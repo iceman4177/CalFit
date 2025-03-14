@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import Select from 'react-select';
+import React, { useEffect } from 'react';
 
 const ExerciseForm = ({
   newExercise,
@@ -10,8 +9,10 @@ const ExerciseForm = ({
   onFinishWorkout,
   exerciseOptions
 }) => {
-  // Local state to control the open/close state of the react-select dropdown
-  const [menuIsOpen, setMenuIsOpen] = useState(false);
+  // Persist newExercise state to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('newExerciseFields', JSON.stringify(newExercise));
+  }, [newExercise]);
 
   // Persist currentCalories to sessionStorage
   useEffect(() => {
@@ -38,21 +39,6 @@ const ExerciseForm = ({
     setCurrentCalories(cals);
   };
 
-  // Format options for react-select as { label, value }
-  const formatOptions = (optionsArray) =>
-    optionsArray.map((option) => ({ label: option, value: option }));
-
-  const getExerciseOptions = () => {
-    if (!newExercise.exerciseType) return [];
-    if (newExercise.exerciseType === 'machine')
-      return formatOptions(exerciseOptions.machine);
-    if (newExercise.exerciseType === 'dumbbell')
-      return formatOptions(exerciseOptions.dumbbell);
-    if (newExercise.exerciseType === 'barbell')
-      return formatOptions(exerciseOptions.barbell);
-    return [];
-  };
-
   return (
     <div>
       <h3>Add New Exercise</h3>
@@ -61,14 +47,9 @@ const ExerciseForm = ({
           <label>Exercise Type:</label>
           <select
             value={newExercise.exerciseType}
-            onChange={(e) => {
-              setNewExercise({
-                ...newExercise,
-                exerciseType: e.target.value,
-                exerciseName: ''
-              });
-              setMenuIsOpen(false); // close dropdown if type changes
-            }}
+            onChange={(e) =>
+              setNewExercise({ ...newExercise, exerciseType: e.target.value, exerciseName: '' })
+            }
             required
           >
             <option value="">Select Exercise Type</option>
@@ -80,26 +61,38 @@ const ExerciseForm = ({
         {newExercise.exerciseType && (
           <div>
             <label>Select Exercise:</label>
-            <Select
-              menuIsOpen={menuIsOpen}
-              onMenuOpen={() => setMenuIsOpen(true)}
-              onMenuClose={() => setMenuIsOpen(false)}
-              value={
-                newExercise.exerciseName
-                  ? { label: newExercise.exerciseName, value: newExercise.exerciseName }
-                  : null
-              }
-              onChange={(selectedOption) => {
-                setNewExercise({ ...newExercise, exerciseName: selectedOption.value });
-                setMenuIsOpen(false); // close dropdown on selection
-              }}
-              options={getExerciseOptions()}
-              placeholder="Select Exercise"
-            />
+            <select
+              value={newExercise.exerciseName}
+              onChange={(e) => setNewExercise({ ...newExercise, exerciseName: e.target.value })}
+              required
+            >
+              <option value="">Select Exercise</option>
+              {newExercise.exerciseType === 'machine'
+                ? exerciseOptions.machine.map((ex, idx) => (
+                    <option key={idx} value={ex}>
+                      {ex}
+                    </option>
+                  ))
+                : newExercise.exerciseType === 'dumbbell'
+                ? exerciseOptions.dumbbell.map((ex, idx) => (
+                    <option key={idx} value={ex}>
+                      {ex}
+                    </option>
+                  ))
+                : exerciseOptions.barbell.map((ex, idx) => (
+                    <option key={idx} value={ex}>
+                      {ex}
+                    </option>
+                  ))}
+            </select>
           </div>
         )}
         <div>
-          <label>Weight (lbs):</label>
+          <label>
+            {newExercise.exerciseType === 'dumbbell'
+              ? 'Weight (lbs per dumbbell):'
+              : 'Weight (lbs):'}
+          </label>
           <input
             type="number"
             value={newExercise.weight}

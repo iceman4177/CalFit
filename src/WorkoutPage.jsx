@@ -4,50 +4,35 @@ import SaunaForm from './SaunaForm';
 import WorkoutSummary from './WorkoutSummary';
 
 function WorkoutPage({ userData }) {
-  // Define exercise options so they’re available for use
+  // Define grouped exercise options
   const exerciseOptions = {
-    machine: [
-      'Chest Press Machine',
-      'Pec Fly / Rear Deltoid Machine',
-      'Shoulder Press Machine',
-      'Lat Pulldown Machine',
-      'Seated Row Machine',
-      'Leg Press Machine',
-      'Leg Extension Machine',
-      'Leg Curl Machine',
-      'Abdominal Crunch Machine',
-      'Assisted Pull-Up/Dip Machine',
-      'Cable Crossover/Functional Trainer',
-      'Smith Machine'
-    ],
-    dumbbell: [
-      'Dumbbell Bench Press',
-      'Dumbbell Flyes',
-      'Dumbbell Shoulder Press',
-      'Dumbbell Lateral Raise',
-      'Dumbbell Bicep Curls',
-      'Hammer Curls',
-      'Dumbbell Triceps Extensions',
-      'Dumbbell Rows (One-Arm Row)',
-      'Dumbbell Shrugs',
-      'Dumbbell Squats',
-      'Dumbbell Lunges',
-      'Dumbbell Deadlifts',
-      'Dumbbell Step-Ups'
-    ],
-    barbell: [
-      'Barbell Bench Press',
-      'Overhead Press (Barbell Press)',
-      'Barbell Row',
-      'Barbell Bicep Curls',
-      'Barbell Upright Row',
-      'Barbell Squat',
-      'Barbell Deadlift',
-      'Barbell Lunges',
-      'Barbell Hip Thrusts',
-      'Barbell Clean and Press / Power Clean',
-      'Barbell Shrugs'
-    ]
+    machine: {
+      Chest: ['Chest Press Machine', 'Cable Crossover/Functional Trainer'],
+      Shoulders: ['Shoulder Press Machine'],
+      Back: ['Seated Row Machine', 'Lat Pulldown Machine'],
+      Legs: ['Leg Press Machine', 'Leg Extension Machine', 'Leg Curl Machine'],
+      Abs: ['Abdominal Crunch Machine'],
+      Misc: ['Pec Fly / Rear Deltoid Machine', 'Assisted Pull-Up/Dip Machine']
+    },
+    dumbbell: {
+      Chest: ['Dumbbell Bench Press', 'Dumbbell Flyes'],
+      Shoulders: ['Dumbbell Shoulder Press', 'Dumbbell Lateral Raise'],
+      Biceps: ['Dumbbell Bicep Curls', 'Hammer Curls'],
+      Triceps: ['Dumbbell Triceps Extensions'],
+      Back: ['Dumbbell Rows (One-Arm Row)'],
+      Traps: ['Dumbbell Shrugs'],
+      Legs: ['Dumbbell Squats', 'Dumbbell Lunges', 'Dumbbell Deadlifts', 'Dumbbell Step-Ups']
+    },
+    barbell: {
+      Chest: ['Barbell Bench Press'],
+      Shoulders: ['Overhead Press (Barbell Press)', 'Barbell Upright Row'],
+      Back: ['Barbell Row'],
+      Biceps: ['Barbell Bicep Curls'],
+      Legs: ['Barbell Squat', 'Barbell Deadlift', 'Barbell Lunges'],
+      Glutes: ['Barbell Hip Thrusts'],
+      FullBody: ['Barbell Clean and Press / Power Clean'],
+      Traps: ['Barbell Shrugs']
+    }
   };
 
   // --- Cumulative Data: loaded once from localStorage ---
@@ -142,36 +127,28 @@ function WorkoutPage({ userData }) {
   // Handlers for SaunaForm
   const handleAddSauna = (e, time, temp) => {
     e.preventDefault();
-    // Safely parse inputs
     const saunaTimeVal = parseFloat(time);
     const saunaTempVal = parseFloat(temp);
     const safeTime = isNaN(saunaTimeVal) ? 0 : saunaTimeVal;
     const safeTemp = isNaN(saunaTempVal) ? 180 : saunaTempVal;
-
-    // Safely parse user weight
     const weightNum = parseFloat(userData.weight);
     const safeWeight = isNaN(weightNum) ? 0 : weightNum;
     const weightFactor = safeWeight > 0 ? safeWeight / 150 : 1;
-
     const saunaCalories = safeTime * (safeTemp - 150) * 0.1 * weightFactor;
     const finalCals = isNaN(saunaCalories) ? 0 : saunaCalories;
-
     const saunaEntry = {
       exerciseType: 'Sauna',
       exerciseName: 'Sauna Session',
       weight: '',
-      sets: '', // sets not applicable for sauna
+      sets: '', // not applicable for sauna
       reps: `${safeTime} min`,
       calories: finalCals,
     };
-
     const updatedExercises = [...cumulativeExercises, saunaEntry];
     updateCumulativeData(updatedExercises);
-
     // Clear sauna fields
     setSaunaTime('');
     setSaunaTemp('180');
-
     // Finalize workout
     setShowSaunaForm(false);
     setIsFinished(true);
