@@ -4,7 +4,7 @@ import SaunaForm from './SaunaForm';
 import WorkoutSummary from './WorkoutSummary';
 
 function WorkoutPage({ userData }) {
-  // Define grouped exercise options
+  // Define grouped exercise options by equipment type and muscle group
   const exerciseOptions = {
     machine: {
       Chest: ['Chest Press Machine', 'Cable Crossover/Functional Trainer'],
@@ -118,7 +118,6 @@ function WorkoutPage({ userData }) {
   // Handler for "Finish Workout" (passed to ExerciseForm)
   const handleFinishWorkout = (e) => {
     e.preventDefault();
-    // Remove any finished flag so we start fresh for this session
     sessionStorage.removeItem('workoutFinished');
     setIsFinished(false);
     setShowSaunaForm(true);
@@ -146,10 +145,8 @@ function WorkoutPage({ userData }) {
     };
     const updatedExercises = [...cumulativeExercises, saunaEntry];
     updateCumulativeData(updatedExercises);
-    // Clear sauna fields
     setSaunaTime('');
     setSaunaTemp('180');
-    // Finalize workout
     setShowSaunaForm(false);
     setIsFinished(true);
     sessionStorage.setItem('workoutFinished', 'true');
