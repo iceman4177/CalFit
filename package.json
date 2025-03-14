@@ -1,23 +1,22 @@
 {
-  "name": "react-javascript",
+  "name": "your-app-name",
   "version": "1.0.0",
-  "type": "module",
-  "description": "React TypeScript on Replit, using Vite bundler",
+  "private": true,
+  "dependencies": {
+    "axios": "^0.24.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-router-dom": "^5.3.4",
+    "react-select": "^5.10.1",
+    "vite": "^2.0.0"
+  },
   "scripts": {
     "dev": "vite",
+    "start": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "serve": "vite preview"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
-    "@types/react": "^18.2.37",
-    "@types/react-dom": "^18.2.15",
-    "@vitejs/plugin-react": "^4.2.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.0"
+    "@types/react-router-dom": "^5.3.3"
   }
 }

@@ -10,10 +10,11 @@ channel = "stable-24_05"
 language = "nodejs"
 
 [deployment]
-deploymentTarget = "static"
+deploymentTarget = "cloudrun"
 build = ["npm", "run", "build"]
-publicDir = "dist"
+run = ["sh", "-c", "npm run start"]
 
 [[ports]]
 localPort = 5173
 externalPort = 80
+exposeLocalhost = true
