@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
+import { Container, Box, Typography } from '@mui/material';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
 
 function App() {
   const [userData, setUserData] = useState(null);
 
-  // On mount, load saved health data from localStorage (if available)
   useEffect(() => {
     const storedData = localStorage.getItem('userData');
     if (storedData) {
@@ -16,7 +16,14 @@ function App() {
 
   return (
     <Router>
-      <div className="App">
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Box sx={{ textAlign: 'center', mb: 4 }}>
+          <Typography variant="h2" color="primary">CalFit Tracker</Typography>
+          <Typography variant="body1" color="textSecondary">
+            Track your workouts, calories, and sauna sessions!
+          </Typography>
+        </Box>
+
         <Switch>
           <Route
             path="/"
@@ -34,7 +41,7 @@ function App() {
             }
           />
         </Switch>
-      </div>
+      </Container>
     </Router>
   );
 }

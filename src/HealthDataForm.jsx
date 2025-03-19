@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom'; // For React Router v5
+import { Box, Button, Container, MenuItem, Paper, Select, TextField, Typography } from '@mui/material';
 
 function HealthDataForm({ setUserData }) {
   const history = useHistory();
@@ -32,6 +33,7 @@ function HealthDataForm({ setUserData }) {
       height: { feet: heightFeet, inches: heightInches },
       activityLevel,
     };
+
     // Save to localStorage and update state
     localStorage.setItem('userData', JSON.stringify(userData));
     setUserData(userData);
@@ -44,62 +46,81 @@ function HealthDataForm({ setUserData }) {
   };
 
   return (
-    <div className="health-data-form">
-      <h2>Enter Your Health Information</h2>
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label>Age:</label>
-          <input
-            type="number"
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label>Weight (lbs):</label>
-          <input
-            type="number"
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label>Height (feet):</label>
-          <input
-            type="number"
-            value={heightFeet}
-            onChange={(e) => setHeightFeet(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label>Height (inches):</label>
-          <input
-            type="number"
-            value={heightInches}
-            onChange={(e) => setHeightInches(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label>Activity Level:</label>
-          <select
-            value={activityLevel}
-            onChange={(e) => setActivityLevel(e.target.value)}
-            required
-          >
-            <option value="">Select Activity Level</option>
-            <option value="sedentary">Sedentary</option>
-            <option value="light">Light Exercise</option>
-            <option value="moderate">Moderate Exercise</option>
-            <option value="intense">Intense Exercise</option>
-          </select>
-        </div>
-        <button type="submit">Save Health Data</button>
-      </form>
-    </div>
+    <Container maxWidth="sm">
+      <Paper elevation={3} sx={{ p: 4, mt: 4, borderRadius: 2 }}>
+        <Typography variant="h4" color="primary" align="center" gutterBottom>
+          Enter Your Health Information
+        </Typography>
+
+        <form onSubmit={handleSubmit}>
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              label="Age"
+              type="number"
+              fullWidth
+              variant="outlined"
+              value={age}
+              onChange={(e) => setAge(e.target.value)}
+              required
+            />
+          </Box>
+
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              label="Weight (lbs)"
+              type="number"
+              fullWidth
+              variant="outlined"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              required
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              label="Height (feet)"
+              type="number"
+              variant="outlined"
+              fullWidth
+              value={heightFeet}
+              onChange={(e) => setHeightFeet(e.target.value)}
+              required
+            />
+            <TextField
+              label="Height (inches)"
+              type="number"
+              variant="outlined"
+              fullWidth
+              value={heightInches}
+              onChange={(e) => setHeightInches(e.target.value)}
+              required
+            />
+          </Box>
+
+          <Box sx={{ mb: 3 }}>
+            <Select
+              value={activityLevel}
+              onChange={(e) => setActivityLevel(e.target.value)}
+              displayEmpty
+              fullWidth
+              variant="outlined"
+              required
+            >
+              <MenuItem value="" disabled>Select Activity Level</MenuItem>
+              <MenuItem value="sedentary">Sedentary</MenuItem>
+              <MenuItem value="light">Light Exercise</MenuItem>
+              <MenuItem value="moderate">Moderate Exercise</MenuItem>
+              <MenuItem value="intense">Intense Exercise</MenuItem>
+            </Select>
+          </Box>
+
+          <Button variant="contained" color="primary" fullWidth type="submit">
+            Save Health Data
+          </Button>
+        </form>
+      </Paper>
+    </Container>
   );
 }
 

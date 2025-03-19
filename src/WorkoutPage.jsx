@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Container, Typography, Box, Divider } from '@mui/material';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import WorkoutSummary from './WorkoutSummary';
@@ -39,7 +40,7 @@ function WorkoutPage({ userData }) {
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
 
-  // --- New Exercise Form State & Current Calories (handled by ExerciseForm) ---
+  // --- New Exercise Form State & Current Calories ---
   const [newExercise, setNewExercise] = useState(() => {
     const saved = sessionStorage.getItem('newExerciseFields');
     return saved
@@ -51,32 +52,20 @@ function WorkoutPage({ userData }) {
     return savedCals ? parseFloat(savedCals) : 0;
   });
 
-  // --- Sauna Session State (handled by SaunaForm) ---
-  const [saunaTime, setSaunaTime] = useState(() => {
-    const saved = sessionStorage.getItem('saunaTime');
-    return saved ? saved : '';
-  });
-  const [saunaTemp, setSaunaTemp] = useState(() => {
-    const saved = sessionStorage.getItem('saunaTemp');
-    return saved ? saved : '180';
-  });
+  // --- Sauna Session State ---
+  const [saunaTime, setSaunaTime] = useState(() => sessionStorage.getItem('saunaTime') || '');
+  const [saunaTemp, setSaunaTemp] = useState(() => sessionStorage.getItem('saunaTemp') || '180');
 
   // --- Flags stored in sessionStorage ---
-  const [showSaunaForm, setShowSaunaForm] = useState(() => {
-    const saved = sessionStorage.getItem('showSaunaForm');
-    return saved === 'true';
-  });
-  const [isFinished, setIsFinished] = useState(() => {
-    const finished = sessionStorage.getItem('workoutFinished');
-    return finished === 'true';
-  });
+  const [showSaunaForm, setShowSaunaForm] = useState(() => sessionStorage.getItem('showSaunaForm') === 'true');
+  const [isFinished, setIsFinished] = useState(() => sessionStorage.getItem('workoutFinished') === 'true');
 
-  // On mount, load cumulative data from localStorage (if available)
+  // On mount, load cumulative data from localStorage
   useEffect(() => {
     const savedCum = localStorage.getItem('cumulativeWorkoutData');
     if (savedCum) {
       const parsed = JSON.parse(savedCum);
-      if (parsed && parsed.exercises) {
+      if (parsed?.exercises) {
         setCumulativeExercises(parsed.exercises);
         const total = parsed.exercises.reduce((sum, ex) => sum + ex.calories, 0);
         setCumulativeTotal(total);
@@ -93,7 +82,7 @@ function WorkoutPage({ userData }) {
     sessionStorage.setItem('workoutFinished', isFinished ? 'true' : 'false');
   }, [isFinished]);
 
-  // Helper: update cumulative data
+  // Update cumulative data
   const updateCumulativeData = (updatedExercises) => {
     setCumulativeExercises(updatedExercises);
     const newTotal = updatedExercises.reduce((sum, ex) => sum + ex.calories, 0);
@@ -101,21 +90,19 @@ function WorkoutPage({ userData }) {
     localStorage.setItem('cumulativeWorkoutData', JSON.stringify({ exercises: updatedExercises }));
   };
 
-  // Handler for "Add New Exercise" (passed to ExerciseForm)
+  // Handlers
   const handleAddExercise = (e) => {
     e.preventDefault();
     const cals = parseFloat(sessionStorage.getItem('currentWorkoutCalories')) || 0;
     const exerciseToAdd = { ...newExercise, calories: cals };
     const updatedExercises = [...cumulativeExercises, exerciseToAdd];
     updateCumulativeData(updatedExercises);
-    // Reset new exercise form (default sets set to "1")
     setNewExercise({ exerciseType: '', exerciseName: '', weight: '', sets: '1', reps: '' });
     setCurrentCalories(0);
     sessionStorage.removeItem('newExerciseFields');
     sessionStorage.removeItem('currentWorkoutCalories');
   };
 
-  // Handler for "Finish Workout" (passed to ExerciseForm)
   const handleFinishWorkout = (e) => {
     e.preventDefault();
     sessionStorage.removeItem('workoutFinished');
@@ -123,7 +110,6 @@ function WorkoutPage({ userData }) {
     setShowSaunaForm(true);
   };
 
-  // Handlers for SaunaForm
   const handleAddSauna = (e, time, temp) => {
     e.preventDefault();
     const saunaTimeVal = parseFloat(time);
@@ -139,7 +125,7 @@ function WorkoutPage({ userData }) {
       exerciseType: 'Sauna',
       exerciseName: 'Sauna Session',
       weight: '',
-      sets: '', // not applicable for sauna
+      sets: '',
       reps: `${safeTime} min`,
       calories: finalCals,
     };
@@ -149,30 +135,20 @@ function WorkoutPage({ userData }) {
     setSaunaTemp('180');
     setShowSaunaForm(false);
     setIsFinished(true);
-    sessionStorage.setItem('workoutFinished', 'true');
-    sessionStorage.removeItem('saunaTime');
-    sessionStorage.removeItem('saunaTemp');
-    sessionStorage.removeItem('showSaunaForm');
   };
 
   const handleSkipSauna = (e) => {
     e.preventDefault();
     setShowSaunaForm(false);
     setIsFinished(true);
-    sessionStorage.setItem('workoutFinished', 'true');
-    sessionStorage.removeItem('saunaTime');
-    sessionStorage.removeItem('saunaTemp');
-    sessionStorage.removeItem('showSaunaForm');
   };
 
-  // Handler for removing an individual exercise (passed to WorkoutSummary)
   const handleRemoveExercise = (index) => {
     const updatedExercises = [...cumulativeExercises];
     updatedExercises.splice(index, 1);
     updateCumulativeData(updatedExercises);
   };
 
-  // Handler for clearing all exercises (passed to WorkoutSummary)
   const handleClearAll = () => {
     updateCumulativeData([]);
     localStorage.removeItem('cumulativeWorkoutData');
@@ -181,55 +157,27 @@ function WorkoutPage({ userData }) {
   };
 
   if (isFinished) {
-    return (
-      <WorkoutSummary
-        cumulativeExercises={cumulativeExercises}
-        cumulativeTotal={cumulativeTotal}
-        onRemoveExercise={handleRemoveExercise}
-        onClearAll={handleClearAll}
-      />
-    );
+    return <WorkoutSummary cumulativeExercises={cumulativeExercises} cumulativeTotal={cumulativeTotal} onRemoveExercise={handleRemoveExercise} onClearAll={handleClearAll} />;
   }
 
   if (showSaunaForm) {
-    return (
-      <SaunaForm
-        saunaTime={saunaTime}
-        saunaTemp={saunaTemp}
-        setSaunaTime={setSaunaTime}
-        setSaunaTemp={setSaunaTemp}
-        onAddSauna={handleAddSauna}
-        onSkipSauna={handleSkipSauna}
-      />
-    );
+    return <SaunaForm saunaTime={saunaTime} saunaTemp={saunaTemp} setSaunaTime={setSaunaTime} setSaunaTemp={setSaunaTemp} onAddSauna={handleAddSauna} onSkipSauna={handleSkipSauna} />;
   }
 
   return (
-    <div>
-      <h2>Workout Page</h2>
-      <p>
+    <Container maxWidth="md" sx={{ py: 4 }}>
+      <Typography variant="h2" color="primary" align="center" gutterBottom>
+        Workout Tracker
+      </Typography>
+      <Typography variant="body1" align="center" color="textSecondary">
         Welcome! You are {userData.age} years old and weigh {userData.weight} lbs.
-      </p>
-      <div>
-        <h3>Cumulative Calories: {cumulativeTotal.toFixed(2)}</h3>
-        <WorkoutSummary
-          cumulativeExercises={cumulativeExercises}
-          cumulativeTotal={cumulativeTotal}
-          onRemoveExercise={handleRemoveExercise}
-          onClearAll={handleClearAll}
-        />
-      </div>
-      <hr />
-      <ExerciseForm
-        newExercise={newExercise}
-        setNewExercise={setNewExercise}
-        currentCalories={currentCalories}
-        setCurrentCalories={setCurrentCalories}
-        onAddExercise={handleAddExercise}
-        onFinishWorkout={handleFinishWorkout}
-        exerciseOptions={exerciseOptions}
-      />
-    </div>
+      </Typography>
+
+      <Divider sx={{ my: 3 }} />
+
+      <WorkoutSummary cumulativeExercises={cumulativeExercises} cumulativeTotal={cumulativeTotal} onRemoveExercise={handleRemoveExercise} onClearAll={handleClearAll} />
+      <ExerciseForm newExercise={newExercise} setNewExercise={setNewExercise} currentCalories={currentCalories} setCurrentCalories={setCurrentCalories} onAddExercise={handleAddExercise} onFinishWorkout={handleFinishWorkout} exerciseOptions={exerciseOptions} />
+    </Container>
   );
 }
 

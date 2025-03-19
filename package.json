@@ -20,6 +20,7 @@
     "serve": "vite preview"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.14",
     "@types/react-router-dom": "^5.3.3"
   }
 }
