@@ -1,28 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Container, Typography, Divider, Button } from '@mui/material';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import { useHistory } from 'react-router-dom';
 
 function WorkoutPage({ userData }) {
-  // Wizard Steps: 1: Exercises, 2: Sauna, 3: Summary
+  // Wizard Steps:
+  // 1: Exercises, 2: Sauna, 3: Summary
   const [currentStep, setCurrentStep] = useState(1);
   const history = useHistory();
 
-  // Master list of exercises for the session
-  const [cumulativeExercises, setCumulativeExercises] = useState([]);
+  // Persist cumulativeExercises in sessionStorage so added exercises are retained
+  const [cumulativeExercises, setCumulativeExercises] = useState(() => {
+    const saved = sessionStorage.getItem('cumulativeExercises');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
 
-  // New exercise state – includes selection and set details
-  const [newExercise, setNewExercise] = useState({
-    exerciseType: '',
-    muscleGroup: '',
-    exerciseName: '',
-    weight: '',
-    sets: '1',
-    reps: ''
+  // Save cumulativeExercises whenever they change
+  useEffect(() => {
+    sessionStorage.setItem('cumulativeExercises', JSON.stringify(cumulativeExercises));
+  }, [cumulativeExercises]);
+
+  // newExercise state (persisted in sessionStorage)
+  const [newExercise, setNewExercise] = useState(() => {
+    const saved = sessionStorage.getItem('newExerciseForm');
+    return saved
+      ? JSON.parse(saved)
+      : {
+          exerciseType: '',
+          muscleGroup: '',
+          exerciseName: '',
+          weight: '',
+          sets: '1',
+          reps: ''
+        };
   });
   const [currentCalories, setCurrentCalories] = useState(0);
+
+  useEffect(() => {
+    sessionStorage.setItem('newExerciseForm', JSON.stringify(newExercise));
+  }, [newExercise]);
 
   // Sauna data
   const [saunaTime, setSaunaTime] = useState('');
@@ -59,7 +77,7 @@ function WorkoutPage({ userData }) {
     }
   };
 
-  // Calculate calories for a single exercise using a basic formula
+  // Calculate calories for a given exercise
   const calculateCalories = (exercise) => {
     const w = parseFloat(exercise.weight) || 0;
     const s = parseInt(exercise.sets) || 1;
@@ -82,12 +100,12 @@ function WorkoutPage({ userData }) {
     setCurrentCalories(cals);
   };
 
-  // Handler for adding a set – note we only clear the set details (weight, sets, reps)
+  // Handler for adding a new exercise set.
+  // Only clear set-specific fields so the exercise selection remains.
   const handleAddExercise = () => {
     const cals = calculateCalories(newExercise);
     const exerciseToAdd = { ...newExercise, calories: cals };
     setCumulativeExercises([...cumulativeExercises, exerciseToAdd]);
-    // Clear only the set-specific fields so the selection remains
     setNewExercise((prev) => ({
       ...prev,
       weight: '',
@@ -97,12 +115,12 @@ function WorkoutPage({ userData }) {
     setCurrentCalories(0);
   };
 
-  // Move to the Sauna step after finishing exercise entry
+  // Move to the Sauna step
   const handleDoneWithExercises = () => {
     setCurrentStep(2);
   };
 
-  // In the Sauna step, merge the sauna data (if any) and move to Summary
+  // In the Sauna step, merge sauna data and move to the Summary step
   const handleNextFromSauna = () => {
     const filtered = cumulativeExercises.filter(
       (ex) => ex.exerciseType !== 'Sauna'
@@ -133,25 +151,23 @@ function WorkoutPage({ userData }) {
     setCumulativeExercises(updated);
   };
 
-  // Navigation: "Back" from Sauna returns to Exercises
+  // Navigation: "Back" from Sauna to Exercises
   const handleBackToExercises = () => {
     setCurrentStep(1);
   };
 
-  // Navigation: "Back" from Summary returns to Sauna (removing sauna entry)
+  // Navigation: "Back" from Summary to Sauna (removes sauna entry)
   const handleBackToSauna = () => {
-    const filtered = cumulativeExercises.filter(
-      (ex) => ex.exerciseType !== 'Sauna'
-    );
+    const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
     setCumulativeExercises(filtered);
     setCurrentStep(2);
   };
 
-  // Finalize the workout: save session to localStorage and navigate to Workout History
+  // Finalize the workout: calculate total, save session to localStorage, and navigate to Workout History
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
-    const currentDate = new Date().toLocaleDateString('en-US'); // e.g., "3/19/2025"
+    const currentDate = new Date().toLocaleDateString('en-US');
     const newSession = {
       date: currentDate,
       totalCalories: total,
@@ -168,7 +184,7 @@ function WorkoutPage({ userData }) {
     history.push('/history');
   };
 
-  // Allow the user to start a new workout (clears session data)
+  // Allow starting a new workout (clear session data)
   const handleNewWorkout = () => {
     setCumulativeExercises([]);
     setCumulativeTotal(0);
@@ -179,7 +195,7 @@ function WorkoutPage({ userData }) {
 
   // ---------------- Render Based on Step ----------------
 
-  // Step 3: Summary – show list of exercises (including sauna) with total and navigation buttons
+  // Step 3: Summary – display the list of exercises (including sauna) and total calories
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     return (
@@ -218,7 +234,7 @@ function WorkoutPage({ userData }) {
     );
   }
 
-  // Step 2: Sauna – show sauna inputs with Back and Next buttons
+  // Step 2: Sauna – show sauna inputs with Back and Next buttons.
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -242,7 +258,7 @@ function WorkoutPage({ userData }) {
     );
   }
 
-  // Step 1: Exercises – display current exercises and the ExerciseForm.
+  // Step 1: Exercises – display current exercises (if any) and the ExerciseForm.
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" color="primary" align="center" gutterBottom>

@@ -1,3 +1,4 @@
+// ExerciseForm.jsx
 import React from 'react';
 import {
   Box,
@@ -14,13 +15,11 @@ const ExerciseForm = ({
   newExercise,
   setNewExercise,
   currentCalories,
-  setCurrentCalories,
-  onAddExercise,
   onCalculate,
+  onAddExercise,
   onDoneWithExercises,
   exerciseOptions
 }) => {
-
   const handleInputChange = (field, value) => {
     setNewExercise((prev) => ({ ...prev, [field]: value }));
   };
@@ -40,12 +39,27 @@ const ExerciseForm = ({
     return exerciseOptions[newExercise.exerciseType][newExercise.muscleGroup] || [];
   };
 
+  // Provide dynamic helper text based on the selected exercise type and name.
+  const getWeightHelperText = () => {
+    if (newExercise.exerciseType === 'dumbbell') {
+      return 'Enter weight per dumbbell';
+    }
+    if (
+      newExercise.exerciseName &&
+      newExercise.exerciseName.toLowerCase().includes('leg press')
+    ) {
+      return 'Enter total weight loaded (both sides)';
+    }
+    return '';
+  };
+
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto', mt: 2 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>
         Add New Exercise
       </Typography>
 
+      {/* Equipment Type Selection */}
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel id="equipment-label">Equipment Type</InputLabel>
         <MuiSelect
@@ -65,6 +79,7 @@ const ExerciseForm = ({
         </MuiSelect>
       </FormControl>
 
+      {/* Muscle Group Selection */}
       {newExercise.exerciseType && (
         <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel id="muscle-group-label">Muscle Group</InputLabel>
@@ -86,6 +101,7 @@ const ExerciseForm = ({
         </FormControl>
       )}
 
+      {/* Exercise Selection */}
       {newExercise.muscleGroup && newExercise.exerciseType && (
         <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel id="exercise-label">Exercise</InputLabel>
@@ -98,15 +114,16 @@ const ExerciseForm = ({
             <MenuItem value="">
               <em>Select an Exercise</em>
             </MenuItem>
-            {getExercisesForSelection().map((exName) => (
-              <MenuItem key={exName} value={exName}>
-                {exName}
+            {getExercisesForSelection().map((exercise) => (
+              <MenuItem key={exercise} value={exercise}>
+                {exercise}
               </MenuItem>
             ))}
           </MuiSelect>
         </FormControl>
       )}
 
+      {/* Weight Input with dynamic helper text */}
       <TextField
         label="Weight (lbs)"
         type="number"
@@ -114,8 +131,10 @@ const ExerciseForm = ({
         onChange={(e) => handleInputChange('weight', e.target.value)}
         fullWidth
         sx={{ mb: 2 }}
+        helperText={getWeightHelperText()}
       />
 
+      {/* Sets Input */}
       <TextField
         label="Sets"
         type="number"
@@ -125,6 +144,7 @@ const ExerciseForm = ({
         sx={{ mb: 2 }}
       />
 
+      {/* Reps Input */}
       <TextField
         label="Reps"
         type="number"

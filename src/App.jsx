@@ -5,6 +5,7 @@ import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
 import WorkoutHistory from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
+import Achievements from './Achievements';
 
 function App() {
   const [userData, setUserData] = useState(null);
@@ -38,15 +39,14 @@ function App() {
             <Button variant="outlined" component={Link} to="/dashboard">
               Dashboard
             </Button>
+            <Button variant="outlined" component={Link} to="/achievements">
+              Achievements
+            </Button>
           </Stack>
         </Box>
 
         <Switch>
-          <Route
-            path="/"
-            exact
-            render={() => <HealthDataForm setUserData={setUserData} />}
-          />
+          <Route exact path="/" render={() => <HealthDataForm setUserData={setUserData} />} />
           <Route
             path="/workout"
             render={() =>
@@ -59,6 +59,7 @@ function App() {
           />
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
+          <Route path="/achievements" component={Achievements} />
         </Switch>
       </Container>
     </Router>
