@@ -1,18 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { Container, Typography, Divider } from '@mui/material';
+import React, { useState } from 'react';
+import { Container, Typography, Divider, Button } from '@mui/material';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
-import WorkoutSummary from './WorkoutSummary';
+import { useHistory } from 'react-router-dom';
 
 function WorkoutPage({ userData }) {
-  // Step 1 = Exercises, Step 2 = Sauna, Step 3 = Summary
+  // Wizard Steps:
+  // 1: Exercises, 2: Sauna, 3: Summary
   const [currentStep, setCurrentStep] = useState(1);
+  const history = useHistory();
 
-  // Master list of exercises for this session
+  // Master list of exercises for the current session
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
 
-  // New Exercise
+  // New Exercise fields and calculated calories
   const [newExercise, setNewExercise] = useState({
     exerciseType: '',
     muscleGroup: '',
@@ -23,11 +25,11 @@ function WorkoutPage({ userData }) {
   });
   const [currentCalories, setCurrentCalories] = useState(0);
 
-  // Sauna
+  // Sauna data
   const [saunaTime, setSaunaTime] = useState('');
   const [saunaTemp, setSaunaTemp] = useState('180');
 
-  // Example exercise options
+  // Example exercise options (grouped by equipment type)
   const exerciseOptions = {
     machine: {
       Chest: ['Chest Press Machine', 'Cable Crossover/Functional Trainer'],
@@ -58,7 +60,7 @@ function WorkoutPage({ userData }) {
     }
   };
 
-  // Calculate calories for a single exercise
+  // Calculate calories for a single exercise using a basic formula
   const calculateCalories = (exercise) => {
     const w = parseFloat(exercise.weight) || 0;
     const s = parseInt(exercise.sets) || 1;
@@ -66,24 +68,26 @@ function WorkoutPage({ userData }) {
     let cals = w * s * r * 0.05;
     if (exercise.exerciseType === 'machine') {
       cals *= 1.5;
-    } else if (exercise.exerciseType === 'dumbbell' || exercise.exerciseType === 'barbell') {
+    } else if (
+      exercise.exerciseType === 'dumbbell' ||
+      exercise.exerciseType === 'barbell'
+    ) {
       cals *= 1.2;
     }
     return cals;
   };
 
-  // Handler for the "Calculate Calories" button
+  // Handler for calculating calories when the user clicks "Calculate Calories"
   const handleCalculate = () => {
     const cals = calculateCalories(newExercise);
     setCurrentCalories(cals);
   };
 
-  // Handler for "Add Exercise"
+  // Handler for adding a new exercise to the session
   const handleAddExercise = () => {
-    // Make sure we have an updated calories value
     const cals = calculateCalories(newExercise);
     const exerciseToAdd = { ...newExercise, calories: cals };
-    setCumulativeExercises((prev) => [...prev, exerciseToAdd]);
+    setCumulativeExercises([...cumulativeExercises, exerciseToAdd]);
     setNewExercise({
       exerciseType: '',
       muscleGroup: '',
@@ -95,24 +99,24 @@ function WorkoutPage({ userData }) {
     setCurrentCalories(0);
   };
 
-  // Handler when user is done adding exercises => move to sauna step
+  // When the user is done with adding exercises, move to the Sauna step
   const handleDoneWithExercises = () => {
     setCurrentStep(2);
   };
 
-  // Handler for finishing the entire workout
-  const handleFinishWorkout = () => {
-    // If user provided sauna data, calculate sauna cals
-    let updatedExercises = [...cumulativeExercises];
+  // In the Sauna step, when the user clicks "Next", merge the sauna data
+  // (removing any previous sauna entry) and move to the Summary step
+  const handleNextFromSauna = () => {
+    const filtered = cumulativeExercises.filter(
+      (ex) => ex.exerciseType !== 'Sauna'
+    );
     if (saunaTime.trim() !== '') {
       const saunaTimeVal = parseFloat(saunaTime) || 0;
       const saunaTempVal = parseFloat(saunaTemp) || 180;
-      const userWeight = parseFloat(userData.weight) || 150; // fallback
-
+      const userWeight = parseFloat(userData.weight) || 150;
       const weightFactor = userWeight / 150;
       const saunaCalories = saunaTimeVal * (saunaTempVal - 150) * 0.1 * weightFactor;
-
-      updatedExercises.push({
+      filtered.push({
         exerciseType: 'Sauna',
         exerciseName: 'Sauna Session',
         sets: '',
@@ -121,18 +125,41 @@ function WorkoutPage({ userData }) {
         calories: saunaCalories
       });
     }
+    setCumulativeExercises(filtered);
+    setCurrentStep(3);
+  };
 
-    // Calculate total
-    const total = updatedExercises.reduce((sum, ex) => sum + ex.calories, 0);
-    setCumulativeExercises(updatedExercises);
+  // Handler to remove an exercise (or sauna entry) from the current session
+  const handleRemoveExercise = (index) => {
+    const updated = [...cumulativeExercises];
+    updated.splice(index, 1);
+    setCumulativeExercises(updated);
+  };
+
+  // Navigation: "Back" from Sauna step returns to Exercises step
+  const handleBackToExercises = () => {
+    setCurrentStep(1);
+  };
+
+  // Navigation: "Back" from Summary step returns to Sauna step (and removes the sauna entry)
+  const handleBackToSauna = () => {
+    const filtered = cumulativeExercises.filter(
+      (ex) => ex.exerciseType !== 'Sauna'
+    );
+    setCumulativeExercises(filtered);
+    setCurrentStep(2);
+  };
+
+  // Final handler: When the user clicks "Log Workout", calculate totals,
+  // save the session to localStorage, and navigate to the Workout History page.
+  const handleFinish = () => {
+    const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
-
-    // Save the workout session to history
-    const currentDate = new Date().toLocaleDateString('en-US'); // e.g. 3/19/2025
+    const currentDate = new Date().toLocaleDateString('en-US'); // e.g., "3/19/2025"
     const newSession = {
       date: currentDate,
       totalCalories: total,
-      exercises: updatedExercises.map((ex) => ({
+      exercises: cumulativeExercises.map((ex) => ({
         name: ex.exerciseName || ex.exerciseType,
         sets: ex.sets,
         reps: ex.reps,
@@ -142,25 +169,10 @@ function WorkoutPage({ userData }) {
     const existingHistory = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     existingHistory.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existingHistory));
-
-    // Move to summary step
-    setCurrentStep(3);
+    history.push('/history');
   };
 
-  // Remove a single exercise from the array
-  const handleRemoveExercise = (index) => {
-    const updated = [...cumulativeExercises];
-    updated.splice(index, 1);
-    setCumulativeExercises(updated);
-  };
-
-  // Clear all exercises
-  const handleClearAll = () => {
-    setCumulativeExercises([]);
-    setCumulativeTotal(0);
-  };
-
-  // Start a new workout (back to step 1, clear data)
+  // Optional: Allow the user to start a new workout (clears the current session)
   const handleNewWorkout = () => {
     setCumulativeExercises([]);
     setCumulativeTotal(0);
@@ -169,26 +181,49 @@ function WorkoutPage({ userData }) {
     setCurrentStep(1);
   };
 
-  // If user is at Step 3, show summary
+  // -------------------- Rendering Based on Step --------------------
+
+  // Step 3: Summary step – display the list of exercises (including sauna) and total,
+  // plus buttons to go back or log the workout.
   if (currentStep === 3) {
+    const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Typography variant="h2" color="primary" align="center" gutterBottom>
           Workout Summary
         </Typography>
         <Divider sx={{ my: 3 }} />
-        <WorkoutSummary
-          cumulativeExercises={cumulativeExercises}
-          cumulativeTotal={cumulativeTotal}
-          onRemoveExercise={handleRemoveExercise}
-          onClearAll={handleClearAll}
-          onNewWorkout={handleNewWorkout}
-        />
+        {cumulativeExercises.map((ex, idx) => (
+          <Typography key={idx} variant="body1">
+            {ex.exerciseName} - {ex.calories.toFixed(2)} cals
+            <Button
+              variant="text"
+              color="error"
+              size="small"
+              onClick={() => handleRemoveExercise(idx)}
+              sx={{ ml: 2 }}
+            >
+              Remove
+            </Button>
+          </Typography>
+        ))}
+        <Typography variant="h5" sx={{ mt: 2 }}>
+          Total Calories Burned: {total.toFixed(2)}
+        </Typography>
+        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleBackToSauna}>
+          Back
+        </Button>
+        <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={handleFinish}>
+          Log Workout
+        </Button>
+        <Button variant="text" sx={{ mt: 3 }} onClick={handleNewWorkout}>
+          Start New Workout
+        </Button>
       </Container>
     );
   }
 
-  // If user is at Step 2, show sauna form
+  // Step 2: Sauna step – show sauna input fields with Back and Next buttons.
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -196,20 +231,23 @@ function WorkoutPage({ userData }) {
           Sauna Session
         </Typography>
         <Divider sx={{ my: 3 }} />
-
         <SaunaForm
           saunaTime={saunaTime}
           saunaTemp={saunaTemp}
           setSaunaTime={setSaunaTime}
           setSaunaTemp={setSaunaTemp}
-          onFinishWorkout={handleFinishWorkout}
-          onBackToExercises={() => setCurrentStep(1)}
         />
+        <Button variant="outlined" sx={{ mt: 2, mr: 2 }} onClick={handleBackToExercises}>
+          Back
+        </Button>
+        <Button variant="contained" sx={{ mt: 2 }} onClick={handleNextFromSauna}>
+          Next
+        </Button>
       </Container>
     );
   }
 
-  // Otherwise, user is at Step 1 (Exercises)
+  // Step 1: Exercises step – display the current list of exercises and the ExerciseForm.
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" color="primary" align="center" gutterBottom>
@@ -219,34 +257,33 @@ function WorkoutPage({ userData }) {
         Welcome! You are {userData.age} years old and weigh {userData.weight} lbs.
       </Typography>
       <Divider sx={{ my: 3 }} />
-
-      {/* Current Exercises */}
       {cumulativeExercises.length > 0 && (
         <div style={{ marginBottom: '1rem' }}>
           <Typography variant="h6">Current Exercises:</Typography>
-          {cumulativeExercises.map((ex, idx) => (
-            <Typography key={idx} variant="body2">
-              {ex.exerciseName} - {ex.sets} sets x {ex.reps} reps (
-              {ex.calories.toFixed(2)} cals)
-              <button
-                style={{ marginLeft: '10px' }}
-                onClick={() => handleRemoveExercise(idx)}
-              >
-                Remove
-              </button>
-            </Typography>
-          ))}
+          {cumulativeExercises
+            .filter((ex) => ex.exerciseType !== 'Sauna')
+            .map((ex, idx) => (
+              <Typography key={idx} variant="body2">
+                {ex.exerciseName} - {ex.sets} sets x {ex.reps} reps ({ex.calories.toFixed(2)} cals)
+                <Button
+                  variant="text"
+                  color="error"
+                  size="small"
+                  onClick={() => handleRemoveExercise(idx)}
+                  sx={{ ml: 2 }}
+                >
+                  Remove
+                </Button>
+              </Typography>
+            ))}
         </div>
       )}
-
-      {/* Exercise Form */}
       <ExerciseForm
         newExercise={newExercise}
         setNewExercise={setNewExercise}
         currentCalories={currentCalories}
-        setCurrentCalories={setCurrentCalories}
-        onAddExercise={handleAddExercise}
         onCalculate={handleCalculate}
+        onAddExercise={handleAddExercise}
         onDoneWithExercises={handleDoneWithExercises}
         exerciseOptions={exerciseOptions}
       />
