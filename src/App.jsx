@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
-import { Container, Box, Typography } from '@mui/material';
+import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
+import { Container, Box, Typography, Button, Stack } from '@mui/material';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
+import WorkoutHistory from './WorkoutHistory';
 
 function App() {
   const [userData, setUserData] = useState(null);
@@ -22,6 +23,15 @@ function App() {
           <Typography variant="body1" color="textSecondary">
             Track your workouts, calories, and sauna sessions!
           </Typography>
+          {/* Navigation Buttons */}
+          <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2 }}>
+            <Button variant="contained" component={Link} to="/workout">
+              Workout
+            </Button>
+            <Button variant="outlined" component={Link} to="/history">
+              History
+            </Button>
+          </Stack>
         </Box>
 
         <Switch>
@@ -40,6 +50,7 @@ function App() {
               )
             }
           />
+          <Route path="/history" component={WorkoutHistory} />
         </Switch>
       </Container>
     </Router>

@@ -5,17 +5,17 @@ const WorkoutSummary = ({
   cumulativeTotal,
   onRemoveExercise,
   onClearAll,
+  onNewWorkout
 }) => {
   return (
-    <div>
+    <div style={{ maxWidth: '600px', margin: '0 auto', marginTop: '20px' }}>
       <h2>Workout Summary</h2>
       {cumulativeExercises.map((ex, idx) => {
-        // Safely handle null or undefined calories
         const safeCalories = ex.calories ?? 0;
         return (
           <div key={idx}>
             <p>
-              {ex.exerciseType} - {ex.exerciseName}: {safeCalories.toFixed(2)} cals
+              {ex.exerciseName || ex.exerciseType} - {safeCalories.toFixed(2)} cals
               <button onClick={() => onRemoveExercise(idx)} style={{ marginLeft: '10px' }}>
                 Remove
               </button>
@@ -27,10 +27,15 @@ const WorkoutSummary = ({
       <h3>Total Calories Burned: {(cumulativeTotal ?? 0).toFixed(2)}</h3>
 
       {cumulativeExercises.length > 0 && (
-        <button onClick={onClearAll} style={{ marginTop: '10px' }}>
+        <button onClick={onClearAll} style={{ marginTop: '10px', marginRight: '10px' }}>
           Clear All Exercises
         </button>
       )}
+
+      {/* Start a new workout */}
+      <button onClick={onNewWorkout} style={{ marginTop: '10px' }}>
+        Start New Workout
+      </button>
     </div>
   );
 };

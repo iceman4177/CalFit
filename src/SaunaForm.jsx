@@ -1,54 +1,47 @@
-import React, { useEffect } from 'react';
+import React from 'react';
+import { Box, TextField, Typography, Button } from '@mui/material';
 
 const SaunaForm = ({
   saunaTime,
   saunaTemp,
   setSaunaTime,
   setSaunaTemp,
-  onAddSauna,
-  onSkipSauna
+  onFinishWorkout,
+  onBackToExercises
 }) => {
-  // Persist sauna fields in sessionStorage
-  useEffect(() => {
-    sessionStorage.setItem('saunaTime', saunaTime);
-  }, [saunaTime]);
-
-  useEffect(() => {
-    sessionStorage.setItem('saunaTemp', saunaTemp);
-  }, [saunaTemp]);
-
   return (
-    <div>
-      <h2>Sauna Session</h2>
-      <p>Optional: Enter your sauna session details to add to your calorie burn.</p>
-      <form>
-        <div>
-          <label>Time in Sauna (minutes):</label>
-          <input
-            type="number"
-            value={saunaTime}
-            onChange={(e) => setSaunaTime(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label>Temperature (°F):</label>
-          <input
-            type="number"
-            value={saunaTemp}
-            onChange={(e) => setSaunaTemp(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          {/* IMPORTANT: pass saunaTime and saunaTemp to onAddSauna */}
-          <button onClick={(e) => onAddSauna(e, saunaTime, saunaTemp)}>
-            Add Sauna Session
-          </button>
-          <button onClick={onSkipSauna}>Skip Sauna</button>
-        </div>
-      </form>
-    </div>
+    <Box sx={{ maxWidth: 600, mx: 'auto', mt: 2 }}>
+      <Typography variant="h5" sx={{ mb: 2 }}>
+        Sauna Session (Optional)
+      </Typography>
+
+      <TextField
+        label="Time in Sauna (minutes)"
+        type="number"
+        value={saunaTime}
+        onChange={(e) => setSaunaTime(e.target.value)}
+        fullWidth
+        sx={{ mb: 2 }}
+      />
+
+      <TextField
+        label="Temperature (°F)"
+        type="number"
+        value={saunaTemp}
+        onChange={(e) => setSaunaTemp(e.target.value)}
+        fullWidth
+        sx={{ mb: 2 }}
+      />
+
+      <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+        <Button variant="outlined" onClick={onBackToExercises}>
+          Back to Exercises
+        </Button>
+        <Button variant="contained" color="primary" onClick={onFinishWorkout}>
+          Finish Workout
+        </Button>
+      </Box>
+    </Box>
   );
 };
 
