@@ -1,45 +1,17 @@
-/* Tailwind base styles */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* App.css */
 
-/* Global styles */
+/* Reset some default margins/padding */
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* Use a system font or your preferred font (Material UI uses Roboto by default) */
 body {
-  @apply bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white transition-colors duration-300;
+  font-family: 'Roboto', sans-serif;
+  background-color: #f4f6f8; /* Light grey background */
+  color: #333; /* Dark text for readability */
 }
 
-/* App container */
-.App {
-  @apply font-sans p-5 text-center min-h-screen;
-}
-
-/* Health Data Form */
-.health-data-form {
-  @apply mx-auto w-4/5 max-w-lg p-5 border border-gray-300 rounded-lg bg-white shadow-md dark:bg-gray-800 dark:border-gray-600;
-}
-
-/* Form spacing */
-form div {
-  @apply my-2;
-}
-
-/* Labels */
-label {
-  @apply block mb-1 font-medium;
-}
-
-/* Inputs and Select dropdowns */
-input,
-select {
-  @apply w-full p-2 mb-3 rounded-md border border-gray-300 dark:bg-gray-700 dark:border-gray-600;
-}
-
-/* Buttons */
-button {
-  @apply px-4 py-2 bg-blue-600 text-white rounded-md transition-all duration-200 hover:bg-blue-700;
-}
-
-/* Dark Mode Toggle */
-.dark-mode-toggle {
-  @apply absolute top-4 right-4 p-2 bg-gray-300 dark:bg-gray-700 text-gray-900 dark:text-white rounded-md cursor-pointer transition-all;
-}
+/* Optional: You can add any additional global styles here */

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+// ProgressDashboard.jsx
+import React, { useState, useEffect } from 'react';
 import { Container, Typography, Box, Paper } from '@mui/material';
 import { Bar } from 'react-chartjs-2';
 import {

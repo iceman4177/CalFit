@@ -1,11 +1,28 @@
+// App.jsx
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
+import {
+  BrowserRouter as Router,
+  Route,
+  Switch,
+  Link,
+  useLocation
+} from 'react-router-dom';
 import { Container, Box, Typography, Button, Stack } from '@mui/material';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
 import WorkoutHistory from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
 import Achievements from './Achievements';
+import { logPageView } from './analytics';
+
+// Small component to track pageviews on route changes
+function PageTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    logPageView(location.pathname + location.search);
+  }, [location]);
+  return null;
+}
 
 function App() {
   const [userData, setUserData] = useState(null);
@@ -20,6 +37,7 @@ function App() {
 
   return (
     <Router>
+      <PageTracker />
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Box sx={{ textAlign: 'center', mb: 4 }}>
           <Typography variant="h2" color="primary">
@@ -46,7 +64,10 @@ function App() {
         </Box>
 
         <Switch>
+          {/* Landing / Health Data */}
           <Route exact path="/" render={() => <HealthDataForm setUserData={setUserData} />} />
+
+          {/* Workout Flow */}
           <Route
             path="/workout"
             render={() =>
@@ -57,8 +78,14 @@ function App() {
               )
             }
           />
+
+          {/* History */}
           <Route path="/history" component={WorkoutHistory} />
+
+          {/* Dashboard */}
           <Route path="/dashboard" component={ProgressDashboard} />
+
+          {/* Achievements */}
           <Route path="/achievements" component={Achievements} />
         </Switch>
       </Container>

@@ -53,7 +53,7 @@ function Achievements() {
     setWorkoutHistory(history);
 
     // Evaluate which achievements are unlocked
-    const unlocked = achievementList.filter((achievement) => achievement.condition(history));
+    const unlocked = achievementList.filter((ach) => ach.condition(history));
     setUnlockedAchievements(unlocked);
   }, []);
 
@@ -69,7 +69,9 @@ function Achievements() {
       ) : (
         <Grid container spacing={2}>
           {achievementList.map((achievement) => {
-            const isUnlocked = achievement.condition(workoutHistory);
+            const isUnlocked = unlockedAchievements.some(
+              (unlocked) => unlocked.id === achievement.id
+            );
             return (
               <Grid item xs={12} sm={6} md={4} key={achievement.id}>
                 <Card
