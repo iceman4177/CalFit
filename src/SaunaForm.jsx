@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, TextField, Typography } from '@mui/material';
+import { Box, TextField, Typography, Tooltip } from '@mui/material';
 
 const SaunaForm = ({ saunaTime, saunaTemp, setSaunaTime, setSaunaTemp }) => {
   return (
@@ -8,23 +8,27 @@ const SaunaForm = ({ saunaTime, saunaTemp, setSaunaTime, setSaunaTemp }) => {
         Sauna Session (Optional)
       </Typography>
 
-      <TextField
-        label="Time in Sauna (minutes)"
-        type="number"
-        value={saunaTime}
-        onChange={(e) => setSaunaTime(e.target.value)}
-        fullWidth
-        sx={{ mb: 2 }}
-      />
+      <Tooltip title="Enter total time spent in the sauna (in minutes)">
+        <TextField
+          label="Time in Sauna (minutes)"
+          type="number"
+          value={saunaTime}
+          onChange={(e) => setSaunaTime(e.target.value)}
+          fullWidth
+          sx={{ mb: 2 }}
+        />
+      </Tooltip>
 
-      <TextField
-        label="Temperature (°F)"
-        type="number"
-        value={saunaTemp}
-        onChange={(e) => setSaunaTemp(e.target.value)}
-        fullWidth
-        sx={{ mb: 2 }}
-      />
+      <Tooltip title="Temperature of the sauna in Fahrenheit">
+        <TextField
+          label="Temperature (°F)"
+          type="number"
+          value={saunaTemp}
+          onChange={(e) => setSaunaTemp(e.target.value)}
+          fullWidth
+          sx={{ mb: 2 }}
+        />
+      </Tooltip>
     </Box>
   );
 };

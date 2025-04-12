@@ -1,18 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { useHistory } from 'react-router-dom'; // For React Router v5
-import { Box, Button, Container, MenuItem, Paper, Select, TextField, Typography } from '@mui/material';
+import { useHistory } from 'react-router-dom';
+import {
+  Box,
+  Button,
+  Container,
+  MenuItem,
+  Paper,
+  Select,
+  TextField,
+  Typography,
+  Tooltip
+} from '@mui/material';
 
 function HealthDataForm({ setUserData }) {
   const history = useHistory();
 
-  // Local state for health data
   const [age, setAge] = useState('');
   const [weight, setWeight] = useState('');
   const [heightFeet, setHeightFeet] = useState('');
   const [heightInches, setHeightInches] = useState('');
   const [activityLevel, setActivityLevel] = useState('');
 
-  // On mount, load saved health data from localStorage (if available)
   useEffect(() => {
     const savedData = localStorage.getItem('userData');
     if (savedData) {
@@ -34,14 +42,9 @@ function HealthDataForm({ setUserData }) {
       activityLevel,
     };
 
-    // Save to localStorage and update state
     localStorage.setItem('userData', JSON.stringify(userData));
     setUserData(userData);
-
-    // Remove any finished flag from previous sessions
     localStorage.removeItem('workoutFinished');
-
-    // Navigate to the Workout page
     history.push('/workout');
   };
 
@@ -54,65 +57,75 @@ function HealthDataForm({ setUserData }) {
 
         <form onSubmit={handleSubmit}>
           <Box sx={{ mb: 2 }}>
-            <TextField
-              label="Age"
-              type="number"
-              fullWidth
-              variant="outlined"
-              value={age}
-              onChange={(e) => setAge(e.target.value)}
-              required
-            />
+            <Tooltip title="Your age helps us estimate calories burned">
+              <TextField
+                label="Age"
+                type="number"
+                fullWidth
+                variant="outlined"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                required
+              />
+            </Tooltip>
           </Box>
 
           <Box sx={{ mb: 2 }}>
-            <TextField
-              label="Weight (lbs)"
-              type="number"
-              fullWidth
-              variant="outlined"
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              required
-            />
+            <Tooltip title="Used to calculate calories burned">
+              <TextField
+                label="Weight (lbs)"
+                type="number"
+                fullWidth
+                variant="outlined"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                required
+              />
+            </Tooltip>
           </Box>
 
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <TextField
-              label="Height (feet)"
-              type="number"
-              variant="outlined"
-              fullWidth
-              value={heightFeet}
-              onChange={(e) => setHeightFeet(e.target.value)}
-              required
-            />
-            <TextField
-              label="Height (inches)"
-              type="number"
-              variant="outlined"
-              fullWidth
-              value={heightInches}
-              onChange={(e) => setHeightInches(e.target.value)}
-              required
-            />
+            <Tooltip title="Height in feet">
+              <TextField
+                label="Height (feet)"
+                type="number"
+                variant="outlined"
+                fullWidth
+                value={heightFeet}
+                onChange={(e) => setHeightFeet(e.target.value)}
+                required
+              />
+            </Tooltip>
+            <Tooltip title="Additional inches">
+              <TextField
+                label="Height (inches)"
+                type="number"
+                variant="outlined"
+                fullWidth
+                value={heightInches}
+                onChange={(e) => setHeightInches(e.target.value)}
+                required
+              />
+            </Tooltip>
           </Box>
 
           <Box sx={{ mb: 3 }}>
-            <Select
-              value={activityLevel}
-              onChange={(e) => setActivityLevel(e.target.value)}
-              displayEmpty
-              fullWidth
-              variant="outlined"
-              required
-            >
-              <MenuItem value="" disabled>Select Activity Level</MenuItem>
-              <MenuItem value="sedentary">Sedentary</MenuItem>
-              <MenuItem value="light">Light Exercise</MenuItem>
-              <MenuItem value="moderate">Moderate Exercise</MenuItem>
-              <MenuItem value="intense">Intense Exercise</MenuItem>
-            </Select>
+            <Tooltip title="General level of physical activity during the week">
+              <Select
+                value={activityLevel}
+                onChange={(e) => setActivityLevel(e.target.value)}
+                displayEmpty
+                fullWidth
+                variant="outlined"
+                required
+              >
+                <MenuItem value="" disabled>Select Activity Level</MenuItem>
+                <MenuItem value="sedentary">Sedentary</MenuItem>
+                <MenuItem value="light">Light Exercise</MenuItem>
+                <MenuItem value="moderate">Moderate Exercise</MenuItem>
+                <MenuItem value="intense">Intense Exercise</MenuItem>
+              </Select>
+            </Tooltip>
           </Box>
 
           <Button variant="contained" color="primary" fullWidth type="submit">

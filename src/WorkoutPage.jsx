@@ -1,21 +1,16 @@
-// WorkoutPage.jsx
 import React, { useState } from 'react';
-import { Container, Typography, Divider, Button } from '@mui/material';
+import { Container, Typography, Divider, Button, Tooltip } from '@mui/material';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import { useHistory } from 'react-router-dom';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 function WorkoutPage({ userData }) {
-  // Wizard Steps: 1 = Exercises, 2 = Sauna, 3 = Summary
   const [currentStep, setCurrentStep] = useState(1);
   const history = useHistory();
 
-  // Persisted list of exercises for the session
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
-
-  // New exercise form state
   const [newExercise, setNewExercise] = useState({
     exerciseType: '',
     muscleGroup: '',
@@ -26,14 +21,11 @@ function WorkoutPage({ userData }) {
   });
   const [currentCalories, setCurrentCalories] = useState(0);
 
-  // Sauna data
   const [saunaTime, setSaunaTime] = useState('');
   const [saunaTemp, setSaunaTemp] = useState('180');
 
-  // State for share modal
   const [shareModalOpen, setShareModalOpen] = useState(false);
 
-  // Example exercise options (grouped by equipment type)
   const exerciseOptions = {
     machine: {
       Chest: ['Chest Press Machine', 'Cable Crossover/Functional Trainer'],
@@ -64,7 +56,6 @@ function WorkoutPage({ userData }) {
     }
   };
 
-  // Calculate calories for a single exercise
   const calculateCalories = (exercise) => {
     const w = parseFloat(exercise.weight) || 0;
     const s = parseInt(exercise.sets) || 1;
@@ -81,14 +72,20 @@ function WorkoutPage({ userData }) {
     return cals;
   };
 
-  // Handler for "Calculate Calories" button
   const handleCalculate = () => {
     const cals = calculateCalories(newExercise);
     setCurrentCalories(cals);
   };
 
-  // Handler for adding an exercise set (clears only set-specific fields)
   const handleAddExercise = () => {
+    const weight = parseFloat(newExercise.weight);
+    const reps = parseInt(newExercise.reps);
+
+    if (!newExercise.exerciseName || !weight || weight <= 0 || !reps || reps <= 0) {
+      alert('Please enter both a valid weight and number of reps.');
+      return;
+    }
+
     const cals = calculateCalories(newExercise);
     const exerciseToAdd = { ...newExercise, calories: cals };
     setCumulativeExercises([...cumulativeExercises, exerciseToAdd]);
@@ -101,18 +98,18 @@ function WorkoutPage({ userData }) {
     setCurrentCalories(0);
   };
 
-  // Updated handler: When "Done with Exercises" is clicked, if the form is filled,
-  // automatically add the current exercise before moving on.
   const handleDoneWithExercises = () => {
-    if (newExercise.exerciseName.trim() !== '') {
+    const weight = parseFloat(newExercise.weight);
+    const reps = parseInt(newExercise.reps);
+
+    if (newExercise.exerciseName && weight > 0 && reps > 0) {
       handleAddExercise();
     }
+
     setCurrentStep(2);
   };
 
-  // In the Sauna step, merge sauna data and move to Summary
   const handleNextFromSauna = () => {
-    // Filter out any existing sauna entry in case the user revisits this step
     const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
     if (saunaTime.trim() !== '') {
       const saunaTimeVal = parseFloat(saunaTime) || 0;
@@ -149,7 +146,6 @@ function WorkoutPage({ userData }) {
     setCurrentStep(2);
   };
 
-  // Finalize workout: calculate totals, save session, and navigate to History
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
@@ -170,7 +166,6 @@ function WorkoutPage({ userData }) {
     history.push('/history');
   };
 
-  // Handler to start a new workout (reset session data)
   const handleNewWorkout = () => {
     setCumulativeExercises([]);
     setCumulativeTotal(0);
@@ -179,17 +174,15 @@ function WorkoutPage({ userData }) {
     setCurrentStep(1);
   };
 
-  // Open share modal
   const handleShareWorkout = () => {
     setShareModalOpen(true);
   };
 
-  // In the Summary step, compute share text based on final workout data
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString('en-US')} with CalFit Tracker: ${cumulativeExercises.length} exercises burning a total of ${total.toFixed(2)} calories! #CalFitTracker`;
     const shareUrl = window.location.href;
-    
+
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Typography variant="h2" color="primary" align="center" gutterBottom>
@@ -213,18 +206,33 @@ function WorkoutPage({ userData }) {
         <Typography variant="h5" sx={{ mt: 2 }}>
           Total Calories Burned: {total.toFixed(2)}
         </Typography>
-        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleBackToSauna}>
-          Back
-        </Button>
-        <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={handleFinish}>
-          Log Workout
-        </Button>
-        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleShareWorkout}>
-          Share Workout
-        </Button>
-        <Button variant="text" sx={{ mt: 3 }} onClick={handleNewWorkout}>
-          Start New Workout
-        </Button>
+
+        <Tooltip title="Go back to edit sauna session">
+          <span>
+            <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleBackToSauna}>
+              Back
+            </Button>
+          </span>
+        </Tooltip>
+
+        <Tooltip title="Save this workout to your history">
+          <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={handleFinish}>
+            Log Workout
+          </Button>
+        </Tooltip>
+
+        <Tooltip title="Copy and share your workout summary">
+          <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleShareWorkout}>
+            Share Workout
+          </Button>
+        </Tooltip>
+
+        <Tooltip title="Reset and begin a new workout session">
+          <Button variant="text" sx={{ mt: 3 }} onClick={handleNewWorkout}>
+            Start New Workout
+          </Button>
+        </Tooltip>
+
         <ShareWorkoutModal
           open={shareModalOpen}
           onClose={() => setShareModalOpen(false)}
@@ -235,7 +243,6 @@ function WorkoutPage({ userData }) {
     );
   }
 
-  // Step 2: Sauna – display sauna inputs with Back and Next buttons
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -259,7 +266,6 @@ function WorkoutPage({ userData }) {
     );
   }
 
-  // Step 1: Exercises – display current exercises and the ExerciseForm.
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" color="primary" align="center" gutterBottom>
