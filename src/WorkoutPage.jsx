@@ -1,14 +1,23 @@
 import React, { useState } from 'react';
-import { Container, Typography, Divider, Button, Tooltip } from '@mui/material';
+import {
+  Container,
+  Typography,
+  Divider,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
+} from '@mui/material';
+import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
-import { useHistory } from 'react-router-dom';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 function WorkoutPage({ userData }) {
-  const [currentStep, setCurrentStep] = useState(1);
   const history = useHistory();
 
+  const [currentStep, setCurrentStep] = useState(1);
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
   const [newExercise, setNewExercise] = useState({
@@ -20,11 +29,22 @@ function WorkoutPage({ userData }) {
     reps: ''
   });
   const [currentCalories, setCurrentCalories] = useState(0);
-
   const [saunaTime, setSaunaTime] = useState('');
   const [saunaTemp, setSaunaTemp] = useState('180');
 
+  // Share modal
   const [shareModalOpen, setShareModalOpen] = useState(false);
+
+  // First-time-use popup states for summary buttons
+  const [showBackHelp, setShowBackHelp] = useState(false);
+  const [showLogHelp, setShowLogHelp] = useState(false);
+  const [showShareHelp, setShowShareHelp] = useState(false);
+  const [showNewHelp, setShowNewHelp] = useState(false);
+
+  const handleDismiss = (key, setter) => {
+    localStorage.setItem(key, 'true');
+    setter(false);
+  };
 
   const exerciseOptions = {
     machine: {
@@ -56,56 +76,39 @@ function WorkoutPage({ userData }) {
     }
   };
 
-  const calculateCalories = (exercise) => {
-    const w = parseFloat(exercise.weight) || 0;
-    const s = parseInt(exercise.sets) || 1;
-    const r = parseInt(exercise.reps) || 0;
+  const calculateCalories = () => {
+    const w = parseFloat(newExercise.weight) || 0;
+    const s = parseInt(newExercise.sets) || 1;
+    const r = parseInt(newExercise.reps) || 0;
     let cals = w * s * r * 0.05;
-    if (exercise.exerciseType === 'machine') {
-      cals *= 1.5;
-    } else if (
-      exercise.exerciseType === 'dumbbell' ||
-      exercise.exerciseType === 'barbell'
-    ) {
-      cals *= 1.2;
-    }
+    if (newExercise.exerciseType === 'machine') cals *= 1.5;
+    else if (['dumbbell', 'barbell'].includes(newExercise.exerciseType)) cals *= 1.2;
+    setCurrentCalories(cals);
     return cals;
   };
 
   const handleCalculate = () => {
-    const cals = calculateCalories(newExercise);
-    setCurrentCalories(cals);
+    calculateCalories();
   };
 
   const handleAddExercise = () => {
     const weight = parseFloat(newExercise.weight);
     const reps = parseInt(newExercise.reps);
-
     if (!newExercise.exerciseName || !weight || weight <= 0 || !reps || reps <= 0) {
       alert('Please enter both a valid weight and number of reps.');
       return;
     }
-
-    const cals = calculateCalories(newExercise);
+    const cals = calculateCalories();
     const exerciseToAdd = { ...newExercise, calories: cals };
     setCumulativeExercises([...cumulativeExercises, exerciseToAdd]);
-    setNewExercise((prev) => ({
-      ...prev,
-      weight: '',
-      sets: '1',
-      reps: ''
-    }));
+    setNewExercise({ ...newExercise, weight: '', sets: '1', reps: '' });
     setCurrentCalories(0);
   };
 
   const handleDoneWithExercises = () => {
     const weight = parseFloat(newExercise.weight);
     const reps = parseInt(newExercise.reps);
-
-    if (newExercise.exerciseName && weight > 0 && reps > 0) {
-      handleAddExercise();
-    }
-
+    if (newExercise.exerciseName && weight > 0 && reps > 0) handleAddExercise();
     setCurrentStep(2);
   };
 
@@ -115,8 +118,7 @@ function WorkoutPage({ userData }) {
       const saunaTimeVal = parseFloat(saunaTime) || 0;
       const saunaTempVal = parseFloat(saunaTemp) || 180;
       const userWeight = parseFloat(userData.weight) || 150;
-      const weightFactor = userWeight / 150;
-      const saunaCalories = saunaTimeVal * (saunaTempVal - 150) * 0.1 * weightFactor;
+      const saunaCalories = saunaTimeVal * (saunaTempVal - 150) * 0.1 * (userWeight / 150);
       filtered.push({
         exerciseType: 'Sauna',
         exerciseName: 'Sauna Session',
@@ -136,10 +138,7 @@ function WorkoutPage({ userData }) {
     setCumulativeExercises(updated);
   };
 
-  const handleBackToExercises = () => {
-    setCurrentStep(1);
-  };
-
+  const handleBackToExercises = () => setCurrentStep(1);
   const handleBackToSauna = () => {
     const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
     setCumulativeExercises(filtered);
@@ -149,9 +148,8 @@ function WorkoutPage({ userData }) {
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
-    const currentDate = new Date().toLocaleDateString('en-US');
     const newSession = {
-      date: currentDate,
+      date: new Date().toLocaleDateString('en-US'),
       totalCalories: total,
       exercises: cumulativeExercises.map((ex) => ({
         name: ex.exerciseName || ex.exerciseType,
@@ -160,22 +158,28 @@ function WorkoutPage({ userData }) {
         calories: ex.calories
       }))
     };
-    const existingHistory = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    existingHistory.push(newSession);
-    localStorage.setItem('workoutHistory', JSON.stringify(existingHistory));
+    const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    existing.push(newSession);
+    localStorage.setItem('workoutHistory', JSON.stringify(existing));
     history.push('/history');
   };
 
   const handleNewWorkout = () => {
     setCumulativeExercises([]);
-    setCumulativeTotal(0);
+    setCurrentCalories(0);
     setSaunaTime('');
     setSaunaTemp('180');
     setCurrentStep(1);
   };
 
-  const handleShareWorkout = () => {
-    setShareModalOpen(true);
+  const handleShareWorkout = () => setShareModalOpen(true);
+
+  const triggerOrHandle = (key, setPopup, callback) => {
+    if (!localStorage.getItem(key)) {
+      setPopup(true);
+    } else {
+      callback();
+    }
   };
 
   if (currentStep === 3) {
@@ -207,38 +211,59 @@ function WorkoutPage({ userData }) {
           Total Calories Burned: {total.toFixed(2)}
         </Typography>
 
-        <Tooltip title="Go back to edit sauna session">
-          <span>
-            <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleBackToSauna}>
-              Back
-            </Button>
-          </span>
-        </Tooltip>
+        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}>
+          Back
+        </Button>
+        <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)}>
+          Log Workout
+        </Button>
+        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenShareHelp', setShowShareHelp, handleShareWorkout)}>
+          Share Workout
+        </Button>
+        <Button variant="text" sx={{ mt: 3 }} onClick={() => triggerOrHandle('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}>
+          Start New Workout
+        </Button>
 
-        <Tooltip title="Save this workout to your history">
-          <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={handleFinish}>
-            Log Workout
-          </Button>
-        </Tooltip>
-
-        <Tooltip title="Copy and share your workout summary">
-          <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={handleShareWorkout}>
-            Share Workout
-          </Button>
-        </Tooltip>
-
-        <Tooltip title="Reset and begin a new workout session">
-          <Button variant="text" sx={{ mt: 3 }} onClick={handleNewWorkout}>
-            Start New Workout
-          </Button>
-        </Tooltip>
-
+        {/* Share Modal */}
         <ShareWorkoutModal
           open={shareModalOpen}
           onClose={() => setShareModalOpen(false)}
           shareText={shareText}
           shareUrl={shareUrl}
         />
+
+        {/* Button Help Popups */}
+        <Dialog open={showBackHelp} onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp)}>
+          <DialogTitle>Go Back</DialogTitle>
+          <DialogContent>This returns you to your sauna session to make changes.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenBackHelp', setShowBackHelp); handleBackToSauna(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showLogHelp} onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp)}>
+          <DialogTitle>Log Workout</DialogTitle>
+          <DialogContent>Saves your workout to history so you can view your progress.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenLogHelp', setShowLogHelp); handleFinish(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showShareHelp} onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}>
+          <DialogTitle>Share Workout</DialogTitle>
+          <DialogContent>Copy and paste your summary to share it online or with friends!</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenShareHelp', setShowShareHelp); handleShareWorkout(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showNewHelp} onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp)}>
+          <DialogTitle>Start New Workout</DialogTitle>
+          <DialogContent>This will reset your current session and allow you to begin a new one.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenNewHelp', setShowNewHelp); handleNewWorkout(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
       </Container>
     );
   }
