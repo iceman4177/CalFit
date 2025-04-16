@@ -1,3 +1,7 @@
+// Baselined full code as of April 13
+// Rebranded from CalFit Tracker to Slimcal.ai
+// Includes original structure plus UI name updates
+
 // App.jsx
 import React, { useState, useEffect } from 'react';
 import {
@@ -15,7 +19,6 @@ import ProgressDashboard from './ProgressDashboard';
 import Achievements from './Achievements';
 import { logPageView } from './analytics';
 
-// Small component to track pageviews on route changes
 function PageTracker() {
   const location = useLocation();
   useEffect(() => {
@@ -27,7 +30,6 @@ function PageTracker() {
 function App() {
   const [userData, setUserData] = useState(null);
 
-  // Load user data from localStorage on mount
   useEffect(() => {
     const storedData = localStorage.getItem('userData');
     if (storedData) {
@@ -41,12 +43,11 @@ function App() {
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Box sx={{ textAlign: 'center', mb: 4 }}>
           <Typography variant="h2" color="primary">
-            CalFit Tracker
+            Slimcal.ai
           </Typography>
           <Typography variant="body1" color="textSecondary">
             Track your workouts, calories, and sauna sessions!
           </Typography>
-          {/* Navigation Buttons */}
           <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2 }}>
             <Button variant="contained" component={Link} to="/workout">
               Workout
@@ -64,10 +65,7 @@ function App() {
         </Box>
 
         <Switch>
-          {/* Landing / Health Data */}
           <Route exact path="/" render={() => <HealthDataForm setUserData={setUserData} />} />
-
-          {/* Workout Flow */}
           <Route
             path="/workout"
             render={() =>
@@ -78,14 +76,8 @@ function App() {
               )
             }
           />
-
-          {/* History */}
           <Route path="/history" component={WorkoutHistory} />
-
-          {/* Dashboard */}
           <Route path="/dashboard" component={ProgressDashboard} />
-
-          {/* Achievements */}
           <Route path="/achievements" component={Achievements} />
         </Switch>
       </Container>

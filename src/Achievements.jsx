@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Typography, Grid, Card, CardContent } from '@mui/material';
 
-// Define your achievement criteria
 const achievementList = [
   {
     id: 'first_workout',
@@ -52,7 +51,6 @@ function Achievements() {
     const history = savedHistory ? JSON.parse(savedHistory) : [];
     setWorkoutHistory(history);
 
-    // Evaluate which achievements are unlocked
     const unlocked = achievementList.filter((ach) => ach.condition(history));
     setUnlockedAchievements(unlocked);
   }, []);

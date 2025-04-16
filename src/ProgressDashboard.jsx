@@ -43,7 +43,7 @@ function ProgressDashboard() {
     responsive: true,
     plugins: {
       legend: { position: 'top' },
-      title: { display: true, text: 'Calories Burned Per Workout' }
+      title: { display: true, text: 'Slimcal.ai - Calories Burned Per Workout' }
     }
   };
 
