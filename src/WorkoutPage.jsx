@@ -1,5 +1,5 @@
 // WorkoutPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Typography,
@@ -37,6 +37,16 @@ function WorkoutPage({ userData }) {
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
+
+  useEffect(() => {
+    if (!sessionStorage.getItem('hasSeenWorkoutPagePopups')) {
+      sessionStorage.setItem('hasSeenWorkoutPagePopups', 'true');
+      if (!localStorage.getItem('hasSeenBackHelp')) setShowBackHelp(true);
+      if (!localStorage.getItem('hasSeenLogHelp')) setShowLogHelp(true);
+      if (!localStorage.getItem('hasSeenShareHelp')) setShowShareHelp(true);
+      if (!localStorage.getItem('hasSeenNewHelp')) setShowNewHelp(true);
+    }
+  }, []);
 
   const handleDismiss = (key, setter) => {
     localStorage.setItem(key, 'true');
@@ -105,7 +115,9 @@ function WorkoutPage({ userData }) {
   const handleDoneWithExercises = () => {
     const weight = parseFloat(newExercise.weight);
     const reps = parseInt(newExercise.reps);
-    if (newExercise.exerciseName && weight > 0 && reps > 0) handleAddExercise();
+    if (newExercise.exerciseName && weight > 0 && reps > 0) {
+      handleAddExercise();
+    }
     setCurrentStep(2);
   };
 
@@ -136,6 +148,7 @@ function WorkoutPage({ userData }) {
   };
 
   const handleBackToExercises = () => setCurrentStep(1);
+
   const handleBackToSauna = () => {
     const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
     setCumulativeExercises(filtered);
@@ -192,7 +205,10 @@ function WorkoutPage({ userData }) {
         <Divider sx={{ my: 3 }} />
         {cumulativeExercises.map((ex, idx) => (
           <Typography key={idx} variant="body1">
-            {ex.exerciseName} - {ex.calories.toFixed(2)} cals
+            {ex.exerciseType === 'Sauna'
+              ? `${ex.exerciseName} x ${ex.reps}`
+              : `${ex.exerciseName} - ${ex.sets} sets x ${ex.reps} reps`
+            } ({ex.calories.toFixed(2)} cals)
             <Button
               variant="text"
               color="error"
@@ -228,8 +244,61 @@ function WorkoutPage({ userData }) {
           shareUrl={shareUrl}
         />
 
-        {/* Button Help Popups */}
-        {/* ...unchanged from baseline */}
+        {/* Dialog popups (unchanged) */}
+        <Dialog open={showBackHelp} onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp)}>
+          <DialogTitle>Go Back</DialogTitle>
+          <DialogContent>This returns you to your sauna session to make changes.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenBackHelp', setShowBackHelp); handleBackToSauna(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showLogHelp} onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp)}>
+          <DialogTitle>Log Workout</DialogTitle>
+          <DialogContent>Saves your workout to history so you can view your progress.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenLogHelp', setShowLogHelp); handleFinish(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showShareHelp} onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}>
+          <DialogTitle>Share Workout</DialogTitle>
+          <DialogContent>Copy and paste your summary to share it online or with friends!</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenShareHelp', setShowShareHelp); handleShareWorkout(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={showNewHelp} onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp)}>
+          <DialogTitle>Start New Workout</DialogTitle>
+          <DialogContent>This will reset your current session and allow you to begin a new one.</DialogContent>
+          <DialogActions>
+            <Button onClick={() => { handleDismiss('hasSeenNewHelp', setShowNewHelp); handleNewWorkout(); }}>Got it</Button>
+          </DialogActions>
+        </Dialog>
+      </Container>
+    );
+  }
+
+  if (currentStep === 2) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Typography variant="h2" color="primary" align="center" gutterBottom>
+          Sauna Session
+        </Typography>
+        <Divider sx={{ my: 3 }} />
+        <SaunaForm
+          saunaTime={saunaTime}
+          saunaTemp={saunaTemp}
+          setSaunaTime={setSaunaTime}
+          setSaunaTemp={setSaunaTemp}
+        />
+        <Button variant="outlined" sx={{ mt: 2, mr: 2 }} onClick={handleBackToExercises}>
+          Back
+        </Button>
+        <Button variant="contained" sx={{ mt: 2 }} onClick={handleNextFromSauna}>
+          Next
+        </Button>
       </Container>
     );
   }
