@@ -8,15 +8,23 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Box
 } from '@mui/material';
 import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
-function WorkoutPage({ userData }) {
+function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
+
+  // Redirect to health form if userData is missing
+  useEffect(() => {
+    if (!userData) {
+      history.replace('/edit-info');
+    }
+  }, [userData, history]);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
@@ -106,8 +114,7 @@ function WorkoutPage({ userData }) {
       return;
     }
     const cals = calculateCalories();
-    const exerciseToAdd = { ...newExercise, calories: cals };
-    setCumulativeExercises([...cumulativeExercises, exerciseToAdd]);
+    setCumulativeExercises([...cumulativeExercises, { ...newExercise, calories: cals }]);
     setNewExercise({ ...newExercise, weight: '', sets: '1', reps: '' });
     setCurrentCalories(0);
   };
@@ -124,40 +131,39 @@ function WorkoutPage({ userData }) {
   const handleNextFromSauna = () => {
     const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
     if (saunaTime.trim() !== '') {
-      const saunaTimeVal = parseFloat(saunaTime) || 0;
-      const saunaTempVal = parseFloat(saunaTemp) || 180;
-      const userWeight = parseFloat(userData.weight) || 150;
-      const saunaCalories = saunaTimeVal * (saunaTempVal - 150) * 0.1 * (userWeight / 150);
+      const t = parseFloat(saunaTime) || 0;
+      const temp = parseFloat(saunaTemp) || 180;
+      const uw = parseFloat(userData.weight) || 150;
+      const saunaCals = t * (temp - 150) * 0.1 * (uw / 150);
       filtered.push({
         exerciseType: 'Sauna',
         exerciseName: 'Sauna Session',
         sets: '',
-        reps: `${saunaTimeVal} min`,
+        reps: '',
         weight: '',
-        calories: saunaCalories
+        calories: saunaCals
       });
     }
     setCumulativeExercises(filtered);
     setCurrentStep(3);
   };
 
-  const handleRemoveExercise = (index) => {
-    const updated = [...cumulativeExercises];
-    updated.splice(index, 1);
-    setCumulativeExercises(updated);
+  const handleRemoveExercise = (i) => {
+    const u = [...cumulativeExercises];
+    u.splice(i, 1);
+    setCumulativeExercises(u);
   };
 
   const handleBackToExercises = () => setCurrentStep(1);
-
   const handleBackToSauna = () => {
-    const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
-    setCumulativeExercises(filtered);
+    setCumulativeExercises(cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna'));
     setCurrentStep(2);
   };
 
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
+
     const newSession = {
       date: new Date().toLocaleDateString('en-US'),
       totalCalories: total,
@@ -168,9 +174,13 @@ function WorkoutPage({ userData }) {
         calories: ex.calories
       }))
     };
+
     const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
+
+    // Update App's burnedCalories (so banner shows consumed - burned)
+    onWorkoutLogged(total);
     history.push('/history');
   };
 
@@ -184,35 +194,36 @@ function WorkoutPage({ userData }) {
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  const triggerOrHandle = (key, setPopup, callback) => {
-    if (!localStorage.getItem(key)) {
-      setPopup(true);
-    } else {
-      callback();
-    }
+  const triggerOrHandle = (key, setter, cb) => {
+    if (!localStorage.getItem(key)) setter(true);
+    else cb();
   };
 
+  // Step 3: Summary screen
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
-    const shareText = `I just logged a workout on ${new Date().toLocaleDateString('en-US')} with Slimcal.ai: ${cumulativeExercises.length} exercises burning a total of ${total.toFixed(2)} calories! #SlimcalAI`;
-    const shareUrl = window.location.href;
+    const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
+      'en-US'
+    )} with Slimcal.ai: ${cumulativeExercises.length} exercises burning a total of ${total.toFixed(
+      2
+    )} calories! #SlimcalAI`;
 
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
-        <Typography variant="h2" color="primary" align="center" gutterBottom>
+        <Typography variant="h2" align="center" color="primary" gutterBottom>
           Workout Summary
         </Typography>
         <Divider sx={{ my: 3 }} />
         {cumulativeExercises.map((ex, idx) => (
           <Typography key={idx} variant="body1">
+            {ex.exerciseName}{' '}
             {ex.exerciseType === 'Sauna'
-              ? `${ex.exerciseName} x ${ex.reps}`
-              : `${ex.exerciseName} - ${ex.sets} sets x ${ex.reps} reps`
-            } ({ex.calories.toFixed(2)} cals)
+              ? `- ${ex.calories.toFixed(2)} cals`
+              : `- ${ex.sets}×${ex.reps} (${ex.calories.toFixed(2)} cals)`}
             <Button
-              variant="text"
-              color="error"
               size="small"
+              color="error"
+              variant="text"
               onClick={() => handleRemoveExercise(idx)}
               sx={{ ml: 2 }}
             >
@@ -224,66 +235,115 @@ function WorkoutPage({ userData }) {
           Total Calories Burned: {total.toFixed(2)}
         </Typography>
 
-        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}>
-          Back
-        </Button>
-        <Button variant="contained" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)}>
-          Log Workout
-        </Button>
-        <Button variant="outlined" sx={{ mt: 3, mr: 2 }} onClick={() => triggerOrHandle('hasSeenShareHelp', setShowShareHelp, handleShareWorkout)}>
-          Share Workout
-        </Button>
-        <Button variant="text" sx={{ mt: 3 }} onClick={() => triggerOrHandle('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}>
-          Start New Workout
-        </Button>
+        <Box sx={{ mt: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            onClick={() => triggerOrHandle('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}
+          >
+            Back
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)}
+          >
+            Log Workout
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() =>
+              triggerOrHandle('hasSeenShareHelp', setShowShareHelp, handleShareWorkout)
+            }
+          >
+            Share Workout
+          </Button>
+          <Button
+            variant="text"
+            onClick={() => triggerOrHandle('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}
+          >
+            Start New Workout
+          </Button>
+        </Box>
 
         <ShareWorkoutModal
           open={shareModalOpen}
           onClose={() => setShareModalOpen(false)}
           shareText={shareText}
-          shareUrl={shareUrl}
+          shareUrl={window.location.href}
         />
 
-        {/* Dialog popups (unchanged) */}
+        {/* Helper Dialogs */}
         <Dialog open={showBackHelp} onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp)}>
           <DialogTitle>Go Back</DialogTitle>
           <DialogContent>This returns you to your sauna session to make changes.</DialogContent>
           <DialogActions>
-            <Button onClick={() => { handleDismiss('hasSeenBackHelp', setShowBackHelp); handleBackToSauna(); }}>Got it</Button>
+            <Button
+              onClick={() => {
+                handleDismiss('hasSeenBackHelp', setShowBackHelp);
+                handleBackToSauna();
+              }}
+            >
+              Got it
+            </Button>
           </DialogActions>
         </Dialog>
-
         <Dialog open={showLogHelp} onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp)}>
           <DialogTitle>Log Workout</DialogTitle>
           <DialogContent>Saves your workout to history so you can view your progress.</DialogContent>
           <DialogActions>
-            <Button onClick={() => { handleDismiss('hasSeenLogHelp', setShowLogHelp); handleFinish(); }}>Got it</Button>
+            <Button
+              onClick={() => {
+                handleDismiss('hasSeenLogHelp', setShowLogHelp);
+                handleFinish();
+              }}
+            >
+              Got it
+            </Button>
           </DialogActions>
         </Dialog>
-
-        <Dialog open={showShareHelp} onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}>
+        <Dialog
+          open={showShareHelp}
+          onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}
+        >
           <DialogTitle>Share Workout</DialogTitle>
-          <DialogContent>Copy and paste your summary to share it online or with friends!</DialogContent>
+          <DialogContent>
+            Copy and paste your summary to share it online or with friends!
+          </DialogContent>
           <DialogActions>
-            <Button onClick={() => { handleDismiss('hasSeenShareHelp', setShowShareHelp); handleShareWorkout(); }}>Got it</Button>
+            <Button
+              onClick={() => {
+                handleDismiss('hasSeenShareHelp', setShowShareHelp);
+                handleShareWorkout();
+              }}
+            >
+              Got it
+            </Button>
           </DialogActions>
         </Dialog>
-
         <Dialog open={showNewHelp} onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp)}>
           <DialogTitle>Start New Workout</DialogTitle>
-          <DialogContent>This will reset your current session and allow you to begin a new one.</DialogContent>
+          <DialogContent>
+            This will reset your current session and allow you to begin a new one.
+          </DialogContent>
           <DialogActions>
-            <Button onClick={() => { handleDismiss('hasSeenNewHelp', setShowNewHelp); handleNewWorkout(); }}>Got it</Button>
+            <Button
+              onClick={() => {
+                handleDismiss('hasSeenNewHelp', setShowNewHelp);
+                handleNewWorkout();
+              }}
+            >
+              Got it
+            </Button>
           </DialogActions>
         </Dialog>
       </Container>
     );
   }
 
+  // Step 2: Sauna
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
-        <Typography variant="h2" color="primary" align="center" gutterBottom>
+        <Typography variant="h2" align="center" color="primary" gutterBottom>
           Sauna Session
         </Typography>
         <Divider sx={{ my: 3 }} />
@@ -293,37 +353,41 @@ function WorkoutPage({ userData }) {
           setSaunaTime={setSaunaTime}
           setSaunaTemp={setSaunaTemp}
         />
-        <Button variant="outlined" sx={{ mt: 2, mr: 2 }} onClick={handleBackToExercises}>
-          Back
-        </Button>
-        <Button variant="contained" sx={{ mt: 2 }} onClick={handleNextFromSauna}>
-          Next
-        </Button>
+        <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
+          <Button variant="outlined" onClick={handleBackToExercises}>
+            Back
+          </Button>
+          <Button variant="contained" onClick={handleNextFromSauna}>
+            Next
+          </Button>
+        </Box>
       </Container>
     );
   }
 
+  // Step 1: Exercise form
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
-      <Typography variant="h2" color="primary" align="center" gutterBottom>
+      <Typography variant="h2" align="center" color="primary" gutterBottom>
         Workout Tracker
       </Typography>
       <Typography variant="body1" align="center" color="textSecondary">
-        Welcome! You are {userData.age} years old and weigh {userData.weight} lbs.
+        Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
       </Typography>
       <Divider sx={{ my: 3 }} />
+
       {cumulativeExercises.length > 0 && (
-        <div style={{ marginBottom: '1rem' }}>
+        <Box sx={{ mb: 2 }}>
           <Typography variant="h6">Current Exercises:</Typography>
           {cumulativeExercises
             .filter((ex) => ex.exerciseType !== 'Sauna')
             .map((ex, idx) => (
               <Typography key={idx} variant="body2">
-                {ex.exerciseName} - {ex.sets} sets x {ex.reps} reps ({ex.calories.toFixed(2)} cals)
+                {ex.exerciseName} - {ex.sets}×{ex.reps} ({ex.calories.toFixed(2)} cals)
                 <Button
-                  variant="text"
-                  color="error"
                   size="small"
+                  color="error"
+                  variant="text"
                   onClick={() => handleRemoveExercise(idx)}
                   sx={{ ml: 2 }}
                 >
@@ -331,8 +395,9 @@ function WorkoutPage({ userData }) {
                 </Button>
               </Typography>
             ))}
-        </div>
+        </Box>
       )}
+
       <ExerciseForm
         newExercise={newExercise}
         setNewExercise={setNewExercise}
