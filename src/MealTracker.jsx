@@ -1,4 +1,4 @@
-// MealTracker.jsx
+// src/MealTracker.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -14,8 +14,15 @@ import {
   Autocomplete
 } from '@mui/material';
 import foodData from './foodData.json';
+import useFirstTimeTip from './hooks/useFirstTimeTip';
 
-function MealTracker({ onMealUpdate, refreshCalories }) {
+export default function MealTracker({ onMealUpdate }) {
+  // Manual tips
+  const [FoodTip, triggerFoodTip]   = useFirstTimeTip('tip_food', 'Search or type a food name.');
+  const [CalTip, triggerCalTip]     = useFirstTimeTip('tip_cal', 'Enter the calories amount.');
+  const [AddTip, triggerAddTip]     = useFirstTimeTip('tip_addMeal', 'Tap to add this meal.');
+  const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clearMeals', 'Tap to clear today’s meals.');
+
   const [foodInput, setFoodInput] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
   const [calories, setCalories] = useState('');
@@ -23,57 +30,54 @@ function MealTracker({ onMealUpdate, refreshCalories }) {
   const today = new Date().toLocaleDateString('en-US');
 
   useEffect(() => {
-    const savedMeals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayLog = savedMeals.find((entry) => entry.date === today);
+    const saved = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayLog = saved.find(e => e.date === today);
     const meals = todayLog ? todayLog.meals : [];
     setMealLog(meals);
     onMealUpdate(meals.reduce((sum, m) => sum + m.calories, 0));
-  }, []);
+  }, [onMealUpdate, today]);
 
-  const saveMeals = (meals) => {
-    const saved = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const filtered = saved.filter((e) => e.date !== today);
-    filtered.push({ date: today, meals });
-    localStorage.setItem('mealHistory', JSON.stringify(filtered));
+  const saveMeals = meals => {
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]')
+      .filter(e => e.date !== today);
+    rest.push({ date: today, meals });
+    localStorage.setItem('mealHistory', JSON.stringify(rest));
     onMealUpdate(meals.reduce((sum, m) => sum + m.calories, 0));
-    refreshCalories();
   };
 
-  const handleAddMeal = () => {
+  const handleAdd = () => {
     const cal = parseInt(calories, 10);
     if (!foodInput.trim() || !cal || cal <= 0) {
-      alert('Please enter a valid food and calorie value.');
+      alert('Enter a valid food & calories.');
       return;
     }
     const newMeal = { name: foodInput.trim(), calories: cal };
     const updated = [...mealLog, newMeal];
     setMealLog(updated);
     saveMeals(updated);
-    setFoodInput('');
-    setSelectedFood(null);
-    setCalories('');
+    // <> Removed clearing so fields stay populated for repeated adds </>
+    // setFoodInput('');
+    // setSelectedFood(null);
+    // setCalories('');
   };
 
-  const handleClearMeals = () => {
-    const saved = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const filtered = saved.filter((entry) => entry.date !== today);
-    localStorage.setItem('mealHistory', JSON.stringify(filtered));
+  const handleClear = () => {
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]')
+      .filter(e => e.date !== today);
+    localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]);
     onMealUpdate(0);
-    refreshCalories();
   };
 
-  const handleFoodChange = (e, value) => {
-    setSelectedFood(value);
-    if (value) {
-      setFoodInput(value.name);
-      setCalories(String(value.calories));
-    } else {
-      setCalories('');
+  const handleFoodChange = (e, v) => {
+    setSelectedFood(v);
+    if (v) {
+      setFoodInput(v.name);
+      setCalories(String(v.calories));
     }
   };
 
-  const totalCalories = mealLog.reduce((sum, m) => sum + m.calories, 0);
+  const total = mealLog.reduce((sum, m) => sum + m.calories, 0);
 
   return (
     <Container maxWidth="sm" sx={{ py: 4 }}>
@@ -81,38 +85,44 @@ function MealTracker({ onMealUpdate, refreshCalories }) {
         Meal Tracker
       </Typography>
 
+      {/* Tips */}
+      <FoodTip />
+      <CalTip />
+      <AddTip />
+      <ClearTip />
+
       <Box sx={{ mb: 2 }}>
         <Autocomplete
           options={foodData}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={o => o.name}
           value={selectedFood}
+          onFocus={() => triggerFoodTip()}
           onChange={handleFoodChange}
           inputValue={foodInput}
           onInputChange={(e, v) => setFoodInput(v)}
-          renderInput={(params) => <TextField {...params} label="Food Name" fullWidth />}
+          renderInput={params => <TextField {...params} label="Food Name" fullWidth />}
         />
-
         <TextField
           label="Calories"
           type="number"
           value={calories}
-          onChange={(e) => setCalories(e.target.value)}
+          onFocus={() => triggerCalTip()}
+          onChange={e => setCalories(e.target.value)}
           fullWidth
           sx={{ mt: 2 }}
         />
-
         {!selectedFood && foodInput.length > 2 && (
           <Alert severity="info" sx={{ mt: 2 }}>
-            Food not found in free lookup. You can enter calories manually.
+            Not found—enter calories manually.
           </Alert>
         )}
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button variant="contained" onClick={handleAddMeal}>
+        <Button variant="contained" onClick={() => { triggerAddTip(); handleAdd(); }}>
           Add Meal
         </Button>
-        <Button variant="outlined" color="error" onClick={handleClearMeals}>
+        <Button variant="outlined" color="error" onClick={() => { triggerClearTip(); handleClear(); }}>
           Clear Meals
         </Button>
       </Box>
@@ -124,10 +134,10 @@ function MealTracker({ onMealUpdate, refreshCalories }) {
         <Typography>No meals added yet.</Typography>
       ) : (
         <List>
-          {mealLog.map((meal, i) => (
+          {mealLog.map((m, i) => (
             <Box key={i}>
               <ListItem>
-                <ListItemText primary={meal.name} secondary={`${meal.calories} calories`} />
+                <ListItemText primary={m.name} secondary={`${m.calories} cals`} />
               </ListItem>
               <Divider />
             </Box>
@@ -136,10 +146,8 @@ function MealTracker({ onMealUpdate, refreshCalories }) {
       )}
 
       <Typography variant="h6" align="right" sx={{ mt: 3 }}>
-        Total Calories: {totalCalories}
+        Total Calories: {total}
       </Typography>
     </Container>
   );
 }
-
-export default MealTracker;

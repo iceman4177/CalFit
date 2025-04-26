@@ -10,9 +10,18 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import useFirstTimeTip from './hooks/useFirstTimeTip';
 
-function HealthDataForm({ setUserData }) {
+export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
+
+  // Manual tips + dropdown control
+  const [AgeTip, triggerAgeTip] = useFirstTimeTip('tip_age', 'Enter your age to personalize calculations.');
+  const [WeightTip, triggerWeightTip] = useFirstTimeTip('tip_weight', 'Enter your weight (lbs).');
+  const [FeetTip, triggerFeetTip] = useFirstTimeTip('tip_heightFeet', 'Enter height in feet.');
+  const [InchesTip, triggerInchesTip] = useFirstTimeTip('tip_heightInches', 'Enter height in inches.');
+  const [ActivityTip, triggerActivityTip] = useFirstTimeTip('tip_activityLevel', 'Select your activity level.');
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const [age, setAge] = useState('');
   const [weight, setWeight] = useState('');
@@ -23,34 +32,37 @@ function HealthDataForm({ setUserData }) {
   useEffect(() => {
     const saved = localStorage.getItem('userData');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      setAge(parsed.age || '');
-      setWeight(parsed.weight || '');
-      setHeightFeet(parsed.height?.feet || '');
-      setHeightInches(parsed.height?.inches || '');
-      setActivityLevel(parsed.activityLevel || '');
+      const p = JSON.parse(saved);
+      setAge(p.age || '');
+      setWeight(p.weight || '');
+      setHeightFeet(p.height?.feet || '');
+      setHeightInches(p.height?.inches || '');
+      setActivityLevel(p.activityLevel || '');
     }
   }, []);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = e => {
     e.preventDefault();
-    const userData = {
+    const data = {
       age,
       weight,
       height: { feet: heightFeet, inches: heightInches },
       activityLevel
     };
-    localStorage.setItem('userData', JSON.stringify(userData));
-    setUserData(userData);
-
-    // Set a first-time flag so this form isn't shown again
+    localStorage.setItem('userData', JSON.stringify(data));
+    setUserData(data);
     localStorage.setItem('hasCompletedHealthData', 'true');
-
     history.push('/');
   };
 
   return (
     <Container maxWidth="sm">
+      <AgeTip />
+      <WeightTip />
+      <FeetTip />
+      <InchesTip />
+      <ActivityTip />
+
       <Paper elevation={3} sx={{ p: 4, mt: 4, borderRadius: 2 }}>
         <Typography variant="h4" align="center" gutterBottom>
           Enter Your Health Info
@@ -61,9 +73,9 @@ function HealthDataForm({ setUserData }) {
               label="Age"
               type="number"
               value={age}
-              onChange={(e) => setAge(e.target.value)}
-              fullWidth
-              required
+              onFocus={() => triggerAgeTip()}
+              onChange={e => setAge(e.target.value)}
+              fullWidth required
             />
           </Box>
           <Box sx={{ mb: 2 }}>
@@ -71,36 +83,37 @@ function HealthDataForm({ setUserData }) {
               label="Weight (lbs)"
               type="number"
               value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              fullWidth
-              required
+              onFocus={() => triggerWeightTip()}
+              onChange={e => setWeight(e.target.value)}
+              fullWidth required
             />
           </Box>
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+          <Box sx={{ display:'flex', gap:2, mb:2 }}>
             <TextField
               label="Height (feet)"
               type="number"
               value={heightFeet}
-              onChange={(e) => setHeightFeet(e.target.value)}
-              fullWidth
-              required
+              onFocus={() => triggerFeetTip()}
+              onChange={e => setHeightFeet(e.target.value)}
+              fullWidth required
             />
             <TextField
               label="Height (inches)"
               type="number"
               value={heightInches}
-              onChange={(e) => setHeightInches(e.target.value)}
-              fullWidth
-              required
+              onFocus={() => triggerInchesTip()}
+              onChange={e => setHeightInches(e.target.value)}
+              fullWidth required
             />
           </Box>
           <Box sx={{ mb: 3 }}>
             <Select
+              open={activityOpen}
+              onOpen={() => triggerActivityTip(() => setActivityOpen(true))}
+              onClose={() => setActivityOpen(false)}
               value={activityLevel}
-              onChange={(e) => setActivityLevel(e.target.value)}
-              fullWidth
-              displayEmpty
-              required
+              onChange={e => setActivityLevel(e.target.value)}
+              fullWidth displayEmpty required
             >
               <MenuItem value="" disabled>Select Activity Level</MenuItem>
               <MenuItem value="sedentary">Sedentary</MenuItem>
@@ -110,12 +123,10 @@ function HealthDataForm({ setUserData }) {
             </Select>
           </Box>
           <Button variant="contained" fullWidth type="submit">
-            Save & Continue
+            Save &amp; Continue
           </Button>
         </form>
       </Paper>
     </Container>
   );
 }
-
-export default HealthDataForm;

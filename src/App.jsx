@@ -1,9 +1,7 @@
-// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Route,
   Switch,
-  Link,
   NavLink,
   useLocation,
   useHistory
@@ -28,6 +26,7 @@ import ListIcon from '@mui/icons-material/List';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import InfoIcon from '@mui/icons-material/Info';
 
+import useFirstTimeTip from './hooks/useFirstTimeTip';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
 import WorkoutHistory from './WorkoutHistory';
@@ -39,9 +38,23 @@ import CalorieSummary from './CalorieSummary';
 import NetCalorieBanner from './NetCalorieBanner';
 import { logPageView } from './analytics';
 
+// Tip text for each route
+const routeTips = {
+  '/':             'Welcome to Slimcal.ai! First, enter your health info so everything can be personalized.',
+  '/workout':      'This is your Workout page: add exercises, calculate & log calories burned.',
+  '/meals':        'On the Meals page, search foods or enter calories manually to track intake.',
+  '/history':      'Here’s your History: review past workouts & meals at a glance.',
+  '/dashboard':    'Dashboard shows your total workouts & calories burned over time.',
+  '/achievements': 'Achievements page: hit milestones to unlock badges!',
+  '/calorie-log':  'Calorie Log gives you a detailed daily breakdown of intake vs. burn.',
+  '/summary':      'Summary page: quick overview of today’s net calories.'
+};
+
 function PageTracker() {
   const location = useLocation();
-  useEffect(() => logPageView(location.pathname + location.search), [location]);
+  useEffect(() => {
+    logPageView(location.pathname + location.search);
+  }, [location]);
   return null;
 }
 
@@ -49,24 +62,22 @@ export default function App() {
   const history = useHistory();
   const location = useLocation();
 
+  // Only auto‐trigger if there’s a non‐empty tip
+  const message = routeTips[location.pathname] || '';
+  const [PageTip] = useFirstTimeTip(
+    `hasSeenPageTip_${location.pathname}`,
+    message,
+    { auto: Boolean(message) }
+  );
+
   const [userData, setUserDataState] = useState(null);
   const [burnedCalories, setBurnedCalories] = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [showHealthForm, setShowHealthForm] = useState(false);
 
-  // “More” menu anchor
   const [moreAnchor, setMoreAnchor] = useState(null);
   const openMore = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
-
-  const moreLinks = [
-    { to: '/history',      label: 'History',      icon: <HistoryIcon fontSize="small" /> },
-    { to: '/dashboard',    label: 'Dashboard',    icon: <DashboardIcon fontSize="small" /> },
-    { to: '/achievements', label: 'Achievements', icon: <EmojiEventsIcon fontSize="small" /> },
-    { to: '/calorie-log',  label: 'Calorie Log',  icon: <ListIcon fontSize="small" /> },
-    { to: '/summary',      label: 'Summary',      icon: <AssessmentIcon fontSize="small" /> },
-    { to: '/edit-info',    label: 'Edit Info',    icon: <InfoIcon fontSize="small" /> }
-  ];
 
   const setUserData = data => {
     localStorage.setItem('userData', JSON.stringify(data));
@@ -76,17 +87,17 @@ export default function App() {
   const refreshCalories = () => {
     const today = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const burnedSum = workouts
-      .filter(w => w.date === today)
-      .reduce((sum, w) => sum + w.totalCalories, 0);
-    setBurnedCalories(burnedSum);
-
+    setBurnedCalories(
+      workouts.filter(w => w.date === today)
+              .reduce((sum, w) => sum + w.totalCalories, 0)
+    );
     const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = meals.find(m => m.date === today);
-    const consumedSum = todayMeals
-      ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0)
-      : 0;
-    setConsumedCalories(consumedSum);
+    setConsumedCalories(
+      todayMeals
+        ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0)
+        : 0
+    );
   };
 
   useEffect(() => {
@@ -103,57 +114,63 @@ export default function App() {
   const handleUpdateBurned = () => refreshCalories();
   const handleUpdateConsumed = () => refreshCalories();
 
-  // Primary nav always visible under banner
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={{ xs: 1, sm: 2 }}
-        justifyContent="center"
-      >
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} justifyContent="center">
         <Tooltip title="Log Workout">
           <Button
-            component={Link}
+            component={NavLink}
             to="/workout"
             variant="contained"
             color="primary"
             startIcon={<FitnessCenterIcon />}
-            sx={{ whiteSpace: 'nowrap', px: 2 }}
-          >Workout</Button>
+            sx={{ px: 2 }}
+          >
+            Workout
+          </Button>
         </Tooltip>
         <Tooltip title="Log Meal">
           <Button
-            component={Link}
+            component={NavLink}
             to="/meals"
             variant="contained"
             color="secondary"
             startIcon={<RestaurantIcon />}
-            sx={{ whiteSpace: 'nowrap', px: 2 }}
-          >Meals</Button>
+            sx={{ px: 2 }}
+          >
+            Meals
+          </Button>
         </Tooltip>
         <Tooltip title="More options">
           <Button
             onClick={openMore}
             variant="outlined"
             startIcon={<MoreVertIcon />}
-            sx={{ whiteSpace: 'nowrap', px: 2 }}
-          >More</Button>
+            sx={{ px: 2 }}
+          >
+            More
+          </Button>
         </Tooltip>
       </Stack>
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
-        {moreLinks.map(({ to, label, icon }) => (
-          <MenuItem
-            key={to}
-            component={NavLink}
-            to={to}
-            exact
-            onClick={closeMore}
-            sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
-          >
-            {icon}
-            {label}
-          </MenuItem>
-        ))}
+        <MenuItem component={NavLink} to="/history" onClick={closeMore}>
+          <HistoryIcon fontSize="small" /> History
+        </MenuItem>
+        <MenuItem component={NavLink} to="/dashboard" onClick={closeMore}>
+          <DashboardIcon fontSize="small" /> Dashboard
+        </MenuItem>
+        <MenuItem component={NavLink} to="/achievements" onClick={closeMore}>
+          <EmojiEventsIcon fontSize="small" /> Achievements
+        </MenuItem>
+        <MenuItem component={NavLink} to="/calorie-log" onClick={closeMore}>
+          <ListIcon fontSize="small" /> Calorie Log
+        </MenuItem>
+        <MenuItem component={NavLink} to="/summary" onClick={closeMore}>
+          <AssessmentIcon fontSize="small" /> Summary
+        </MenuItem>
+        <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
+          <InfoIcon fontSize="small" /> Edit Info
+        </MenuItem>
       </Menu>
     </Box>
   );
@@ -161,46 +178,65 @@ export default function App() {
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <PageTracker />
+      {message && <PageTip />}
 
-      {/* Header + Banner */}
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>
-        <Typography variant="body1" color="textSecondary">Track your workouts, meals, and calories all in one place.</Typography>
+        <Typography variant="body1" color="textSecondary">
+          Track your workouts, meals, and calories all in one place.
+        </Typography>
       </Box>
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
 
-      {/* Unified Nav Bar */}
       {navBar}
 
-      {/* Routes */}
       <Switch>
-        <Route path="/edit-info" render={() => (
-          <HealthDataForm
-            setUserData={data => { setUserData(data); setShowHealthForm(false); history.push('/'); }}
-          />
-        )} />
-        <Route path="/workout" render={() => (
-          <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
-        )} />
-        <Route path="/meals" render={() => (
-          <MealTracker onMealUpdate={handleUpdateConsumed} />
-        )} />
-        <Route path="/history" render={() => (
-          <WorkoutHistory onHistoryChange={refreshCalories} />
-        )} />
+        <Route
+          path="/edit-info"
+          render={() => (
+            <HealthDataForm
+              setUserData={data => {
+                setUserData(data);
+                setShowHealthForm(false);
+                history.push('/');
+              }}
+            />
+          )}
+        />
+        <Route
+          path="/workout"
+          render={() => <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />}
+        />
+        <Route
+          path="/meals"
+          render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />}
+        />
+        <Route
+          path="/history"
+          render={() => <WorkoutHistory onHistoryChange={refreshCalories} />}
+        />
         <Route path="/dashboard" component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log" component={CalorieHistory} />
-        <Route path="/summary" render={() => (
-          <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />
-        )} />
-        <Route exact path="/" render={() => (
-          showHealthForm ? (
-            <HealthDataForm
-              setUserData={data => { setUserData(data); setShowHealthForm(false); history.push('/'); }}
-            />
-          ) : null
-        )} />
+        <Route
+          path="/summary"
+          render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />}
+        />
+        <Route
+          exact
+          path="/"
+          render={() =>
+            showHealthForm ? (
+              <HealthDataForm
+                setUserData={data => {
+                  setUserData(data);
+                  setShowHealthForm(false);
+                  history.push('/');
+                }}
+              />
+            ) : null
+          }
+        />
       </Switch>
     </Container>
   );

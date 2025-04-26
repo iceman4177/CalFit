@@ -41,20 +41,23 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
   const [saunaTime, setSaunaTime] = useState('');
   const [saunaTemp, setSaunaTemp] = useState('180');
   const [shareModalOpen, setShareModalOpen] = useState(false);
+
+  // Summary-tip state (all false initially)
   const [showBackHelp, setShowBackHelp] = useState(false);
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
 
-  useEffect(() => {
-    if (!sessionStorage.getItem('hasSeenWorkoutPagePopups')) {
-      sessionStorage.setItem('hasSeenWorkoutPagePopups', 'true');
-      if (!localStorage.getItem('hasSeenBackHelp')) setShowBackHelp(true);
-      if (!localStorage.getItem('hasSeenLogHelp')) setShowLogHelp(true);
-      if (!localStorage.getItem('hasSeenShareHelp')) setShowShareHelp(true);
-      if (!localStorage.getItem('hasSeenNewHelp')) setShowNewHelp(true);
-    }
-  }, []);
+  // Remove this entire block so tips don't appear on mount:
+  // useEffect(() => {
+  //   if (!sessionStorage.getItem('hasSeenWorkoutPagePopups')) {
+  //     sessionStorage.setItem('hasSeenWorkoutPagePopups', 'true');
+  //     if (!localStorage.getItem('hasSeenBackHelp')) setShowBackHelp(true);
+  //     if (!localStorage.getItem('hasSeenLogHelp')) setShowLogHelp(true);
+  //     if (!localStorage.getItem('hasSeenShareHelp')) setShowShareHelp(true);
+  //     if (!localStorage.getItem('hasSeenNewHelp')) setShowNewHelp(true);
+  //   }
+  // }, []);
 
   const handleDismiss = (key, setter) => {
     localStorage.setItem(key, 'true');
@@ -179,7 +182,6 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
 
-    // Update App's burnedCalories (so banner shows consumed - burned)
     onWorkoutLogged(total);
     history.push('/history');
   };
@@ -195,8 +197,11 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
   const handleShareWorkout = () => setShareModalOpen(true);
 
   const triggerOrHandle = (key, setter, cb) => {
-    if (!localStorage.getItem(key)) setter(true);
-    else cb();
+    if (!localStorage.getItem(key)) {
+      setter(true);
+    } else {
+      cb();
+    }
   };
 
   // Step 3: Summary screen
@@ -271,7 +276,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
           shareUrl={window.location.href}
         />
 
-        {/* Helper Dialogs */}
+        {/* Only show each help dialog when its respective flag is true */}
         <Dialog open={showBackHelp} onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp)}>
           <DialogTitle>Go Back</DialogTitle>
           <DialogContent>This returns you to your sauna session to make changes.</DialogContent>
@@ -286,6 +291,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
             </Button>
           </DialogActions>
         </Dialog>
+
         <Dialog open={showLogHelp} onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp)}>
           <DialogTitle>Log Workout</DialogTitle>
           <DialogContent>Saves your workout to history so you can view your progress.</DialogContent>
@@ -300,6 +306,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
             </Button>
           </DialogActions>
         </Dialog>
+
         <Dialog
           open={showShareHelp}
           onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}
@@ -319,6 +326,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
             </Button>
           </DialogActions>
         </Dialog>
+
         <Dialog open={showNewHelp} onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp)}>
           <DialogTitle>Start New Workout</DialogTitle>
           <DialogContent>
