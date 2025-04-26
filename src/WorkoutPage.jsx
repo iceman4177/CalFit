@@ -1,4 +1,4 @@
-// WorkoutPage.jsx
+// src/WorkoutPage.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -246,7 +246,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
             variant="contained"
             onClick={() => triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)}
           >
-            Log Workout
+            Show Me the Burn!
           </Button>
           <Button
             variant="outlined"

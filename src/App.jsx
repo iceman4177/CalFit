@@ -1,4 +1,4 @@
-// App.jsx
+// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -20,7 +20,8 @@ import WorkoutHistory from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
 import Achievements from './Achievements';
 import MealTracker from './MealTracker';
-import CalorieSummary from './CalorieSummary';
+import CalorieHistory from './CalorieHistory';
+import CalorieSummary from './CalorieSummary';    // ← import updated
 import NetCalorieBanner from './NetCalorieBanner';
 import { logPageView } from './analytics';
 
@@ -39,19 +40,18 @@ function App() {
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [showHealthForm, setShowHealthForm] = useState(false);
 
-  // Wrapping setter to persist
   const setUserData = (data) => {
     localStorage.setItem('userData', JSON.stringify(data));
     setUserDataState(data);
   };
 
-  // Recalculate today's totals from storage
   const refreshCalories = () => {
     const today = new Date().toLocaleDateString('en-US');
 
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const todayWorkouts = workouts.filter((w) => w.date === today);
-    const burnedSum = todayWorkouts.reduce((sum, w) => sum + w.totalCalories, 0);
+    const burnedSum = workouts
+      .filter((w) => w.date === today)
+      .reduce((sum, w) => sum + w.totalCalories, 0);
     setBurnedCalories(burnedSum);
 
     const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
@@ -63,7 +63,6 @@ function App() {
   };
 
   useEffect(() => {
-    // Load or prompt health form
     const saved = localStorage.getItem('userData');
     if (saved) {
       setUserDataState(JSON.parse(saved));
@@ -74,10 +73,7 @@ function App() {
     refreshCalories();
   }, []);
 
-  // Called by WorkoutPage after logging or deleting
   const handleUpdateBurned = () => refreshCalories();
-
-  // Called by MealTracker after add/clear
   const handleUpdateConsumed = () => refreshCalories();
 
   const handleEditInfo = () => {
@@ -85,7 +81,6 @@ function App() {
     history.push('/edit-info');
   };
 
-  // Root route content changes based on showing form
   const renderRoot = () =>
     showHealthForm ? (
       <HealthDataForm
@@ -99,20 +94,10 @@ function App() {
       <Box sx={{ textAlign: 'center', mt: 4 }}>
         <Typography variant="h5">What would you like to do today?</Typography>
         <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2 }}>
-          <Button
-            variant="contained"
-            color="primary"
-            component={Link}
-            to="/workout"
-          >
+          <Button variant="contained" color="primary" component={Link} to="/workout">
             Log Workout
           </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            component={Link}
-            to="/meals"
-          >
+          <Button variant="outlined" color="secondary" component={Link} to="/meals">
             Log Meal
           </Button>
         </Stack>
@@ -128,33 +113,15 @@ function App() {
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
-        <Stack
-          direction="row"
-          spacing={2}
-          justifyContent="center"
-          sx={{ mt: 2, flexWrap: 'wrap' }}
-        >
-          <Button variant="contained" component={Link} to="/workout">
-            Workout
-          </Button>
-          <Button variant="outlined" component={Link} to="/history">
-            History
-          </Button>
-          <Button variant="outlined" component={Link} to="/dashboard">
-            Dashboard
-          </Button>
-          <Button variant="outlined" component={Link} to="/achievements">
-            Achievements
-          </Button>
-          <Button variant="outlined" component={Link} to="/meals">
-            Meals
-          </Button>
-          <Button variant="outlined" component={Link} to="/summary">
-            Summary
-          </Button>
-          <Button variant="text" color="secondary" onClick={handleEditInfo}>
-            Edit Info
-          </Button>
+        <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2, flexWrap: 'wrap' }}>
+          <Button variant="contained" component={Link} to="/workout">Log Workout</Button>
+          <Button variant="outlined" component={Link} to="/history">History</Button>
+          <Button variant="outlined" component={Link} to="/dashboard">Dashboard</Button>
+          <Button variant="outlined" component={Link} to="/achievements">Achievements</Button>
+          <Button variant="outlined" component={Link} to="/meals">Meals</Button>
+          <Button variant="outlined" component={Link} to="/calorie-log">Calorie Log</Button>
+          <Button variant="outlined" component={Link} to="/summary">Summary</Button>
+          <Button variant="text" color="secondary" onClick={handleEditInfo}>Edit Info</Button>
         </Stack>
       </Box>
 
@@ -176,27 +143,29 @@ function App() {
         <Route
           path="/workout"
           render={() => (
-            <WorkoutPage
-              userData={userData}
-              onWorkoutLogged={handleUpdateBurned}
-            />
+            <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
           )}
         />
         <Route
           path="/meals"
-          render={() => (
-            <MealTracker onMealUpdate={handleUpdateConsumed} />
-          )}
+          render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />}
         />
         <Route
           path="/history"
-          render={() => (
-            <WorkoutHistory onHistoryChange={refreshCalories} />
-          )}
+          render={() => <WorkoutHistory onHistoryChange={refreshCalories} />}
         />
         <Route path="/dashboard" component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
-        <Route path="/summary" component={CalorieSummary} />
+        <Route path="/calorie-log" component={CalorieHistory} />
+        <Route
+          path="/summary"
+          render={() => (
+            <CalorieSummary
+              burned={burnedCalories}
+              consumed={consumedCalories}
+            />
+          )}
+        />
         <Route exact path="/" render={renderRoot} />
       </Switch>
     </Container>

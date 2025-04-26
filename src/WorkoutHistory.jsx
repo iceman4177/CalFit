@@ -1,4 +1,3 @@
-// WorkoutHistory.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -17,8 +16,7 @@ const WorkoutHistory = ({ onHistoryChange }) => {
   const historyNav = useHistory();
 
   useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    setWorkoutHistory(saved);
+    setWorkoutHistory(JSON.parse(localStorage.getItem('workoutHistory') || '[]'));
   }, []);
 
   const handleClearHistory = () => {
@@ -86,22 +84,14 @@ const WorkoutHistory = ({ onHistoryChange }) => {
 
       {workoutHistory.length > 0 && (
         <Box sx={{ textAlign: 'center', mt: 3 }}>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={handleClearHistory}
-          >
+          <Button variant="contained" color="secondary" onClick={handleClearHistory}>
             Clear History
           </Button>
         </Box>
       )}
 
       <Box sx={{ textAlign: 'center', mt: 3 }}>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => historyNav.push('/workout')}
-        >
+        <Button variant="contained" color="primary" onClick={() => historyNav.push('/workout')}>
           Back to Workout
         </Button>
       </Box>
