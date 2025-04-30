@@ -15,6 +15,8 @@ import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import ShareWorkoutModal from './ShareWorkoutModal';
+import { MET_VALUES } from './exerciseMeta';
+import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
 
 function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
@@ -48,20 +50,18 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
 
-  // Remove this entire block so tips don't appear on mount:
-  // useEffect(() => {
-  //   if (!sessionStorage.getItem('hasSeenWorkoutPagePopups')) {
-  //     sessionStorage.setItem('hasSeenWorkoutPagePopups', 'true');
-  //     if (!localStorage.getItem('hasSeenBackHelp')) setShowBackHelp(true);
-  //     if (!localStorage.getItem('hasSeenLogHelp')) setShowLogHelp(true);
-  //     if (!localStorage.getItem('hasSeenShareHelp')) setShowShareHelp(true);
-  //     if (!localStorage.getItem('hasSeenNewHelp')) setShowNewHelp(true);
-  //   }
-  // }, []);
-
-  const handleDismiss = (key, setter) => {
+  const handleDismiss = (key, setter, cb) => {
     localStorage.setItem(key, 'true');
     setter(false);
+    if (cb) cb();
+  };
+
+  const triggerOrHandle = (key, setter, cb) => {
+    if (!localStorage.getItem(key)) {
+      setter(true);
+    } else {
+      cb();
+    }
   };
 
   const exerciseOptions = {
@@ -94,24 +94,42 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
     }
   };
 
+  // Proprietary hybrid calorie calculation:
+  // MET (body‐based) + mechanical work (load‐based)
   const calculateCalories = () => {
-    const w = parseFloat(newExercise.weight) || 0;
-    const s = parseInt(newExercise.sets) || 1;
-    const r = parseInt(newExercise.reps) || 0;
-    let cals = w * s * r * 0.05;
-    if (newExercise.exerciseType === 'machine') cals *= 1.5;
-    else if (['dumbbell', 'barbell'].includes(newExercise.exerciseType)) cals *= 1.2;
-    setCurrentCalories(cals);
-    return cals;
+    // --- MET component ---
+    const bodyWeightLbs = parseFloat(userData.weight) || 0;
+    const reps          = parseInt(newExercise.reps, 10) || 0;
+    const sets          = parseInt(newExercise.sets, 10) || 1;
+    const exerciseKey   = newExercise.exerciseName || newExercise.exerciseType;
+
+    // estimate time: assume 5 sec per rep
+    const totalSeconds = reps * sets * 5;
+    const durationMin  = totalSeconds / 60;
+
+    const met       = MET_VALUES[exerciseKey] ?? 5;
+    const bodyKg    = bodyWeightLbs * 0.453592;
+    const metCals   = met * bodyKg * durationMin;
+
+    // --- Mechanical work component ---
+    const loadLbs      = parseFloat(newExercise.weight) || 0;
+    const loadKg       = loadLbs * 0.453592;
+    const rom          = EXERCISE_ROM[exerciseKey] ?? 0.5; // meters
+    // work in joules = m · g · h · reps · sets
+    const workJ        = loadKg * G * rom * reps * sets;
+    // convert to dietary cals, accounting for efficiency
+    const mechCals     = workJ / (4184 * EFFICIENCY);
+
+    const total = metCals + mechCals;
+    setCurrentCalories(total);
+    return total;
   };
 
-  const handleCalculate = () => {
-    calculateCalories();
-  };
+  const handleCalculate = () => calculateCalories();
 
   const handleAddExercise = () => {
     const weight = parseFloat(newExercise.weight);
-    const reps = parseInt(newExercise.reps);
+    const reps   = parseInt(newExercise.reps, 10);
     if (!newExercise.exerciseName || !weight || weight <= 0 || !reps || reps <= 0) {
       alert('Please enter both a valid weight and number of reps.');
       return;
@@ -124,7 +142,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
 
   const handleDoneWithExercises = () => {
     const weight = parseFloat(newExercise.weight);
-    const reps = parseInt(newExercise.reps);
+    const reps   = parseInt(newExercise.reps, 10);
     if (newExercise.exerciseName && weight > 0 && reps > 0) {
       handleAddExercise();
     }
@@ -132,12 +150,12 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
   };
 
   const handleNextFromSauna = () => {
-    const filtered = cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna');
-    if (saunaTime.trim() !== '') {
-      const t = parseFloat(saunaTime) || 0;
-      const temp = parseFloat(saunaTemp) || 180;
-      const uw = parseFloat(userData.weight) || 150;
-      const saunaCals = t * (temp - 150) * 0.1 * (uw / 150);
+    const filtered = cumulativeExercises.filter(ex => ex.exerciseType !== 'Sauna');
+    if (saunaTime.trim()) {
+      const t         = parseFloat(saunaTime) || 0;
+      const tmp       = parseFloat(saunaTemp)  || 180;
+      const uw        = parseFloat(userData.weight) || 150;
+      const saunaCals = t * (tmp - 150) * 0.1 * (uw / 150);
       filtered.push({
         exerciseType: 'Sauna',
         exerciseName: 'Sauna Session',
@@ -151,60 +169,48 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
     setCurrentStep(3);
   };
 
-  const handleRemoveExercise = (i) => {
-    const u = [...cumulativeExercises];
-    u.splice(i, 1);
-    setCumulativeExercises(u);
+  const handleRemoveExercise = i => {
+    const copy = [...cumulativeExercises];
+    copy.splice(i, 1);
+    setCumulativeExercises(copy);
   };
 
   const handleBackToExercises = () => setCurrentStep(1);
-  const handleBackToSauna = () => {
-    setCumulativeExercises(cumulativeExercises.filter((ex) => ex.exerciseType !== 'Sauna'));
+  const handleBackToSauna     = () => {
+    setCumulativeExercises(cumulativeExercises.filter(ex => ex.exerciseType !== 'Sauna'));
     setCurrentStep(2);
   };
 
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
-
     const newSession = {
       date: new Date().toLocaleDateString('en-US'),
       totalCalories: total,
-      exercises: cumulativeExercises.map((ex) => ({
+      exercises: cumulativeExercises.map(ex => ({
         name: ex.exerciseName || ex.exerciseType,
         sets: ex.sets,
         reps: ex.reps,
         calories: ex.calories
       }))
     };
-
     const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
-
     onWorkoutLogged(total);
     history.push('/history');
   };
 
-  const handleNewWorkout = () => {
+  const handleNewWorkout   = () => {
     setCumulativeExercises([]);
     setCurrentCalories(0);
     setSaunaTime('');
     setSaunaTemp('180');
     setCurrentStep(1);
   };
-
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  const triggerOrHandle = (key, setter, cb) => {
-    if (!localStorage.getItem(key)) {
-      setter(true);
-    } else {
-      cb();
-    }
-  };
-
-  // Step 3: Summary screen
+  // --- Step 3: Summary screen ---
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
@@ -219,12 +225,13 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
           Workout Summary
         </Typography>
         <Divider sx={{ my: 3 }} />
+
         {cumulativeExercises.map((ex, idx) => (
-          <Typography key={idx} variant="body1">
+          <Typography key={idx} variant="body1" sx={{ mb: 1 }}>
             {ex.exerciseName}{' '}
             {ex.exerciseType === 'Sauna'
-              ? `- ${ex.calories.toFixed(2)} cals`
-              : `- ${ex.sets}×${ex.reps} (${ex.calories.toFixed(2)} cals)`}
+              ? `– ${ex.calories.toFixed(2)} cals`
+              : `– ${ex.sets}×${ex.reps} (${ex.calories.toFixed(2)} cals)`}
             <Button
               size="small"
               color="error"
@@ -236,6 +243,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
             </Button>
           </Typography>
         ))}
+
         <Typography variant="h5" sx={{ mt: 2 }}>
           Total Calories Burned: {total.toFixed(2)}
         </Typography>
@@ -243,13 +251,17 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
         <Box sx={{ mt: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <Button
             variant="outlined"
-            onClick={() => triggerOrHandle('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}
+            onClick={() =>
+              triggerOrHandle('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)
+            }
           >
             Back
           </Button>
           <Button
             variant="contained"
-            onClick={() => triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)}
+            onClick={() =>
+              triggerOrHandle('hasSeenLogHelp', setShowLogHelp, handleFinish)
+            }
           >
             Show Me the Burn!
           </Button>
@@ -263,7 +275,9 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
           </Button>
           <Button
             variant="text"
-            onClick={() => triggerOrHandle('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}
+            onClick={() =>
+              triggerOrHandle('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)
+            }
           >
             Start New Workout
           </Button>
@@ -276,32 +290,28 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
           shareUrl={window.location.href}
         />
 
-        {/* Only show each help dialog when its respective flag is true */}
-        <Dialog open={showBackHelp} onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp)}>
+        {/* Help Dialogs */}
+        <Dialog
+          open={showBackHelp}
+          onClose={() => handleDismiss('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}
+        >
           <DialogTitle>Go Back</DialogTitle>
           <DialogContent>This returns you to your sauna session to make changes.</DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => {
-                handleDismiss('hasSeenBackHelp', setShowBackHelp);
-                handleBackToSauna();
-              }}
-            >
+            <Button onClick={() => handleDismiss('hasSeenBackHelp', setShowBackHelp, handleBackToSauna)}>
               Got it
             </Button>
           </DialogActions>
         </Dialog>
 
-        <Dialog open={showLogHelp} onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp)}>
+        <Dialog
+          open={showLogHelp}
+          onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp, handleFinish)}
+        >
           <DialogTitle>Log Workout</DialogTitle>
           <DialogContent>Saves your workout to history so you can view your progress.</DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => {
-                handleDismiss('hasSeenLogHelp', setShowLogHelp);
-                handleFinish();
-              }}
-            >
+            <Button onClick={() => handleDismiss('hasSeenLogHelp', setShowLogHelp, handleFinish)}>
               Got it
             </Button>
           </DialogActions>
@@ -309,36 +319,29 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
 
         <Dialog
           open={showShareHelp}
-          onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp)}
+          onClose={() => handleDismiss('hasSeenShareHelp', setShowShareHelp, handleShareWorkout)}
         >
           <DialogTitle>Share Workout</DialogTitle>
           <DialogContent>
             Copy and paste your summary to share it online or with friends!
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => {
-                handleDismiss('hasSeenShareHelp', setShowShareHelp);
-                handleShareWorkout();
-              }}
-            >
+            <Button onClick={() => handleDismiss('hasSeenShareHelp', setShowShareHelp, handleShareWorkout)}>
               Got it
             </Button>
           </DialogActions>
         </Dialog>
 
-        <Dialog open={showNewHelp} onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp)}>
+        <Dialog
+          open={showNewHelp}
+          onClose={() => handleDismiss('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}
+        >
           <DialogTitle>Start New Workout</DialogTitle>
           <DialogContent>
             This will reset your current session and allow you to begin a new one.
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => {
-                handleDismiss('hasSeenNewHelp', setShowNewHelp);
-                handleNewWorkout();
-              }}
-            >
+            <Button onClick={() => handleDismiss('hasSeenNewHelp', setShowNewHelp, handleNewWorkout)}>
               Got it
             </Button>
           </DialogActions>
@@ -388,7 +391,7 @@ function WorkoutPage({ userData, onWorkoutLogged }) {
         <Box sx={{ mb: 2 }}>
           <Typography variant="h6">Current Exercises:</Typography>
           {cumulativeExercises
-            .filter((ex) => ex.exerciseType !== 'Sauna')
+            .filter(ex => ex.exerciseType !== 'Sauna')
             .map((ex, idx) => (
               <Typography key={idx} variant="body2">
                 {ex.exerciseName} - {ex.sets}×{ex.reps} ({ex.calories.toFixed(2)} cals)
