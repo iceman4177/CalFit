@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -25,6 +26,7 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import ListIcon from '@mui/icons-material/List';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import InfoIcon from '@mui/icons-material/Info';
+import ChatIcon from '@mui/icons-material/Chat';
 
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import HealthDataForm from './HealthDataForm';
@@ -36,6 +38,7 @@ import MealTracker from './MealTracker';
 import CalorieHistory from './CalorieHistory';
 import CalorieSummary from './CalorieSummary';
 import NetCalorieBanner from './NetCalorieBanner';
+import DailyRecapCoach from './DailyRecapCoach';
 import { logPageView } from './analytics';
 
 // Tip text for each route
@@ -47,7 +50,8 @@ const routeTips = {
   '/dashboard':    'Dashboard shows your total workouts & calories burned over time.',
   '/achievements': 'Achievements page: hit milestones to unlock badges!',
   '/calorie-log':  'Calorie Log gives you a detailed daily breakdown of intake vs. burn.',
-  '/summary':      'Summary page: quick overview of today’s net calories.'
+  '/summary':      'Summary page: quick overview of today’s net calories.',
+  '/recap':        'Meet your AI Coach: get a friendly recap of today’s workouts & meals!'
 };
 
 function PageTracker() {
@@ -88,8 +92,9 @@ export default function App() {
     const today = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     setBurnedCalories(
-      workouts.filter(w => w.date === today)
-              .reduce((sum, w) => sum + w.totalCalories, 0)
+      workouts
+        .filter(w => w.date === today)
+        .reduce((sum, w) => sum + w.totalCalories, 0)
     );
     const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = meals.find(m => m.date === today);
@@ -111,12 +116,16 @@ export default function App() {
     refreshCalories();
   }, []);
 
-  const handleUpdateBurned = () => refreshCalories();
-  const handleUpdateConsumed = () => refreshCalories();
+  const handleUpdateBurned = refreshCalories;
+  const handleUpdateConsumed = refreshCalories;
 
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} justifyContent="center">
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={{ xs: 1, sm: 2 }}
+        justifyContent="center"
+      >
         <Tooltip title="Log Workout">
           <Button
             component={NavLink}
@@ -168,6 +177,9 @@ export default function App() {
         <MenuItem component={NavLink} to="/summary" onClick={closeMore}>
           <AssessmentIcon fontSize="small" /> Summary
         </MenuItem>
+        <MenuItem component={NavLink} to="/recap" onClick={closeMore}>
+          <ChatIcon fontSize="small" /> Daily Recap
+        </MenuItem>
         <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
           <InfoIcon fontSize="small" /> Edit Info
         </MenuItem>
@@ -181,7 +193,9 @@ export default function App() {
       {message && <PageTip />}
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
-        <Typography variant="h2" color="primary">Slimcal.ai</Typography>
+        <Typography variant="h2" color="primary">
+          Slimcal.ai
+        </Typography>
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
@@ -205,7 +219,9 @@ export default function App() {
         />
         <Route
           path="/workout"
-          render={() => <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />}
+          render={() => (
+            <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
+          )}
         />
         <Route
           path="/meals"
@@ -220,8 +236,11 @@ export default function App() {
         <Route path="/calorie-log" component={CalorieHistory} />
         <Route
           path="/summary"
-          render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />}
+          render={() => (
+            <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />
+          )}
         />
+        <Route path="/recap" component={DailyRecapCoach} />
         <Route
           exact
           path="/"

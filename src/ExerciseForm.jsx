@@ -1,3 +1,4 @@
+// src/ExerciseForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -10,8 +11,10 @@ import {
   Typography,
   ToggleButtonGroup,
   ToggleButton,
-  Tooltip
+  Tooltip,
+  IconButton
 } from '@mui/material';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 
 export default function ExerciseForm({
@@ -23,7 +26,7 @@ export default function ExerciseForm({
   onDoneWithExercises,
   exerciseOptions
 }) {
-  // 1) First-time tips hooks
+  // 1) First‑time tips hooks
   const [EquipTip,    triggerEquipTip]    = useFirstTimeTip('tip_equipment',   'Choose your equipment.');
   const [MuscleTip,   triggerMuscleTip]   = useFirstTimeTip('tip_muscle',      'Next, pick a muscle group.');
   const [ExTip,       triggerExTip]       = useFirstTimeTip('tip_exercise',    'Then select an exercise.');
@@ -32,7 +35,7 @@ export default function ExerciseForm({
   const [SetsTip,     triggerSetsTip]     = useFirstTimeTip('tip_setsField',   'Enter number of sets.');
   const [TempoTip,    triggerTempoTip]    = useFirstTimeTip(
     'tip_tempoMode',
-    'Standard tempo is 1s concentric + 3s eccentric; switch to Custom to override.'
+    'Presets: Hypertrophy (1s+3s), Power (1s+1s), Slow (3s+3s); switch to Custom to override.'
   );
   const [ConcTip,     triggerConcTip]     = useFirstTimeTip('tip_concentric',  'Enter concentric time per rep (s).');
   const [EccTip,      triggerEccTip]      = useFirstTimeTip('tip_eccentric',   'Enter eccentric time per rep (s).');
@@ -45,13 +48,23 @@ export default function ExerciseForm({
   const [muscleOpen,   setMuscleOpen]      = useState(false);
   const [exerciseOpen, setExerciseOpen]    = useState(false);
 
-  // 3) Tempo mode local + propagate to parent
-  const [tempoMode,    setTempoMode]       = useState(newExercise.tempoMode || 'standard');
+  // 3) Tempo mode: 'hypertrophy' | 'power' | 'slow' | 'custom'
+  const [tempoMode,    setTempoMode]       = useState(newExercise.tempoMode || 'hypertrophy');
   const handleTempoChange = (_e, val) => {
     if (!val) return;
     triggerTempoTip();
     setTempoMode(val);
-    setNewExercise(prev => ({ ...prev, tempoMode: val }));
+    // propagate to parent state and auto‑fill if not custom
+    let defaults = {
+      hypertrophy: { concentricTime: '1', eccentricTime: '3' },
+      power:       { concentricTime: '1', eccentricTime: '1' },
+      slow:        { concentricTime: '3', eccentricTime: '3' }
+    };
+    setNewExercise(prev => ({
+      ...prev,
+      tempoMode: val,
+      ...(val !== 'custom' ? defaults[val] : {})
+    }));
   };
 
   // 4) Derived option lists
@@ -89,11 +102,11 @@ export default function ExerciseForm({
     return '';
   }
 
-  // 6) Generic change
+  // 6) Generic change handler
   const handleChange = field => e =>
     setNewExercise(prev => ({ ...prev, [field]: e.target.value }));
 
-  // 7) Keep local tempoMode in sync if parent resets (e.g. after Add)
+  // 7) Keep local tempoMode synced if parent resets (e.g. after Add)
   useEffect(() => {
     if (newExercise.tempoMode && newExercise.tempoMode !== tempoMode) {
       setTempoMode(newExercise.tempoMode);
@@ -102,7 +115,7 @@ export default function ExerciseForm({
 
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto', mt: 2 }}>
-      {/* First-time tips */}
+      {/* First‑time tips */}
       <EquipTip />
       <MuscleTip />
       <ExTip />
@@ -217,17 +230,22 @@ export default function ExerciseForm({
         onChange={handleChange('sets')}
       />
 
-      {/* Tempo Toggle */}
+      {/* Tempo Presets */}
       <Box sx={{ mb: 2, textAlign: 'center' }}>
-        <Tooltip title="Standard: 1s concentric + 3s eccentric. Custom: choose your own.">
-          <ToggleButtonGroup
-            value={tempoMode}
-            exclusive
-            onChange={handleTempoChange}
-          >
-            <ToggleButton value="standard">Standard Tempo</ToggleButton>
-            <ToggleButton value="custom">Custom Tempo</ToggleButton>
-          </ToggleButtonGroup>
+        <ToggleButtonGroup
+          value={tempoMode}
+          exclusive
+          onChange={handleTempoChange}
+        >
+          <ToggleButton value="hypertrophy">Hypertrophy</ToggleButton>
+          <ToggleButton value="power">Power</ToggleButton>
+          <ToggleButton value="slow">Slow</ToggleButton>
+          <ToggleButton value="custom">Custom</ToggleButton>
+        </ToggleButtonGroup>
+        <Tooltip title="Hypertrophy: 1s concentric + 3s eccentric (Compendium 2011). Power: 1s+1s. Slow: 3s+3s.">
+          <IconButton size="small">
+            <InfoOutlinedIcon fontSize="small" />
+          </IconButton>
         </Tooltip>
       </Box>
 
@@ -259,22 +277,13 @@ export default function ExerciseForm({
 
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-        <Button
-          variant="contained"
-          onClick={() => { triggerCalcTip(); onCalculate(); }}
-        >
+        <Button variant="contained" onClick={() => { triggerCalcTip(); onCalculate(); }}>
           Calculate Calories
         </Button>
-        <Button
-          variant="contained"
-          onClick={() => { triggerAddTip(); onAddExercise(); }}
-        >
+        <Button variant="contained" onClick={() => { triggerAddTip(); onAddExercise(); }}>
           Add Exercise
         </Button>
-        <Button
-          variant="outlined"
-          onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}
-        >
+        <Button variant="outlined" onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}>
           Done
         </Button>
       </Box>

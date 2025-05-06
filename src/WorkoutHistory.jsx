@@ -1,3 +1,4 @@
+// src/WorkoutHistory.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -15,8 +16,10 @@ const WorkoutHistory = ({ onHistoryChange }) => {
   const [workoutHistory, setWorkoutHistory] = useState([]);
   const historyNav = useHistory();
 
+  // load in original chronological order
   useEffect(() => {
-    setWorkoutHistory(JSON.parse(localStorage.getItem('workoutHistory') || '[]'));
+    const saved = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    setWorkoutHistory(saved);
   }, []);
 
   const handleClearHistory = () => {
@@ -25,12 +28,17 @@ const WorkoutHistory = ({ onHistoryChange }) => {
     onHistoryChange();
   };
 
-  const handleDeleteWorkout = (index) => {
-    const updated = workoutHistory.filter((_, i) => i !== index);
-    setWorkoutHistory(updated);
+  const handleDeleteWorkout = (visibleIndex) => {
+    // map the displayed (reversed) index back to the original array index
+    const originalIndex = workoutHistory.length - 1 - visibleIndex;
+    const updated = workoutHistory.filter((_, i) => i !== originalIndex);
     localStorage.setItem('workoutHistory', JSON.stringify(updated));
+    setWorkoutHistory(updated);
     onHistoryChange();
   };
+
+  // reverse for display so the newest is first
+  const displayHistory = [...workoutHistory].reverse();
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -38,13 +46,13 @@ const WorkoutHistory = ({ onHistoryChange }) => {
         Workout History
       </Typography>
 
-      {workoutHistory.length === 0 ? (
+      {displayHistory.length === 0 ? (
         <Typography align="center" color="textSecondary">
           No past workouts recorded.
         </Typography>
       ) : (
         <List>
-          {workoutHistory.map((w, idx) => (
+          {displayHistory.map((w, idx) => (
             <Box key={idx}>
               <ListItem
                 secondaryAction={
@@ -82,7 +90,7 @@ const WorkoutHistory = ({ onHistoryChange }) => {
         </List>
       )}
 
-      {workoutHistory.length > 0 && (
+      {displayHistory.length > 0 && (
         <Box sx={{ textAlign: 'center', mt: 3 }}>
           <Button variant="contained" color="secondary" onClick={handleClearHistory}>
             Clear History
