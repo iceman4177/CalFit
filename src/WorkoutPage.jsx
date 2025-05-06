@@ -15,6 +15,7 @@ import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
 import ShareWorkoutModal from './ShareWorkoutModal';
+import TemplateSelector from './TemplateSelector';
 import { MET_VALUES } from './exerciseMeta';
 import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
 
@@ -48,6 +49,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [saunaTime, setSaunaTime] = useState('');
   const [saunaTemp, setSaunaTemp] = useState('180');
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [showTemplate, setShowTemplate] = useState(false);
 
   // Summary-tip state (all false initially)
   const [showBackHelp,  setShowBackHelp]  = useState(false);
@@ -64,6 +66,23 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const triggerOrHandle = (key, setter, cb) => {
     if (!localStorage.getItem(key)) setter(true);
     else cb();
+  };
+
+  // Load a past session into current workout
+  const handleLoadTemplate = (exercises) => {
+    setCumulativeExercises(
+      exercises.map(ex => ({
+        exerciseType:    ex.exerciseType || '',
+        muscleGroup:     ex.muscleGroup || '',
+        exerciseName:    ex.name,
+        weight:          ex.weight || '',
+        sets:            ex.sets || '',
+        reps:            ex.reps || '',
+        concentricTime:  ex.concentricTime || '',
+        eccentricTime:   ex.eccentricTime || '',
+        calories:        ex.calories
+      }))
+    );
   };
 
   const exerciseOptions = {
@@ -104,8 +123,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const key   = newExercise.exerciseName || newExercise.exerciseType;
 
     // tempo: use entered or default 2s concentric / 2s eccentric
-    const concSec = parseFloat(newExercise.concentricTime) || 2;
-    const eccSec  = parseFloat(newExercise.eccentricTime)  || 2;
+    const concSec   = parseFloat(newExercise.concentricTime) || 2;
+    const eccSec    = parseFloat(newExercise.eccentricTime)  || 2;
     const activeSec = reps * sets * (concSec + eccSec);
     const activeMin = activeSec / 60;
 
@@ -125,9 +144,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     return total;
   };
 
-  const handleCalculate = () => calculateCalories();
-
-  const handleAddExercise = () => {
+  const handleCalculate     = () => calculateCalories();
+  const handleAddExercise   = () => {
     if (!newExercise.exerciseName ||
         parseFloat(newExercise.weight) <= 0 ||
         parseInt(newExercise.reps, 10) <= 0
@@ -151,9 +169,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     });
     setCurrentCalories(0);
   };
-
   const handleDoneWithExercises = () => {
-    // auto-add last entry if complete
     if (newExercise.exerciseName &&
         parseFloat(newExercise.weight) > 0 &&
         parseInt(newExercise.reps, 10) > 0
@@ -162,7 +178,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
     setCurrentStep(2);
   };
-
   const handleNextFromSauna = () => {
     const filtered = cumulativeExercises.filter(ex => ex.exerciseType !== 'Sauna');
     if (saunaTime.trim()) {
@@ -184,13 +199,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(filtered);
     setCurrentStep(3);
   };
-
   const handleRemoveExercise = i => {
     const arr = [...cumulativeExercises];
     arr.splice(i, 1);
     setCumulativeExercises(arr);
   };
-
   const handleBackToExercises = () => setCurrentStep(1);
   const handleBackToSauna     = () => {
     setCumulativeExercises(
@@ -198,15 +211,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
     setCurrentStep(2);
   };
-
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
-
     const newSession = {
-      date: new Date().toLocaleDateString('en-US'),
+      date:          new Date().toLocaleDateString('en-US'),
       totalCalories: total,
-      exercises: cumulativeExercises.map(ex => ({
+      exercises:     cumulativeExercises.map(ex => ({
         name:     ex.exerciseName || ex.exerciseType,
         sets:     ex.sets,
         reps:     ex.reps,
@@ -216,11 +227,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
-
     onWorkoutLogged(total);
     history.push('/history');
   };
-
   const handleNewWorkout   = () => {
     setCumulativeExercises([]);
     setCurrentCalories(0);
@@ -230,9 +239,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   };
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  // --- Step 3: Summary screen ---
+  // Step 3: Summary screen
   if (currentStep === 3) {
-    const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
+    const total     = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
       'en-US'
     )} with Slimcal.ai: ${cumulativeExercises.length} exercises burning a total of ${total.toFixed(
@@ -393,7 +402,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // Step 2: Sauna
+  // Step 2: Sauna
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -419,12 +428,17 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // Step 1: Exercise form
+  // Step 1: Exercise form
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" align="center" color="primary" gutterBottom>
         Workout Tracker
       </Typography>
+      <Box sx={{ textAlign: 'center', mb: 2 }}>
+        <Button variant="outlined" onClick={() => setShowTemplate(true)}>
+          Load Past Workout
+        </Button>
+      </Box>
       <Typography variant="body1" align="center" color="textSecondary">
         Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
       </Typography>
@@ -460,6 +474,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         onAddExercise={handleAddExercise}
         onDoneWithExercises={handleDoneWithExercises}
         exerciseOptions={exerciseOptions}
+      />
+
+      <TemplateSelector
+        open={showTemplate}
+        onClose={() => setShowTemplate(false)}
+        onLoadTemplate={handleLoadTemplate}
       />
     </Container>
   );
