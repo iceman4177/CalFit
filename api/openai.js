@@ -2,35 +2,40 @@
 import { Configuration, OpenAIApi } from "openai";
 
 export default async function handler(req, res) {
+  // 1) Only accept POST
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res
+      .status(405)
+      .json({ error: "Method Not Allowed", allowed: ["POST"] });
   }
 
+  // 2) Check body
+  if (!req.body || typeof req.body !== "object") {
+    return res.status(400).json({ error: "Bad Request: no JSON body" });
+  }
+
+  // 3) Verify API key
   const apiKey = process.env.OPENAI_API_KEY;
+  console.log("OPENAI_API_KEY present?", !!apiKey);
   if (!apiKey) {
-    console.error("Missing OPENAI_API_KEY");
-    return res.status(500).json({ error: "Server misconfiguration." });
+    return res
+      .status(500)
+      .json({ error: "Server misconfiguration: missing OPENAI_API_KEY" });
   }
 
-  const config = new Configuration({ apiKey });
-  const client = new OpenAIApi(config);
+  // 4) Initialize client
+  const configuration = new Configuration({ apiKey });
+  const openai = new OpenAIApi(configuration);
 
   try {
-    const { messages } = req.body;
-    if (!Array.isArray(messages)) {
-      return res.status(400).json({ error: "Request must include an array of messages." });
-    }
-
-    const completion = await client.createChatCompletion({
-      model: "gpt-3.5-turbo",
-      messages
-    });
-
+    // forward the exact payload
+    const completion = await openai.createChatCompletion(req.body);
     return res.status(200).json(completion.data);
   } catch (err) {
     console.error("OpenAI error:", err);
-    const status  = err.response?.status || 500;
-    const message = err.response?.data?.error?.message || err.message;
-    return res.status(status).json({ error: message });
+    // if the error has a response body, include it
+    const message =
+      err.response?.data || err.message || "Unknown server error";
+    return res.status(500).json({ error: "OpenAI API error", message });
   }
 }
