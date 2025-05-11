@@ -1,65 +1,70 @@
-// src/DailyRecapCoach.jsx
 import React, { useState } from "react";
-import { Box, Button, Typography } from "@mui/material";
-import UpgradeModal from "./components/UpgradeModal";
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Typography
+} from "@mui/material";
 
 export default function DailyRecapCoach() {
-  const [recap, setRecap] = useState("");
   const [loading, setLoading] = useState(false);
-  const [callsMade, setCallsMade] = useState(
-    parseInt(localStorage.getItem("recapCalls") || "0", 10)
-  );
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [recap, setRecap]     = useState("");
+  const [error, setError]     = useState("");
 
   const handleGetRecap = async () => {
-    if (callsMade >= 3) {
-      setUpgradeOpen(true);
-      return;
-    }
     setLoading(true);
+    setError("");
     try {
-      const response = await fetch("/api/openai", {
+      const messages = [
+        { role: "system", content: "You are a friendly fitness coach." },
+        { role: "user",   content: "Give me a recap of today's workout." }
+      ];
+
+      const res = await fetch("/api/openai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "You are a helpful fitness coach." },
-            { role: "user", content: "Give me my daily recap..." }
-          ]
-        })
+        body: JSON.stringify({ messages })
       });
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "";
-      setRecap(content);
 
-      const next = callsMade + 1;
-      setCallsMade(next);
-      localStorage.setItem("recapCalls", next.toString());
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API error (${res.status}): ${text}`);
+      }
+
+      const data = await res.json();
+      const msg  = data.choices?.[0]?.message?.content;
+      if (!msg) throw new Error("No message returned from OpenAI.");
+
+      setRecap(msg);
     } catch (err) {
       console.error("Recap error:", err);
-      setRecap("Error getting recap. Please try again later.");
+      setError("Sorry, I couldn’t generate your daily recap right now.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        Daily Recap Coach
-      </Typography>
-      {recap && (
-        <Typography sx={{ whiteSpace: "pre-wrap", mb: 2 }}>{recap}</Typography>
-      )}
+    <Box sx={{ p: 2, textAlign: "center" }}>
       <Button
         variant="contained"
         onClick={handleGetRecap}
         disabled={loading}
       >
-        {loading ? "Loading…" : "Get Daily Recap"}
+        {loading ? <CircularProgress size={24} /> : "Get Daily Recap"}
       </Button>
 
-      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
+      {error && (
+        <Typography color="error" sx={{ mt: 2 }}>
+          {error}
+        </Typography>
+      )}
+
+      {recap && (
+        <Typography sx={{ mt: 3, whiteSpace: "pre-wrap" }}>
+          {recap}
+        </Typography>
+      )}
     </Box>
   );
 }
