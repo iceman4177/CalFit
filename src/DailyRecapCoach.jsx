@@ -1,5 +1,11 @@
+// src/DailyRecapCoach.jsx
 import React, { useState } from "react";
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Typography
+} from "@mui/material";
 
 export default function DailyRecapCoach() {
   const [loading, setLoading] = useState(false);
@@ -9,16 +15,39 @@ export default function DailyRecapCoach() {
   const handleGetRecap = async () => {
     setLoading(true);
     setError("");
+    setRecap("");
+
     try {
+      // 1) Load your workout history and filter to today's date
+      const history = JSON.parse(localStorage.getItem("workoutHistory") || "[]");
+      const today   = new Date().toLocaleDateString("en-US");
+      const todaysWorkouts = history.filter(w => w.date === today);
+
+      // 2) Build the user prompt based on whether you logged anything
+      let userContent;
+      if (todaysWorkouts.length === 0) {
+        userContent =
+          "I haven't logged any workout today. Can you suggest a full‑body workout plan for me?";
+      } else {
+        // Flatten all exercises from today's sessions
+        const lines = todaysWorkouts.flatMap(w =>
+          w.exercises.map(ex =>
+            `- ${ex.name}: ${ex.sets}×${ex.reps} (${ex.calories.toFixed(2)} cal)`
+          )
+        );
+        userContent = `Here’s what I did today:\n${lines.join("\n")}\n\nPlease give me a friendly recap of my workout.`;
+      }
+
+      // 3) Send to your API route
       const messages = [
         { role: "system", content: "You are a friendly fitness coach." },
-        { role: "user",   content: "Give me a recap of today's workout." }
+        { role: "user", content: userContent }
       ];
 
       const res = await fetch("/api/openai", {
-        method:  "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ messages })
+        body: JSON.stringify({ messages })
       });
 
       if (!res.ok) {
@@ -41,7 +70,11 @@ export default function DailyRecapCoach() {
 
   return (
     <Box sx={{ p: 2, textAlign: "center" }}>
-      <Button variant="contained" onClick={handleGetRecap} disabled={loading}>
+      <Button
+        variant="contained"
+        onClick={handleGetRecap}
+        disabled={loading}
+      >
         {loading ? <CircularProgress size={24} /> : "Get Daily Recap"}
       </Button>
 
