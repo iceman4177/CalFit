@@ -8,6 +8,7 @@
     "@mui/icons-material": "^6.4.8",
     "@mui/material": "^6.4.7",
     "@sentry/vite-plugin": "^3.2.2",
+    "@stripe/stripe-js": "^7.3.0",
     "axios": "^0.24.0",
     "chart.js": "^4.4.8",
     "openai": "^4.97.0",
