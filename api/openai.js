@@ -1,47 +1,46 @@
 // api/openai.js
-import { Configuration, OpenAIApi } from "openai";
+import OpenAI from "openai";
 
 export default async function handler(req, res) {
-  // 1) ONLY POST
+  // Ensure we only handle POST requests
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  // 2) VERIFY we have your secret
-  const key = process.env.OPENAI_API_KEY;
-  console.log("🔑 OPENAI_API_KEY present?", Boolean(key));
-  if (!key) {
-    console.error("❌ Missing OPENAI_API_KEY in environment!");
+  // Grab your secret key from env
+  const apiKey = process.env.OPENAI_API_KEY;
+  console.log("🔑 OPENAI_API_KEY present?", Boolean(apiKey));
+
+  if (!apiKey) {
     return res
       .status(500)
-      .json({ error: "Server misconfiguration: missing API key." });
+      .json({ error: "Server misconfiguration: missing OPENAI_API_KEY." });
   }
 
-  // 3) CONFIGURE client
-  const config = new Configuration({ apiKey: key });
-  const openai = new OpenAIApi(config);
-
-  // 4) PARSE & VALIDATE body
-  let { messages, model = "gpt-3.5-turbo", temperature = 0.7 } = req.body;
-  if (!Array.isArray(messages)) {
-    return res.status(400).json({ error: "Invalid request: messages must be an array" });
-  }
+  // Instantiate the client
+  const openai = new OpenAI({ apiKey });
 
   try {
-    // 5) CALL OpenAI
-    const completion = await openai.createChatCompletion({
-      model,
-      messages,
-      temperature,
-    });
-    return res.status(200).json(completion.data);
-  } catch (err) {
-    // 6) HANDLE errors
-    console.error("❌ OpenAI API error:", err);
-    if (err.response?.data) {
-      return res.status(err.response.status).json(err.response.data);
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      return res
+        .status(400)
+        .json({ error: "Bad Request: `messages` array is required." });
     }
-    return res.status(500).json({ error: "Server misconfiguration." });
+
+    // Call the chat completion endpoint
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages
+    });
+
+    // Forward the API response
+    return res.status(200).json(completion);
+  } catch (err) {
+    console.error("OpenAI request failed:", err);
+    return res
+      .status(500)
+      .json({ error: "OpenAI request failed.", detail: err.message });
   }
 }
