@@ -1,3 +1,4 @@
+// src/HealthDataForm.jsx
 import React, { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
 import {
@@ -15,30 +16,51 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
 
-  // Manual tips + dropdown control
-  const [AgeTip, triggerAgeTip] = useFirstTimeTip('tip_age', 'Enter your age to personalize calculations.');
-  const [WeightTip, triggerWeightTip] = useFirstTimeTip('tip_weight', 'Enter your weight (lbs).');
-  const [FeetTip, triggerFeetTip] = useFirstTimeTip('tip_heightFeet', 'Enter height in feet.');
-  const [InchesTip, triggerInchesTip] = useFirstTimeTip('tip_heightInches', 'Enter height in inches.');
-  const [ActivityTip, triggerActivityTip] = useFirstTimeTip('tip_activityLevel', 'Select your activity level.');
+  // First‑time tips
+  const [AgeTip, triggerAgeTip] = useFirstTimeTip(
+    'tip_age',
+    'Enter your age to personalize calculations.'
+  );
+  const [WeightTip, triggerWeightTip] = useFirstTimeTip(
+    'tip_weight',
+    'Enter your weight (lbs).'
+  );
+  const [FeetTip, triggerFeetTip] = useFirstTimeTip(
+    'tip_heightFeet',
+    'Enter height in feet.'
+  );
+  const [InchesTip, triggerInchesTip] = useFirstTimeTip(
+    'tip_heightInches',
+    'Enter height in inches.'
+  );
+  const [ActivityTip, triggerActivityTip] = useFirstTimeTip(
+    'tip_activityLevel',
+    'Select your activity level.'
+  );
+  const [GoalTip, triggerGoalTip] = useFirstTimeTip(
+    'tip_dailyGoal',
+    'Enter your daily calorie goal (kcal).'
+  );
+
   const [activityOpen, setActivityOpen] = useState(false);
 
+  // Form state
   const [age, setAge] = useState('');
   const [weight, setWeight] = useState('');
   const [heightFeet, setHeightFeet] = useState('');
   const [heightInches, setHeightInches] = useState('');
   const [activityLevel, setActivityLevel] = useState('');
+  const [dailyGoal, setDailyGoal] = useState('');
 
+  // Load any existing saved values
   useEffect(() => {
-    const saved = localStorage.getItem('userData');
-    if (saved) {
-      const p = JSON.parse(saved);
-      setAge(p.age || '');
-      setWeight(p.weight || '');
-      setHeightFeet(p.height?.feet || '');
-      setHeightInches(p.height?.inches || '');
-      setActivityLevel(p.activityLevel || '');
-    }
+    const saved = JSON.parse(localStorage.getItem('userData') || '{}');
+    if (saved.age) setAge(saved.age);
+    if (saved.weight) setWeight(saved.weight);
+    if (saved.height?.feet) setHeightFeet(saved.height.feet);
+    if (saved.height?.inches) setHeightInches(saved.height.inches);
+    if (saved.activityLevel) setActivityLevel(saved.activityLevel);
+    if (saved.dailyGoal) setDailyGoal(saved.dailyGoal);
   }, []);
 
   const handleSubmit = e => {
@@ -47,7 +69,8 @@ export default function HealthDataForm({ setUserData }) {
       age,
       weight,
       height: { feet: heightFeet, inches: heightInches },
-      activityLevel
+      activityLevel,
+      dailyGoal
     };
     localStorage.setItem('userData', JSON.stringify(data));
     setUserData(data);
@@ -62,6 +85,7 @@ export default function HealthDataForm({ setUserData }) {
       <FeetTip />
       <InchesTip />
       <ActivityTip />
+      <GoalTip />
 
       <Paper elevation={3} sx={{ p: 4, mt: 4, borderRadius: 2 }}>
         <Typography variant="h4" align="center" gutterBottom>
@@ -73,9 +97,10 @@ export default function HealthDataForm({ setUserData }) {
               label="Age"
               type="number"
               value={age}
-              onFocus={() => triggerAgeTip()}
+              onFocus={triggerAgeTip}
               onChange={e => setAge(e.target.value)}
-              fullWidth required
+              fullWidth
+              required
             />
           </Box>
           <Box sx={{ mb: 2 }}>
@@ -83,47 +108,65 @@ export default function HealthDataForm({ setUserData }) {
               label="Weight (lbs)"
               type="number"
               value={weight}
-              onFocus={() => triggerWeightTip()}
+              onFocus={triggerWeightTip}
               onChange={e => setWeight(e.target.value)}
-              fullWidth required
+              fullWidth
+              required
             />
           </Box>
-          <Box sx={{ display:'flex', gap:2, mb:2 }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <TextField
               label="Height (feet)"
               type="number"
               value={heightFeet}
-              onFocus={() => triggerFeetTip()}
+              onFocus={triggerFeetTip}
               onChange={e => setHeightFeet(e.target.value)}
-              fullWidth required
+              fullWidth
+              required
             />
             <TextField
               label="Height (inches)"
               type="number"
               value={heightInches}
-              onFocus={() => triggerInchesTip()}
+              onFocus={triggerInchesTip}
               onChange={e => setHeightInches(e.target.value)}
-              fullWidth required
+              fullWidth
+              required
             />
           </Box>
-          <Box sx={{ mb: 3 }}>
+          <Box sx={{ mb: 2 }}>
             <Select
               open={activityOpen}
               onOpen={() => triggerActivityTip(() => setActivityOpen(true))}
               onClose={() => setActivityOpen(false)}
               value={activityLevel}
               onChange={e => setActivityLevel(e.target.value)}
-              fullWidth displayEmpty required
+              fullWidth
+              displayEmpty
+              required
             >
-              <MenuItem value="" disabled>Select Activity Level</MenuItem>
+              <MenuItem value="" disabled>
+                Select Activity Level
+              </MenuItem>
               <MenuItem value="sedentary">Sedentary</MenuItem>
               <MenuItem value="light">Light Exercise</MenuItem>
               <MenuItem value="moderate">Moderate Exercise</MenuItem>
               <MenuItem value="intense">Intense Exercise</MenuItem>
             </Select>
           </Box>
+          <Box sx={{ mb: 3 }}>
+            <TextField
+              label="Daily Calorie Goal (kcal)"
+              type="number"
+              value={dailyGoal}
+              onFocus={triggerGoalTip}
+              onChange={e => setDailyGoal(e.target.value)}
+              fullWidth
+              required
+            />
+          </Box>
           <Button variant="contained" fullWidth type="submit">
-            Save &amp; Continue
+            Save & Continue
           </Button>
         </form>
       </Paper>

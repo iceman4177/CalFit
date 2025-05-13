@@ -200,7 +200,13 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
       </Box>
-      <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
+
+      {/* Pass dailyGoal into the banner */}
+      <NetCalorieBanner
+        burned={burnedCalories}
+        consumed={consumedCalories}
+        goal={userData?.dailyGoal}
+      />
 
       {navBar}
 

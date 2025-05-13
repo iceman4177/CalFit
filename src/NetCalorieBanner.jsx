@@ -1,9 +1,9 @@
-// NetCalorieBanner.jsx
+// src/NetCalorieBanner.jsx
 import React from 'react';
 import { Box, Typography, Paper, Chip } from '@mui/material';
+import DailyGoalTracker from './DailyGoalTracker';
 
-function NetCalorieBanner({ burned, consumed }) {
-  // FIXED: subtract burned from consumed
+export default function NetCalorieBanner({ burned, consumed, goal }) {
   const net = consumed - burned;
   const status = net > 0 ? 'Surplus' : net < 0 ? 'Deficit' : 'Balanced';
 
@@ -15,7 +15,7 @@ function NetCalorieBanner({ burned, consumed }) {
       <Typography variant="h4" align="center" sx={{ fontWeight: 'bold' }}>
         {net.toFixed(2)} calories
       </Typography>
-      <Box textAlign="center" mt={1}>
+      <Box textAlign="center" mt={1} mb={ goal ? 2 : 0 }>
         <Chip
           label={status}
           color={
@@ -27,8 +27,9 @@ function NetCalorieBanner({ burned, consumed }) {
           }
         />
       </Box>
+      {goal ? (
+        <DailyGoalTracker burned={burned} consumed={consumed} goal={goal} />
+      ) : null}
     </Paper>
-  );
+);
 }
-
-export default NetCalorieBanner;
