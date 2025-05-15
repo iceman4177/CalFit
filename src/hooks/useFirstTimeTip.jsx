@@ -1,3 +1,4 @@
+// src/hooks/useFirstTimeTip.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
@@ -9,7 +10,7 @@ import {
 } from '@mui/material';
 
 /**
- * Hook for one‐off tip dialogs, with optional post‐close callback.
+ * Hook for one‑off tip dialogs, with optional post‑close callback.
  *
  * @param {string} storageKey – localStorage key to mark tip as seen.
  * @param {string} message    – text to show in the tip.
@@ -24,7 +25,7 @@ export default function useFirstTimeTip(
   const [open, setOpen] = useState(false);
   const callbackRef = useRef(null);
 
-  // Auto‐show on mount if requested
+  // Auto‑show on mount if requested
   useEffect(() => {
     if (auto && message && !localStorage.getItem(storageKey)) {
       setOpen(true);
@@ -38,18 +39,21 @@ export default function useFirstTimeTip(
    */
   const trigger = (afterClose) => {
     if (!localStorage.getItem(storageKey) && message) {
-      callbackRef.current = afterClose || null;
+      if (typeof afterClose === 'function') {
+        callbackRef.current = afterClose;
+      }
       setOpen(true);
       localStorage.setItem(storageKey, 'true');
     } else {
-      // Already seen: invoke immediately
-      afterClose && afterClose();
+      if (typeof afterClose === 'function') {
+        afterClose();
+      }
     }
   };
 
   const handleClose = () => {
     setOpen(false);
-    if (callbackRef.current) {
+    if (typeof callbackRef.current === 'function') {
       callbackRef.current();
       callbackRef.current = null;
     }

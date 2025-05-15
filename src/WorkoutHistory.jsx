@@ -69,17 +69,21 @@ const WorkoutHistory = ({ onHistoryChange }) => {
                   primary={`Workout on ${w.date}`}
                   secondary={
                     <>
-                      <Typography variant="body2">
+                      <Typography component="div" variant="body2">
                         Total Calories Burned: {w.totalCalories.toFixed(2)}
                       </Typography>
-                      <Typography variant="body2">Exercises:</Typography>
-                      <ul>
-                        {w.exercises.map((ex, i) => (
-                          <li key={i}>
-                            {ex.name} – {ex.sets}×{ex.reps} ({ex.calories.toFixed(2)} cals)
-                          </li>
-                        ))}
-                      </ul>
+                      <Typography component="div" variant="body2">
+                        Exercises:
+                      </Typography>
+                      <Box component="div" sx={{ ml: 2 }}>
+                        <ul>
+                          {w.exercises.map((ex, i) => (
+                            <li key={i}>
+                              {ex.name} – {ex.sets}×{ex.reps} ({ex.calories.toFixed(2)} cals)
+                            </li>
+                          ))}
+                        </ul>
+                      </Box>
                     </>
                   }
                 />
