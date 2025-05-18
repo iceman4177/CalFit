@@ -65,15 +65,25 @@ export default function HealthDataForm({ setUserData }) {
 
   const handleSubmit = e => {
     e.preventDefault();
-    const data = {
+
+    // Base user data
+    const baseData = {
       age,
       weight,
       height: { feet: heightFeet, inches: heightInches },
       activityLevel,
-      dailyGoal
+      dailyGoal: Number(dailyGoal)
     };
-    localStorage.setItem('userData', JSON.stringify(data));
-    setUserData(data);
+
+    // Initialize streak fields
+    const enriched = {
+      ...baseData,
+      lastLogDate: '',
+      currentStreak: 0
+    };
+
+    localStorage.setItem('userData', JSON.stringify(enriched));
+    setUserData(enriched);
     localStorage.setItem('hasCompletedHealthData', 'true');
     history.push('/');
   };

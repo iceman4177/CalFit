@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -39,6 +38,7 @@ import CalorieHistory from './CalorieHistory';
 import CalorieSummary from './CalorieSummary';
 import NetCalorieBanner from './NetCalorieBanner';
 import DailyRecapCoach from './DailyRecapCoach';
+import StreakBanner from './components/StreakBanner';
 import { logPageView } from './analytics';
 
 // Tip text for each route
@@ -66,7 +66,6 @@ export default function App() {
   const history = useHistory();
   const location = useLocation();
 
-  // Only auto‐trigger if there’s a non‐empty tip
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
@@ -116,7 +115,7 @@ export default function App() {
     refreshCalories();
   }, []);
 
-  const handleUpdateBurned = refreshCalories;
+  const handleUpdateBurned   = refreshCalories;
   const handleUpdateConsumed = refreshCalories;
 
   const navBar = (
@@ -201,12 +200,10 @@ export default function App() {
         </Typography>
       </Box>
 
-      {/* Pass dailyGoal into the banner */}
-      <NetCalorieBanner
-        burned={burnedCalories}
-        consumed={consumedCalories}
-        goal={userData?.dailyGoal}
-      />
+      <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
+
+      {/* 🚀 NEW: Streak banner */}
+      <StreakBanner />
 
       {navBar}
 

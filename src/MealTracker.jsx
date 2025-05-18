@@ -15,13 +15,26 @@ import {
 } from '@mui/material';
 import foodData from './foodData.json';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
+import { updateStreak } from './utils/streak';
 
 export default function MealTracker({ onMealUpdate }) {
   // Manual tips
-  const [FoodTip, triggerFoodTip]   = useFirstTimeTip('tip_food', 'Search or type a food name.');
-  const [CalTip, triggerCalTip]     = useFirstTimeTip('tip_cal', 'Enter the calories amount.');
-  const [AddTip, triggerAddTip]     = useFirstTimeTip('tip_addMeal', 'Tap to add this meal.');
-  const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clearMeals', 'Tap to clear today’s meals.');
+  const [FoodTip, triggerFoodTip] = useFirstTimeTip(
+    'tip_food',
+    'Search or type a food name.'
+  );
+  const [CalTip, triggerCalTip] = useFirstTimeTip(
+    'tip_cal',
+    'Enter the calories amount.'
+  );
+  const [AddTip, triggerAddTip] = useFirstTimeTip(
+    'tip_addMeal',
+    'Tap to add this meal.'
+  );
+  const [ClearTip, triggerClearTip] = useFirstTimeTip(
+    'tip_clearMeals',
+    'Tap to clear today’s meals.'
+  );
 
   const [foodInput, setFoodInput] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
@@ -38,8 +51,9 @@ export default function MealTracker({ onMealUpdate }) {
   }, [onMealUpdate, today]);
 
   const saveMeals = meals => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]')
-      .filter(e => e.date !== today);
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(
+      e => e.date !== today
+    );
     rest.push({ date: today, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
     onMealUpdate(meals.reduce((sum, m) => sum + m.calories, 0));
@@ -55,15 +69,15 @@ export default function MealTracker({ onMealUpdate }) {
     const updated = [...mealLog, newMeal];
     setMealLog(updated);
     saveMeals(updated);
-    // <> Removed clearing so fields stay populated for repeated adds </>
-    // setFoodInput('');
-    // setSelectedFood(null);
-    // setCalories('');
+
+    // 🎉 update streak on any log
+    updateStreak();
   };
 
   const handleClear = () => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]')
-      .filter(e => e.date !== today);
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(
+      e => e.date !== today
+    );
     localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]);
     onMealUpdate(0);
@@ -122,7 +136,11 @@ export default function MealTracker({ onMealUpdate }) {
         <Button variant="contained" onClick={() => { triggerAddTip(); handleAdd(); }}>
           Add Meal
         </Button>
-        <Button variant="outlined" color="error" onClick={() => { triggerClearTip(); handleClear(); }}>
+        <Button
+          variant="outlined"
+          color="error"
+          onClick={() => { triggerClearTip(); handleClear(); }}
+        >
           Clear Meals
         </Button>
       </Box>

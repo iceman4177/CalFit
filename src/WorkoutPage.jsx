@@ -18,6 +18,7 @@ import ShareWorkoutModal from './ShareWorkoutModal';
 import TemplateSelector from './TemplateSelector';
 import { MET_VALUES } from './exerciseMeta';
 import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
+import { updateStreak } from './utils/streak';
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
@@ -41,8 +42,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     weight:          '',
     sets:            '1',
     reps:            '',
-    concentricTime:  '',  // seconds
-    eccentricTime:   ''   // seconds
+    concentricTime:  '',
+    eccentricTime:   ''
   });
 
   const [currentCalories, setCurrentCalories] = useState(0);
@@ -51,7 +52,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
 
-  // Summary-tip state (all false initially)
+  // Summary‑tip state
   const [showBackHelp,  setShowBackHelp]  = useState(false);
   const [showLogHelp,   setShowLogHelp]   = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
@@ -69,7 +70,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   };
 
   // Load a past session into current workout
-  const handleLoadTemplate = (exercises) => {
+  const handleLoadTemplate = exercises => {
     setCumulativeExercises(
       exercises.map(ex => ({
         exerciseType:    ex.exerciseType || '',
@@ -122,21 +123,18 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const sets  = parseInt(newExercise.sets, 10) || 1;
     const key   = newExercise.exerciseName || newExercise.exerciseType;
 
-    // tempo: use entered or default 2s concentric / 2s eccentric
     const concSec   = parseFloat(newExercise.concentricTime) || 2;
     const eccSec    = parseFloat(newExercise.eccentricTime)  || 2;
     const activeSec = reps * sets * (concSec + eccSec);
     const activeMin = activeSec / 60;
 
-    // MET component
-    const met     = MET_VALUES[key] ?? MET_VALUES.default;
-    const bodyKg  = bwLbs * 0.453592;
+    const met    = MET_VALUES[key] ?? MET_VALUES.default;
+    const bodyKg = bwLbs * 0.453592;
     const metCals = met * bodyKg * activeMin;
 
-    // mechanical work component
-    const loadKg   = (parseFloat(newExercise.weight) || 0) * 0.453592;
-    const rom      = EXERCISE_ROM[key] ?? 0.5; // meters
-    const workJ    = loadKg * G * rom * reps * sets;
+    const loadKg = (parseFloat(newExercise.weight) || 0) * 0.453592;
+    const rom    = EXERCISE_ROM[key] ?? 0.5;
+    const workJ  = loadKg * G * rom * reps * sets;
     const mechCals = workJ / (4184 * EFFICIENCY);
 
     const total = metCals + mechCals;
@@ -144,8 +142,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     return total;
   };
 
-  const handleCalculate     = () => calculateCalories();
-  const handleAddExercise   = () => {
+  const handleCalculate   = () => calculateCalories();
+  const handleAddExercise = () => {
     if (!newExercise.exerciseName ||
         parseFloat(newExercise.weight) <= 0 ||
         parseInt(newExercise.reps, 10) <= 0
@@ -158,7 +156,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       ...cumulativeExercises,
       { ...newExercise, calories: cals }
     ]);
-    // reset inputs (keep type/muscle/name)
     setNewExercise({
       ...newExercise,
       weight:         '',
@@ -169,6 +166,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     });
     setCurrentCalories(0);
   };
+
   const handleDoneWithExercises = () => {
     if (newExercise.exerciseName &&
         parseFloat(newExercise.weight) > 0 &&
@@ -178,11 +176,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
     setCurrentStep(2);
   };
+
   const handleNextFromSauna = () => {
     const filtered = cumulativeExercises.filter(ex => ex.exerciseType !== 'Sauna');
     if (saunaTime.trim()) {
-      const t   = parseFloat(saunaTime) || 0;
-      const tmp = parseFloat(saunaTemp)  || 180;
+      const t   = parseFloat(saunaTime)   || 0;
+      const tmp = parseFloat(saunaTemp)   || 180;
       const uw  = parseFloat(userData.weight) || 150;
       const saunaCals = t * (tmp - 150) * 0.1 * (uw / 150);
       filtered.push({
@@ -199,11 +198,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(filtered);
     setCurrentStep(3);
   };
+
   const handleRemoveExercise = i => {
     const arr = [...cumulativeExercises];
     arr.splice(i, 1);
     setCumulativeExercises(arr);
   };
+
   const handleBackToExercises = () => setCurrentStep(1);
   const handleBackToSauna     = () => {
     setCumulativeExercises(
@@ -211,6 +212,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
     setCurrentStep(2);
   };
+
   const handleFinish = () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     setCumulativeTotal(total);
@@ -228,8 +230,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
     onWorkoutLogged(total);
+
+    // 🎉 update the user's daily streak
+    updateStreak();
+
     history.push('/history');
   };
+
   const handleNewWorkout   = () => {
     setCumulativeExercises([]);
     setCurrentCalories(0);
@@ -239,7 +246,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   };
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  // Step 3: Summary screen
+  // ---- Step 3: Summary screen ----
   if (currentStep === 3) {
     const total     = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
@@ -402,7 +409,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // Step 2: Sauna
+  // ---- Step 2: Sauna ----
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -428,7 +435,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // Step 1: Exercise form
+  // ---- Step 1: Exercise Form ----
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" align="center" color="primary" gutterBottom>
@@ -451,7 +458,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             .filter(ex => ex.exerciseType !== 'Sauna')
             .map((ex, idx) => (
               <Typography key={idx} variant="body2">
-                {ex.exerciseName} – {ex.sets}×{ex.reps} ({ex.calories.toFixed(2)} cals)
+                {ex.exerciseName} – {ex.sets}×{ex.reps} (
+                {ex.calories.toFixed(2)} cals)
                 <Button
                   size="small"
                   color="error"
