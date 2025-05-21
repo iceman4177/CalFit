@@ -39,6 +39,7 @@ import CalorieSummary from './CalorieSummary';
 import NetCalorieBanner from './NetCalorieBanner';
 import DailyRecapCoach from './DailyRecapCoach';
 import StreakBanner from './components/StreakBanner';
+import UpgradeModal from './components/UpgradeModal';
 import { logPageView } from './analytics';
 
 // Tip text for each route
@@ -63,9 +64,10 @@ function PageTracker() {
 }
 
 export default function App() {
-  const history = useHistory();
+  const history  = useHistory();
   const location = useLocation();
 
+  // first-time tips
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
@@ -73,51 +75,79 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
+  // user data & premium
   const [userData, setUserDataState] = useState(null);
-  const [burnedCalories, setBurnedCalories] = useState(0);
-  const [consumedCalories, setConsumedCalories] = useState(0);
-  const [showHealthForm, setShowHealthForm] = useState(false);
+  const [isPremium, setIsPremium]     = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
+  // calories
+  const [burnedCalories, setBurnedCalories]     = useState(0);
+  const [consumedCalories, setConsumedCalories] = useState(0);
+  const [showHealthForm, setShowHealthForm]     = useState(false);
+
+  // “More” menu anchor
   const [moreAnchor, setMoreAnchor] = useState(null);
-  const openMore = e => setMoreAnchor(e.currentTarget);
+  const openMore  = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
 
+  // Persisted setter merges premium flag
   const setUserData = data => {
-    localStorage.setItem('userData', JSON.stringify(data));
-    setUserDataState(data);
+    const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+    const next = { ...prev, ...data, isPremium };
+    localStorage.setItem('userData', JSON.stringify(next));
+    setUserDataState(next);
   };
+
+  // Load userData + premium + calories on mount
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem('userData') || '{}');
+    setUserDataState(saved);
+    setIsPremium(saved.isPremium || false);
+    setShowHealthForm(!saved.age);   // or your health‑data check
+    refreshCalories();
+  }, []);
+
+  // Stripe success → grant Pro
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('checkout') === 'success') {
+      setIsPremium(true);
+      const updated = { ...(userData || {}), isPremium: true };
+      localStorage.setItem('userData', JSON.stringify(updated));
+      setUserDataState(updated);
+      history.replace(location.pathname);
+    }
+  }, [location.search]);
+
+  // Dev shortcut: visit /dev/grantPro to toggle Pro
+  useEffect(() => {
+    if (location.pathname === '/dev/grantPro') {
+      setIsPremium(true);
+      const prev    = JSON.parse(localStorage.getItem('userData') || '{}');
+      const updated = { ...prev, isPremium: true };
+      localStorage.setItem('userData', JSON.stringify(updated));
+      setUserDataState(updated);
+      history.replace('/');
+    }
+  }, [location.pathname]);
 
   const refreshCalories = () => {
     const today = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     setBurnedCalories(
-      workouts
-        .filter(w => w.date === today)
-        .reduce((sum, w) => sum + w.totalCalories, 0)
+      workouts.filter(w => w.date === today)
+              .reduce((sum, w) => sum + w.totalCalories, 0)
     );
     const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = meals.find(m => m.date === today);
     setConsumedCalories(
-      todayMeals
-        ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0)
-        : 0
+      todayMeals ? todayMeals.meals.reduce((sum,m) => sum + m.calories, 0) : 0
     );
   };
-
-  useEffect(() => {
-    const saved = localStorage.getItem('userData');
-    if (saved) {
-      setUserDataState(JSON.parse(saved));
-      setShowHealthForm(false);
-    } else {
-      setShowHealthForm(true);
-    }
-    refreshCalories();
-  }, []);
-
   const handleUpdateBurned   = refreshCalories;
   const handleUpdateConsumed = refreshCalories;
 
+  // Navigation bar
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack
@@ -127,27 +157,17 @@ export default function App() {
       >
         <Tooltip title="Log Workout">
           <Button
-            component={NavLink}
-            to="/workout"
-            variant="contained"
-            color="primary"
-            startIcon={<FitnessCenterIcon />}
-            sx={{ px: 2 }}
-          >
-            Workout
-          </Button>
+            component={NavLink} to="/workout"
+            variant="contained" color="primary"
+            startIcon={<FitnessCenterIcon />} sx={{ px: 2 }}
+          >Workout</Button>
         </Tooltip>
         <Tooltip title="Log Meal">
           <Button
-            component={NavLink}
-            to="/meals"
-            variant="contained"
-            color="secondary"
-            startIcon={<RestaurantIcon />}
-            sx={{ px: 2 }}
-          >
-            Meals
-          </Button>
+            component={NavLink} to="/meals"
+            variant="contained" color="secondary"
+            startIcon={<RestaurantIcon />} sx={{ px: 2 }}
+          >Meals</Button>
         </Tooltip>
         <Tooltip title="More options">
           <Button
@@ -155,9 +175,7 @@ export default function App() {
             variant="outlined"
             startIcon={<MoreVertIcon />}
             sx={{ px: 2 }}
-          >
-            More
-          </Button>
+          >More</Button>
         </Tooltip>
       </Stack>
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
@@ -198,33 +216,42 @@ export default function App() {
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
+
+        {!isPremium && (
+          <Button
+            variant="contained"
+            sx={{ mt: 2 }}
+            onClick={() => setUpgradeOpen(true)}
+          >
+            Try Pro Free
+          </Button>
+        )}
       </Box>
 
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-
-      {/* 🚀 NEW: Streak banner */}
       <StreakBanner />
-
       {navBar}
 
       <Switch>
         <Route
           path="/edit-info"
-          render={() => (
-            <HealthDataForm
-              setUserData={data => {
-                setUserData(data);
-                setShowHealthForm(false);
-                history.push('/');
-              }}
-            />
-          )}
+          render={() =>
+            showHealthForm ? (
+              <HealthDataForm
+                setUserData={data => {
+                  setUserData(data);
+                  setShowHealthForm(false);
+                  history.push('/');
+                }}
+              />
+            ) : null
+          }
         />
         <Route
           path="/workout"
-          render={() => (
+          render={() =>
             <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
-          )}
+          }
         />
         <Route
           path="/meals"
@@ -243,23 +270,19 @@ export default function App() {
             <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />
           )}
         />
-        <Route path="/recap" component={DailyRecapCoach} />
         <Route
-          exact
-          path="/"
-          render={() =>
-            showHealthForm ? (
-              <HealthDataForm
-                setUserData={data => {
-                  setUserData(data);
-                  setShowHealthForm(false);
-                  history.push('/');
-                }}
-              />
-            ) : null
-          }
+          path="/recap"
+          render={() => (
+            <DailyRecapCoach userData={{ ...userData, isPremium }} />
+          )}
         />
+        <Route exact path="/" render={() => null} />
       </Switch>
+
+      <UpgradeModal
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+      />
     </Container>
   );
 }

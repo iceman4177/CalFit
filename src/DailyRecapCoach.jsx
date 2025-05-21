@@ -8,60 +8,69 @@ import {
 } from "@mui/material";
 import UpgradeModal from "./components/UpgradeModal";
 
-export default function DailyRecapCoach() {
-  const [loading, setLoading] = useState(false);
-  const [recap, setRecap]     = useState("");
-  const [error, setError]     = useState("");
-  const [count, setCount]     = useState(0);
-  const [modalOpen, setModalOpen] = useState(false);
+export default function DailyRecapCoach({ userData }) {
+  const { isPremium } = userData || {};
+  const [loading, setLoading]         = useState(false);
+  const [recap, setRecap]             = useState("");
+  const [error, setError]             = useState("");
+  const [count, setCount]             = useState(0);
+  const [modalOpen, setModalOpen]     = useState(false);
 
-  // Track usage by date
   const today = new Date().toLocaleDateString("en-US");
+  const storageKey = `recapUsage`;
+
+  // Load today’s count on mount
   useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem("recapUsage") || "{}");
-    setCount(stored.date === today ? stored.count : 0);
+    const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    if (stored.date === today) {
+      setCount(stored.count);
+    } else {
+      setCount(0);
+    }
   }, [today]);
 
-  // Increment and persist usage count
+  // Persist new count
   const incrementCount = () => {
-    const stored = JSON.parse(localStorage.getItem("recapUsage") || "{}");
+    const stored   = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const newCount = stored.date === today ? stored.count + 1 : 1;
     localStorage.setItem(
-      "recapUsage",
+      storageKey,
       JSON.stringify({ date: today, count: newCount })
     );
     setCount(newCount);
+    return newCount;
   };
 
   const handleGetRecap = async () => {
-    // If already used 3 times, prompt upgrade
-    if (count >= 3) {
+    // For free users, enforce 3/day limit
+    if (!isPremium && count >= 3) {
       setModalOpen(true);
       return;
     }
 
-    incrementCount();
+    if (!isPremium) {
+      incrementCount();
+    }
+
     setLoading(true);
     setError("");
     setRecap("");
 
     try {
-      // 1) Load your workout history for today
+      // 1) Load workout history for today
       const history = JSON.parse(
         localStorage.getItem("workoutHistory") || "[]"
       );
-      const todayWorkouts = history.filter(
-        (w) => w.date === today
-      );
+      const todayWorkouts = history.filter(w => w.date === today);
 
-      // 2) Build prompt
+      // 2) Build the prompt
       let userContent;
       if (todayWorkouts.length === 0) {
         userContent =
           "I haven't logged any workout today. Can you suggest a full‑body workout plan for me?";
       } else {
-        const lines = todayWorkouts.flatMap((w) =>
-          w.exercises.map((ex) =>
+        const lines = todayWorkouts.flatMap(w =>
+          w.exercises.map(ex =>
             `- ${ex.name}: ${ex.sets}×${ex.reps} (${ex.calories.toFixed(
               2
             )} cal)`
@@ -72,7 +81,7 @@ export default function DailyRecapCoach() {
         )}\n\nPlease give me a friendly recap of my workout.`;
       }
 
-      // 3) Send to API
+      // 3) Send to your API
       const messages = [
         { role: "system", content: "You are a friendly fitness coach." },
         { role: "user", content: userContent }
@@ -97,7 +106,8 @@ export default function DailyRecapCoach() {
     } catch (err) {
       console.error("Recap error:", err);
       setError(
-        err.message || "Sorry, I couldn’t generate your daily recap right now."
+        err.message ||
+          "Sorry, I couldn’t generate your daily recap right now."
       );
     } finally {
       setLoading(false);
@@ -126,7 +136,7 @@ export default function DailyRecapCoach() {
         </Typography>
       )}
 
-      {/* Upgrade modal after 3 free uses */}
+      {/* If non‑premium and over limit, show upgrade */}
       <UpgradeModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </Box>
   );
