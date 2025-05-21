@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -27,6 +28,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import InfoIcon from '@mui/icons-material/Info';
 import ChatIcon from '@mui/icons-material/Chat';
 
+import useDailyNotification from './hooks/useDailyNotification';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
@@ -67,7 +69,10 @@ export default function App() {
   const history  = useHistory();
   const location = useLocation();
 
-  // first-time tips
+  // schedule a daily notification at 7:00 pm
+  useDailyNotification({ hour: 19, minute: 0 });
+
+  // first‑time tips
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
@@ -102,8 +107,8 @@ export default function App() {
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     setUserDataState(saved);
-    setIsPremium(saved.isPremium || false);
-    setShowHealthForm(!saved.age);   // or your health‑data check
+    setIsPremium(!!saved.isPremium);
+    setShowHealthForm(!saved.age);
     refreshCalories();
   }, []);
 
@@ -132,16 +137,16 @@ export default function App() {
   }, [location.pathname]);
 
   const refreshCalories = () => {
-    const today = new Date().toLocaleDateString('en-US');
+    const today    = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     setBurnedCalories(
       workouts.filter(w => w.date === today)
               .reduce((sum, w) => sum + w.totalCalories, 0)
     );
-    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const meals     = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = meals.find(m => m.date === today);
     setConsumedCalories(
-      todayMeals ? todayMeals.meals.reduce((sum,m) => sum + m.calories, 0) : 0
+      todayMeals ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0) : 0
     );
   };
   const handleUpdateBurned   = refreshCalories;
@@ -160,14 +165,18 @@ export default function App() {
             component={NavLink} to="/workout"
             variant="contained" color="primary"
             startIcon={<FitnessCenterIcon />} sx={{ px: 2 }}
-          >Workout</Button>
+          >
+            Workout
+          </Button>
         </Tooltip>
         <Tooltip title="Log Meal">
           <Button
             component={NavLink} to="/meals"
             variant="contained" color="secondary"
             startIcon={<RestaurantIcon />} sx={{ px: 2 }}
-          >Meals</Button>
+          >
+            Meals
+          </Button>
         </Tooltip>
         <Tooltip title="More options">
           <Button
@@ -175,7 +184,9 @@ export default function App() {
             variant="outlined"
             startIcon={<MoreVertIcon />}
             sx={{ px: 2 }}
-          >More</Button>
+          >
+            More
+          </Button>
         </Tooltip>
       </Stack>
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
@@ -282,6 +293,8 @@ export default function App() {
       <UpgradeModal
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}
+        title="Start your 7‑Day Free Pro Trial"
+        description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
       />
     </Container>
   );

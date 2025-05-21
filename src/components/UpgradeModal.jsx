@@ -13,7 +13,19 @@ import { loadStripe } from "@stripe/stripe-js";
 // initialize Stripe.js
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
-export default function UpgradeModal({ open, onClose }) {
+/**
+ * Props:
+ *  - open: boolean
+ *  - onClose: () => void
+ *  - title?: string         // dialog title (defaults to “Upgrade to Slimcal.ai Pro”)
+ *  - description?: string   // dialog body text
+ */
+export default function UpgradeModal({
+  open,
+  onClose,
+  title = "Upgrade to Slimcal.ai Pro",
+  description = "Unlock unlimited AI coaching, personalized plans, and more by going Pro!"
+}) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
 
@@ -35,7 +47,6 @@ export default function UpgradeModal({ open, onClose }) {
       }
 
       if (!res.ok) {
-        // if JSON with error, use that, else display raw text
         const msg = data?.error || text || "Checkout session failed";
         throw new Error(msg);
       }
@@ -52,11 +63,10 @@ export default function UpgradeModal({ open, onClose }) {
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogTitle>Upgrade to Slimcal.ai Pro</DialogTitle>
+      <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         <Typography sx={{ mb: 2 }}>
-          You’ve used up your 3 free Daily Recap calls for today. Upgrade for unlimited AI coaching,
-          personalized plans, and more!
+          {description}
         </Typography>
         {apiError && (
           <Typography color="error" variant="body2">
