@@ -43,6 +43,7 @@ import CalorieSummary from './CalorieSummary';
 import NetCalorieBanner from './NetCalorieBanner';
 import DailyRecapCoach from './DailyRecapCoach';
 import StreakBanner from './components/StreakBanner';
+import SocialProofBanner from './components/SocialProofBanner';
 import UpgradeModal from './components/UpgradeModal';
 import { logPageView } from './analytics';
 
@@ -254,6 +255,7 @@ export default function App() {
 
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
       <StreakBanner />
+      <SocialProofBanner />
       {navBar}
 
       <Switch>
