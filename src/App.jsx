@@ -1,4 +1,5 @@
 // src/App.jsx
+
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -29,6 +30,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import ChatIcon from '@mui/icons-material/Chat';
 
 import useDailyNotification from './hooks/useDailyNotification';
+import useVariableRewards from './hooks/useVariableRewards';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
@@ -69,8 +71,19 @@ export default function App() {
   const history  = useHistory();
   const location = useLocation();
 
-  // schedule a daily notification at 7:00 pm
-  useDailyNotification({ hour: 19, minute: 0 });
+  // 1) Daily browser notification at 7:00 pm
+  useDailyNotification({
+    hour: 19,
+    minute: 0,
+    title: 'Slimcal.ai Reminder',
+    body: '⏰ Don’t forget to log today’s workout & meals!'
+  });
+
+  // 2) Variable rewards: random badges on new logs
+  const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
+  const mealsCount = JSON.parse(localStorage.getItem('mealHistory') || '[]')
+    .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
+  useVariableRewards({ workoutsCount, mealsCount });
 
   // first‑time tips
   const message = routeTips[location.pathname] || '';
@@ -143,8 +156,8 @@ export default function App() {
       workouts.filter(w => w.date === today)
               .reduce((sum, w) => sum + w.totalCalories, 0)
     );
-    const meals     = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayMeals = meals.find(m => m.date === today);
+    const mealsData = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayMeals = mealsData.find(m => m.date === today);
     setConsumedCalories(
       todayMeals ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0) : 0
     );
@@ -260,9 +273,9 @@ export default function App() {
         />
         <Route
           path="/workout"
-          render={() =>
+          render={() => (
             <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
-          }
+          )}
         />
         <Route
           path="/meals"

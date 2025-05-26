@@ -1,8 +1,9 @@
-// Achievements.jsx
-import React, { useEffect, useState } from 'react';
-import { Container, Typography, Grid, Card, CardContent } from '@mui/material';
+// src/Achievements.jsx
 
-const achievementList = [
+import React, { useEffect, useState } from 'react';
+import { Container, Typography, Grid, Card, CardContent, Chip, Box } from '@mui/material';
+
+const staticAchievements = [
   {
     id: 'first_workout',
     name: 'First Workout',
@@ -42,61 +43,79 @@ const achievementList = [
   }
 ];
 
-function Achievements() {
+export default function Achievements() {
   const [workoutHistory, setWorkoutHistory] = useState([]);
-  const [unlockedAchievements, setUnlockedAchievements] = useState([]);
+  const [earnedStatic, setEarnedStatic] = useState([]);
+  const [randomBadges, setRandomBadges] = useState([]);
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem('workoutHistory');
-    const history = savedHistory ? JSON.parse(savedHistory) : [];
-    setWorkoutHistory(history);
+    // load workout history
+    const savedHistory = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    setWorkoutHistory(savedHistory);
 
-    const unlocked = achievementList.filter((ach) => ach.condition(history));
-    setUnlockedAchievements(unlocked);
+    // determine which static achievements are unlocked
+    const unlockedStatic = staticAchievements.filter(ach =>
+      ach.condition(savedHistory)
+    );
+    setEarnedStatic(unlockedStatic);
+
+    // load any random “lucky drop” badges
+    const rnd = JSON.parse(localStorage.getItem('randomBadges') || '[]');
+    setRandomBadges(rnd);
   }, []);
+
+  // merge static + random badges
+  const allBadges = [
+    ...earnedStatic.map(b => ({ ...b, random: false })),
+    ...randomBadges.map(b => ({ ...b, random: true }))
+  ];
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h3" align="center" gutterBottom>
         Achievements
       </Typography>
-      {workoutHistory.length === 0 ? (
-        <Typography variant="body1" align="center">
-          No achievements yet. Start working out!
-        </Typography>
+
+      {allBadges.length === 0 ? (
+        <Box textAlign="center" mt={4}>
+          <Typography variant="body1">
+            No achievements yet. Start logging workouts or meals!
+          </Typography>
+        </Box>
       ) : (
         <Grid container spacing={2}>
-          {achievementList.map((achievement) => {
-            const isUnlocked = unlockedAchievements.some(
-              (unlocked) => unlocked.id === achievement.id
-            );
-            return (
-              <Grid item xs={12} sm={6} md={4} key={achievement.id}>
-                <Card
-                  sx={{
-                    opacity: isUnlocked ? 1 : 0.4,
-                    backgroundColor: isUnlocked ? '#e0ffe0' : '#f0f0f0'
-                  }}
-                >
-                  <CardContent>
-                    <Typography variant="h4" align="center">
-                      {achievement.icon}
-                    </Typography>
-                    <Typography variant="h6" align="center">
-                      {achievement.name}
-                    </Typography>
-                    <Typography variant="body2" align="center">
-                      {achievement.description}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            );
-          })}
+          {allBadges.map(badge => (
+            <Grid item xs={12} sm={6} md={4} key={badge.id}>
+              <Card
+                sx={{
+                  position: 'relative',
+                  opacity: 1,
+                  backgroundColor: '#f9f9f9'
+                }}
+              >
+                <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="h4">
+                    {badge.icon}
+                  </Typography>
+                  <Typography variant="h6" gutterBottom>
+                    {badge.name}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    {badge.description}
+                  </Typography>
+                  {badge.random && (
+                    <Chip
+                      label="🎉 Lucky Drop"
+                      size="small"
+                      sx={{ mt: 1 }}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
       )}
     </Container>
   );
 }
-
-export default Achievements;
