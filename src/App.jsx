@@ -16,7 +16,11 @@ import {
   Stack,
   Tooltip,
   Menu,
-  MenuItem
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
@@ -30,26 +34,27 @@ import InfoIcon from '@mui/icons-material/Info';
 import ChatIcon from '@mui/icons-material/Chat';
 
 import useDailyNotification from './hooks/useDailyNotification';
-import useVariableRewards from './hooks/useVariableRewards';
-import useMealReminders from './hooks/useMealReminders';
-import useFirstTimeTip from './hooks/useFirstTimeTip';
+import useVariableRewards   from './hooks/useVariableRewards';
+import useMealReminders     from './hooks/useMealReminders';
+import useInAppMealPrompt   from './hooks/useInAppMealPrompt';
+import useFirstTimeTip      from './hooks/useFirstTimeTip';
 
-import HealthDataForm from './HealthDataForm';
-import WorkoutPage from './WorkoutPage';
-import WorkoutHistory from './WorkoutHistory';
+import HealthDataForm    from './HealthDataForm';
+import WorkoutPage       from './WorkoutPage';
+import WorkoutHistory    from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
-import Achievements from './Achievements';
-import MealTracker from './MealTracker';
-import CalorieHistory from './CalorieHistory';
-import CalorieSummary from './CalorieSummary';
-import NetCalorieBanner from './NetCalorieBanner';
-import DailyRecapCoach from './DailyRecapCoach';
-import StreakBanner from './components/StreakBanner';
+import Achievements      from './Achievements';
+import MealTracker       from './MealTracker';
+import CalorieHistory    from './CalorieHistory';
+import CalorieSummary    from './CalorieSummary';
+import NetCalorieBanner  from './NetCalorieBanner';
+import DailyRecapCoach   from './DailyRecapCoach';
+import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
-import WaitlistSignup from './components/WaitlistSignup';
-import AlertPreferences from './components/AlertPreferences';
-import UpgradeModal from './components/UpgradeModal';
-import { logPageView } from './analytics';
+import WaitlistSignup    from './components/WaitlistSignup';
+import AlertPreferences  from './components/AlertPreferences';
+import UpgradeModal      from './components/UpgradeModal';
+import { logPageView }   from './analytics';
 
 // Tip text for each route
 const routeTips = {
@@ -92,8 +97,37 @@ export default function App() {
     .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
 
-  // 3) Scheduled meal reminders (breakfast, lunch, dinner)
+  // 3) Scheduled browser meal reminders
   useMealReminders();
+
+  // 4) In‑app meal prompt when opening after scheduled meal time
+  const missedMeals = useInAppMealPrompt() || [];
+  const [promptOpen, setPromptOpen] = useState(false);
+
+  useEffect(() => {
+    const todayKey = new Date().toLocaleDateString('en-US');
+    const alreadyPrompted = localStorage.getItem('missedMealsPrompted') === todayKey;
+
+    if (
+      !alreadyPrompted &&
+      missedMeals.length > 0 &&
+      location.pathname !== '/meals'
+    ) {
+      // only prompt once per day
+      localStorage.setItem('missedMealsPrompted', todayKey);
+      setPromptOpen(true);
+    }
+  }, [missedMeals, location.pathname]);
+
+  const handleClosePrompt = () => setPromptOpen(false);
+  const handleGoToMeals   = () => {
+    setPromptOpen(false);
+    history.push({
+      pathname: '/meals',
+      // pass the first missed meal type so MealTracker can pre-select it
+      state:    { mealToLog: missedMeals[0] }
+    });
+  };
 
   // First‑time tips
   const message = routeTips[location.pathname] || '';
@@ -163,8 +197,9 @@ export default function App() {
     const today    = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     setBurnedCalories(
-      workouts.filter(w => w.date === today)
-              .reduce((sum, w) => sum + w.totalCalories, 0)
+      workouts
+        .filter(w => w.date === today)
+        .reduce((sum, w) => sum + w.totalCalories, 0)
     );
     const mealsData  = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = mealsData.find(m => m.date === today);
@@ -178,25 +213,27 @@ export default function App() {
   // Navigation bar
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={{ xs: 1, sm: 2 }}
-        justifyContent="center"
-      >
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} justifyContent="center">
         <Tooltip title="Log Workout">
           <Button
-            component={NavLink} to="/workout"
-            variant="contained" color="primary"
-            startIcon={<FitnessCenterIcon />} sx={{ px: 2 }}
+            component={NavLink}
+            to="/workout"
+            variant="contained"
+            color="primary"
+            startIcon={<FitnessCenterIcon />}
+            sx={{ px: 2 }}
           >
             Workout
           </Button>
         </Tooltip>
         <Tooltip title="Log Meal">
           <Button
-            component={NavLink} to="/meals"
-            variant="contained" color="secondary"
-            startIcon={<RestaurantIcon />} sx={{ px: 2 }}
+            component={NavLink}
+            to="/meals"
+            variant="contained"
+            color="secondary"
+            startIcon={<RestaurantIcon />}
+            sx={{ px: 2 }}
           >
             Meals
           </Button>
@@ -249,17 +286,28 @@ export default function App() {
       <PageTracker />
       {message && <PageTip />}
 
+      {/* In‑App Meal Reminder Dialog */}
+      <Dialog open={promptOpen} onClose={handleClosePrompt}>
+        <DialogTitle>Meal Reminder</DialogTitle>
+        <DialogContent>
+          {missedMeals.map(meal => (
+            <Typography key={meal} sx={{ mb: 1 }}>
+              🍽 Don’t forget to log your <strong>{meal}</strong>!
+            </Typography>
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleGoToMeals}>Ok</Button>
+        </DialogActions>
+      </Dialog>
+
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
         {!isPremium && (
-          <Button
-            variant="contained"
-            sx={{ mt: 2 }}
-            onClick={() => setUpgradeOpen(true)}
-          >
+          <Button variant="contained" sx={{ mt: 2 }} onClick={() => setUpgradeOpen(true)}>
             Try Pro Free
           </Button>
         )}

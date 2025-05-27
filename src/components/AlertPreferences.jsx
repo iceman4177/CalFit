@@ -2,65 +2,103 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
+  Container,
   Typography,
   TextField,
+  IconButton,
   Button,
-  Paper
+  Stack,
+  Box
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 
-const DEFAULT_PREFS = {
-  breakfast: '08:00',
-  lunch:     '12:00',
-  dinner:    '18:00'
-};
+const STORAGE_KEY = 'mealReminderPrefs';
+
+// Helper to load-and-normalize prefs
+function loadPrefs() {
+  const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    // already in the new [ { name, time }, … ] format
+    return raw.filter(p => p.name && p.time);
+  }
+  // legacy object format: { breakfast: "08:00", … }
+  return Object.entries(raw).map(([name, time]) => ({ name, time }));
+}
 
 export default function AlertPreferences() {
-  const [prefs, setPrefs] = useState(DEFAULT_PREFS);
-  const [status, setStatus] = useState('idle'); // idle | saved
+  const [meals, setMeals] = useState([]);
 
+  // on mount, load normalized prefs
   useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem('mealReminderPrefs') || '{}');
-    setPrefs({ ...DEFAULT_PREFS, ...stored });
+    setMeals(loadPrefs());
   }, []);
 
-  const handleChange = meal => e => {
-    setPrefs(p => ({ ...p, [meal]: e.target.value }));
-    setStatus('idle');
+  // persist the array form whenever it changes
+  const save = updated => {
+    setMeals(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   };
 
-  const handleSave = () => {
-    localStorage.setItem('mealReminderPrefs', JSON.stringify(prefs));
-    setStatus('saved');
+  const updateMeal = (idx, field, value) => {
+    const updated = meals.slice();
+    updated[idx] = { ...updated[idx], [field]: value };
+    save(updated);
+  };
+
+  const addMeal = () => {
+    save([...meals, { name: '', time: '12:00' }]);
+  };
+
+  const removeMeal = idx => {
+    save(meals.filter((_, i) => i !== idx));
   };
 
   return (
-    <Paper sx={{ maxWidth: 400, mx: 'auto', mt: 4, p: 3 }}>
-      <Typography variant="h5" align="center" gutterBottom>
+    <Container maxWidth="sm" sx={{ py: 4 }}>
+      <Typography variant="h4" gutterBottom>
         Alert Preferences
       </Typography>
-      <Box component="form" noValidate autoComplete="off">
-        {['breakfast','lunch','dinner'].map(meal => (
+
+      {meals.map((meal, idx) => (
+        <Stack
+          key={idx}
+          direction="row"
+          spacing={2}
+          alignItems="center"
+          sx={{ mb: 2 }}
+        >
+          {/* Meal label */}
           <TextField
-            key={meal}
-            label={`${meal.charAt(0).toUpperCase()}${meal.slice(1)} Time`}
-            type="time"
+            label="Meal name"
+            value={meal.name}
+            onChange={e => updateMeal(idx, 'name', e.target.value)}
+            placeholder="e.g. Breakfast"
             fullWidth
-            value={prefs[meal]}
-            onChange={handleChange(meal)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ mb: 2 }}
           />
-        ))}
-        <Button variant="contained" fullWidth onClick={handleSave}>
-          Save Preferences
+
+          {/* Time picker – widened so you see both minute digits */}
+          <TextField
+            label="Time"
+            type="time"
+            value={meal.time}
+            onChange={e => updateMeal(idx, 'time', e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            inputProps={{ step: 300 }}       // 5‑minute steps
+            sx={{ width: 120 }}              // <— ensure full "HH:MM" is visible
+          />
+
+          <IconButton onClick={() => removeMeal(idx)}>
+            <DeleteIcon />
+          </IconButton>
+        </Stack>
+      ))}
+
+      <Box sx={{ textAlign: 'center', mt: 3 }}>
+        <Button variant="outlined" onClick={addMeal}>
+          + Add another meal
         </Button>
-        {status === 'saved' && (
-          <Typography variant="body2" align="center" color="success.main" mt={2}>
-            Preferences saved!
-          </Typography>
-        )}
       </Box>
-    </Paper>
+    </Container>
   );
 }
