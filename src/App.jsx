@@ -31,7 +31,9 @@ import ChatIcon from '@mui/icons-material/Chat';
 
 import useDailyNotification from './hooks/useDailyNotification';
 import useVariableRewards from './hooks/useVariableRewards';
+import useMealReminders from './hooks/useMealReminders';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
+
 import HealthDataForm from './HealthDataForm';
 import WorkoutPage from './WorkoutPage';
 import WorkoutHistory from './WorkoutHistory';
@@ -44,6 +46,8 @@ import NetCalorieBanner from './NetCalorieBanner';
 import DailyRecapCoach from './DailyRecapCoach';
 import StreakBanner from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
+import WaitlistSignup from './components/WaitlistSignup';
+import AlertPreferences from './components/AlertPreferences';
 import UpgradeModal from './components/UpgradeModal';
 import { logPageView } from './analytics';
 
@@ -57,7 +61,9 @@ const routeTips = {
   '/achievements': 'Achievements page: hit milestones to unlock badges!',
   '/calorie-log':  'Calorie Log gives you a detailed daily breakdown of intake vs. burn.',
   '/summary':      'Summary page: quick overview of today’s net calories.',
-  '/recap':        'Meet your AI Coach: get a friendly recap of today’s workouts & meals!'
+  '/recap':        'Meet your AI Coach: get a friendly recap of today’s workouts & meals!',
+  '/waitlist':     'Join our waitlist to get early access to upcoming features!',
+  '/preferences':  'Customize when you get meal reminders each day.'
 };
 
 function PageTracker() {
@@ -82,11 +88,14 @@ export default function App() {
 
   // 2) Variable rewards: random badges on new logs
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
-  const mealsCount = JSON.parse(localStorage.getItem('mealHistory') || '[]')
+  const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')    || '[]')
     .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
 
-  // first‑time tips
+  // 3) Scheduled meal reminders (breakfast, lunch, dinner)
+  useMealReminders();
+
+  // First‑time tips
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
@@ -94,12 +103,12 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
-  // user data & premium
+  // User data & premium
   const [userData, setUserDataState] = useState(null);
   const [isPremium, setIsPremium]     = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-  // calories
+  // Calories
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [showHealthForm, setShowHealthForm]     = useState(false);
@@ -157,7 +166,7 @@ export default function App() {
       workouts.filter(w => w.date === today)
               .reduce((sum, w) => sum + w.totalCalories, 0)
     );
-    const mealsData = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const mealsData  = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayMeals = mealsData.find(m => m.date === today);
     setConsumedCalories(
       todayMeals ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0) : 0
@@ -222,6 +231,12 @@ export default function App() {
         <MenuItem component={NavLink} to="/recap" onClick={closeMore}>
           <ChatIcon fontSize="small" /> Daily Recap
         </MenuItem>
+        <MenuItem component={NavLink} to="/waitlist" onClick={closeMore}>
+          <InfoIcon fontSize="small" /> Join Waitlist
+        </MenuItem>
+        <MenuItem component={NavLink} to="/preferences" onClick={closeMore}>
+          <InfoIcon fontSize="small" /> Alert Preferences
+        </MenuItem>
         <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
           <InfoIcon fontSize="small" /> Edit Info
         </MenuItem>
@@ -235,13 +250,10 @@ export default function App() {
       {message && <PageTip />}
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
-        <Typography variant="h2" color="primary">
-          Slimcal.ai
-        </Typography>
+        <Typography variant="h2" color="primary">Slimcal.ai</Typography>
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
-
         {!isPremium && (
           <Button
             variant="contained"
@@ -279,14 +291,8 @@ export default function App() {
             <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />
           )}
         />
-        <Route
-          path="/meals"
-          render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />}
-        />
-        <Route
-          path="/history"
-          render={() => <WorkoutHistory onHistoryChange={refreshCalories} />}
-        />
+        <Route path="/meals" render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />} />
+        <Route path="/history" render={() => <WorkoutHistory onHistoryChange={refreshCalories} />} />
         <Route path="/dashboard" component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log" component={CalorieHistory} />
@@ -302,6 +308,8 @@ export default function App() {
             <DailyRecapCoach userData={{ ...userData, isPremium }} />
           )}
         />
+        <Route path="/waitlist" component={WaitlistSignup} />
+        <Route path="/preferences" component={AlertPreferences} />
         <Route exact path="/" render={() => null} />
       </Switch>
 
