@@ -57,7 +57,7 @@ import UpgradeModal      from './components/UpgradeModal';
 import { logPageView }   from './analytics';
 
 const routeTips = {
-  '/':             'Welcome to Slimcal.ai! First, enter your health info so everything can be personalized.',
+  '/edit-info':     'Welcome to Slimcal.ai! First, enter your health info so everything can be personalized.',
   '/workout':      'This is your Workout page: add exercises, calculate & log calories burned.',
   '/meals':        'On the Meals page, search foods or enter calories manually to track intake.',
   '/history':      'Here’s your History: review past workouts & meals at a glance.',
@@ -148,7 +148,6 @@ export default function App() {
     setShowHealthForm(!saved.age);
     refreshCalories();
 
-    // Redirect new users to health form
     if (!saved.age && location.pathname === '/') {
       history.push('/edit-info');
     }
@@ -194,14 +193,11 @@ export default function App() {
   const handleUpdateBurned   = refreshCalories;
   const handleUpdateConsumed = refreshCalories;
 
-  // ✅ Updated: conditional first-time tip
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
     message,
-    {
-      auto: Boolean(message) && (location.pathname !== '/' || !!userData?.age)
-    }
+    { auto: Boolean(message) }
   );
 
   const navBar = (
