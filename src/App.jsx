@@ -122,13 +122,6 @@ export default function App() {
     });
   };
 
-  const message = routeTips[location.pathname] || '';
-  const [PageTip] = useFirstTimeTip(
-    `hasSeenPageTip_${location.pathname}`,
-    message,
-    { auto: Boolean(message) }
-  );
-
   const [userData, setUserDataState] = useState(null);
   const [isPremium, setIsPremium]     = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -155,7 +148,7 @@ export default function App() {
     setShowHealthForm(!saved.age);
     refreshCalories();
 
-    // 🔁 Added redirect logic
+    // Redirect new users to health form
     if (!saved.age && location.pathname === '/') {
       history.push('/edit-info');
     }
@@ -200,6 +193,16 @@ export default function App() {
 
   const handleUpdateBurned   = refreshCalories;
   const handleUpdateConsumed = refreshCalories;
+
+  // ✅ Updated: conditional first-time tip
+  const message = routeTips[location.pathname] || '';
+  const [PageTip] = useFirstTimeTip(
+    `hasSeenPageTip_${location.pathname}`,
+    message,
+    {
+      auto: Boolean(message) && (location.pathname !== '/' || !!userData?.age)
+    }
+  );
 
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
