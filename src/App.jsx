@@ -1,5 +1,4 @@
 // src/App.jsx
-
 import React, { useState, useEffect } from 'react';
 import {
   Route,
@@ -22,6 +21,7 @@ import {
   DialogContent,
   DialogActions
 } from '@mui/material';
+
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -34,27 +34,28 @@ import InfoIcon from '@mui/icons-material/Info';
 import ChatIcon from '@mui/icons-material/Chat';
 
 import useDailyNotification from './hooks/useDailyNotification';
-import useVariableRewards   from './hooks/useVariableRewards';
-import useMealReminders     from './hooks/useMealReminders';
-import useInAppMealPrompt   from './hooks/useInAppMealPrompt';
-import useFirstTimeTip      from './hooks/useFirstTimeTip';
+import useVariableRewards from './hooks/useVariableRewards';
+import useMealReminders from './hooks/useMealReminders';
+import useInAppMealPrompt from './hooks/useInAppMealPrompt';
+import useFirstTimeTip from './hooks/useFirstTimeTip';
 
-import HealthDataForm    from './HealthDataForm';
-import WorkoutPage       from './WorkoutPage';
-import WorkoutHistory    from './WorkoutHistory';
+import HealthDataForm from './HealthDataForm';
+import WorkoutPage from './WorkoutPage';
+import WorkoutHistory from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
-import Achievements      from './Achievements';
-import MealTracker       from './MealTracker';
-import CalorieHistory    from './CalorieHistory';
-import CalorieSummary    from './CalorieSummary';
-import NetCalorieBanner  from './NetCalorieBanner';
-import DailyRecapCoach   from './DailyRecapCoach';
-import StreakBanner      from './components/StreakBanner';
+import Achievements from './Achievements';
+import MealTracker from './MealTracker';
+import CalorieHistory from './CalorieHistory';
+import CalorieSummary from './CalorieSummary';
+import NetCalorieBanner from './NetCalorieBanner';
+import DailyRecapCoach from './DailyRecapCoach';
+import StreakBanner from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
-import WaitlistSignup    from './components/WaitlistSignup';
-import AlertPreferences  from './components/AlertPreferences';
-import UpgradeModal      from './components/UpgradeModal';
-import { logPageView }   from './analytics';
+import WaitlistSignup from './components/WaitlistSignup';
+import AlertPreferences from './components/AlertPreferences';
+import UpgradeModal from './components/UpgradeModal';
+import AmbassadorModal from './components/AmbassadorModal';
+import { logPageView } from './analytics';
 
 const routeTips = {
   '/edit-info':     'Welcome to Slimcal.ai! First, enter your health info so everything can be personalized.',
@@ -79,7 +80,7 @@ function PageTracker() {
 }
 
 export default function App() {
-  const history  = useHistory();
+  const history = useHistory();
   const location = useLocation();
 
   useDailyNotification({
@@ -90,10 +91,9 @@ export default function App() {
   });
 
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
-  const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')    || '[]')
+  const mealsCount = JSON.parse(localStorage.getItem('mealHistory') || '[]')
     .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
-
   useMealReminders();
 
   const missedMeals = useInAppMealPrompt() || [];
@@ -102,36 +102,28 @@ export default function App() {
   useEffect(() => {
     const todayKey = new Date().toLocaleDateString('en-US');
     const alreadyPrompted = localStorage.getItem('missedMealsPrompted') === todayKey;
-
-    if (
-      !alreadyPrompted &&
-      missedMeals.length > 0 &&
-      location.pathname !== '/meals'
-    ) {
+    if (!alreadyPrompted && missedMeals.length > 0 && location.pathname !== '/meals') {
       localStorage.setItem('missedMealsPrompted', todayKey);
       setPromptOpen(true);
     }
   }, [missedMeals, location.pathname]);
 
   const handleClosePrompt = () => setPromptOpen(false);
-  const handleGoToMeals   = () => {
+  const handleGoToMeals = () => {
     setPromptOpen(false);
-    history.push({
-      pathname: '/meals',
-      state:    { mealToLog: missedMeals[0] }
-    });
+    history.push({ pathname: '/meals', state: { mealToLog: missedMeals[0] } });
   };
 
   const [userData, setUserDataState] = useState(null);
-  const [isPremium, setIsPremium]     = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-
-  const [burnedCalories, setBurnedCalories]     = useState(0);
+  const [showHealthForm, setShowHealthForm] = useState(false);
+  const [ambassadorOpen, setAmbassadorOpen] = useState(false);
+  const [burnedCalories, setBurnedCalories] = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
-  const [showHealthForm, setShowHealthForm]     = useState(false);
 
   const [moreAnchor, setMoreAnchor] = useState(null);
-  const openMore  = e => setMoreAnchor(e.currentTarget);
+  const openMore = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
 
   const setUserData = data => {
@@ -151,46 +143,30 @@ export default function App() {
     if (!saved.age && location.pathname === '/') {
       history.push('/edit-info');
     }
+
+    const streak = parseInt(localStorage.getItem('streakCount') || '0', 10);
+    const hasSeenAmbassador = localStorage.getItem('hasSeenAmbassadorInvite') === 'true';
+    if (streak >= 30 && !hasSeenAmbassador) {
+      setAmbassadorOpen(true);
+      localStorage.setItem('hasSeenAmbassadorInvite', 'true');
+    }
   }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('checkout') === 'success') {
-      setIsPremium(true);
-      const updated = { ...(userData || {}), isPremium: true };
-      localStorage.setItem('userData', JSON.stringify(updated));
-      setUserDataState(updated);
-      history.replace(location.pathname);
-    }
-  }, [location.search]);
-
-  useEffect(() => {
-    if (location.pathname === '/dev/grantPro') {
-      setIsPremium(true);
-      const prev    = JSON.parse(localStorage.getItem('userData') || '{}');
-      const updated = { ...prev, isPremium: true };
-      localStorage.setItem('userData', JSON.stringify(updated));
-      setUserDataState(updated);
-      history.replace('/');
-    }
-  }, [location.pathname]);
-
   const refreshCalories = () => {
-    const today    = new Date().toLocaleDateString('en-US');
+    const today = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayMeals = meals.find(m => m.date === today);
+
     setBurnedCalories(
-      workouts
-        .filter(w => w.date === today)
-        .reduce((sum, w) => sum + w.totalCalories, 0)
+      workouts.filter(w => w.date === today).reduce((sum, w) => sum + w.totalCalories, 0)
     );
-    const mealsData  = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayMeals = mealsData.find(m => m.date === today);
     setConsumedCalories(
       todayMeals ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0) : 0
     );
   };
 
-  const handleUpdateBurned   = refreshCalories;
+  const handleUpdateBurned = refreshCalories;
   const handleUpdateConsumed = refreshCalories;
 
   const message = routeTips[location.pathname] || '';
@@ -202,19 +178,19 @@ export default function App() {
 
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} justifyContent="center">
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
         <Tooltip title="Log Workout">
-          <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />} sx={{ px: 2 }}>
+          <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
             Workout
           </Button>
         </Tooltip>
         <Tooltip title="Log Meal">
-          <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />} sx={{ px: 2 }}>
+          <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             Meals
           </Button>
         </Tooltip>
         <Tooltip title="More options">
-          <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />} sx={{ px: 2 }}>
+          <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
             More
           </Button>
         </Tooltip>
@@ -242,15 +218,15 @@ export default function App() {
         <DialogTitle>Meal Reminder</DialogTitle>
         <DialogContent>
           {missedMeals.map(meal => (
-            <Typography key={meal} sx={{ mb: 1 }}>
-              🍽 Don’t forget to log your <strong>{meal}</strong>!
-            </Typography>
+            <Typography key={meal}>🍽 Don’t forget to log your <strong>{meal}</strong>!</Typography>
           ))}
         </DialogContent>
         <DialogActions>
           <Button onClick={handleGoToMeals}>Ok</Button>
         </DialogActions>
       </Dialog>
+
+      <AmbassadorModal open={ambassadorOpen} onClose={() => setAmbassadorOpen(false)} />
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>
@@ -270,20 +246,17 @@ export default function App() {
       {navBar}
 
       <Switch>
-        <Route
-          path="/edit-info"
-          render={() =>
-            showHealthForm ? (
-              <HealthDataForm
-                setUserData={data => {
-                  setUserData(data);
-                  setShowHealthForm(false);
-                  history.push('/');
-                }}
-              />
-            ) : null
-          }
-        />
+        <Route path="/edit-info" render={() =>
+          showHealthForm ? (
+            <HealthDataForm
+              setUserData={data => {
+                setUserData(data);
+                setShowHealthForm(false);
+                history.push('/');
+              }}
+            />
+          ) : null
+        } />
         <Route path="/workout" render={() => <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />} />
         <Route path="/meals" render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />} />
         <Route path="/history" render={() => <WorkoutHistory onHistoryChange={refreshCalories} />} />
