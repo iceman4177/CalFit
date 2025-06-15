@@ -59,16 +59,16 @@ import { logPageView } from './analytics';
 
 const routeTips = {
   '/edit-info':     'Welcome to Slimcal.ai! First, enter your health info so everything can be personalized.',
-  '/workout':      'This is your Workout page: add exercises, calculate & log calories burned.',
-  '/meals':        'On the Meals page, search foods or enter calories manually to track intake.',
-  '/history':      'Here’s your History: review past workouts & meals at a glance.',
-  '/dashboard':    'Dashboard shows your total workouts & calories burned over time.',
-  '/achievements': 'Achievements page: hit milestones to unlock badges!',
-  '/calorie-log':  'Calorie Log gives you a detailed daily breakdown of intake vs. burn.',
-  '/summary':      'Summary page: quick overview of today’s net calories.',
-  '/recap':        'Meet your AI Coach: get a friendly recap of today’s workouts & meals!',
-  '/waitlist':     'Join our waitlist to get early access to upcoming features!',
-  '/preferences':  'Customize when you get meal reminders each day.'
+  '/workout':       'This is your Workout page: add exercises, calculate & log calories burned.',
+  '/meals':         'On the Meals page, search foods or enter calories manually to track intake.',
+  '/history':       'Here’s your History: review past workouts & meals at a glance.',
+  '/dashboard':     'Dashboard shows your total workouts & calories burned over time.',
+  '/achievements':  'Achievements page: hit milestones to unlock badges!',
+  '/calorie-log':   'Calorie Log gives you a detailed daily breakdown of intake vs. burn.',
+  '/summary':       'Summary page: quick overview of today’s net calories.',
+  '/recap':         'Meet your AI Coach: get a friendly recap of today’s workouts & meals!',
+  '/waitlist':      'Join our waitlist to get early access to upcoming features!',
+  '/preferences':   'Customize when you get meal reminders each day.'
 };
 
 function PageTracker() {
@@ -117,7 +117,6 @@ export default function App() {
   const [userData, setUserDataState] = useState(null);
   const [isPremium, setIsPremium] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [showHealthForm, setShowHealthForm] = useState(false);
   const [ambassadorOpen, setAmbassadorOpen] = useState(false);
   const [burnedCalories, setBurnedCalories] = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
@@ -137,7 +136,6 @@ export default function App() {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     setUserDataState(saved);
     setIsPremium(!!saved.isPremium);
-    setShowHealthForm(!saved.age);
     refreshCalories();
 
     if (!saved.age && location.pathname === '/') {
@@ -246,17 +244,14 @@ export default function App() {
       {navBar}
 
       <Switch>
-        <Route path="/edit-info" render={() =>
-          showHealthForm ? (
-            <HealthDataForm
-              setUserData={data => {
-                setUserData(data);
-                setShowHealthForm(false);
-                history.push('/');
-              }}
-            />
-          ) : null
-        } />
+        <Route path="/edit-info" render={() => (
+          <HealthDataForm
+            setUserData={data => {
+              setUserData(data);
+              history.push('/');
+            }}
+          />
+        )} />
         <Route path="/workout" render={() => <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />} />
         <Route path="/meals" render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />} />
         <Route path="/history" render={() => <WorkoutHistory onHistoryChange={refreshCalories} />} />
@@ -273,8 +268,8 @@ export default function App() {
       <UpgradeModal
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}
-        title="Start your 7‑Day Free Pro Trial"
-        description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
+        title="Start your 7-Day Free Pro Trial"
+        description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
       />
     </Container>
   );
