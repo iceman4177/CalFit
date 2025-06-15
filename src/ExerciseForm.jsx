@@ -28,7 +28,7 @@ export default function ExerciseForm({
 }) {
   // first-time tips
   const [EquipTip,    triggerEquipTip]    = useFirstTimeTip('tip_equipment',   'Choose your equipment.');
-  const [CalTip,      triggerCalTip]      = useFirstTimeTip('tip_cardioCal',   'Enter calories burned manually.');
+  const [CardioTip,   triggerCardioTip]   = useFirstTimeTip('tip_cardioCal',   'Enter calories burned manually.');
   const [MuscleTip,   triggerMuscleTip]   = useFirstTimeTip('tip_muscle',      'Pick a muscle group for strength work.');
   const [ExTip,       triggerExTip]       = useFirstTimeTip('tip_exercise',    'Then select a specific exercise.');
   const [WeightTip,   triggerWeightTip]   = useFirstTimeTip('tip_weightField', 'Enter the weight used (lbs).');
@@ -51,8 +51,11 @@ export default function ExerciseForm({
   const isCardio   = newExercise.exerciseType === 'cardio';
   const isStrength = newExercise.exerciseType && !isCardio;
 
+  // cardio machine options
+  const cardioTypes = ['Treadmill', 'Bike', 'Elliptical', 'Rowing', 'Stair Climber'];
+
   // option lists
-  const equipmentTypes = Array.from(new Set(['cardio', ...Object.keys(exerciseOptions)]));
+  const equipmentTypes = ['cardio', ...Object.keys(exerciseOptions)];
   const muscleGroups   = isStrength
     ? Object.keys(exerciseOptions[newExercise.exerciseType])
     : [];
@@ -60,7 +63,7 @@ export default function ExerciseForm({
     ? exerciseOptions[newExercise.exerciseType][newExercise.muscleGroup]
     : [];
 
-  // weight label/helpers preserved
+  // weight label/helpers
   function weightLabel() {
     if (newExercise.exerciseType === 'dumbbell') return 'Weight per Dumbbell (lbs)';
     if (newExercise.exerciseType === 'barbell')  return 'Total Bar Weight (lbs)';
@@ -88,7 +91,6 @@ export default function ExerciseForm({
     const eq = e.target.value;
     setNewExercise({
       exerciseType:   eq,
-      // for cardio we only care about manualCalories
       manualCalories: '',
       muscleGroup:    '',
       exerciseName:   '',
@@ -119,7 +121,7 @@ export default function ExerciseForm({
     };
     setNewExercise(prev => ({
       ...prev,
-      tempoMode:     val,
+      tempoMode:      val,
       ...(val !== 'custom' ? presets[val] : {})
     }));
   };
@@ -135,7 +137,7 @@ export default function ExerciseForm({
     <Box sx={{ maxWidth: 600, mx: 'auto', mt: 2 }}>
       {/* tips */}
       <EquipTip />
-      {isCardio   && <CalTip />}
+      {isCardio   && <CardioTip />}
       {isStrength && <MuscleTip />}
       {isStrength && <ExTip />}
       {isStrength && <WeightTip />}
@@ -175,16 +177,34 @@ export default function ExerciseForm({
 
       {/* Cardio: manual calories input */}
       {isCardio && (
-        <TextField
-          label="Calories Burned (kcal)"
-          type="number"
-          fullWidth
-          sx={{ mb: 3 }}
-          value={newExercise.manualCalories || ''}
-          onFocus={triggerCalTip}
-          onChange={handleChange('manualCalories')}
-          helperText="Enter calories burned manually"
-        />
+        <>
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel id="cardio-label">Machine</InputLabel>
+            <MuiSelect
+              labelId="cardio-label"
+              onOpen={() => { triggerCardioTip(); }}
+              onClose={() => {}}
+              value={newExercise.cardioType || ''}
+              label="Machine"
+              onChange={handleChange('cardioType')}
+            >
+              <MenuItem value=""><em>Select Machine</em></MenuItem>
+              {cardioTypes.map(c => (
+                <MenuItem key={c} value={c}>{c}</MenuItem>
+              ))}
+            </MuiSelect>
+          </FormControl>
+          <TextField
+            label="Calories Burned (kcal)"
+            type="number"
+            fullWidth
+            sx={{ mb: 3 }}
+            value={newExercise.manualCalories || ''}
+            onFocus={triggerCardioTip}
+            onChange={handleChange('manualCalories')}
+            helperText="Enter calories burned manually"
+          />
+        </>
       )}
 
       {/* Strength: muscle & exercise & weight/reps/sets */}
@@ -272,7 +292,7 @@ export default function ExerciseForm({
           {tempoMode === 'custom' && (
             <>
               <TextField
-                label="Concentric Time (s)"
+                label="Concentric Time per Rep (s)"
                 type="number"
                 fullWidth
                 sx={{ mb: 2 }}
@@ -281,7 +301,7 @@ export default function ExerciseForm({
                 onChange={handleChange('concentricTime')}
               />
               <TextField
-                label="Eccentric Time (s)"
+                label="Eccentric Time per Rep (s)"
                 type="number"
                 fullWidth
                 sx={{ mb: 3 }}
@@ -296,16 +316,15 @@ export default function ExerciseForm({
 
       {/* action buttons */}
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-        {/* only for strength: calculate via MET + work */}
         {isStrength && (
           <Button variant="contained" onClick={() => { triggerCalcTip(); onCalculate(); }}>
             Calculate Calories
           </Button>
         )}
-        <Button variant="contained" onClick={() => onAddExercise()}>
+        <Button variant="contained" onClick={() => { triggerAddTip(); onAddExercise(); }}>
           Add Exercise
         </Button>
-        <Button variant="outlined" onClick={() => onDoneWithExercises()}>
+        <Button variant="outlined" onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}>
           Done
         </Button>
       </Box>
@@ -315,5 +334,5 @@ export default function ExerciseForm({
         Calories: {currentCalories.toFixed(2)}
       </Typography>
     </Box>
-);
+  );
 }
