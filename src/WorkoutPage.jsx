@@ -34,9 +34,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
   const [cumulativeTotal, setCumulativeTotal] = useState(0);
 
-  // include tempo fields in state
+  // include manualCalories for cardio plus strength fields
   const [newExercise, setNewExercise] = useState({
     exerciseType:    '',
+    manualCalories:  '',
     muscleGroup:     '',
     exerciseName:    '',
     weight:          '',
@@ -52,7 +53,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
 
-  // Summary‑tip state
+  // Summary-help state
   const [showBackHelp,  setShowBackHelp]  = useState(false);
   const [showLogHelp,   setShowLogHelp]   = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
@@ -142,8 +143,43 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     return total;
   };
 
-  const handleCalculate   = () => calculateCalories();
+  // separate calculate handler
+  const handleCalculate = () => {
+    if (newExercise.exerciseType === 'cardio') {
+      const cal = parseFloat(newExercise.manualCalories);
+      if (!cal || cal <= 0) {
+        alert('Please enter valid calories for cardio.');
+        return;
+      }
+      setCurrentCalories(cal);
+    } else {
+      calculateCalories();
+    }
+  };
+
+  // ---- UPDATED handleAddExercise ----
   const handleAddExercise = () => {
+    // Cardio: manual calories only
+    if (newExercise.exerciseType === 'cardio') {
+      const cal = parseFloat(newExercise.manualCalories);
+      if (!cal || cal <= 0) {
+        alert('Please enter a valid calories amount for cardio.');
+        return;
+      }
+      setCumulativeExercises([
+        ...cumulativeExercises,
+        {
+          exerciseType: 'cardio',
+          exerciseName: 'Cardio',
+          calories:     cal
+        }
+      ]);
+      setNewExercise(prev => ({ ...prev, manualCalories: '' }));
+      setCurrentCalories(0);
+      return;
+    }
+
+    // Strength: existing validation & calculate
     if (!newExercise.exerciseName ||
         parseFloat(newExercise.weight) <= 0 ||
         parseInt(newExercise.reps, 10) <= 0
@@ -167,10 +203,18 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCurrentCalories(0);
   };
 
+  // ---- UPDATED handleDoneWithExercises ----
   const handleDoneWithExercises = () => {
-    if (newExercise.exerciseName &&
-        parseFloat(newExercise.weight) > 0 &&
-        parseInt(newExercise.reps, 10) > 0
+    // Add any pending cardio input
+    if (newExercise.exerciseType === 'cardio' &&
+        parseFloat(newExercise.manualCalories) > 0
+    ) {
+      handleAddExercise();
+    }
+    // Or any pending strength input
+    else if (newExercise.exerciseName &&
+             parseFloat(newExercise.weight) > 0 &&
+             parseInt(newExercise.reps, 10) > 0
     ) {
       handleAddExercise();
     }
@@ -187,11 +231,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       filtered.push({
         exerciseType:   'Sauna',
         exerciseName:   'Sauna Session',
-        weight:         '',
-        sets:           '',
-        reps:           '',
-        concentricTime: '',
-        eccentricTime:  '',
         calories:       saunaCals
       });
     }
@@ -220,7 +259,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       date:          new Date().toLocaleDateString('en-US'),
       totalCalories: total,
       exercises:     cumulativeExercises.map(ex => ({
-        name:     ex.exerciseName || ex.exerciseType,
+        name:     ex.exerciseName,
         sets:     ex.sets,
         reps:     ex.reps,
         calories: ex.calories
@@ -231,7 +270,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
     onWorkoutLogged(total);
 
-    // 🎉 update the user's daily streak
+    // update the user's daily streak
     updateStreak();
 
     history.push('/history');
@@ -267,7 +306,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             {ex.exerciseName}{' '}
             {ex.exerciseType === 'Sauna'
               ? `– ${ex.calories.toFixed(2)} cals`
-              : `– ${ex.sets}×${ex.reps} (${ex.calories.toFixed(2)} cals)`}{' '}
+              : `– ${ex.sets || ''}×${ex.reps || ''} (${ex.calories.toFixed(2)} cals)`}{' '}
             <Button
               size="small"
               color="error"
@@ -409,7 +448,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // ---- Step 2: Sauna ----
+  // ---- Step 2: Sauna ----
   if (currentStep === 2) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -435,7 +474,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     );
   }
 
-  // ---- Step 1: Exercise Form ----
+  // ---- Step 1: Exercise Form ----
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h2" align="center" color="primary" gutterBottom>

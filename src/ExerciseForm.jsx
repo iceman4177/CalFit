@@ -26,65 +26,46 @@ export default function ExerciseForm({
   onDoneWithExercises,
   exerciseOptions
 }) {
-  // 1) First‑time tips hooks
+  // first-time tips
   const [EquipTip,    triggerEquipTip]    = useFirstTimeTip('tip_equipment',   'Choose your equipment.');
-  const [MuscleTip,   triggerMuscleTip]   = useFirstTimeTip('tip_muscle',      'Next, pick a muscle group.');
-  const [ExTip,       triggerExTip]       = useFirstTimeTip('tip_exercise',    'Then select an exercise.');
+  const [CalTip,      triggerCalTip]      = useFirstTimeTip('tip_cardioCal',   'Enter calories burned manually.');
+  const [MuscleTip,   triggerMuscleTip]   = useFirstTimeTip('tip_muscle',      'Pick a muscle group for strength work.');
+  const [ExTip,       triggerExTip]       = useFirstTimeTip('tip_exercise',    'Then select a specific exercise.');
   const [WeightTip,   triggerWeightTip]   = useFirstTimeTip('tip_weightField', 'Enter the weight used (lbs).');
-  const [RepsTip,     triggerRepsTip]     = useFirstTimeTip('tip_repsField',   'Enter how many repetitions.');
+  const [RepsTip,     triggerRepsTip]     = useFirstTimeTip('tip_repsField',   'Enter how many reps.');
   const [SetsTip,     triggerSetsTip]     = useFirstTimeTip('tip_setsField',   'Enter number of sets.');
-  const [TempoTip,    triggerTempoTip]    = useFirstTimeTip(
-    'tip_tempoMode',
-    'Presets: Hypertrophy (1s+3s), Power (1s+1s), Slow (3s+3s); switch to Custom to override.'
-  );
-  const [ConcTip,     triggerConcTip]     = useFirstTimeTip('tip_concentric',  'Enter concentric time per rep (s).');
-  const [EccTip,      triggerEccTip]      = useFirstTimeTip('tip_eccentric',   'Enter eccentric time per rep (s).');
+  const [TempoTip,    triggerTempoTip]    = useFirstTimeTip('tip_tempoMode',   'Presets: Hypertrophy (1s+3s), Power (1s+1s), Slow (3s+3s).');
+  const [ConcTip,     triggerConcTip]     = useFirstTimeTip('tip_concentric',  'Time lifting per rep (s).');
+  const [EccTip,      triggerEccTip]      = useFirstTimeTip('tip_eccentric',   'Time lowering per rep (s).');
   const [CalcTip,     triggerCalcTip]     = useFirstTimeTip('tip_calcBtn',     'Calculate calories burned.');
-  const [AddTip,      triggerAddTip]      = useFirstTimeTip('tip_addBtn',      'Add this exercise to your session.');
+  const [AddTip,      triggerAddTip]      = useFirstTimeTip('tip_addBtn',      'Add this exercise.');
   const [DoneTip,     triggerDoneTip]     = useFirstTimeTip('tip_doneBtn',     'Finish and view summary.');
 
-  // 2) Dropdown open states (for tips)
-  const [equipOpen,    setEquipOpen]       = useState(false);
-  const [muscleOpen,   setMuscleOpen]      = useState(false);
-  const [exerciseOpen, setExerciseOpen]    = useState(false);
+  // local state
+  const [equipOpen,    setEquipOpen]    = useState(false);
+  const [muscleOpen,   setMuscleOpen]   = useState(false);
+  const [exerciseOpen, setExerciseOpen] = useState(false);
+  const [tempoMode,    setTempoMode]    = useState(newExercise.tempoMode || 'hypertrophy');
 
-  // 3) Tempo mode: 'hypertrophy' | 'power' | 'slow' | 'custom'
-  const [tempoMode,    setTempoMode]       = useState(newExercise.tempoMode || 'hypertrophy');
-  const handleTempoChange = (_e, val) => {
-    if (!val) return;
-    triggerTempoTip();
-    setTempoMode(val);
-    // propagate to parent state and auto‑fill if not custom
-    let defaults = {
-      hypertrophy: { concentricTime: '1', eccentricTime: '3' },
-      power:       { concentricTime: '1', eccentricTime: '1' },
-      slow:        { concentricTime: '3', eccentricTime: '3' }
-    };
-    setNewExercise(prev => ({
-      ...prev,
-      tempoMode: val,
-      ...(val !== 'custom' ? defaults[val] : {})
-    }));
-  };
+  // helper flags
+  const isCardio   = newExercise.exerciseType === 'cardio';
+  const isStrength = newExercise.exerciseType && !isCardio;
 
-  // 4) Derived option lists
-  const equipmentTypes = Object.keys(exerciseOptions);
-  const muscleGroups   = Array.from(
-    new Set(equipmentTypes.flatMap(e => Object.keys(exerciseOptions[e])))
-  );
-  const exercises      = newExercise.exerciseType && newExercise.muscleGroup
-    ? exerciseOptions[newExercise.exerciseType][newExercise.muscleGroup] || []
+  // option lists
+  const equipmentTypes = Array.from(new Set(['cardio', ...Object.keys(exerciseOptions)]));
+  const muscleGroups   = isStrength
+    ? Object.keys(exerciseOptions[newExercise.exerciseType])
+    : [];
+  const exercises      = isStrength && newExercise.muscleGroup
+    ? exerciseOptions[newExercise.exerciseType][newExercise.muscleGroup]
     : [];
 
-  // 5) Weight label/helpers
-  const isTwoSideMachine =
-    newExercise.exerciseType === 'machine' &&
-    /press|leg press/i.test(newExercise.exerciseName || '');
+  // weight label/helpers preserved
   function weightLabel() {
     if (newExercise.exerciseType === 'dumbbell') return 'Weight per Dumbbell (lbs)';
     if (newExercise.exerciseType === 'barbell')  return 'Total Bar Weight (lbs)';
     if (newExercise.exerciseType === 'machine') {
-      return isTwoSideMachine
+      return /press|leg press/i.test(newExercise.exerciseName || '')
         ? 'Stack Weight per Side (lbs)'
         : 'Stack Weight (lbs)';
     }
@@ -96,17 +77,54 @@ export default function ExerciseForm({
     if (newExercise.exerciseType === 'barbell')
       return 'Enter total weight on the bar (plates + bar).';
     if (newExercise.exerciseType === 'machine')
-      return isTwoSideMachine
+      return /press|leg press/i.test(newExercise.exerciseName || '')
         ? 'Enter weight on one side of the stack.'
         : 'Enter total stack weight.';
     return '';
   }
 
-  // 6) Generic change handler
+  // clear dependent fields on equipment change
+  const handleEquipChange = e => {
+    const eq = e.target.value;
+    setNewExercise({
+      exerciseType:   eq,
+      // for cardio we only care about manualCalories
+      manualCalories: '',
+      muscleGroup:    '',
+      exerciseName:   '',
+      weight:         '',
+      reps:           '',
+      sets:           '1',
+      tempoMode:      'hypertrophy',
+      concentricTime: '',
+      eccentricTime:  ''
+    });
+    triggerEquipTip();
+    setEquipOpen(false);
+  };
+
+  // generic change handler
   const handleChange = field => e =>
     setNewExercise(prev => ({ ...prev, [field]: e.target.value }));
 
-  // 7) Keep local tempoMode synced if parent resets (e.g. after Add)
+  // tempo presets
+  const handleTempoChange = (_e, val) => {
+    if (!val) return;
+    triggerTempoTip();
+    setTempoMode(val);
+    const presets = {
+      hypertrophy: { concentricTime: '1', eccentricTime: '3' },
+      power:       { concentricTime: '1', eccentricTime: '1' },
+      slow:        { concentricTime: '3', eccentricTime: '3' }
+    };
+    setNewExercise(prev => ({
+      ...prev,
+      tempoMode:     val,
+      ...(val !== 'custom' ? presets[val] : {})
+    }));
+  };
+
+  // sync local tempoMode
   useEffect(() => {
     if (newExercise.tempoMode && newExercise.tempoMode !== tempoMode) {
       setTempoMode(newExercise.tempoMode);
@@ -115,16 +133,17 @@ export default function ExerciseForm({
 
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto', mt: 2 }}>
-      {/* First‑time tips */}
+      {/* tips */}
       <EquipTip />
-      <MuscleTip />
-      <ExTip />
-      <WeightTip />
-      <RepsTip />
-      <SetsTip />
-      <TempoTip />
-      <ConcTip />
-      <EccTip />
+      {isCardio   && <CalTip />}
+      {isStrength && <MuscleTip />}
+      {isStrength && <ExTip />}
+      {isStrength && <WeightTip />}
+      {isStrength && <RepsTip />}
+      {isStrength && <SetsTip />}
+      {isStrength && <TempoTip />}
+      {isStrength && <ConcTip />}
+      {isStrength && <EccTip />}
       <CalcTip />
       <AddTip />
       <DoneTip />
@@ -139,159 +158,162 @@ export default function ExerciseForm({
         <MuiSelect
           labelId="equip-label"
           open={equipOpen}
-          onOpen={() => triggerEquipTip(() => setEquipOpen(true))}
+          onOpen={() => { triggerEquipTip(); setEquipOpen(true); }}
           onClose={() => setEquipOpen(false)}
           value={newExercise.exerciseType || ''}
           label="Equipment Type"
-          onChange={handleChange('exerciseType')}
+          onChange={handleEquipChange}
         >
           <MenuItem value=""><em>Select Equipment</em></MenuItem>
-          {equipmentTypes.map(e => (
-            <MenuItem key={e} value={e}>
-              {e.charAt(0).toUpperCase() + e.slice(1)}
+          {equipmentTypes.map(type => (
+            <MenuItem key={type} value={type}>
+              {type.charAt(0).toUpperCase() + type.slice(1)}
             </MenuItem>
           ))}
         </MuiSelect>
       </FormControl>
 
-      {/* Muscle Group */}
-      {newExercise.exerciseType && (
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel id="muscle-label">Muscle Group</InputLabel>
-          <MuiSelect
-            labelId="muscle-label"
-            open={muscleOpen}
-            onOpen={() => triggerMuscleTip(() => setMuscleOpen(true))}
-            onClose={() => setMuscleOpen(false)}
-            value={newExercise.muscleGroup || ''}
-            label="Muscle Group"
-            onChange={handleChange('muscleGroup')}
-          >
-            <MenuItem value=""><em>Select Muscle</em></MenuItem>
-            {muscleGroups.map(m => (
-              <MenuItem key={m} value={m}>{m}</MenuItem>
-            ))}
-          </MuiSelect>
-        </FormControl>
+      {/* Cardio: manual calories input */}
+      {isCardio && (
+        <TextField
+          label="Calories Burned (kcal)"
+          type="number"
+          fullWidth
+          sx={{ mb: 3 }}
+          value={newExercise.manualCalories || ''}
+          onFocus={triggerCalTip}
+          onChange={handleChange('manualCalories')}
+          helperText="Enter calories burned manually"
+        />
       )}
 
-      {/* Exercise */}
-      {newExercise.exerciseType && newExercise.muscleGroup && (
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel id="exercise-label">Exercise</InputLabel>
-          <MuiSelect
-            labelId="exercise-label"
-            open={exerciseOpen}
-            onOpen={() => triggerExTip(() => setExerciseOpen(true))}
-            onClose={() => setExerciseOpen(false)}
-            value={newExercise.exerciseName || ''}
-            label="Exercise"
-            onChange={handleChange('exerciseName')}
-          >
-            <MenuItem value=""><em>Select Exercise</em></MenuItem>
-            {exercises.map(x => (
-              <MenuItem key={x} value={x}>{x}</MenuItem>
-            ))}
-          </MuiSelect>
-        </FormControl>
-      )}
-
-      {/* Weight */}
-      <TextField
-        label={weightLabel()}
-        type="number"
-        fullWidth
-        sx={{ mb: 2 }}
-        value={newExercise.weight || ''}
-        onFocus={() => triggerWeightTip()}
-        onChange={handleChange('weight')}
-        helperText={weightHelper()}
-      />
-
-      {/* Reps */}
-      <TextField
-        label="Reps"
-        type="number"
-        fullWidth
-        sx={{ mb: 2 }}
-        value={newExercise.reps || ''}
-        onFocus={() => triggerRepsTip()}
-        onChange={handleChange('reps')}
-      />
-
-      {/* Sets */}
-      <TextField
-        label="Sets"
-        type="number"
-        fullWidth
-        sx={{ mb: 3 }}
-        value={newExercise.sets || ''}
-        onFocus={() => triggerSetsTip()}
-        onChange={handleChange('sets')}
-      />
-
-      {/* Tempo Presets */}
-      <Box sx={{ mb: 2, textAlign: 'center' }}>
-        <ToggleButtonGroup
-          value={tempoMode}
-          exclusive
-          onChange={handleTempoChange}
-        >
-          <ToggleButton value="hypertrophy">Hypertrophy</ToggleButton>
-          <ToggleButton value="power">Power</ToggleButton>
-          <ToggleButton value="slow">Slow</ToggleButton>
-          <ToggleButton value="custom">Custom</ToggleButton>
-        </ToggleButtonGroup>
-        <Tooltip title="Hypertrophy: 1s concentric + 3s eccentric (Compendium 2011). Power: 1s+1s. Slow: 3s+3s.">
-          <IconButton size="small">
-            <InfoOutlinedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-
-      {/* Custom Tempo Inputs */}
-      {tempoMode === 'custom' && (
+      {/* Strength: muscle & exercise & weight/reps/sets */}
+      {isStrength && (
         <>
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel id="muscle-label">Muscle Group</InputLabel>
+            <MuiSelect
+              labelId="muscle-label"
+              open={muscleOpen}
+              onOpen={() => { triggerMuscleTip(); setMuscleOpen(true); }}
+              onClose={() => setMuscleOpen(false)}
+              value={newExercise.muscleGroup || ''}
+              label="Muscle Group"
+              onChange={handleChange('muscleGroup')}
+            >
+              <MenuItem value=""><em>Select Muscle</em></MenuItem>
+              {muscleGroups.map(m => (
+                <MenuItem key={m} value={m}>{m}</MenuItem>
+              ))}
+            </MuiSelect>
+          </FormControl>
+
+          {newExercise.muscleGroup && (
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="exercise-label">Exercise</InputLabel>
+              <MuiSelect
+                labelId="exercise-label"
+                open={exerciseOpen}
+                onOpen={() => { triggerExTip(); setExerciseOpen(true); }}
+                onClose={() => setExerciseOpen(false)}
+                value={newExercise.exerciseName || ''}
+                label="Exercise"
+                onChange={handleChange('exerciseName')}
+              >
+                <MenuItem value=""><em>Select Exercise</em></MenuItem>
+                {exercises.map(x => (
+                  <MenuItem key={x} value={x}>{x}</MenuItem>
+                ))}
+              </MuiSelect>
+            </FormControl>
+          )}
+
           <TextField
-            label="Concentric Time per Rep (s)"
+            label={weightLabel()}
+            helperText={weightHelper()}
             type="number"
             fullWidth
             sx={{ mb: 2 }}
-            value={newExercise.concentricTime || ''}
-            onFocus={() => triggerConcTip()}
-            onChange={handleChange('concentricTime')}
-            helperText="Time lifting the weight"
+            value={newExercise.weight || ''}
+            onFocus={triggerWeightTip}
+            onChange={handleChange('weight')}
           />
           <TextField
-            label="Eccentric Time per Rep (s)"
+            label="Reps"
+            type="number"
+            fullWidth
+            sx={{ mb: 2 }}
+            value={newExercise.reps || ''}
+            onFocus={triggerRepsTip}
+            onChange={handleChange('reps')}
+          />
+          <TextField
+            label="Sets"
             type="number"
             fullWidth
             sx={{ mb: 3 }}
-            value={newExercise.eccentricTime || ''}
-            onFocus={() => triggerEccTip()}
-            onChange={handleChange('eccentricTime')}
-            helperText="Time lowering the weight"
+            value={newExercise.sets || ''}
+            onFocus={triggerSetsTip}
+            onChange={handleChange('sets')}
           />
+
+          <Box sx={{ mb: 2, textAlign: 'center' }}>
+            <ToggleButtonGroup value={tempoMode} exclusive onChange={handleTempoChange}>
+              <ToggleButton value="hypertrophy">Hypertrophy</ToggleButton>
+              <ToggleButton value="power">Power</ToggleButton>
+              <ToggleButton value="slow">Slow</ToggleButton>
+              <ToggleButton value="custom">Custom</ToggleButton>
+            </ToggleButtonGroup>
+            <Tooltip title="Hypertrophy: 1s+3s; Power: 1s+1s; Slow: 3s+3s">
+              <IconButton size="small"><InfoOutlinedIcon fontSize="small" /></IconButton>
+            </Tooltip>
+          </Box>
+
+          {tempoMode === 'custom' && (
+            <>
+              <TextField
+                label="Concentric Time (s)"
+                type="number"
+                fullWidth
+                sx={{ mb: 2 }}
+                value={newExercise.concentricTime || ''}
+                onFocus={triggerConcTip}
+                onChange={handleChange('concentricTime')}
+              />
+              <TextField
+                label="Eccentric Time (s)"
+                type="number"
+                fullWidth
+                sx={{ mb: 3 }}
+                value={newExercise.eccentricTime || ''}
+                onFocus={triggerEccTip}
+                onChange={handleChange('eccentricTime')}
+              />
+            </>
+          )}
         </>
       )}
 
-      {/* Action Buttons */}
+      {/* action buttons */}
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-        <Button variant="contained" onClick={() => { triggerCalcTip(); onCalculate(); }}>
-          Calculate Calories
-        </Button>
-        <Button variant="contained" onClick={() => { triggerAddTip(); onAddExercise(); }}>
+        {/* only for strength: calculate via MET + work */}
+        {isStrength && (
+          <Button variant="contained" onClick={() => { triggerCalcTip(); onCalculate(); }}>
+            Calculate Calories
+          </Button>
+        )}
+        <Button variant="contained" onClick={() => onAddExercise()}>
           Add Exercise
         </Button>
-        <Button variant="outlined" onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}>
+        <Button variant="outlined" onClick={() => onDoneWithExercises()}>
           Done
         </Button>
       </Box>
 
-      {/* Display current calories */}
+      {/* current calories */}
       <Typography variant="h6" align="center">
         Calories: {currentCalories.toFixed(2)}
       </Typography>
     </Box>
-  );
+);
 }
