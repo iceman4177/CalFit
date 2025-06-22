@@ -1,92 +1,141 @@
-// CalorieHistory.jsx
+// src/CalorieHistory.jsx
 import React, { useEffect, useState } from 'react';
 import {
   Container,
   Typography,
-  Paper,
+  Button,
   Table,
   TableHead,
   TableRow,
   TableCell,
-  TableBody
+  TableBody,
+  Box
 } from '@mui/material';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable'; // import the standalone function
 
-function CalorieHistory() {
-  const [dailyData, setDailyData] = useState([]);
+function exportToCsv(rows, filename) {
+  const header = Object.keys(rows[0]).join(',');
+  const csv = [
+    header,
+    ...rows.map(r => Object.values(r).join(','))
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+export default function CalorieHistory() {
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-
-    // Map dates to { consumed, burned }
+    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
     const map = {};
 
-    // Accumulate burned calories
-    workouts.forEach(({ date, totalCalories }) => {
-      if (!map[date]) map[date] = { consumed: 0, burned: 0 };
-      map[date].burned += totalCalories;
+    workouts.forEach(w => {
+      const key = w.date;
+      map[key] = map[key] || { date: key, burned: 0, consumed: 0 };
+      map[key].burned += w.totalCalories;
+    });
+    meals.forEach(m => {
+      const key = m.date;
+      map[key] = map[key] || { date: key, burned: 0, consumed: 0 };
+      map[key].consumed += m.meals.reduce((sum, e) => sum + e.calories, 0);
     });
 
-    // Accumulate consumed calories
-    meals.forEach(({ date, meals }) => {
-      if (!map[date]) map[date] = { consumed: 0, burned: 0 };
-      map[date].consumed += meals.reduce((sum, m) => sum + m.calories, 0);
-    });
+    const combined = Object.values(map)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .map(r => ({
+        Date:     r.date,
+        Burned:   r.burned.toFixed(2),
+        Consumed: r.consumed.toFixed(2),
+        Net:      (r.consumed - r.burned).toFixed(2)
+      }));
 
-    // Convert to array and sort descending by date
-    const arr = Object.entries(map)
-      .map(([date, { consumed, burned }]) => ({
-        date,
-        consumed,
-        burned,
-        net: consumed - burned
-      }))
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    setDailyData(arr);
+    setHistory(combined);
   }, []);
 
+  const handleExportCsv = () => {
+    if (!history.length) return;
+    exportToCsv(history, 'slimcal_history.csv');
+  };
+
+  const handleExportPdf = () => {
+    if (!history.length) return;
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('Slimcal.ai Calorie History', 14, 22);
+    doc.setFontSize(11);
+    const totalDays = history.length;
+    const avgNet = (
+      history.reduce((sum, r) => sum + parseFloat(r.Net), 0) /
+      totalDays
+    ).toFixed(2);
+    doc.text(`Days: ${totalDays}  |  Avg Net: ${avgNet} kcal`, 14, 30);
+
+    // use the standalone autoTable function
+    autoTable(doc, {
+      startY: 36,
+      head: [['Date', 'Burned', 'Consumed', 'Net']],
+      body: history.map(r => [r.Date, r.Burned, r.Consumed, r.Net]),
+      styles: { fontSize: 10 }
+    });
+
+    doc.save('slimcal_history.pdf');
+  };
+
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="sm" sx={{ py: 4 }}>
       <Typography variant="h4" align="center" gutterBottom>
         Calorie History
       </Typography>
+      <Box sx={{ mb: 2, display: 'flex', gap: 2, justifyContent: 'center' }}>
+        <Button
+          variant="outlined"
+          onClick={handleExportCsv}
+          disabled={!history.length}
+        >
+          Export CSV
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleExportPdf}
+          disabled={!history.length}
+        >
+          Download PDF
+        </Button>
+      </Box>
 
-      {dailyData.length === 0 ? (
-        <Typography align="center" color="textSecondary">
-          No data yet. Log workouts or meals to see history.
-        </Typography>
+      {history.length === 0 ? (
+        <Typography>No history data to show.</Typography>
       ) : (
-        <Paper elevation={3} sx={{ overflowX: 'auto' }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell align="right">Consumed</TableCell>
-                <TableCell align="right">Burned</TableCell>
-                <TableCell align="right">Net</TableCell>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Date</TableCell>
+              <TableCell align="right">Burned</TableCell>
+              <TableCell align="right">Consumed</TableCell>
+              <TableCell align="right">Net</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {history.map((row, idx) => (
+              <TableRow key={idx}>
+                <TableCell>{row.Date}</TableCell>
+                <TableCell align="right">{row.Burned}</TableCell>
+                <TableCell align="right">{row.Consumed}</TableCell>
+                <TableCell align="right">{row.Net}</TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {dailyData.map(({ date, consumed, burned, net }) => (
-                <TableRow key={date}>
-                  <TableCell>{date}</TableCell>
-                  <TableCell align="right">{consumed.toFixed(2)}</TableCell>
-                  <TableCell align="right">{burned.toFixed(2)}</TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{ color: net > 0 ? 'green' : net < 0 ? 'red' : 'gray' }}
-                  >
-                    {net.toFixed(2)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Container>
   );
 }
-
-export default CalorieHistory;

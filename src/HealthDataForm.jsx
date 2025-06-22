@@ -16,7 +16,7 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
 
-  // First‑time tips
+  // First-time tips
   const [AgeTip, triggerAgeTip] = useFirstTimeTip(
     'tip_age',
     'Enter your age to personalize calculations.'
@@ -75,11 +75,14 @@ export default function HealthDataForm({ setUserData }) {
       dailyGoal: Number(dailyGoal)
     };
 
-    // Initialize streak fields
+    // Initialize streak and new preference flags
     const enriched = {
       ...baseData,
       lastLogDate: '',
-      currentStreak: 0
+      currentStreak: 0,
+      // NEW FLAGS — default to true
+      showFirstTimeTips: true,
+      showMealReminders: true
     };
 
     localStorage.setItem('userData', JSON.stringify(enriched));

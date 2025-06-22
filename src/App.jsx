@@ -83,6 +83,7 @@ export default function App() {
   const history = useHistory();
   const location = useLocation();
 
+  // always schedule reminder
   useDailyNotification({
     hour: 19,
     minute: 0,
@@ -90,41 +91,43 @@ export default function App() {
     body: '⏰ Don’t forget to log today’s workout & meals!'
   });
 
+  // variable rewards & in-app prompts still for everyone
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
   const mealsCount = JSON.parse(localStorage.getItem('mealHistory') || '[]')
     .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
   useMealReminders();
-
   const missedMeals = useInAppMealPrompt() || [];
   const [promptOpen, setPromptOpen] = useState(false);
 
+  // in-app missed-meals
   useEffect(() => {
     const todayKey = new Date().toLocaleDateString('en-US');
-    const alreadyPrompted = localStorage.getItem('missedMealsPrompted') === todayKey;
-    if (!alreadyPrompted && missedMeals.length > 0 && location.pathname !== '/meals') {
+    if (missedMeals.length > 0
+        && location.pathname !== '/meals'
+        && localStorage.getItem('missedMealsPrompted') !== todayKey
+    ) {
       localStorage.setItem('missedMealsPrompted', todayKey);
       setPromptOpen(true);
     }
   }, [missedMeals, location.pathname]);
-
   const handleClosePrompt = () => setPromptOpen(false);
-  const handleGoToMeals = () => {
-    setPromptOpen(false);
-    history.push({ pathname: '/meals', state: { mealToLog: missedMeals[0] } });
-  };
+  const handleGoToMeals    = () => { setPromptOpen(false); history.push('/meals'); };
 
+  // user + premium state
   const [userData, setUserDataState] = useState(null);
-  const [isPremium, setIsPremium] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [ambassadorOpen, setAmbassadorOpen] = useState(false);
-  const [burnedCalories, setBurnedCalories] = useState(0);
+  const [isPremium, setIsPremium]    = useState(false);
+  const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
+  const [upgradeOpen, setUpgradeOpen]           = useState(false);
+  const [ambassadorOpen, setAmbassadorOpen]     = useState(false);
 
+  // nav “More” menu
   const [moreAnchor, setMoreAnchor] = useState(null);
-  const openMore = e => setMoreAnchor(e.currentTarget);
+  const openMore  = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
 
+  // persist userData
   const setUserData = data => {
     const prev = JSON.parse(localStorage.getItem('userData') || '{}');
     const next = { ...prev, ...data, isPremium };
@@ -132,6 +135,7 @@ export default function App() {
     setUserDataState(next);
   };
 
+  // on-mount load & streak logic
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     setUserDataState(saved);
@@ -139,39 +143,38 @@ export default function App() {
     refreshCalories();
 
     if (!saved.age && location.pathname === '/') {
-      history.push('/edit-info');
+      history.replace('/edit-info');
     }
 
     const streak = parseInt(localStorage.getItem('streakCount') || '0', 10);
-    const hasSeenAmbassador = localStorage.getItem('hasSeenAmbassadorInvite') === 'true';
-    if (streak >= 30 && !hasSeenAmbassador) {
+    if (streak >= 30 && localStorage.getItem('hasSeenAmbassadorInvite') !== 'true') {
       setAmbassadorOpen(true);
       localStorage.setItem('hasSeenAmbassadorInvite', 'true');
     }
   }, []);
 
-  const refreshCalories = () => {
-    const today = new Date().toLocaleDateString('en-US');
+  // recalc totals
+  function refreshCalories() {
+    const today    = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
     const todayMeals = meals.find(m => m.date === today);
 
     setBurnedCalories(
-      workouts.filter(w => w.date === today).reduce((sum, w) => sum + w.totalCalories, 0)
+      workouts.filter(w => w.date === today)
+              .reduce((sum, w) => sum + w.totalCalories, 0)
     );
     setConsumedCalories(
       todayMeals ? todayMeals.meals.reduce((sum, m) => sum + m.calories, 0) : 0
     );
-  };
+  }
 
-  const handleUpdateBurned = refreshCalories;
-  const handleUpdateConsumed = refreshCalories;
-
+  // page-tip on first view only
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
     message,
-    { auto: Boolean(message) }
+    { auto: Boolean(message) }  // no premium gating
   );
 
   const navBar = (
@@ -244,16 +247,16 @@ export default function App() {
       {navBar}
 
       <Switch>
-        <Route path="/edit-info" render={() => (
+        <Route path="/edit-info" render={() =>
           <HealthDataForm
             setUserData={data => {
               setUserData(data);
               history.push('/');
             }}
           />
-        )} />
-        <Route path="/workout" render={() => <WorkoutPage userData={userData} onWorkoutLogged={handleUpdateBurned} />} />
-        <Route path="/meals" render={() => <MealTracker onMealUpdate={handleUpdateConsumed} />} />
+        }/>
+        <Route path="/workout" render={() => <WorkoutPage userData={userData} onWorkoutLogged={refreshCalories} />} />
+        <Route path="/meals"   render={() => <MealTracker onMealUpdate={refreshCalories} />} />
         <Route path="/history" render={() => <WorkoutHistory onHistoryChange={refreshCalories} />} />
         <Route path="/dashboard" component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
