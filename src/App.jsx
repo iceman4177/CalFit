@@ -80,20 +80,33 @@ function PageTracker() {
 }
 
 export default function App() {
-  const history = useHistory();
+  const history  = useHistory();
   const location = useLocation();
+
+  // 1) If they just returned from Stripe checkout with subscribed=1, flag premium
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('subscribed') === '1') {
+      const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+      const next = { ...prev, isPremium: true };
+      localStorage.setItem('userData', JSON.stringify(next));
+      setIsPremium(true);
+      // remove it so it doesn’t trigger again
+      window.history.replaceState({}, '', location.pathname);
+    }
+  }, [location.search]);
 
   // always schedule reminder
   useDailyNotification({
-    hour: 19,
+    hour:   19,
     minute: 0,
-    title: 'Slimcal.ai Reminder',
-    body: '⏰ Don’t forget to log today’s workout & meals!'
+    title:  'Slimcal.ai Reminder',
+    body:   '⏰ Don’t forget to log today’s workout & meals!'
   });
 
   // variable rewards & in-app prompts still for everyone
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
-  const mealsCount = JSON.parse(localStorage.getItem('mealHistory') || '[]')
+  const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')   || '[]')
     .reduce((sum, entry) => sum + (entry.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
   useMealReminders();
@@ -104,23 +117,23 @@ export default function App() {
   useEffect(() => {
     const todayKey = new Date().toLocaleDateString('en-US');
     if (missedMeals.length > 0
-        && location.pathname !== '/meals'
-        && localStorage.getItem('missedMealsPrompted') !== todayKey
+      && location.pathname !== '/meals'
+      && localStorage.getItem('missedMealsPrompted') !== todayKey
     ) {
       localStorage.setItem('missedMealsPrompted', todayKey);
       setPromptOpen(true);
     }
   }, [missedMeals, location.pathname]);
   const handleClosePrompt = () => setPromptOpen(false);
-  const handleGoToMeals    = () => { setPromptOpen(false); history.push('/meals'); };
+  const handleGoToMeals  = () => { setPromptOpen(false); history.push('/meals'); };
 
   // user + premium state
-  const [userData, setUserDataState] = useState(null);
-  const [isPremium, setIsPremium]    = useState(false);
-  const [burnedCalories, setBurnedCalories]     = useState(0);
+  const [userData,         setUserDataState]    = useState(null);
+  const [isPremium,        setIsPremium]        = useState(false);
+  const [burnedCalories,   setBurnedCalories]   = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
-  const [upgradeOpen, setUpgradeOpen]           = useState(false);
-  const [ambassadorOpen, setAmbassadorOpen]     = useState(false);
+  const [upgradeOpen,      setUpgradeOpen]      = useState(false);
+  const [ambassadorOpen,   setAmbassadorOpen]   = useState(false);
 
   // nav “More” menu
   const [moreAnchor, setMoreAnchor] = useState(null);
@@ -147,7 +160,7 @@ export default function App() {
     }
 
     const streak = parseInt(localStorage.getItem('streakCount') || '0', 10);
-    if (streak >= 30 && localStorage.getItem('hasSeenAmbassadorInvite') !== 'true') {
+    if (streak >= 30 && !localStorage.getItem('hasSeenAmbassadorInvite')) {
       setAmbassadorOpen(true);
       localStorage.setItem('hasSeenAmbassadorInvite', 'true');
     }
@@ -155,9 +168,9 @@ export default function App() {
 
   // recalc totals
   function refreshCalories() {
-    const today    = new Date().toLocaleDateString('en-US');
-    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+    const today     = new Date().toLocaleDateString('en-US');
+    const workouts  = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const meals     = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
     const todayMeals = meals.find(m => m.date === today);
 
     setBurnedCalories(
@@ -174,7 +187,7 @@ export default function App() {
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
     message,
-    { auto: Boolean(message) }  // no premium gating
+    { auto: Boolean(message) }
   );
 
   const navBar = (
@@ -258,14 +271,14 @@ export default function App() {
         <Route path="/workout" render={() => <WorkoutPage userData={userData} onWorkoutLogged={refreshCalories} />} />
         <Route path="/meals"   render={() => <MealTracker onMealUpdate={refreshCalories} />} />
         <Route path="/history" render={() => <WorkoutHistory onHistoryChange={refreshCalories} />} />
-        <Route path="/dashboard" component={ProgressDashboard} />
+        <Route path="/dashboard"    component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
-        <Route path="/calorie-log" component={CalorieHistory} />
-        <Route path="/summary" render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
-        <Route path="/recap" render={() => <DailyRecapCoach userData={{ ...userData, isPremium }} />} />
-        <Route path="/waitlist" component={WaitlistSignup} />
-        <Route path="/preferences" component={AlertPreferences} />
-        <Route exact path="/" render={() => null} />
+        <Route path="/calorie-log"  component={CalorieHistory} />
+        <Route path="/summary"      render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
+        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium }} />} />
+        <Route path="/waitlist"     component={WaitlistSignup} />
+        <Route path="/preferences"  component={AlertPreferences} />
+        <Route exact path="/"       render={() => null} />
       </Switch>
 
       <UpgradeModal

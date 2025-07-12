@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 
 /**
- * Hook for one‑off tip dialogs, with optional post‑close callback.
+ * Hook for one-off tip dialogs, with optional post-close callback.
  *
  * @param {string} storageKey – localStorage key to mark tip as seen.
  * @param {string} message    – text to show in the tip.
@@ -25,7 +25,7 @@ export default function useFirstTimeTip(
   const [open, setOpen] = useState(false);
   const callbackRef = useRef(null);
 
-  // Auto‑show on mount if requested
+  // Auto-show on mount if requested
   useEffect(() => {
     if (auto && message && !localStorage.getItem(storageKey)) {
       setOpen(true);

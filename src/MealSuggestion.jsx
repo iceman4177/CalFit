@@ -1,112 +1,114 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Card, CardContent, CardActions,
-  Typography, Button, Box, Chip, CircularProgress
+  Card,
+  CardContent,
+  CardActions,
+  Typography,
+  Button,
+  Box,
+  Chip,
+  CircularProgress
 } from '@mui/material';
-import { UserDataContext } from './UserDataContext';
+import { useUserData } from './UserDataContext'; // <- updated import
 
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
-  const { dailyGoal, goalType, recentMeals = [] } = useContext(UserDataContext);
+  const { dailyGoal, goalType, recentMeals } = useUserData();
 
-  const [meal,     setMeal]    = useState(null);
-  const [loading,  setLoading] = useState(false);
-  const [error,    setError]   = useState(null);
-  const [tries,    setTries]   = useState(0);
+  const [suggestion, setSuggestion] = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
 
+  // decide meal period
   const hour   = new Date().getHours();
-  const period = hour < 10
-    ? 'Breakfast'
-    : hour < 14
-      ? 'Lunch'
-      : hour < 17
-        ? 'Snack'
-        : 'Dinner';
+  const period = hour < 10 ? 'Breakfast'
+               : hour < 14 ? 'Lunch'
+               : hour < 17 ? 'Snack'
+               : 'Dinner';
 
-  /** Fetch from our API (with up to 2 retries) */
-  const fetchMeal = async () => {
-    setLoading(true);
-    setError(null);
-    setTries(t => t + 1);
-
-    try {
-      const recent = recentMeals.slice(-3).join(',');
-      const qs = new URLSearchParams({
-        period,
-        goalType,
-        dailyGoal:   String(dailyGoal),
-        consumed:    String(consumedCalories),
-        recentMeals: recent
-      });
-      const resp = await fetch(`/api/suggestMeal?${qs}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-      const data = await resp.json();
-      if (typeof data.calories !== 'number' || data.calories < 100) {
-        throw new Error('BadCalories');
-      }
-
-      setMeal(data);
-    } catch (err) {
-      console.error('[MealSuggestion] fetch error', err);
-      if (tries < 2) {
-        return fetchMeal();
-      }
-      setError('Couldn’t fetch a valid suggestion. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Kick off our first fetch
+  // fetch from our API
   useEffect(() => {
-    fetchMeal();
-  }, []);  // ← Notice we don't return anything here!
+    async function fetchSuggestion() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const resp = await fetch(
+          `/api/suggestMeal?period=${period}&goalType=${goalType}` +
+          `&dailyGoal=${dailyGoal}&consumed=${consumedCalories}` +
+          `&recentMeals=${encodeURIComponent(recentMeals.join(','))}`
+        , { method: 'GET' });
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        if (data.name && data.calories != null) {
+          setSuggestion(data);
+        } else {
+          throw new Error('Invalid suggestion format');
+        }
+      } catch (err) {
+        console.error('[MealSuggestion] fetch error', err);
+        setError('Couldn’t fetch a suggestion. Try again.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchSuggestion();
+  }, [period, goalType, dailyGoal, consumedCalories, recentMeals]);
 
   if (loading) {
     return (
-      <Box sx={{ textAlign:'center', mt:2 }}>
+      <Box sx={{ textAlign: 'center', mt: 2 }}>
         <CircularProgress />
         <Typography>Thinking of a meal…</Typography>
       </Box>
     );
   }
+
   if (error) {
     return (
-      <Box sx={{ textAlign:'center', mt:2 }}>
+      <Box sx={{ textAlign: 'center', mt: 2 }}>
         <Typography color="error">{error}</Typography>
-        <Button onClick={fetchMeal}>RETRY</Button>
+        <Button onClick={() => setSuggestion(null)}>Retry</Button>
       </Box>
     );
   }
-  if (!meal) return null;
+
+  if (!suggestion) return null;
 
   return (
     <Box>
-      <Card sx={{ maxWidth:400, mx:'auto', mt:2, p:2 }}>
+      <Card sx={{ maxWidth: 400, mx: 'auto', mt: 2, p: 2 }}>
         <CardContent>
-          <Box sx={{ display:'flex', alignItems:'center', mb:1, gap:1 }}>
-            <Typography variant="h6">{meal.name}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+            <Typography variant="h6">{suggestion.name}</Typography>
             <Chip label={period} size="small" />
           </Box>
-          <Box sx={{ display:'flex', gap:2, mb:1, flexWrap:'wrap' }}>
-            <Typography>🔥 {meal.calories}</Typography>
-            {meal.macros && (
+          <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
+            <Typography>🔥 {suggestion.calories}</Typography>
+            {suggestion.macros && (
               <>
-                <Typography>🥩 {meal.macros.p}g</Typography>
-                <Typography>🌾 {meal.macros.c}g</Typography>
-                <Typography>🥑 {meal.macros.f}g</Typography>
+                <Typography>🥩 {suggestion.macros.p}g</Typography>
+                <Typography>🌾 {suggestion.macros.c}g</Typography>
+                <Typography>🥑 {suggestion.macros.f}g</Typography>
               </>
             )}
           </Box>
-          <Typography variant="body2" color="textSecondary">
-            ⏱ {meal.prepMinutes} min prep
-          </Typography>
+          {suggestion.prepMinutes != null && (
+            <Typography variant="body2" color="textSecondary">
+              ⏱ {suggestion.prepMinutes} min prep
+            </Typography>
+          )}
         </CardContent>
-        <CardActions sx={{ justifyContent:'space-between' }}>
-          <Button onClick={fetchMeal}>New Suggestion</Button>
+        <CardActions sx={{ justifyContent: 'space-between' }}>
+          <Button onClick={() => setSuggestion(null)}>New Suggestion</Button>
           <Button
             variant="contained"
-            onClick={() => onAddMeal({ name: meal.name, calories: meal.calories })}
+            onClick={() => onAddMeal({
+              name:       suggestion.name,
+              calories:   suggestion.calories
+            })}
           >
             Add &amp; Log
           </Button>

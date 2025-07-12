@@ -1,4 +1,3 @@
-// src/components/UpgradeModal.jsx
 import React, { useState } from "react";
 import {
   Dialog,
@@ -9,6 +8,7 @@ import {
   Typography
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
+import { useUserData } from "../UserDataContext.jsx"; // <-- use the new hook
 
 // initialize Stripe.js
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
@@ -17,16 +17,17 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
  * Props:
  *  - open: boolean
  *  - onClose: () => void
- *  - title?: string         // dialog title (defaults to “Upgrade to Slimcal.ai Pro”)
+ *  - title?: string         // dialog title
  *  - description?: string   // dialog body text
  */
 export default function UpgradeModal({
   open,
   onClose,
-  title = "Upgrade to Slimcal.ai Pro",
+  title = "Upgrade to Slimcal.ai Pro",
   description = "Unlock unlimited AI coaching, personalized plans, and more by going Pro!"
 }) {
-  const [loading, setLoading] = useState(false);
+  const { dailyGoal, goalType } = useUserData(); // example of using context if needed
+  const [loading, setLoading]   = useState(false);
   const [apiError, setApiError] = useState("");
 
   const handleCheckout = async () => {
@@ -52,7 +53,7 @@ export default function UpgradeModal({
       }
 
       const sessionId = data.sessionId;
-      const stripe = await stripePromise;
+      const stripe    = await stripePromise;
       await stripe.redirectToCheckout({ sessionId });
     } catch (err) {
       console.error("Checkout error:", err);
@@ -65,9 +66,7 @@ export default function UpgradeModal({
     <Dialog open={open} onClose={onClose}>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
-        <Typography sx={{ mb: 2 }}>
-          {description}
-        </Typography>
+        <Typography sx={{ mb: 2 }}>{description}</Typography>
         {apiError && (
           <Typography color="error" variant="body2">
             {apiError}

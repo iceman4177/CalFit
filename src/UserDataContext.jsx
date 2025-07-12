@@ -1,12 +1,13 @@
-// src/UserDataContext.jsx
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export const UserDataContext = createContext({
+// 1) Create context
+const UserDataContext = createContext({
   dailyGoal: 0,
   goalType: 'maintain',
   recentMeals: []
 });
 
+// 2) Provider
 export function UserDataProvider({ children }) {
   const [settings, setSettings] = useState({
     dailyGoal: 0,
@@ -28,4 +29,9 @@ export function UserDataProvider({ children }) {
       {children}
     </UserDataContext.Provider>
   );
+}
+
+// 3) Custom hook for easy access
+export function useUserData() {
+  return useContext(UserDataContext);
 }
