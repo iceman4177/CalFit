@@ -1,72 +1,45 @@
 // src/hooks/useInAppMealPrompt.js
 import { useEffect, useState } from 'react';
 
-// storage keys
-const PREFS_KEY    = 'mealReminderPrefs';   // either { name: time, … } or [ { name, time }, … ]
-const PROMPTED_KEY = 'mealPromptsToday';   // { [YYYY-MM-DD]: [mealName,…] }
-
-function todayKey() {
-  // ISO date, e.g. "2025-05-26"
-  return new Date().toISOString().slice(0, 10);
-}
-
-function loadPrefs() {
-  const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
-  if (!raw) return [];
-  if (Array.isArray(raw)) {
-    // new format
-    return raw.filter(p => p.name && p.time);
-  }
-  // legacy object format → array
-  return Object.entries(raw).map(([name, time]) => ({ name, time }));
-}
-
-function loadPromptedMap() {
-  return JSON.parse(localStorage.getItem(PROMPTED_KEY) || '{}');
-}
-
-function savePromptedMap(map) {
-  localStorage.setItem(PROMPTED_KEY, JSON.stringify(map));
-}
+// Default times if user hasn’t set preferences
+const DEFAULT_PREFS = {
+  breakfast: '08:00',
+  lunch:     '12:00',
+  dinner:    '18:00'
+};
 
 export default function useInAppMealPrompt() {
-  const [missed, setMissed] = useState([]);
+  const [missedMeals, setMissedMeals] = useState([]);
 
   useEffect(() => {
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const now       = new Date();
+    const todayKey  = now.toLocaleDateString('en-US');
+    const history   = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayRec  = history.find(m => m.date === todayKey);
+    const loggedSet = new Set((todayRec?.meals || []).map(m => m.type));
 
-    // 1) load & normalize prefs
-    const prefs = loadPrefs()
-      .map(p => {
-        const [h, m] = p.time.split(':').map(Number);
-        return { name: p.name, minutes: h * 60 + m };
-      })
-      .sort((a, b) => a.minutes - b.minutes);
-
-    if (prefs.length === 0) {
-      setMissed([]);
-      return;
+    // load prefs
+    const raw = JSON.parse(localStorage.getItem('mealReminderPrefs') || 'null');
+    let prefs = { ...DEFAULT_PREFS };
+    if (Array.isArray(raw)) {
+      raw.forEach(({ name, time }) => { if (name && time) prefs[name] = time; });
+    } else if (raw && typeof raw === 'object') {
+      prefs = { ...prefs, ...raw };
     }
 
-    // 2) load today's prompted meals
-    const promptedMap = loadPromptedMap();
-    const today       = todayKey();
-    const already     = promptedMap[today] || [];
+    const toRemind = [];
+    Object.entries(prefs).forEach(([meal, timeStr]) => {
+      const [h, m] = timeStr.split(':').map(n => parseInt(n, 10));
+      const mealTime = new Date(now);
+      mealTime.setHours(h, m, 0, 0);
 
-    // 3) find all meals whose time ≤ now and not yet prompted
-    const newly = prefs
-      .filter(p => p.minutes <= nowMinutes)
-      .map(p => p.name)
-      .filter(name => !already.includes(name));
+      if (mealTime <= now && !loggedSet.has(meal)) {
+        toRemind.push(meal);
+      }
+    });
 
-    if (newly.length) {
-      promptedMap[today] = [...already, ...newly];
-      savePromptedMap(promptedMap);
-    }
+    setMissedMeals(toRemind);
+  }, []);
 
-    setMissed(newly);
-  }, []); // run once on mount
-
-  return missed;
+  return missedMeals;
 }
