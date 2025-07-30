@@ -41,8 +41,14 @@ export default function HealthDataForm({ setUserData }) {
     'tip_dailyGoal',
     'Enter your daily calorie goal (kcal).'
   );
+  const [GoalTypeTip, triggerGoalTypeTip] = useFirstTimeTip(
+    'tip_goalType',
+    'Select your fitness goal (bulking, cutting, or maintenance).'
+  );
 
+  // Dropdown open states
   const [activityOpen, setActivityOpen] = useState(false);
+  const [goalTypeOpen, setGoalTypeOpen] = useState(false);
 
   // Form state
   const [age, setAge] = useState('');
@@ -51,6 +57,7 @@ export default function HealthDataForm({ setUserData }) {
   const [heightInches, setHeightInches] = useState('');
   const [activityLevel, setActivityLevel] = useState('');
   const [dailyGoal, setDailyGoal] = useState('');
+  const [goalType, setGoalType] = useState('');
 
   // Load any existing saved values
   useEffect(() => {
@@ -61,6 +68,7 @@ export default function HealthDataForm({ setUserData }) {
     if (saved.height?.inches) setHeightInches(saved.height.inches);
     if (saved.activityLevel) setActivityLevel(saved.activityLevel);
     if (saved.dailyGoal) setDailyGoal(saved.dailyGoal);
+    if (saved.goalType) setGoalType(saved.goalType);
   }, []);
 
   const handleSubmit = e => {
@@ -72,7 +80,8 @@ export default function HealthDataForm({ setUserData }) {
       weight,
       height: { feet: heightFeet, inches: heightInches },
       activityLevel,
-      dailyGoal: Number(dailyGoal)
+      dailyGoal: Number(dailyGoal),
+      goalType
     };
 
     // Initialize streak and new preference flags
@@ -93,16 +102,18 @@ export default function HealthDataForm({ setUserData }) {
 
   return (
     <Container maxWidth="sm">
+      {/* First-time tips */}
       <AgeTip />
       <WeightTip />
       <FeetTip />
       <InchesTip />
       <ActivityTip />
       <GoalTip />
+      <GoalTypeTip />
 
       <Paper elevation={3} sx={{ p: 4, mt: 4, borderRadius: 2 }}>
         <Typography variant="h4" align="center" gutterBottom>
-          Enter Your Health Info
+          Enter Your Health & Fitness Goals
         </Typography>
         <form onSubmit={handleSubmit} autoComplete="off">
           <Box sx={{ mb: 2 }}>
@@ -167,7 +178,7 @@ export default function HealthDataForm({ setUserData }) {
               <MenuItem value="intense">Intense Exercise</MenuItem>
             </Select>
           </Box>
-          <Box sx={{ mb: 3 }}>
+          <Box sx={{ mb: 2 }}>
             <TextField
               label="Daily Calorie Goal (kcal)"
               type="number"
@@ -177,6 +188,25 @@ export default function HealthDataForm({ setUserData }) {
               fullWidth
               required
             />
+          </Box>
+          <Box sx={{ mb: 3 }}>
+            <Select
+              open={goalTypeOpen}
+              onOpen={() => triggerGoalTypeTip(() => setGoalTypeOpen(true))}
+              onClose={() => setGoalTypeOpen(false)}
+              value={goalType}
+              onChange={e => setGoalType(e.target.value)}
+              fullWidth
+              displayEmpty
+              required
+            >
+              <MenuItem value="" disabled>
+                Select Fitness Goal
+              </MenuItem>
+              <MenuItem value="bulking">Bulking</MenuItem>
+              <MenuItem value="cutting">Cutting</MenuItem>
+              <MenuItem value="maintenance">Maintenance</MenuItem>
+            </Select>
           </Box>
           <Button variant="contained" fullWidth type="submit">
             Save & Continue
