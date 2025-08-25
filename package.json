@@ -21,7 +21,6 @@
     "react-ga4": "^2.1.0",
     "react-router-dom": "^5.3.4",
     "react-select": "^5.10.1",
-    "react-swipeable-views": "^0.14.0",
     "stripe": "^18.1.0",
     "vite": "^2.0.0"
   },
