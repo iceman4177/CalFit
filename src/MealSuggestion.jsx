@@ -88,15 +88,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       let meals = Array.isArray(data?.suggestions) ? data.suggestions : [];
 
+      // ✅ Ensure calories are safe numbers
       meals = meals.map((m) => {
         let safeCalories = 0;
 
-        // ✅ Handle number
-        if (typeof m?.calories === "number" && !isNaN(m.calories)) {
+        if (m && typeof m.calories === "number" && !isNaN(m.calories)) {
           safeCalories = m.calories;
-        }
-        // ✅ Handle string like "420 kcal"
-        else if (typeof m?.calories === "string") {
+        } else if (m && typeof m.calories === "string") {
           const match = m.calories.match(/\d+/);
           if (match) safeCalories = parseInt(match[0], 10);
         }
