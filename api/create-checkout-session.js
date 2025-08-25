@@ -1,7 +1,5 @@
 // src/api/create-checkout-session.js
-
 import Stripe from "stripe";
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -10,22 +8,46 @@ export default async function handler(req, res) {
   }
 
   try {
-    const price = await stripe.prices.retrieve(process.env.STRIPE_PRICE_ID);
+    // Decide mode: explicit STRIPE_MODE first, else default by NODE_ENV
+    const mode =
+      process.env.STRIPE_MODE ||
+      (process.env.NODE_ENV === "production" ? "live" : "test");
+
+    const secretKey =
+      mode === "live"
+        ? process.env.STRIPE_SECRET_KEY_LIVE
+        : process.env.STRIPE_SECRET_KEY_TEST;
+
+    const priceId =
+      mode === "live"
+        ? process.env.STRIPE_PRICE_ID_MONTHLY_LIVE
+        : process.env.STRIPE_PRICE_ID_MONTHLY_TEST;
+
+    if (!secretKey) throw new Error("Stripe secret key not configured");
+    if (!priceId) throw new Error("Stripe price ID not configured");
+
+    const stripe = new Stripe(secretKey);
+
+    // Validate price exists
+    const price = await stripe.prices.retrieve(priceId);
     if (!price || !price.active) {
       throw new Error("Price not found or inactive");
     }
 
+    const trialDays = parseInt(process.env.STRIPE_TRIAL_DAYS || "7", 10);
+
+    // Create checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [
         {
-          price: process.env.STRIPE_PRICE_ID,
+          price: priceId,
           quantity: 1,
         },
       ],
       subscription_data: {
-        trial_period_days: 7,
+        trial_period_days: trialDays,
       },
       success_url: `${req.headers.origin}/pro-success`,
       cancel_url: `${req.headers.origin}/?checkout=cancel`,

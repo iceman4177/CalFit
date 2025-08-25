@@ -1,4 +1,3 @@
-// src/components/UpgradeModal.jsx
 import React, { useState } from "react";
 import {
   Dialog,
@@ -11,7 +10,12 @@ import {
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+// Decide which publishable key to use
+const stripePromise = loadStripe(
+  import.meta.env.STRIPE_MODE === "live" || import.meta.env.MODE === "production"
+    ? import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_LIVE
+    : import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_TEST
+);
 
 export default function UpgradeModal({
   open,
