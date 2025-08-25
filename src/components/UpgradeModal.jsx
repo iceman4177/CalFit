@@ -1,33 +1,28 @@
-import React, { useState } from "react";
+// src/components/UpgradeModal.jsx
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   Button,
-  Typography
+  Typography,
+  Box,
+  Chip
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
-import { useUserData } from "../UserDataContext.jsx"; // <-- use the new hook
 
-// initialize Stripe.js
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
-/**
- * Props:
- *  - open: boolean
- *  - onClose: () => void
- *  - title?: string         // dialog title
- *  - description?: string   // dialog body text
- */
 export default function UpgradeModal({
   open,
   onClose,
-  title = "Upgrade to Slimcal.ai Pro",
-  description = "Unlock unlimited AI coaching, personalized plans, and more by going Pro!"
+  title = "Upgrade to Slimcal Pro",
+  description = "Unlimited AI workouts, meals & premium insights."
 }) {
-  const { dailyGoal, goalType } = useUserData(); // example of using context if needed
-  const [loading, setLoading]   = useState(false);
+  const isProUser = localStorage.getItem("isPro") === "true";
+
+  const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
 
   const handleCheckout = async () => {
@@ -36,27 +31,21 @@ export default function UpgradeModal({
     try {
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly" // default checkout plan
+        })
       });
 
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = null;
-      }
-
+      const data = await res.json();
       if (!res.ok) {
-        const msg = data?.error || text || "Checkout session failed";
-        throw new Error(msg);
+        throw new Error(data?.error || "Checkout session failed");
       }
 
-      const sessionId = data.sessionId;
-      const stripe    = await stripePromise;
-      await stripe.redirectToCheckout({ sessionId });
+      const stripe = await stripePromise;
+      await stripe.redirectToCheckout({ sessionId: data.sessionId });
     } catch (err) {
-      console.error("Checkout error:", err);
+      console.error(err);
       setApiError(err.message);
       setLoading(false);
     }
@@ -67,22 +56,39 @@ export default function UpgradeModal({
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         <Typography sx={{ mb: 2 }}>{description}</Typography>
+
+        {!isProUser && (
+          <Chip
+            label="7-day free trial"
+            color="success"
+            size="small"
+            sx={{ mb: 2 }}
+          />
+        )}
+
+        <Typography>
+          <strong>$4.99/mo</strong> billed monthly after trial.
+        </Typography>
+        <Typography variant="body2" color="textSecondary">
+          Cancel anytime.
+        </Typography>
+
         {apiError && (
-          <Typography color="error" variant="body2">
+          <Typography sx={{ mt: 2 }} color="error" variant="body2">
             {apiError}
           </Typography>
         )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={loading}>
-          Cancel
+          Maybe later
         </Button>
         <Button
-          variant="contained"
           onClick={handleCheckout}
+          variant="contained"
           disabled={loading}
         >
-          {loading ? "Redirecting…" : "Upgrade Now"}
+          {loading ? "Redirecting…" : "Start Free Trial"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -25,6 +25,20 @@ import { MET_VALUES } from './exerciseMeta';
 import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
 import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
+import UpgradeModal from './components/UpgradeModal'; // <-- ADDED for paywall modal
+
+// ---- Paywall helpers (localStorage-based until backend arrives) ----
+const isProUser = () => {
+  if (localStorage.getItem('isPro') === 'true') return true;
+  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+  return !!ud.isPremium;
+};
+
+const getAICount = () =>
+  parseInt(localStorage.getItem('aiWorkoutCount') || '0', 10);
+
+const incAICount = () =>
+  localStorage.setItem('aiWorkoutCount', String(getAICount() + 1));
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
@@ -58,6 +72,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
+
+  // NEW: paywall modal state
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const handleDismiss = (key, setter, cb) => {
     localStorage.setItem(key, 'true');
@@ -290,6 +307,26 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(enriched);
   };
 
+  // ---- PRO GATE: Suggest Workout (AI) button ----
+  const handleSuggestAIClick = () => {
+    // If we're opening the card (showSuggestCard is currently false), enforce the cap
+    if (!showSuggestCard) {
+      if (!isProUser()) {
+        const used = getAICount();
+        if (used >= 3) {
+          setShowUpgrade(true);
+          return;
+        }
+        // Count this AI suggestion usage
+        incAICount();
+      }
+      setShowSuggestCard(true);
+      return;
+    }
+    // If closing, just toggle off
+    setShowSuggestCard(false);
+  };
+
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
@@ -422,7 +459,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             <Button
               variant="contained"
               fullWidth
-              onClick={() => setShowSuggestCard(s => !s)}
+              onClick={handleSuggestAIClick} // <-- paywall-gated toggle
             >
               Suggest a Workout (AI)
             </Button>
@@ -535,6 +572,14 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           .reduce((sum, ex) => sum + ex.calories, 0)
           .toFixed(2)} cals! #SlimcalAI`}
         shareUrl={window.location.href}
+      />
+
+      {/* Paywall modal shown after free cap */}
+      <UpgradeModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Upgrade to Slimcal Pro"
+        description="Unlock unlimited AI workout recommendations, AI meal suggestions, the Daily Recap Coach, and advanced insights."
       />
     </Container>
   );

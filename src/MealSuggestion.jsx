@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/MealSuggestion.jsx
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -17,6 +18,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [suggestion, setSuggestion] = useState(null);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0); // trigger re-fetch on demand
 
   // decide meal period
   const hour   = new Date().getHours();
@@ -25,43 +27,76 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                : hour < 17 ? 'Snack'
                : 'Dinner';
 
-  // fetch from our API
-  useEffect(() => {
-    async function fetchSuggestion() {
-      setLoading(true);
-      setError(null);
+  const fetchSuggestion = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const resp = await fetch(
-          `/api/suggestMeal?period=${period}&goalType=${goalType}` +
-          `&dailyGoal=${dailyGoal}&consumed=${consumedCalories}` +
-          `&recentMeals=${encodeURIComponent(recentMeals.join(','))}`
-        , { method: 'GET' });
+    try {
+      const resp = await fetch('/api/ai/meal-suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          period,
+          goalType,
+          dailyGoal,
+          consumedCalories,
+          recentMeals
+        })
+      });
 
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
+      const raw = await resp.text();
 
-        if (data.name && data.calories != null) {
-          setSuggestion(data);
-        } else {
-          throw new Error('Invalid suggestion format');
-        }
-      } catch (err) {
-        console.error('[MealSuggestion] fetch error', err);
-        setError('Couldn’t fetch a suggestion. Try again.');
-      } finally {
-        setLoading(false);
+      if (!resp.ok) {
+        // Surface server error details for debugging
+        console.error('[MealSuggestion] non-OK response:', resp.status, raw);
+        throw new Error(`Server responded ${resp.status}`);
       }
-    }
 
-    fetchSuggestion();
+      // Parse JSON safely
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        console.error('[MealSuggestion] response was not JSON:', raw);
+        throw new Error('Invalid JSON from server');
+      }
+
+      // Accept either { ok:true, suggestion:{ name, calories, ... } }
+      // or legacy { name, calories, ... }
+      let s =
+        (data && data.suggestion && data.suggestion.name && data.suggestion.calories != null)
+          ? data.suggestion
+          : (data && data.name && data.calories != null)
+            ? data
+            : null;
+
+      if (!s) {
+        console.error('[MealSuggestion] bad payload shape:', data);
+        throw new Error('Unexpected payload from server');
+      }
+
+      setSuggestion(s);
+    } catch (err) {
+      console.error('[MealSuggestion] fetch error', err);
+      setError('Couldn’t fetch a suggestion. Please try again.');
+      setSuggestion(null);
+    } finally {
+      setLoading(false);
+    }
   }, [period, goalType, dailyGoal, consumedCalories, recentMeals]);
+
+  // initial + whenever inputs change or refreshKey increments
+  useEffect(() => {
+    fetchSuggestion();
+  }, [fetchSuggestion, refreshKey]);
+
+  const handleRetry = () => setRefreshKey(k => k + 1);
 
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
         <CircularProgress />
-        <Typography>Thinking of a meal…</Typography>
+        <Typography sx={{ mt: 1 }}>Thinking of a meal…</Typography>
       </Box>
     );
   }
@@ -69,8 +104,8 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   if (error) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
-        <Typography color="error">{error}</Typography>
-        <Button onClick={() => setSuggestion(null)}>Retry</Button>
+        <Typography color="error" sx={{ mb: 1 }}>{error}</Typography>
+        <Button onClick={handleRetry}>Retry</Button>
       </Box>
     );
   }
@@ -85,6 +120,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
             <Typography variant="h6">{suggestion.name}</Typography>
             <Chip label={period} size="small" />
           </Box>
+
           <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
             <Typography>🔥 {suggestion.calories}</Typography>
             {suggestion.macros && (
@@ -95,20 +131,24 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
               </>
             )}
           </Box>
+
           {suggestion.prepMinutes != null && (
             <Typography variant="body2" color="textSecondary">
               ⏱ {suggestion.prepMinutes} min prep
             </Typography>
           )}
         </CardContent>
+
         <CardActions sx={{ justifyContent: 'space-between' }}>
-          <Button onClick={() => setSuggestion(null)}>New Suggestion</Button>
+          <Button onClick={handleRetry}>New Suggestion</Button>
           <Button
             variant="contained"
-            onClick={() => onAddMeal({
-              name:       suggestion.name,
-              calories:   suggestion.calories
-            })}
+            onClick={() =>
+              onAddMeal({
+                name:     suggestion.name,
+                calories: suggestion.calories
+              })
+            }
           >
             Add &amp; Log
           </Button>

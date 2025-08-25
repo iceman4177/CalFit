@@ -34,6 +34,9 @@ import AssessmentIcon    from '@mui/icons-material/Assessment';
 import InfoIcon          from '@mui/icons-material/Info';
 import ChatIcon          from '@mui/icons-material/Chat';
 
+import ProLandingPage from './ProLandingPage';
+import ProSuccess     from './ProSuccess';
+
 import useDailyNotification from './hooks/useDailyNotification';
 import useVariableRewards    from './hooks/useVariableRewards';
 import useMealReminders      from './hooks/useMealReminders';
@@ -83,39 +86,36 @@ function PageTracker() {
 }
 
 export default function App() {
-  const history    = useHistory();
-  const location   = useLocation();
-  const promptedRef = useRef(false);
+  const history      = useHistory();
+  const location     = useLocation();
+  const promptedRef  = useRef(false);
 
-  // Capture referrals
+  // used to capture referrals
   useReferral();
 
-  // Request notifications permission once
+  // request notifications permission once
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
 
-  // Stripe callback
+  // Stripe success callback → mark user as premium
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('subscribed') === '1') {
+    if (location.pathname === '/pro-success') {
       const prev = JSON.parse(localStorage.getItem('userData') || '{}');
       const next = { ...prev, isPremium: true };
       localStorage.setItem('userData', JSON.stringify(next));
       setIsPremium(true);
-      window.history.replaceState({}, '', location.pathname);
     }
-  }, [location.search]);
+  }, [location.pathname]);
 
-  // Trial logic (7 days)
+  // 7-day trial logic
   const [trialStart, setTrialStart] = useState(() => localStorage.getItem('trialStart'));
   const trialActive = trialStart
     ? (Date.now() - parseInt(trialStart, 10)) < 7 * 24 * 60 * 60 * 1000
     : false;
 
-  // Daily push at 19:00
   useDailyNotification({
     hour:   19,
     minute: 0,
@@ -123,14 +123,12 @@ export default function App() {
     body:   '⏰ Don’t forget to log today’s workout & meals!'
   });
 
-  // Engagement hooks
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
   const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')   || '[]')
     .reduce((sum, e) => sum + (e.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
   useMealReminders();
 
-  // In-app meal prompt (once, post-onboarding, free users)
   const missedMeals = useInAppMealPrompt() || [];
   const [promptOpen, setPromptOpen] = useState(false);
   useEffect(() => {
@@ -145,23 +143,21 @@ export default function App() {
       setPromptOpen(true);
     }
   }, [missedMeals, location.pathname]);
+
   const handleClosePrompt = () => setPromptOpen(false);
   const handleGoToMeals   = () => { setPromptOpen(false); history.push('/meals'); };
 
-  // User & premium state
-  const [userData, setUserDataState]   = useState(null);
-  const [isPremium, setIsPremium]      = useState(false);
+  const [userData, setUserDataState] = useState(null);
+  const [isPremium, setIsPremium]    = useState(false);
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [upgradeOpen, setUpgradeOpen]           = useState(false);
   const [ambassadorOpen, setAmbassadorOpen]     = useState(false);
 
-  // “More” menu
   const [moreAnchor, setMoreAnchor] = useState(null);
   const openMore  = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
 
-  // Persist helper
   const setUserData = data => {
     const prev = JSON.parse(localStorage.getItem('userData') || '{}');
     const next = { ...prev, ...data, isPremium };
@@ -169,7 +165,6 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // Load on mount & streak
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     setUserDataState(saved);
@@ -202,7 +197,6 @@ export default function App() {
     );
   }
 
-  // Page-tip
   const message = routeTips[location.pathname] || '';
   const [PageTip] = useFirstTimeTip(
     `hasSeenPageTip_${location.pathname}`,
@@ -210,7 +204,6 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
-  // nav bar + Invite button
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
@@ -249,11 +242,11 @@ export default function App() {
     </Box>
   );
 
-  // Invite dialog + FAB
+  // Invite friends dialog
   const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="md" sx={{ py:4 }}>
       <PageTracker />
       {message && <PageTip />}
 
@@ -273,9 +266,7 @@ export default function App() {
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>
-        <Typography variant="body1" color="textSecondary">
-          Track your workouts, meals, and calories all in one place.
-        </Typography>
+        <Typography variant="body1" color="textSecondary">Track your workouts, meals, and calories all in one place.</Typography>
         {!isPremium && !trialActive && (
           <Button
             variant="contained"
@@ -297,10 +288,12 @@ export default function App() {
       {navBar}
 
       <Switch>
+        {/* NEW paywall routes */}
+        <Route path="/pro" component={ProLandingPage} />
+        <Route path="/pro-success" component={ProSuccess} />
+
         <Route path="/edit-info" render={() =>
-          <HealthDataForm
-            setUserData={data => { setUserData(data); history.push('/'); }}
-          />
+          <HealthDataForm setUserData={data => { setUserData(data); history.push('/'); }} />
         }/>
         <Route path="/workout" render={() =>
           <WorkoutPage userData={userData} onWorkoutLogged={refreshCalories} />
@@ -313,14 +306,9 @@ export default function App() {
         }/>
         <Route path="/dashboard" render={() => (
           <>
-            {/* Invite banner */}
             <Box sx={{ p:2, mb:2, bgcolor:'#e0f7fa', borderRadius:1, textAlign:'center' }}>
-              <Typography variant="subtitle1">
-                🚀 Grow Slimcal.ai! Invite friends & earn perks.
-              </Typography>
-              <Button variant="text" onClick={() => setInviteOpen(true)}>
-                Invite Now
-              </Button>
+              <Typography variant="subtitle1">🚀 Grow Slimcal.ai! Invite friends & earn perks.</Typography>
+              <Button variant="text" onClick={() => setInviteOpen(true)}>Invite Now</Button>
             </Box>
             <ProgressDashboard />
             <ReferralDashboard />
@@ -329,36 +317,26 @@ export default function App() {
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log"  component={CalorieHistory} />
         <Route path="/summary"      render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
-        <Route path="/recap"        render={() => <DailyRecapCoach userData={{...userData, isPremium}} />} />
+        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium }} />} />
         <Route path="/waitlist"     component={WaitlistSignup} />
         <Route path="/preferences"  component={AlertPreferences} />
         <Route exact path="/"       render={() => null} />
       </Switch>
 
-      {/* Invite modal */}
       <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Invite Friends</DialogTitle>
-        <DialogContent>
-          <ReferralDashboard />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setInviteOpen(false)}>Close</Button>
-        </DialogActions>
+        <DialogContent><ReferralDashboard /></DialogContent>
+        <DialogActions><Button onClick={() => setInviteOpen(false)}>Close</Button></DialogActions>
       </Dialog>
 
-      {/* Floating Invite button */}
-      <Fab
-        color="primary"
-        onClick={() => setInviteOpen(true)}
-        sx={{ position:'fixed', bottom:16, right:16 }}
-      >
+      <Fab color="primary" onClick={() => setInviteOpen(true)} sx={{ position:'fixed', bottom:16, right:16 }}>
         <CampaignIcon />
       </Fab>
 
       <UpgradeModal
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}
-        title="Start your 7‑Day Free Pro Trial"
+        title="Start your 7-Day Free Pro Trial"
         description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
       />
     </Container>

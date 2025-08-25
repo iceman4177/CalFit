@@ -1,5 +1,5 @@
 // src/MealTracker.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Typography, Box, TextField,
   Button, List, ListItem, ListItemText,
@@ -9,24 +9,39 @@ import foodData from './foodData.json';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
+import UpgradeModal from './components/UpgradeModal'; // <-- ADDED: paywall modal
+
+// ---- Pro gating helpers ----
+const isProUser = () => {
+  if (localStorage.getItem('isPro') === 'true') return true;
+  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+  return !!ud.isPremium;
+};
+
+const getMealAICount = () =>
+  parseInt(localStorage.getItem('aiMealCount') || '0', 10);
+
+const incMealAICount = () =>
+  localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
 export default function MealTracker({ onMealUpdate }) {
-  const [FoodTip, triggerFoodTip]   = useFirstTimeTip('tip_food', 'Search or type a food name.');
-  const [CalTip,  triggerCalTip]    = useFirstTimeTip('tip_cal',  'Enter calories.');
-  const [AddTip,  triggerAddTip]    = useFirstTimeTip('tip_add',  'Tap to add this meal.');
-  const [ClearTip,triggerClearTip]  = useFirstTimeTip('tip_clear','Tap to clear today’s meals.');
+  const [FoodTip,  triggerFoodTip]  = useFirstTimeTip('tip_food',  'Search or type a food name.');
+  const [CalTip,   triggerCalTip]   = useFirstTimeTip('tip_cal',   'Enter calories.');
+  const [AddTip,   triggerAddTip]   = useFirstTimeTip('tip_add',   'Tap to add this meal.');
+  const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
-  const [foodInput, setFoodInput]     = useState('');
-  const [selectedFood, setSelectedFood] = useState(null);
-  const [calories, setCalories]       = useState('');
-  const [mealLog, setMealLog]         = useState([]);
-  const [showSuggest, setShowSuggest] = useState(false);
+  const [foodInput, setFoodInput]         = useState('');
+  const [selectedFood, setSelectedFood]   = useState(null);
+  const [calories, setCalories]           = useState('');
+  const [mealLog, setMealLog]             = useState([]);
+  const [showSuggest, setShowSuggest]     = useState(false);
+  const [showUpgrade, setShowUpgrade]     = useState(false); // <-- ADDED: paywall modal state
 
-  const today      = new Date().toLocaleDateString('en-US');
-  const stored     = JSON.parse(localStorage.getItem('userData')||'{}');
-  const dailyGoal  = stored.dailyGoal || 0;
-  const goalType   = stored.goalType  || 'maintain';
-  const recentMeals= mealLog.map(m=>m.name);
+  const today       = new Date().toLocaleDateString('en-US');
+  const stored      = JSON.parse(localStorage.getItem('userData')||'{}');
+  const dailyGoal   = stored.dailyGoal || 0;
+  const goalType    = stored.goalType  || 'maintain';
+  const recentMeals = mealLog.map(m=>m.name);
 
   // load
   useEffect(()=>{
@@ -62,6 +77,25 @@ export default function MealTracker({ onMealUpdate }) {
     localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]); onMealUpdate(0);
   };
+
+  // ---- PRO GATE: Suggest a Meal (AI) ----
+  const handleAIMealSuggestClick = useCallback(() => {
+    // Only enforce when opening (from hidden -> shown)
+    if (!showSuggest) {
+      if (!isProUser()) {
+        const used = getMealAICount();
+        if (used >= 3) {
+          setShowUpgrade(true); // show paywall
+          return;
+        }
+        incMealAICount(); // count this free use
+      }
+      setShowSuggest(true);
+      return;
+    }
+    // if already open, just close
+    setShowSuggest(false);
+  }, [showSuggest]);
 
   const total = mealLog.reduce((s,m)=>s+m.calories,0);
 
@@ -102,10 +136,7 @@ export default function MealTracker({ onMealUpdate }) {
         <Button variant="outlined" color="error" onClick={()=>{triggerClearTip();handleClear();}}>
           Clear Meals
         </Button>
-        <Button
-          variant="outlined"
-          onClick={()=>{setShowSuggest(!showSuggest);}}
-        >
+        <Button variant="outlined" onClick={handleAIMealSuggestClick}>
           Suggest a Meal (AI)
         </Button>
       </Box>
@@ -144,6 +175,14 @@ export default function MealTracker({ onMealUpdate }) {
       <Typography variant="h6" align="right" sx={{mt:3}}>
         Total Calories: {total}
       </Typography>
+
+      {/* Paywall modal (shown when free cap is hit) */}
+      <UpgradeModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Upgrade to Slimcal Pro"
+        description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, and advanced insights."
+      />
     </Container>
   );
 }
