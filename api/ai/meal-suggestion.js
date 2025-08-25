@@ -1,48 +1,34 @@
-// server/routes/ai.js
-'use strict';
+// api/ai/meal-suggestion.js
 
-const express = require('express');
-const router = express.Router();
-
-let openai = null;
-if (process.env.OPENAI_API_KEY) {
-  const { OpenAI } = require('openai');
-  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Try to load OpenAI only if we have an API key AND the module is installed.
+// This prevents Vercel 500s when 'openai' isn't in root package.json.
+let openaiClient = null;
+const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+if (hasOpenAIKey) {
+  try {
+    const { OpenAI } = require('openai');
+    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  } catch (e) {
+    console.warn('[meal-suggestion] openai module not found; falling back to stub.', e?.message);
+    openaiClient = null;
+  }
 }
 
-/**
- * Utility: simple macro math when client doesn't send targets
- * Defaults (very sane starting points):
- *   protein: 1.8 g/kg bodyweight
- *   fat:     0.8 g/kg bodyweight
- *   carbs:   remainder of calories
- */
 function computeMacroTargets({ weightKg = 75, dailyCalories = 2000 }) {
-  const p = Math.round(1.8 * weightKg);            // grams
-  const f = Math.round(0.8 * weightKg);            // grams
-  const kcalsFromP = p * 4;
-  const kcalsFromF = f * 9;
+  const p = Math.round(1.8 * weightKg);
+  const f = Math.round(0.8 * weightKg);
+  const kcalsFromP = p * 4, kcalsFromF = f * 9;
   const c = Math.max(0, Math.round((dailyCalories - kcalsFromP - kcalsFromF) / 4));
   return { p, c, f };
 }
-
-/**
- * Intelligent calorie window for this meal:
- *   aim around "remaining / mealsRemaining" with ±15% band, clamped to [200..900]
- */
 function suggestCalorieWindow(remaining, mealsRemaining) {
-  const base = Math.max(0, remaining);
-  const per  = Math.max(1, mealsRemaining || 1);
+  const base = Math.max(0, Number(remaining) || 0);
+  const per = Math.max(1, Number(mealsRemaining) || 1);
   const target = base / per;
   const min = Math.round(Math.max(200, target * 0.85));
   const max = Math.round(Math.min(900, target * 1.15));
   return { min, max };
 }
-
-/**
- * Fallback library (used when OPENAI_API_KEY is not set)
- * Varied by period + rough calorie target
- */
 const STUBS = {
   Breakfast: [
     { name: 'Greek Yogurt Parfait (berries + granola)', calories: 320, macros:{p:24,c:40,f:8} },
@@ -65,10 +51,8 @@ const STUBS = {
     { name: 'Tofu Stir-fry, Brown Rice, Mixed Veg',      calories: 580, macros:{p:28,c:68,f:14} },
   ],
 };
-
 function pickStub(period, { min, max }, recentMeals = []) {
   const pool = STUBS[period] || [...STUBS.Breakfast, ...STUBS.Lunch, ...STUBS.Snack, ...STUBS.Dinner];
-  // prefer items within the window and not in recentMeals
   const candidates = pool
     .filter(m => m.calories >= min && m.calories <= max)
     .filter(m => !recentMeals.some(r => r && r.toLowerCase() === m.name.toLowerCase()));
@@ -76,17 +60,11 @@ function pickStub(period, { min, max }, recentMeals = []) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-/**
- * POST /api/ai/meal-suggestion
- * Body: {
- *   period, goalType, dailyGoal, consumedCalories,
- *   recentMeals: string[],
- *   mealsRemaining: number,
- *   macroTargets: { p,c,f } (optional),
- *   user: { weightKg?, weightLbs? } (optional)
- * }
- */
-router.post('/ai/meal-suggestion', async (req, res) => {
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
   try {
     const {
       period = 'Meal',
@@ -102,83 +80,69 @@ router.post('/ai/meal-suggestion', async (req, res) => {
     const remaining = Math.max(0, Number(dailyGoal) - Number(consumedCalories));
     const kcalWindow = suggestCalorieWindow(remaining, mealsRemaining);
 
-    // Compute/normalize macro targets
     let targets = macroTargets;
     if (!targets || typeof targets.p !== 'number') {
       const weightKg = user.weightKg || (user.weightLbs ? user.weightLbs * 0.453592 : 75);
       targets = computeMacroTargets({ weightKg, dailyCalories: dailyGoal });
     }
 
-    // Try OpenAI if available, else fallback stub
-    if (!openai) {
-      const s = pickStub(period, kcalWindow, recentMeals);
-      return res.json({ ok: true, suggestion: s, rationale: { period, kcalWindow, remaining, targets, source: 'stub' } });
+    // If OpenAI client is not available, serve a smart stub
+    if (!openaiClient) {
+      const s = pickStub(period, kcalWindow, Array.isArray(recentMeals) ? recentMeals : []);
+      res.status(200).json({ ok: true, suggestion: s, rationale: { period, kcalWindow, remaining, targets, source: 'stub' } });
+      return;
     }
 
-    // Ask the model for ONE meal, JSON only, within constraints
     const prompt = `
-You are a fitness nutrition assistant. Suggest exactly ONE ${period} that fits:
-- Goal: ${goalType}
-- Daily calories: ${dailyGoal}
-- Consumed so far: ${consumedCalories}
-- Remaining today: ${remaining}
-- Remaining meals today (including this one): ${mealsRemaining}
-- Calorie window for this meal: ${kcalWindow.min}–${kcalWindow.max} kcal (try to land inside)
-- Target daily macros (g): protein=${targets.p}, carbs=${targets.c}, fat=${targets.f}
-- Avoid repeating these recent meals: ${(Array.isArray(recentMeals) ? recentMeals.join(', ') : '')}
+Return ONLY JSON like:
+{"name":"...", "calories":123, "macros":{"p":30,"c":40,"f":12}, "prepMinutes":10, "notes":"short reason"}
+Constraints:
+- Period: ${period} | Goal: ${goalType}
+- Daily: ${dailyGoal} | Consumed: ${consumedCalories} | Remaining: ${remaining}
+- Meals remaining (incl. this one): ${mealsRemaining}
+- Calorie window: ${kcalWindow.min}–${kcalWindow.max}
+- Macro targets (g): p=${targets.p}, c=${targets.c}, f=${targets.f}
+- Avoid: ${(Array.isArray(recentMeals) ? recentMeals.join(', ') : '')}
+Keep JSON strict (no extra prose).`.trim();
 
-Return ONLY strict JSON with this shape (no extra words):
-{
-  "name": "string",
-  "calories": 0,
-  "macros": { "p": 0, "c": 0, "f": 0 },
-  "prepMinutes": 0,
-  "notes": "1 short sentence explaining why this fits"
-}
-Rules:
-- Aim macros proportionally to daily targets and what’s typical for the period.
-- Keep calories inside the window when possible.
-- Prefer diverse options vs. recentMeals.
-- Use common foods available in a typical US grocery store.
-    `.trim();
-
-    const completion = await openai.chat.completions.create({
+    const completion = await openaiClient.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.5
+      temperature: 0.5,
     });
 
-    const text = completion.choices?.[0]?.message?.content?.trim() || '';
-    let json;
+    const text = completion?.choices?.[0]?.message?.content;
+    const safeText = typeof text === 'string' ? text.trim() : '';
+    let json = null;
+
+    // Robust JSON extraction
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(safeText);
     } catch {
-      const m = text.match(/\{[\s\S]*\}/);
-      json = m ? JSON.parse(m[0]) : null;
+      const m = safeText ? safeText.match(/\{[\s\S]*\}/) : null;
+      if (m && m[0]) {
+        try { json = JSON.parse(m[0]); } catch {}
+      }
     }
 
     if (!json || typeof json.name !== 'string' || typeof json.calories !== 'number') {
-      return res.status(502).json({ ok: false, error: 'Bad AI response', raw: text });
+      res.status(502).json({ ok: false, error: 'Bad AI response', raw: safeText });
+      return;
     }
 
-    // Basic de-duplication: if name matches a recent meal, lightly nudge calories & note
-    if (Array.isArray(recentMeals) &&
-        recentMeals.some(r => r && r.toLowerCase() === json.name.toLowerCase())) {
+    // De-dupe & clamp
+    if (Array.isArray(recentMeals) && recentMeals.some(r => r && r.toLowerCase() === json.name.toLowerCase())) {
       json.name = `${json.name} (variation)`;
       json.calories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, json.calories + 40)));
       if (!json.notes) json.notes = 'Varied slightly to avoid repetition.';
     }
-
-    // Clamp calories into the window if wildly off
     if (json.calories < kcalWindow.min || json.calories > kcalWindow.max) {
       json.calories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, json.calories)));
     }
 
-    return res.json({ ok: true, suggestion: json, rationale: { period, kcalWindow, remaining, targets, source: 'openai' } });
+    res.status(200).json({ ok: true, suggestion: json, rationale: { period, kcalWindow, remaining, targets, source: 'openai' } });
   } catch (err) {
-    console.error('[ai/meal-suggestion] error:', err);
-    return res.status(500).json({ ok: false, error: err.message || 'Server error' });
+    console.error('[api/ai/meal-suggestion] error:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Server error' });
   }
-});
-
-module.exports = router;
+};
