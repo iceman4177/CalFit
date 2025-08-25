@@ -90,13 +90,20 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       meals = meals.map((m) => {
         let safeCalories = 0;
-        if (m?.calories != null) {
-          const match = String(m.calories).match(/\d+/);
+
+        // ✅ Handle number
+        if (typeof m?.calories === "number" && !isNaN(m.calories)) {
+          safeCalories = m.calories;
+        }
+        // ✅ Handle string like "420 kcal"
+        else if (typeof m?.calories === "string") {
+          const match = m.calories.match(/\d+/);
           if (match) safeCalories = parseInt(match[0], 10);
         }
+
         return {
-          name: m?.name || 'Unknown meal',
-          calories: Number.isFinite(safeCalories) ? safeCalories : 0,
+          name: m?.name || "Unknown meal",
+          calories: safeCalories,
           macros: m?.macros || { p: 0, c: 0, f: 0 },
           prepMinutes: m?.prepMinutes || null,
         };
