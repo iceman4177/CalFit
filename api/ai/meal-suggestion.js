@@ -133,8 +133,9 @@ Always return a valid JSON array with 5 objects, no extra text.
       return;
     }
 
-    // ✅ FIX: Sanitize calories into numbers
+    // ✅ FIX: Sanitize calories + macros
     meals = meals.map((meal) => {
+      // --- Calories ---
       let safeCalories = 0;
       if (typeof meal.calories === "number" && !isNaN(meal.calories)) {
         safeCalories = meal.calories;
@@ -142,10 +143,32 @@ Always return a valid JSON array with 5 objects, no extra text.
         const match = meal.calories.match(/\d+/);
         if (match) safeCalories = parseInt(match[0], 10);
       }
+
+      // --- Macros ---
+      let safeMacros = { p: 0, c: 0, f: 0 };
+      if (meal.macros && typeof meal.macros === "object") {
+        const { p, c, f } = meal.macros;
+
+        const parseMacro = (val) => {
+          if (typeof val === "number" && !isNaN(val)) return val;
+          if (typeof val === "string") {
+            const match = val.match(/\d+/);
+            return match ? parseInt(match[0], 10) : 0;
+          }
+          return 0;
+        };
+
+        safeMacros = {
+          p: parseMacro(p),
+          c: parseMacro(c),
+          f: parseMacro(f),
+        };
+      }
+
       return {
         ...meal,
         calories: safeCalories,
-        macros: meal.macros || { p: 0, c: 0, f: 0 },
+        macros: safeMacros,
       };
     });
 

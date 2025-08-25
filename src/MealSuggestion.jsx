@@ -88,23 +88,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       let meals = Array.isArray(data?.suggestions) ? data.suggestions : [];
 
-      // ✅ Defensive calories/macros parsing
-      meals = meals.map((m) => {
-        let safeCalories = 0;
-        if (typeof m?.calories === "number" && !isNaN(m.calories)) {
-          safeCalories = m.calories;
-        } else if (typeof m?.calories === "string") {
-          const match = m.calories.match(/\d+/);
-          if (match) safeCalories = parseInt(match[0], 10);
-        }
-
-        return {
-          name: m?.name || "Unknown meal",
-          calories: safeCalories,
-          macros: m?.macros || { p: 0, c: 0, f: 0 },
-          prepMinutes: m?.prepMinutes || null,
-        };
-      });
+      // ✅ Defensive parsing, but backend already sanitizes calories + macros
+      meals = meals.map((m) => ({
+        name: m?.name || "Unknown meal",
+        calories: m?.calories || 0,
+        macros: m?.macros || { p: 0, c: 0, f: 0 },
+        prepMinutes: m?.prepMinutes || null,
+      }));
 
       if (!meals.length) throw new Error('No meal suggestions found');
 
