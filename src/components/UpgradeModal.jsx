@@ -11,8 +11,19 @@ import {
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
 
-// Only need one key now
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+// Decide which publishable key to use
+const publishableKey = import.meta.env.PROD
+  ? import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_LIVE
+  : import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_TEST;
+
+// Debug log: make sure it’s not undefined
+console.log("🔑 Using Stripe publishable key:", publishableKey);
+
+if (!publishableKey) {
+  console.error("❌ Missing Stripe publishable key! Check .env.local (for dev) or Vercel env vars (for prod).");
+}
+
+const stripePromise = loadStripe(publishableKey);
 
 export default function UpgradeModal({
   open,
@@ -32,7 +43,7 @@ export default function UpgradeModal({
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: "monthly" }),
+        body: JSON.stringify({ plan: "monthly" })
       });
 
       let data;
@@ -49,12 +60,12 @@ export default function UpgradeModal({
       if (!stripe) throw new Error("Stripe.js failed to load");
 
       const { error } = await stripe.redirectToCheckout({
-        sessionId: data.sessionId,
+        sessionId: data.sessionId
       });
 
       if (error) throw new Error(error.message);
 
-      // optimistic trial marker
+      // Optimistic trial marker
       if (!localStorage.getItem("trialEndTs")) {
         const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
         localStorage.setItem("trialEndTs", String(trialEnd));

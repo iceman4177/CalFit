@@ -1,4 +1,4 @@
-// src/api/create-checkout-session.js
+// /api/create-checkout-session.js
 import Stripe from "stripe";
 
 export default async function handler(req, res) {
@@ -8,16 +8,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Expect single set of keys depending on environment
-    const secretKey = process.env.STRIPE_SECRET_KEY;
-    const priceId   = process.env.STRIPE_PRICE_ID_MONTHLY;
+    // Use live vs test based on environment
+    const mode =
+      process.env.STRIPE_MODE ||
+      (process.env.NODE_ENV === "production" ? "live" : "test");
+
+    const secretKey =
+      mode === "live"
+        ? process.env.STRIPE_SECRET_KEY_LIVE
+        : process.env.STRIPE_SECRET_KEY_TEST;
+
+    const priceId =
+      mode === "live"
+        ? process.env.STRIPE_PRICE_ID_MONTHLY_LIVE
+        : process.env.STRIPE_PRICE_ID_MONTHLY_TEST;
+
+    console.log("🔑 Stripe mode:", mode);
+    console.log("🔑 Using secret key prefix:", secretKey?.slice(0, 7));
+    console.log("💲 Price ID:", priceId);
 
     if (!secretKey) throw new Error("❌ STRIPE_SECRET_KEY not set");
-    if (!priceId)   throw new Error("❌ STRIPE_PRICE_ID_MONTHLY not set");
+    if (!priceId) throw new Error("❌ STRIPE_PRICE_ID not set");
 
     const stripe = new Stripe(secretKey);
 
-    // validate price
+    // validate price exists
     const price = await stripe.prices.retrieve(priceId);
     if (!price?.active) {
       throw new Error("❌ Price not found or inactive");
@@ -31,16 +46,17 @@ export default async function handler(req, res) {
       line_items: [
         {
           price: priceId,
-          quantity: 1,
-        },
+          quantity: 1
+        }
       ],
       subscription_data: {
-        trial_period_days: trialDays,
+        trial_period_days: trialDays
       },
       success_url: `${req.headers.origin}/pro-success`,
-      cancel_url: `${req.headers.origin}/?checkout=cancel`,
+      cancel_url: `${req.headers.origin}/?checkout=cancel`
     });
 
+    console.log("✅ Created session:", session.id);
     return res.status(200).json({ sessionId: session.id });
   } catch (err) {
     console.error("⚠️ Stripe error:", err);
