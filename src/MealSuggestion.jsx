@@ -10,7 +10,6 @@ import {
   Chip,
   CircularProgress
 } from '@mui/material';
-import SwipeableViews from 'react-swipeable-views';
 import { useUserData } from './UserDataContext';
 import UpgradeModal from './components/UpgradeModal';
 
@@ -51,7 +50,6 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [index, setIndex] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   const hour = new Date().getHours();
@@ -107,7 +105,6 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       if (!meals.length) throw new Error('No meal suggestions found');
 
       setSuggestions(meals);
-      setIndex(0);
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
       setError('Couldn’t fetch meal suggestions. Please try again.');
@@ -159,58 +156,43 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         {period} Ideas
       </Typography>
 
-      <SwipeableViews index={index} onChangeIndex={setIndex} enableMouseEvents>
-        {suggestions.map((s, idx) => (
-          <Box key={idx} sx={{ px: 2 }}>
-            <Card sx={{ p: 1, maxWidth: 400, mx: "auto" }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-                  <Typography variant="subtitle1">{s.name}</Typography>
-                  <Chip label={period} size="small" />
-                </Box>
+      {suggestions.map((s, idx) => (
+        <Card key={idx} sx={{ p: 1, mb: 2, maxWidth: 400, mx: "auto" }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+              <Typography variant="subtitle1">{s.name}</Typography>
+              <Chip label={period} size="small" />
+            </Box>
 
-                <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
-                  <Typography>🔥 {s.calories}</Typography>
-                  {s.macros && (
-                    <>
-                      <Typography>🥩 {s.macros.p}g</Typography>
-                      <Typography>🌾 {s.macros.c}g</Typography>
-                      <Typography>🥑 {s.macros.f}g</Typography>
-                    </>
-                  )}
-                </Box>
+            <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
+              <Typography>🔥 {s.calories}</Typography>
+              {s.macros && (
+                <>
+                  <Typography>🥩 {s.macros.p}g</Typography>
+                  <Typography>🌾 {s.macros.c}g</Typography>
+                  <Typography>🥑 {s.macros.f}g</Typography>
+                </>
+              )}
+            </Box>
 
-                {s.prepMinutes != null && (
-                  <Typography variant="body2" color="textSecondary">
-                    ⏱ {s.prepMinutes} min prep
-                  </Typography>
-                )}
-              </CardContent>
+            {s.prepMinutes != null && (
+              <Typography variant="body2" color="textSecondary">
+                ⏱ {s.prepMinutes} min prep
+              </Typography>
+            )}
+          </CardContent>
 
-              <CardActions sx={{ justifyContent: 'space-between' }}>
-                <Button onClick={handleRetry}>Refresh</Button>
-                <Button
-                  variant="contained"
-                  onClick={() => onAddMeal({ name: s.name, calories: s.calories })}
-                >
-                  Add & Log
-                </Button>
-              </CardActions>
-            </Card>
-          </Box>
-        ))}
-      </SwipeableViews>
-
-      <Box sx={{ textAlign: 'center', mt: 1 }}>
-        {suggestions.map((_, i) => (
-          <Chip
-            key={i}
-            size="small"
-            color={i === index ? "primary" : "default"}
-            sx={{ mx: 0.3 }}
-          />
-        ))}
-      </Box>
+          <CardActions sx={{ justifyContent: 'space-between' }}>
+            <Button onClick={handleRetry}>Refresh</Button>
+            <Button
+              variant="contained"
+              onClick={() => onAddMeal({ name: s.name, calories: s.calories })}
+            >
+              Add & Log
+            </Button>
+          </CardActions>
+        </Card>
+      ))}
 
       <UpgradeModal
         open={showUpgrade}
