@@ -47,12 +47,10 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       const raw = await resp.text();
 
       if (!resp.ok) {
-        // Surface server error details for debugging
         console.error('[MealSuggestion] non-OK response:', resp.status, raw);
         throw new Error(`Server responded ${resp.status}`);
       }
 
-      // Parse JSON safely
       let data;
       try {
         data = JSON.parse(raw);
@@ -61,12 +59,11 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         throw new Error('Invalid JSON from server');
       }
 
-      // Accept either { ok:true, suggestion:{ name, calories, ... } }
-      // or legacy { name, calories, ... }
+      // Handle both new and legacy payload shapes
       let s =
-        (data && data.suggestion && data.suggestion.name && data.suggestion.calories != null)
+        (data?.suggestion && data.suggestion.name && data.suggestion.calories != null)
           ? data.suggestion
-          : (data && data.name && data.calories != null)
+          : (data?.name && data.calories != null)
             ? data
             : null;
 
@@ -75,7 +72,20 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         throw new Error('Unexpected payload from server');
       }
 
-      setSuggestion(s);
+      // 🔒 Defensive calorie parsing
+      let safeCalories = 0;
+      if (s.calories != null) {
+        const match = String(s.calories).match(/\d+/);
+        if (match) {
+          safeCalories = parseInt(match[0], 10);
+        }
+      }
+
+      setSuggestion({
+        ...s,
+        calories: safeCalories,
+        macros: s.macros || { p: 0, c: 0, f: 0 }
+      });
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
       setError('Couldn’t fetch a suggestion. Please try again.');
@@ -85,7 +95,6 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     }
   }, [period, goalType, dailyGoal, consumedCalories, recentMeals]);
 
-  // initial + whenever inputs change or refreshKey increments
   useEffect(() => {
     fetchSuggestion();
   }, [fetchSuggestion, refreshKey]);
