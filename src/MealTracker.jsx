@@ -9,7 +9,7 @@ import foodData from './foodData.json';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
-import UpgradeModal from './components/UpgradeModal'; // <-- ADDED: paywall modal
+import UpgradeModal from './components/UpgradeModal';
 
 // ---- Pro gating helpers ----
 const isProUser = () => {
@@ -35,7 +35,7 @@ export default function MealTracker({ onMealUpdate }) {
   const [calories, setCalories]           = useState('');
   const [mealLog, setMealLog]             = useState([]);
   const [showSuggest, setShowSuggest]     = useState(false);
-  const [showUpgrade, setShowUpgrade]     = useState(false); // <-- ADDED: paywall modal state
+  const [showUpgrade, setShowUpgrade]     = useState(false);
 
   const today       = new Date().toLocaleDateString('en-US');
   const stored      = JSON.parse(localStorage.getItem('userData')||'{}');
@@ -49,7 +49,7 @@ export default function MealTracker({ onMealUpdate }) {
     const todayLog = all.find(e=>e.date===today);
     const meals = todayLog?todayLog.meals:[];
     setMealLog(meals);
-    onMealUpdate(meals.reduce((s,m)=>s+m.calories,0));
+    onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
   },[onMealUpdate,today]);
 
   const save = meals => {
@@ -57,12 +57,12 @@ export default function MealTracker({ onMealUpdate }) {
       .filter(e=>e.date!==today);
     rest.push({ date:today, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
-    onMealUpdate(meals.reduce((s,m)=>s+m.calories,0));
+    onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
   };
 
   const handleAdd = () => {
     const c = parseInt(calories,10);
-    if (!foodInput.trim()||!c||c<=0) {
+    if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
       return alert('Enter a valid food & calories.');
     }
     const nm = { name:foodInput.trim(), calories:c };
@@ -80,24 +80,22 @@ export default function MealTracker({ onMealUpdate }) {
 
   // ---- PRO GATE: Suggest a Meal (AI) ----
   const handleAIMealSuggestClick = useCallback(() => {
-    // Only enforce when opening (from hidden -> shown)
     if (!showSuggest) {
       if (!isProUser()) {
         const used = getMealAICount();
         if (used >= 3) {
-          setShowUpgrade(true); // show paywall
+          setShowUpgrade(true);
           return;
         }
-        incMealAICount(); // count this free use
+        incMealAICount();
       }
       setShowSuggest(true);
       return;
     }
-    // if already open, just close
     setShowSuggest(false);
   }, [showSuggest]);
 
-  const total = mealLog.reduce((s,m)=>s+m.calories,0);
+  const total = mealLog.reduce((s,m)=>s+(m.calories||0),0);
 
   return (
     <Container maxWidth="sm" sx={{py:4}}>
@@ -145,7 +143,8 @@ export default function MealTracker({ onMealUpdate }) {
         <MealSuggestion
           consumedCalories={total}
           onAddMeal={m=>{
-            const nm={ name:m.name, calories:m.calories };
+            const safeCalories = Number.isFinite(m.calories) ? m.calories : 0;
+            const nm={ name:m.name, calories:safeCalories };
             const upd=[...mealLog,nm];
             setMealLog(upd);
             save(upd);
@@ -164,7 +163,7 @@ export default function MealTracker({ onMealUpdate }) {
             {mealLog.map((m,i)=>
               <Box key={i}>
                 <ListItem>
-                  <ListItemText primary={m.name} secondary={`${m.calories} cals`} />
+                  <ListItemText primary={m.name} secondary={`${m.calories||0} cals`} />
                 </ListItem>
                 <Divider/>
               </Box>
@@ -176,7 +175,6 @@ export default function MealTracker({ onMealUpdate }) {
         Total Calories: {total}
       </Typography>
 
-      {/* Paywall modal (shown when free cap is hit) */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}

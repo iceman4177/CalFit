@@ -74,8 +74,9 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       // 🔒 Defensive calorie parsing
       let safeCalories = 0;
-      if (s.calories != null) {
-        const match = String(s.calories).match(/\d+/);
+      if (s && s.calories != null) {
+        const strVal = String(s.calories);
+        const match = strVal.match(/\d+/);
         if (match) {
           safeCalories = parseInt(match[0], 10);
         }
@@ -84,7 +85,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       setSuggestion({
         ...s,
         calories: safeCalories,
-        macros: s.macros || { p: 0, c: 0, f: 0 }
+        macros: (s && s.macros) ? s.macros : { p: 0, c: 0, f: 0 }
       });
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);

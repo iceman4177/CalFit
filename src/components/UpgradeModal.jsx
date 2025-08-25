@@ -1,5 +1,5 @@
 // src/components/UpgradeModal.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -7,7 +7,6 @@ import {
   DialogActions,
   Button,
   Typography,
-  Box,
   Chip
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
@@ -32,21 +31,40 @@ export default function UpgradeModal({
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          plan: "monthly" // default checkout plan
-        })
+        body: JSON.stringify({ plan: "monthly" })
       });
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("Stripe server did not return JSON");
+      }
+
       if (!res.ok) {
         throw new Error(data?.error || "Checkout session failed");
       }
 
+      if (!data.sessionId) {
+        throw new Error("No session ID received from server");
+      }
+
       const stripe = await stripePromise;
-      await stripe.redirectToCheckout({ sessionId: data.sessionId });
+      if (!stripe) throw new Error("Stripe.js failed to load");
+
+      const { error } = await stripe.redirectToCheckout({
+        sessionId: data.sessionId
+      });
+
+      if (error) throw new Error(error.message);
     } catch (err) {
-      console.error(err);
-      setApiError(err.message);
+      console.error("[UpgradeModal] checkout error:", err);
+      // Show user-friendly errors for common cases
+      if (err.message.includes("Expired API Key")) {
+        setApiError("Payment configuration error: Please contact support.");
+      } else {
+        setApiError(err.message || "Something went wrong starting checkout.");
+      }
       setLoading(false);
     }
   };

@@ -1,7 +1,5 @@
 // api/ai/meal-suggestion.js
 
-// Try to load OpenAI only if we have an API key AND the module is installed.
-// This prevents Vercel 500s when 'openai' isn't in root package.json.
 let openaiClient = null;
 const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
 if (hasOpenAIKey) {
@@ -125,19 +123,27 @@ Keep JSON strict (no extra prose).`.trim();
       }
     }
 
-    if (!json || typeof json.name !== 'string' || typeof json.calories !== 'number') {
+    if (!json || typeof json.name !== 'string') {
       res.status(502).json({ ok: false, error: 'Bad AI response', raw: safeText });
       return;
     }
 
-    // De-dupe & clamp
+    // 🔒 Ensure calories is always a number
+    let safeCalories = 0;
+    if (json.calories != null) {
+      const match = String(json.calories).match(/\d+/);
+      if (match) safeCalories = parseInt(match[0], 10);
+    }
+    // Clamp into kcal window
+    safeCalories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, safeCalories)));
+
+    json.calories = safeCalories;
+
+    // De-dupe
     if (Array.isArray(recentMeals) && recentMeals.some(r => r && r.toLowerCase() === json.name.toLowerCase())) {
       json.name = `${json.name} (variation)`;
       json.calories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, json.calories + 40)));
       if (!json.notes) json.notes = 'Varied slightly to avoid repetition.';
-    }
-    if (json.calories < kcalWindow.min || json.calories > kcalWindow.max) {
-      json.calories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, json.calories)));
     }
 
     res.status(200).json({ ok: true, suggestion: json, rationale: { period, kcalWindow, remaining, targets, source: 'openai' } });

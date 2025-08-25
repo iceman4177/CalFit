@@ -10,7 +10,11 @@ import {
 
 // Now receives burned & consumed from App, so it always matches the banner
 function CalorieSummary({ burned, consumed }) {
-  const net = consumed - burned;
+  // Fallbacks: ensure numeric
+  const safeBurned = Number.isFinite(burned) ? burned : 0;
+  const safeConsumed = Number.isFinite(consumed) ? consumed : 0;
+
+  const net = safeConsumed - safeBurned;
   const status =
     net > 0
       ? 'Calorie Surplus'
@@ -27,12 +31,12 @@ function CalorieSummary({ burned, consumed }) {
       <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
         <Typography variant="h6">🍽 Calories Consumed:</Typography>
         <Typography variant="body1" sx={{ mb: 2 }}>
-          {consumed.toFixed(2)} cals
+          {safeConsumed.toFixed(2)} cals
         </Typography>
 
         <Typography variant="h6">🔥 Calories Burned:</Typography>
         <Typography variant="body1" sx={{ mb: 2 }}>
-          {burned.toFixed(2)} cals
+          {safeBurned.toFixed(2)} cals
         </Typography>
 
         <Typography variant="h6">⚖️ Net Calories:</Typography>
