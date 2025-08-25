@@ -1,15 +1,13 @@
 // src/api/meal-suggestion.js
 
-// Try to load OpenAI only if we have an API key AND the module is installed.
-// This prevents Vercel 500s when 'openai' isn't in root package.json.
 let openaiClient = null;
 const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
 if (hasOpenAIKey) {
   try {
-    const { OpenAI } = require('openai');
+    const { OpenAI } = require("openai");
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   } catch (e) {
-    console.warn('[meal-suggestion] openai module not found; falling back to stub.', e?.message);
+    console.warn("[meal-suggestion] openai module not found; falling back to stub.", e?.message);
     openaiClient = null;
   }
 }
@@ -17,7 +15,8 @@ if (hasOpenAIKey) {
 function computeMacroTargets({ weightKg = 75, dailyCalories = 2000 }) {
   const p = Math.round(1.8 * weightKg);
   const f = Math.round(0.8 * weightKg);
-  const kcalsFromP = p * 4, kcalsFromF = f * 9;
+  const kcalsFromP = p * 4,
+    kcalsFromF = f * 9;
   const c = Math.max(0, Math.round((dailyCalories - kcalsFromP - kcalsFromF) / 4));
   return { p, c, f };
 }
@@ -29,129 +28,134 @@ function suggestCalorieWindow(remaining, mealsRemaining) {
   const max = Math.round(Math.min(900, target * 1.15));
   return { min, max };
 }
+
+// --- Simple stub meals for fallback ---
 const STUBS = {
   Breakfast: [
-    { name: 'Greek Yogurt Parfait (berries + granola)', calories: 320, macros:{p:24,c:40,f:8}, prepMinutes:5 },
-    { name: 'Veggie Omelet + Toast',                     calories: 380, macros:{p:28,c:30,f:16}, prepMinutes:10 },
-    { name: 'Protein Oats (banana + peanut butter)',     calories: 420, macros:{p:26,c:52,f:12}, prepMinutes:8 },
+    { name: "Greek Yogurt Parfait", calories: 320, macros: { p: 24, c: 40, f: 8 } },
+    { name: "Veggie Omelet + Toast", calories: 380, macros: { p: 28, c: 30, f: 16 } },
+    { name: "Protein Oats", calories: 420, macros: { p: 26, c: 52, f: 12 } },
   ],
   Lunch: [
-    { name: 'Chicken Rice Bowl (veg + salsa)',           calories: 520, macros:{p:40,c:60,f:12}, prepMinutes:12 },
-    { name: 'Turkey Sandwich + Side Salad',              calories: 480, macros:{p:32,c:48,f:14}, prepMinutes:7 },
-    { name: 'Tuna Poke Bowl',                            calories: 560, macros:{p:38,c:62,f:14}, prepMinutes:15 },
-  ],
-  Snack: [
-    { name: 'Cottage Cheese + Pineapple',                calories: 220, macros:{p:22,c:22,f:5}, prepMinutes:3 },
-    { name: 'Protein Shake + Apple',                     calories: 260, macros:{p:28,c:30,f:3}, prepMinutes:2 },
-    { name: 'Hummus + Veggie Sticks',                    calories: 240, macros:{p:10,c:24,f:12}, prepMinutes:4 },
+    { name: "Chicken Rice Bowl", calories: 520, macros: { p: 40, c: 60, f: 12 } },
+    { name: "Turkey Sandwich + Salad", calories: 480, macros: { p: 32, c: 48, f: 14 } },
+    { name: "Tuna Poke Bowl", calories: 560, macros: { p: 38, c: 62, f: 14 } },
   ],
   Dinner: [
-    { name: 'Grilled Salmon, Quinoa, & Greens',          calories: 610, macros:{p:42,c:54,f:22}, prepMinutes:20 },
-    { name: 'Lean Beef, Sweet Potato, & Broccoli',       calories: 640, macros:{p:45,c:58,f:20}, prepMinutes:25 },
-    { name: 'Tofu Stir-fry, Brown Rice, Mixed Veg',      calories: 580, macros:{p:28,c:68,f:14}, prepMinutes:18 },
+    { name: "Salmon + Quinoa", calories: 610, macros: { p: 42, c: 54, f: 22 } },
+    { name: "Lean Beef + Sweet Potato", calories: 640, macros: { p: 45, c: 58, f: 20 } },
+    { name: "Tofu Stir-fry", calories: 580, macros: { p: 28, c: 68, f: 14 } },
   ],
 };
-function pickStub(period, { min, max }, recentMeals = []) {
-  const pool = STUBS[period] || [...STUBS.Breakfast, ...STUBS.Lunch, ...STUBS.Snack, ...STUBS.Dinner];
-  const candidates = pool
-    .filter(m => m.calories >= min && m.calories <= max)
-    .filter(m => !recentMeals.some(r => r && r.toLowerCase() === m.name.toLowerCase()));
-  const list = candidates.length ? candidates : pool;
-  return list[Math.floor(Math.random() * list.length)];
+
+function pickStub(period) {
+  const pool = STUBS[period] || [...STUBS.Breakfast, ...STUBS.Lunch, ...STUBS.Dinner];
+  const shuffled = pool.sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, 5);
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
     return;
   }
   try {
     const {
-      period = 'Meal',
-      goalType = 'maintain',
+      period = "Meal",
+      goalType = "maintain",
       dailyGoal = 2000,
       consumedCalories = 0,
       recentMeals = [],
       mealsRemaining = 2,
       macroTargets,
-      user = {}
+      user = {},
     } = req.body || {};
 
     const remaining = Math.max(0, Number(dailyGoal) - Number(consumedCalories));
     const kcalWindow = suggestCalorieWindow(remaining, mealsRemaining);
 
     let targets = macroTargets;
-    if (!targets || typeof targets.p !== 'number') {
+    if (!targets || typeof targets.p !== "number") {
       const weightKg = user.weightKg || (user.weightLbs ? user.weightLbs * 0.453592 : 75);
       targets = computeMacroTargets({ weightKg, dailyCalories: dailyGoal });
     }
 
-    // If OpenAI client is not available, serve a smart stub
+    // --- Fallback: stub suggestions ---
     if (!openaiClient) {
-      const s = pickStub(period, kcalWindow, Array.isArray(recentMeals) ? recentMeals : []);
+      const s = pickStub(period);
       res.status(200).json({
         ok: true,
-        suggestions: [s],
-        rationale: { period, kcalWindow, remaining, targets, source: 'stub' }
+        suggestions: s,
+        rationale: { period, kcalWindow, remaining, targets, source: "stub" },
       });
       return;
     }
 
+    // --- OpenAI call for 5 suggestions ---
     const prompt = `
 Return ONLY JSON like:
-[{"name":"...", "calories":123, "macros":{"p":30,"c":40,"f":12}, "prepMinutes":10}]
+[
+  {"name":"Grilled Chicken Salad","calories":420,"macros":{"p":40,"c":35,"f":12},"prepMinutes":15},
+  {"name":"...","calories":...}
+]
 Constraints:
+- Provide EXACTLY 5 meal suggestions
 - Period: ${period} | Goal: ${goalType}
-- Daily: ${dailyGoal} | Consumed: ${consumedCalories} | Remaining: ${remaining}
-- Meals remaining (incl. this one): ${mealsRemaining}
+- Daily goal: ${dailyGoal} | Consumed: ${consumedCalories} | Remaining: ${remaining}
 - Calorie window: ${kcalWindow.min}–${kcalWindow.max}
-- Macro targets (g): p=${targets.p}, c=${targets.c}, f=${targets.f}
-- Avoid: ${(Array.isArray(recentMeals) ? recentMeals.join(', ') : '')}
-Always return a JSON array, no extra prose.
+- Macro targets: p=${targets.p}, c=${targets.c}, f=${targets.f}
+- Avoid: ${(Array.isArray(recentMeals) ? recentMeals.join(", ") : "")}
+Always return a valid JSON array with 5 objects, no extra text.
 `.trim();
 
     const completion = await openaiClient.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.5,
     });
 
-    const text = completion?.choices?.[0]?.message?.content;
-    const safeText = typeof text === 'string' ? text.trim() : '';
-    let json = null;
+    const text = completion?.choices?.[0]?.message?.content?.trim();
+    let meals = null;
 
     try {
-      json = JSON.parse(safeText);
+      meals = JSON.parse(text);
     } catch {
-      const m = safeText ? safeText.match(/\[[\s\S]*\]/) : null;
+      const m = text ? text.match(/\[[\s\S]*\]/) : null;
       if (m && m[0]) {
-        try { json = JSON.parse(m[0]); } catch {}
+        try {
+          meals = JSON.parse(m[0]);
+        } catch {}
       }
     }
 
-    if (!json || !Array.isArray(json)) {
-      res.status(502).json({ ok: false, error: 'Bad AI response', raw: safeText });
+    if (!Array.isArray(meals)) {
+      res.status(502).json({ ok: false, error: "Bad AI response", raw: text });
       return;
     }
 
-    // clamp calories into window
-    json = json.map(meal => {
-      if (typeof meal.calories !== 'number') {
-        meal.calories = parseInt(String(meal.calories).match(/\d+/)?.[0] || '0', 10);
+    // ✅ FIX: Sanitize calories into numbers
+    meals = meals.map((meal) => {
+      let safeCalories = 0;
+      if (typeof meal.calories === "number" && !isNaN(meal.calories)) {
+        safeCalories = meal.calories;
+      } else if (typeof meal.calories === "string") {
+        const match = meal.calories.match(/\d+/);
+        if (match) safeCalories = parseInt(match[0], 10);
       }
-      if (meal.calories < kcalWindow.min || meal.calories > kcalWindow.max) {
-        meal.calories = Math.round(Math.min(kcalWindow.max, Math.max(kcalWindow.min, meal.calories)));
-      }
-      return meal;
+      return {
+        ...meal,
+        calories: safeCalories,
+        macros: meal.macros || { p: 0, c: 0, f: 0 },
+      };
     });
 
     res.status(200).json({
       ok: true,
-      suggestions: json,
-      rationale: { period, kcalWindow, remaining, targets, source: 'openai' }
+      suggestions: meals,
+      rationale: { period, kcalWindow, remaining, targets, source: "openai" },
     });
   } catch (err) {
-    console.error('[api/ai/meal-suggestion] error:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Server error' });
+    console.error("[api/ai/meal-suggestion] error:", err);
+    res.status(500).json({ ok: false, error: err.message || "Server error" });
   }
 };
