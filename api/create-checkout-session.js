@@ -8,35 +8,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Decide mode: explicit STRIPE_MODE first, else default by NODE_ENV
-    const mode =
-      process.env.STRIPE_MODE ||
-      (process.env.NODE_ENV === "production" ? "live" : "test");
+    // Expect single set of keys depending on environment
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+    const priceId   = process.env.STRIPE_PRICE_ID_MONTHLY;
 
-    const secretKey =
-      mode === "live"
-        ? process.env.STRIPE_SECRET_KEY_LIVE
-        : process.env.STRIPE_SECRET_KEY_TEST;
-
-    const priceId =
-      mode === "live"
-        ? process.env.STRIPE_PRICE_ID_MONTHLY_LIVE
-        : process.env.STRIPE_PRICE_ID_MONTHLY_TEST;
-
-    if (!secretKey) throw new Error("Stripe secret key not configured");
-    if (!priceId) throw new Error("Stripe price ID not configured");
+    if (!secretKey) throw new Error("❌ STRIPE_SECRET_KEY not set");
+    if (!priceId)   throw new Error("❌ STRIPE_PRICE_ID_MONTHLY not set");
 
     const stripe = new Stripe(secretKey);
 
-    // Validate price exists
+    // validate price
     const price = await stripe.prices.retrieve(priceId);
-    if (!price || !price.active) {
-      throw new Error("Price not found or inactive");
+    if (!price?.active) {
+      throw new Error("❌ Price not found or inactive");
     }
 
     const trialDays = parseInt(process.env.STRIPE_TRIAL_DAYS || "7", 10);
 
-    // Create checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
@@ -56,7 +44,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ sessionId: session.id });
   } catch (err) {
     console.error("⚠️ Stripe error:", err);
-    const message = err.raw?.message || err.message;
-    return res.status(500).json({ error: message });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 }

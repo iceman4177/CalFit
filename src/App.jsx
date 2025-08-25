@@ -100,6 +100,27 @@ export default function App() {
     }
   }, []);
 
+  const [userData, setUserDataState] = useState(null);
+  const [isPremium, setIsPremium]    = useState(false);
+
+  // 7-day trial logic
+  const [trialStart, setTrialStart] = useState(() => localStorage.getItem('trialStart'));
+  const trialActive = trialStart
+    ? (Date.now() - parseInt(trialStart, 10)) < 7 * 24 * 60 * 60 * 1000
+    : false;
+
+  // ✅ FORCE RESET FOR DEV so Free Trial button always appears
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log("⚠️ Dev mode: resetting trial & premium flags");
+      localStorage.removeItem('trialStart');
+      localStorage.removeItem('userData');
+      localStorage.removeItem('trialEndTs');
+      setIsPremium(false);
+      setTrialStart(null);
+    }
+  }, []);
+
   // Stripe success callback → mark user as premium
   useEffect(() => {
     if (location.pathname === '/pro-success') {
@@ -109,12 +130,6 @@ export default function App() {
       setIsPremium(true);
     }
   }, [location.pathname]);
-
-  // 7-day trial logic
-  const [trialStart, setTrialStart] = useState(() => localStorage.getItem('trialStart'));
-  const trialActive = trialStart
-    ? (Date.now() - parseInt(trialStart, 10)) < 7 * 24 * 60 * 60 * 1000
-    : false;
 
   useDailyNotification({
     hour:   19,
@@ -147,8 +162,6 @@ export default function App() {
   const handleClosePrompt = () => setPromptOpen(false);
   const handleGoToMeals   = () => { setPromptOpen(false); history.push('/meals'); };
 
-  const [userData, setUserDataState] = useState(null);
-  const [isPremium, setIsPremium]    = useState(false);
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [upgradeOpen, setUpgradeOpen]           = useState(false);
@@ -266,7 +279,9 @@ export default function App() {
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>
-        <Typography variant="body1" color="textSecondary">Track your workouts, meals, and calories all in one place.</Typography>
+        <Typography variant="body1" color="textSecondary">
+          Track your workouts, meals, and calories all in one place.
+        </Typography>
         {!isPremium && !trialActive && (
           <Button
             variant="contained"

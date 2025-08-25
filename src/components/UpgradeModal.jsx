@@ -1,3 +1,4 @@
+// src/components/UpgradeModal.jsx
 import React, { useState } from "react";
 import {
   Dialog,
@@ -10,12 +11,8 @@ import {
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
 
-// Decide which publishable key to use
-const stripePromise = loadStripe(
-  import.meta.env.STRIPE_MODE === "live" || import.meta.env.MODE === "production"
-    ? import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_LIVE
-    : import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_TEST
-);
+// Only need one key now
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
 export default function UpgradeModal({
   open,
@@ -35,7 +32,7 @@ export default function UpgradeModal({
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: "monthly" })
+        body: JSON.stringify({ plan: "monthly" }),
       });
 
       let data;
@@ -52,12 +49,12 @@ export default function UpgradeModal({
       if (!stripe) throw new Error("Stripe.js failed to load");
 
       const { error } = await stripe.redirectToCheckout({
-        sessionId: data.sessionId
+        sessionId: data.sessionId,
       });
 
       if (error) throw new Error(error.message);
 
-      // Optimistic trial marker in case redirect fails
+      // optimistic trial marker
       if (!localStorage.getItem("trialEndTs")) {
         const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
         localStorage.setItem("trialEndTs", String(trialEnd));
