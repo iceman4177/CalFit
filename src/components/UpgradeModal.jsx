@@ -41,13 +41,8 @@ export default function UpgradeModal({
         throw new Error("Stripe server did not return JSON");
       }
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Checkout session failed");
-      }
-
-      if (!data.sessionId) {
-        throw new Error("No session ID received from server");
-      }
+      if (!res.ok) throw new Error(data?.error || "Checkout session failed");
+      if (!data.sessionId) throw new Error("No session ID received from server");
 
       const stripe = await stripePromise;
       if (!stripe) throw new Error("Stripe.js failed to load");
@@ -57,14 +52,15 @@ export default function UpgradeModal({
       });
 
       if (error) throw new Error(error.message);
+
+      // Optimistic trial marker in case redirect fails
+      if (!localStorage.getItem("trialEndTs")) {
+        const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
+        localStorage.setItem("trialEndTs", String(trialEnd));
+      }
     } catch (err) {
       console.error("[UpgradeModal] checkout error:", err);
-      // Show user-friendly errors for common cases
-      if (err.message.includes("Expired API Key")) {
-        setApiError("Payment configuration error: Please contact support.");
-      } else {
-        setApiError(err.message || "Something went wrong starting checkout.");
-      }
+      setApiError(err.message || "Something went wrong starting checkout.");
       setLoading(false);
     }
   };

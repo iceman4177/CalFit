@@ -43,7 +43,7 @@ export default function MealTracker({ onMealUpdate }) {
   const goalType    = stored.goalType  || 'maintain';
   const recentMeals = mealLog.map(m=>m.name);
 
-  // load
+  // Load today’s meals
   useEffect(()=>{
     const all = JSON.parse(localStorage.getItem('mealHistory')||'[]');
     const todayLog = all.find(e=>e.date===today);
@@ -135,7 +135,7 @@ export default function MealTracker({ onMealUpdate }) {
           Clear Meals
         </Button>
         <Button variant="outlined" onClick={handleAIMealSuggestClick}>
-          Suggest a Meal (AI)
+          {showSuggest ? "Hide Suggestions" : "Suggest a Meal (AI)"}
         </Button>
       </Box>
 
@@ -175,6 +175,7 @@ export default function MealTracker({ onMealUpdate }) {
         Total Calories: {total}
       </Typography>
 
+      {/* Paywall modal */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}

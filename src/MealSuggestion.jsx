@@ -10,24 +10,58 @@ import {
   Chip,
   CircularProgress
 } from '@mui/material';
-import { useUserData } from './UserDataContext'; // <- updated import
+import SwipeableViews from 'react-swipeable-views';
+import { useUserData } from './UserDataContext';
+import UpgradeModal from './components/UpgradeModal';
+
+// ---- Pro gating helpers ----
+const isProUser = () => {
+  if (localStorage.getItem('isPro') === 'true') return true;
+  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+  return !!ud.isPremium;
+};
+
+const isTrialActive = () => {
+  const ts = parseInt(localStorage.getItem('trialEndTs') || '0', 10);
+  return ts && Date.now() < ts;
+};
+
+const getMealAIRefreshCount = () => {
+  const today = new Date().toLocaleDateString('en-US');
+  const savedDate = localStorage.getItem('aiMealRefreshDate');
+  if (savedDate !== today) {
+    localStorage.setItem('aiMealRefreshDate', today);
+    localStorage.setItem('aiMealRefreshCount', '0');
+    return 0;
+  }
+  return parseInt(localStorage.getItem('aiMealRefreshCount') || '0', 10);
+};
+
+const incMealAIRefreshCount = () => {
+  const today = new Date().toLocaleDateString('en-US');
+  localStorage.setItem('aiMealRefreshDate', today);
+  const newCount = getMealAIRefreshCount() + 1;
+  localStorage.setItem('aiMealRefreshCount', String(newCount));
+};
 
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const { dailyGoal, goalType, recentMeals } = useUserData();
 
-  const [suggestion, setSuggestion] = useState(null);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState(null);
-  const [refreshKey, setRefreshKey] = useState(0); // trigger re-fetch on demand
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [index, setIndex] = useState(0);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // decide meal period
-  const hour   = new Date().getHours();
-  const period = hour < 10 ? 'Breakfast'
-               : hour < 14 ? 'Lunch'
-               : hour < 17 ? 'Snack'
-               : 'Dinner';
+  const hour = new Date().getHours();
+  const period =
+    hour < 10 ? 'Breakfast' :
+    hour < 14 ? 'Lunch' :
+    hour < 17 ? 'Snack' :
+    'Dinner';
 
-  const fetchSuggestion = useCallback(async () => {
+  const fetchSuggestions = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -45,68 +79,65 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       });
 
       const raw = await resp.text();
-
-      if (!resp.ok) {
-        console.error('[MealSuggestion] non-OK response:', resp.status, raw);
-        throw new Error(`Server responded ${resp.status}`);
-      }
+      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
 
       let data;
       try {
         data = JSON.parse(raw);
-      } catch (e) {
-        console.error('[MealSuggestion] response was not JSON:', raw);
+      } catch {
         throw new Error('Invalid JSON from server');
       }
 
-      // Handle both new and legacy payload shapes
-      let s =
-        (data?.suggestion && data.suggestion.name && data.suggestion.calories != null)
-          ? data.suggestion
-          : (data?.name && data.calories != null)
-            ? data
-            : null;
+      let meals = Array.isArray(data?.suggestions) ? data.suggestions : [];
 
-      if (!s) {
-        console.error('[MealSuggestion] bad payload shape:', data);
-        throw new Error('Unexpected payload from server');
-      }
-
-      // 🔒 Defensive calorie parsing
-      let safeCalories = 0;
-      if (s && s.calories != null) {
-        const strVal = String(s.calories);
-        const match = strVal.match(/\d+/);
-        if (match) {
-          safeCalories = parseInt(match[0], 10);
+      meals = meals.map((m) => {
+        let safeCalories = 0;
+        if (m?.calories != null) {
+          const match = String(m.calories).match(/\d+/);
+          if (match) safeCalories = parseInt(match[0], 10);
         }
-      }
-
-      setSuggestion({
-        ...s,
-        calories: safeCalories,
-        macros: (s && s.macros) ? s.macros : { p: 0, c: 0, f: 0 }
+        return {
+          name: m?.name || 'Unknown meal',
+          calories: Number.isFinite(safeCalories) ? safeCalories : 0,
+          macros: m?.macros || { p: 0, c: 0, f: 0 },
+          prepMinutes: m?.prepMinutes || null,
+        };
       });
+
+      if (!meals.length) throw new Error('No meal suggestions found');
+
+      setSuggestions(meals);
+      setIndex(0);
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
-      setError('Couldn’t fetch a suggestion. Please try again.');
-      setSuggestion(null);
+      setError('Couldn’t fetch meal suggestions. Please try again.');
+      setSuggestions([]);
     } finally {
       setLoading(false);
     }
   }, [period, goalType, dailyGoal, consumedCalories, recentMeals]);
 
   useEffect(() => {
-    fetchSuggestion();
-  }, [fetchSuggestion, refreshKey]);
+    fetchSuggestions();
+  }, [fetchSuggestions, refreshKey]);
 
-  const handleRetry = () => setRefreshKey(k => k + 1);
+  const handleRetry = () => {
+    if (!isProUser() && !isTrialActive()) {
+      const used = getMealAIRefreshCount();
+      if (used >= 3) {
+        setShowUpgrade(true);
+        return;
+      }
+      incMealAIRefreshCount();
+    }
+    setRefreshKey((k) => k + 1);
+  };
 
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
         <CircularProgress />
-        <Typography sx={{ mt: 1 }}>Thinking of a meal…</Typography>
+        <Typography sx={{ mt: 1 }}>Thinking of meals…</Typography>
       </Box>
     );
   }
@@ -120,50 +151,73 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     );
   }
 
-  if (!suggestion) return null;
+  if (!suggestions.length) return null;
 
   return (
-    <Box>
-      <Card sx={{ maxWidth: 400, mx: 'auto', mt: 2, p: 2 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-            <Typography variant="h6">{suggestion.name}</Typography>
-            <Chip label={period} size="small" />
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="h6" align="center" gutterBottom>
+        {period} Ideas
+      </Typography>
+
+      <SwipeableViews index={index} onChangeIndex={setIndex} enableMouseEvents>
+        {suggestions.map((s, idx) => (
+          <Box key={idx} sx={{ px: 2 }}>
+            <Card sx={{ p: 1, maxWidth: 400, mx: "auto" }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+                  <Typography variant="subtitle1">{s.name}</Typography>
+                  <Chip label={period} size="small" />
+                </Box>
+
+                <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
+                  <Typography>🔥 {s.calories}</Typography>
+                  {s.macros && (
+                    <>
+                      <Typography>🥩 {s.macros.p}g</Typography>
+                      <Typography>🌾 {s.macros.c}g</Typography>
+                      <Typography>🥑 {s.macros.f}g</Typography>
+                    </>
+                  )}
+                </Box>
+
+                {s.prepMinutes != null && (
+                  <Typography variant="body2" color="textSecondary">
+                    ⏱ {s.prepMinutes} min prep
+                  </Typography>
+                )}
+              </CardContent>
+
+              <CardActions sx={{ justifyContent: 'space-between' }}>
+                <Button onClick={handleRetry}>Refresh</Button>
+                <Button
+                  variant="contained"
+                  onClick={() => onAddMeal({ name: s.name, calories: s.calories })}
+                >
+                  Add & Log
+                </Button>
+              </CardActions>
+            </Card>
           </Box>
+        ))}
+      </SwipeableViews>
 
-          <Box sx={{ display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
-            <Typography>🔥 {suggestion.calories}</Typography>
-            {suggestion.macros && (
-              <>
-                <Typography>🥩 {suggestion.macros.p}g</Typography>
-                <Typography>🌾 {suggestion.macros.c}g</Typography>
-                <Typography>🥑 {suggestion.macros.f}g</Typography>
-              </>
-            )}
-          </Box>
+      <Box sx={{ textAlign: 'center', mt: 1 }}>
+        {suggestions.map((_, i) => (
+          <Chip
+            key={i}
+            size="small"
+            color={i === index ? "primary" : "default"}
+            sx={{ mx: 0.3 }}
+          />
+        ))}
+      </Box>
 
-          {suggestion.prepMinutes != null && (
-            <Typography variant="body2" color="textSecondary">
-              ⏱ {suggestion.prepMinutes} min prep
-            </Typography>
-          )}
-        </CardContent>
-
-        <CardActions sx={{ justifyContent: 'space-between' }}>
-          <Button onClick={handleRetry}>New Suggestion</Button>
-          <Button
-            variant="contained"
-            onClick={() =>
-              onAddMeal({
-                name:     suggestion.name,
-                calories: suggestion.calories
-              })
-            }
-          >
-            Add &amp; Log
-          </Button>
-        </CardActions>
-      </Card>
+      <UpgradeModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Upgrade to Slimcal Pro"
+        description="You’ve reached your 3 free daily AI meal suggestions. Upgrade for unlimited access."
+      />
     </Box>
   );
 }

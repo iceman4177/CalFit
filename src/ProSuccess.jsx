@@ -1,28 +1,33 @@
-import React, { useEffect } from 'react';
-import { Container, Typography, Button, Box } from '@mui/material';
+
+import React, { useEffect } from "react";
+import { useRouter } from "next/router";
 
 export default function ProSuccess() {
+  const router = useRouter();
+
   useEffect(() => {
-    // Persist the Pro status
-    localStorage.setItem('isPro', 'true');
-  }, []);
+    // ✅ Mark user as Pro
+    localStorage.setItem("isPro", "true");
+
+    // ✅ Set 7-day trial expiry (only if not already set)
+    if (!localStorage.getItem("trialEndTs")) {
+      const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+      localStorage.setItem("trialEndTs", String(trialEnd));
+    }
+
+    // redirect back to app homepage after short delay
+    const timer = setTimeout(() => {
+      router.push("/");
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [router]);
 
   return (
-    <Container maxWidth="sm" sx={{ py: 8, textAlign: 'center' }}>
-      <Typography variant="h3" gutterBottom>
-        🎉 Welcome to Slimcal Pro!
-      </Typography>
-      <Typography variant="subtitle1" sx={{ mb: 4 }}>
-        Your intelligent fitness journey just level-upped.
-      </Typography>
-      
-      <Button
-        variant="contained"
-        size="large"
-        onClick={() => window.location.href = '/'}
-      >
-        Go to Dashboard
-      </Button>
-    </Container>
+    <div style={{ textAlign: "center", marginTop: "3rem" }}>
+      <h2>🎉 Welcome to Slimcal Pro!</h2>
+      <p>Your 7-day free trial has started. Unlimited AI features are unlocked.</p>
+      <p>Redirecting back to the app…</p>
+    </div>
   );
 }
