@@ -11,19 +11,19 @@ import {
 } from "@mui/material";
 import { loadStripe } from "@stripe/stripe-js";
 
-// Decide which publishable key to use
-const publishableKey = import.meta.env.PROD
-  ? import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_LIVE
-  : import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY_TEST;
+// Always read the single unified key
+const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
-// Debug log: make sure it’s not undefined
+// Debug log to confirm it’s picked up
 console.log("🔑 Using Stripe publishable key:", publishableKey);
 
 if (!publishableKey) {
-  console.error("❌ Missing Stripe publishable key! Check .env.local (for dev) or Vercel env vars (for prod).");
+  console.error(
+    "❌ Missing Stripe publishable key! Check .env.local (dev) or Vercel env vars (prod)."
+  );
 }
 
-const stripePromise = loadStripe(publishableKey);
+const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
 
 export default function UpgradeModal({
   open,
@@ -56,8 +56,8 @@ export default function UpgradeModal({
       if (!res.ok) throw new Error(data?.error || "Checkout session failed");
       if (!data.sessionId) throw new Error("No session ID received from server");
 
+      if (!stripePromise) throw new Error("Stripe.js failed to load");
       const stripe = await stripePromise;
-      if (!stripe) throw new Error("Stripe.js failed to load");
 
       const { error } = await stripe.redirectToCheckout({
         sessionId: data.sessionId

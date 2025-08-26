@@ -6,10 +6,11 @@ export default function ProSuccess() {
   const history = useHistory();
 
   useEffect(() => {
-    // ✅ Mark user as Pro
+    // ✅ Optimistically mark user as Pro in localStorage
     localStorage.setItem("isPro", "true");
 
-    // ✅ Set 7-day trial expiry (if not already set)
+    // ❌ Do NOT reset trialEndTs here anymore — Stripe handles the real trial.
+    // Only set it if you want an optimistic backup in case redirect failed.
     if (!localStorage.getItem("trialEndTs")) {
       const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
       localStorage.setItem("trialEndTs", String(trialEnd));
@@ -26,7 +27,7 @@ export default function ProSuccess() {
   return (
     <div style={{ textAlign: "center", marginTop: "3rem" }}>
       <h2>🎉 Welcome to Slimcal Pro!</h2>
-      <p>Your 7-day free trial has started. Unlimited AI features are now unlocked.</p>
+      <p>Your Pro subscription is active. Unlimited AI features are now unlocked.</p>
       <p>Redirecting back to the app…</p>
     </div>
   );
