@@ -103,16 +103,10 @@ export default function App() {
   const [userData, setUserDataState] = useState(null);
   const [isPremium, setIsPremium]    = useState(false);
 
-  // 7-day trial logic (legacy local)
+  // 7-day trial logic
   const [trialStart, setTrialStart] = useState(() => localStorage.getItem('trialStart'));
   const trialActive = trialStart
     ? (Date.now() - parseInt(trialStart, 10)) < 7 * 24 * 60 * 60 * 1000
-    : false;
-
-  // Stripe-backed trial check
-  const [trialEndTs, setTrialEndTs] = useState(() => localStorage.getItem('trialEndTs'));
-  const stripeTrialActive = trialEndTs
-    ? Date.now() < parseInt(trialEndTs, 10)
     : false;
 
   // ✅ FORCE RESET FOR DEV so Free Trial button always appears
@@ -124,7 +118,6 @@ export default function App() {
       localStorage.removeItem('trialEndTs');
       setIsPremium(false);
       setTrialStart(null);
-      setTrialEndTs(null);
     }
   }, []);
 
@@ -159,8 +152,7 @@ export default function App() {
       !promptedRef.current &&
       missedMeals.length > 0 &&
       location.pathname !== '/meals' &&
-      !trialActive &&
-      !stripeTrialActive
+      !trialActive
     ) {
       promptedRef.current = true;
       setPromptOpen(true);
@@ -290,15 +282,12 @@ export default function App() {
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
-        {!isPremium && !trialActive && !stripeTrialActive && (
+        {/* ✅ Changed: button now opens UpgradeModal instead of just writing to localStorage */}
+        {!isPremium && !trialActive && (
           <Button
             variant="contained"
             sx={{ mt: 2 }}
-            onClick={() => {
-              const now = Date.now().toString();
-              localStorage.setItem('trialStart', now);
-              setTrialStart(now);
-            }}
+            onClick={() => setUpgradeOpen(true)}
           >
             Try Pro Free
           </Button>
@@ -356,6 +345,7 @@ export default function App() {
         <CampaignIcon />
       </Fab>
 
+      {/* UpgradeModal is always mounted, controlled by state */}
       <UpgradeModal
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}
