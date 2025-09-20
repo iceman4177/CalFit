@@ -2,14 +2,20 @@
 import Stripe from "stripe";
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
+// Use your existing Stripe API version (adjust if needed)
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
-// Dev-only: quick sanity that we're using the intended secret
+// Dev-only sanity logs (safe to keep; redact in prod if you prefer)
+console.log("[wh] env:", process.env.VERCEL_ENV || "local");
 console.log("[wh] using secret suffix:", (process.env.STRIPE_WEBHOOK_SECRET || "").slice(-8));
 
+/**
+ * Important: preserve the raw request body (Vercel Node serverless).
+ * If you run locally, prefer `vercel dev` rather than Vite proxying, which can alter the body.
+ */
 export const config = { api: { bodyParser: false } };
 
-// Read raw stream (Vercel Node serverless)
+// Read raw stream without modifying bytes
 async function buffer(readable) {
   const chunks = [];
   for await (const chunk of readable) {
@@ -24,11 +30,32 @@ export default async function handler(req, res) {
     return res.status(405).end("Method Not Allowed");
   }
 
+  // Stripe signature header must be present
   const sig = req.headers["stripe-signature"];
+  console.log("[wh] sig header present:", Boolean(sig));
+
+  let rawBuf;
+  try {
+    rawBuf = await buffer(req);
+    console.log(
+      "[wh] raw length =",
+      rawBuf.length,
+      "first 80 chars:",
+      rawBuf.toString("utf8").slice(0, 80)
+    );
+  } catch (e) {
+    console.error("[wh] ❌ Failed to read raw body:", e);
+    return res.status(400).send("Invalid body");
+  }
+
+  // Verify signature against the EXACT raw bytes
   let event;
   try {
-    const buf = await buffer(req);
-    event = stripe.webhooks.constructEvent(buf, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      rawBuf,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
     console.error("[wh] ❌ Signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -49,13 +76,16 @@ async function handleEvent(event) {
   switch (event.type) {
     case "checkout.session.completed": {
       const s = event.data.object;
-      console.log("[wh] checkout.session.completed", { id: s.id, mode: s.mode, customer: s.customer });
+      console.log("[wh] checkout.session.completed", {
+        id: s.id,
+        mode: s.mode,
+        customer: s.customer,
+      });
 
-      // 1) Ensure customer mapping exists (capture email and ideally user_id if present in metadata/client_reference_id)
+      // 1) Ensure customer mapping exists (capture email and optionally user_id if passed)
       await upsertCustomer({
         stripe_customer_id: s.customer,
         email: s.customer_details?.email ?? s.customer_email ?? null,
-        // If you pass user_id via client_reference_id or metadata at checkout, capture it:
         user_id: s.client_reference_id || s.metadata?.user_id || null,
       });
 
@@ -75,11 +105,11 @@ async function handleEvent(event) {
       const sub = event.data.object;
       console.log("[wh]", event.type, { id: sub.id, status: sub.status, customer: sub.customer });
 
-      // Make sure customer mapping exists (in case this event arrives before checkout.completed)
+      // Ensure we have a customer mapping (in case this arrives first)
       await upsertCustomer({
         stripe_customer_id: sub.customer,
         email: null,
-        user_id: null, // we may or may not know it here; that's okay
+        user_id: null,
       });
 
       await upsertSubscription(sub);
@@ -87,7 +117,7 @@ async function handleEvent(event) {
     }
 
     case "invoice.paid": {
-      // Optional: keep an eye on successful payments if you want to update period_end or status
+      // Optional billing signal; useful for debugging flow
       const inv = event.data.object;
       console.log("[wh] invoice.paid", { id: inv.id, customer: inv.customer });
       break;
@@ -99,29 +129,27 @@ async function handleEvent(event) {
 }
 
 /**
- * Upserts a row in app_stripe_customers
- * Expects a schema like:
+ * Upserts into app_stripe_customers.
+ * Your existing schema uses "customer_id" (keep it) instead of "stripe_customer_id".
+ *
+ * Table shape assumed:
  *   app_stripe_customers (
- *     stripe_customer_id text primary key,
+ *     customer_id text primary key,
  *     user_id uuid null,
  *     email text,
  *     created_at timestamptz default now(),
  *     updated_at timestamptz default now()
  *   )
- *
- * If your table currently uses `customer_id` instead of `stripe_customer_id`, you can keep it,
- * but consider standardizing to `stripe_customer_id` for clarity.
  */
 async function upsertCustomer({ stripe_customer_id, email, user_id }) {
   if (!stripe_customer_id) return;
 
-  // Build payload using your column names (your current code uses "customer_id")
   const payload = {
-    customer_id: stripe_customer_id, // <-- keep your existing column name to avoid a migration right now
+    customer_id: stripe_customer_id, // keep your column name
     email: email ?? null,
     updated_at: new Date().toISOString(),
   };
-  if (user_id) payload.user_id = user_id; // add user mapping if we have it
+  if (user_id) payload.user_id = user_id;
 
   const { data, error } = await supabaseAdmin
     .from("app_stripe_customers")
@@ -137,8 +165,9 @@ async function upsertCustomer({ stripe_customer_id, email, user_id }) {
 }
 
 /**
- * Upserts a row in app_subscriptions tied to the user's id, not just the customer.
- * Expects a schema like:
+ * Upserts into app_subscriptions using the subscription's own id.
+ *
+ * Table shape assumed:
  *   app_subscriptions (
  *     stripe_subscription_id text primary key,
  *     user_id uuid not null,
@@ -147,13 +176,10 @@ async function upsertCustomer({ stripe_customer_id, email, user_id }) {
  *     price_id text,
  *     product_id text,
  *     cancel_at_period_end boolean default false,
- *     trial_end timestamptz null,
+ *     trial_end timestamptz,
  *     created_at timestamptz default now(),
  *     updated_at timestamptz default now()
  *   )
- *
- * If your table currently uses "customer_id" as the key, switch to "stripe_subscription_id"
- * (or at least set onConflict to "stripe_subscription_id")—customers can have multiple subs.
  */
 async function upsertSubscription(sub) {
   const stripe_subscription_id = sub.id;
@@ -167,29 +193,29 @@ async function upsertSubscription(sub) {
   const cancel_at_period_end = !!sub.cancel_at_period_end;
   const trial_end = sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null;
 
-  // 1) Resolve user_id from app_stripe_customers mapping
+  // Resolve user_id from the customer mapping
   const { data: custRow, error: custErr } = await supabaseAdmin
     .from("app_stripe_customers")
     .select("user_id")
-    .eq("customer_id", stripe_customer_id) // your current column name
+    .eq("customer_id", stripe_customer_id)
     .maybeSingle();
 
   if (custErr) {
     console.error("[wh] customer lookup error", custErr);
     throw custErr;
   }
+
   const user_id = custRow?.user_id;
   if (!user_id) {
     console.warn("[wh] ⚠ No user_id for stripe_customer_id", stripe_customer_id, "—skipping subscription upsert");
-    return; // Optionally: queue retry once user_id is known
+    return; // Optionally queue a retry once user_id is known
   }
 
-  // 2) Upsert subscription keyed by its own id
   const { error: subErr } = await supabaseAdmin
     .from("app_subscriptions")
     .upsert(
       {
-        stripe_subscription_id,  // unique key
+        stripe_subscription_id,
         user_id,
         status,
         current_period_end,
