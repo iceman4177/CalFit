@@ -7,18 +7,21 @@ import theme from './theme';
 import './App.css';
 import { BrowserRouter } from 'react-router-dom';
 import { UserDataProvider } from './UserDataContext';
+import { EntitlementsProvider } from './context/EntitlementsContext.jsx';  // ✅ make sure this path is correct
 import { initGA } from './analytics';
 
 initGA();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
-  <ThemeProvider theme={theme}>
-    <CssBaseline />
-    <BrowserRouter>
-      <UserDataProvider>
-        <App />
-      </UserDataProvider>
-    </BrowserRouter>
-  </ThemeProvider>
+  <EntitlementsProvider>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <BrowserRouter>
+        <UserDataProvider>
+          <App />
+        </UserDataProvider>
+      </BrowserRouter>
+    </ThemeProvider>
+  </EntitlementsProvider>
 );

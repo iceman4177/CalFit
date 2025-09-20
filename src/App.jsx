@@ -63,6 +63,9 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
+// ✅ NEW: use server-verified Pro status from our Entitlements context
+import { useEntitlements } from './context/EntitlementsContext.jsx';
+
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -90,46 +93,21 @@ export default function App() {
   const location     = useLocation();
   const promptedRef  = useRef(false);
 
-  // used to capture referrals
+  // 🔗 capture referrals
   useReferral();
 
-  // request notifications permission once
+  // 🔔 request notifications permission once
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
 
+  // ✅ Server-verified Pro state
+  const { isProActive, status } = useEntitlements();
+  const trialActive = status === 'trialing';
+
   const [userData, setUserDataState] = useState(null);
-  const [isPremium, setIsPremium]    = useState(false);
-
-  // 7-day trial logic
-  const [trialStart, setTrialStart] = useState(() => localStorage.getItem('trialStart'));
-  const trialActive = trialStart
-    ? (Date.now() - parseInt(trialStart, 10)) < 7 * 24 * 60 * 60 * 1000
-    : false;
-
-  // ✅ FORCE RESET FOR DEV so Free Trial button always appears
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log("⚠️ Dev mode: resetting trial & premium flags");
-      localStorage.removeItem('trialStart');
-      localStorage.removeItem('userData');
-      localStorage.removeItem('trialEndTs');
-      setIsPremium(false);
-      setTrialStart(null);
-    }
-  }, []);
-
-  // Stripe success callback → mark user as premium
-  useEffect(() => {
-    if (location.pathname === '/pro-success') {
-      const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-      const next = { ...prev, isPremium: true };
-      localStorage.setItem('userData', JSON.stringify(next));
-      setIsPremium(true);
-    }
-  }, [location.pathname]);
 
   useDailyNotification({
     hour:   19,
@@ -157,7 +135,7 @@ export default function App() {
       promptedRef.current = true;
       setPromptOpen(true);
     }
-  }, [missedMeals, location.pathname]);
+  }, [missedMeals, location.pathname, trialActive]);
 
   const handleClosePrompt = () => setPromptOpen(false);
   const handleGoToMeals   = () => { setPromptOpen(false); history.push('/meals'); };
@@ -173,15 +151,17 @@ export default function App() {
 
   const setUserData = data => {
     const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-    const next = { ...prev, ...data, isPremium };
+    const next = { ...prev, ...data, isPremium: isProActive };
     localStorage.setItem('userData', JSON.stringify(next));
     setUserDataState(next);
   };
 
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
-    setUserDataState(saved);
-    setIsPremium(!!saved.isPremium);
+    // normalize stored flag to server truth
+    const normalized = { ...saved, isPremium: isProActive };
+    setUserDataState(normalized);
+    localStorage.setItem('userData', JSON.stringify(normalized));
     refreshCalories();
 
     if (!saved.age && location.pathname === '/') {
@@ -193,7 +173,8 @@ export default function App() {
       setAmbassadorOpen(true);
       localStorage.setItem('hasSeenAmbassadorInvite', 'true');
     }
-  }, []);
+    // re-run when Pro flips so UI stays in sync
+  }, [isProActive, location.pathname, history]);
 
   function refreshCalories() {
     const today    = new Date().toLocaleDateString('en-US');
@@ -282,8 +263,9 @@ export default function App() {
         <Typography variant="body1" color="textSecondary">
           Track your workouts, meals, and calories all in one place.
         </Typography>
-        {/* ✅ Changed: button now opens UpgradeModal instead of just writing to localStorage */}
-        {!isPremium && !trialActive && (
+
+        {/* Show the upgrade CTA only if user is not Pro */}
+        {!isProActive && (
           <Button
             variant="contained"
             sx={{ mt: 2 }}
@@ -300,7 +282,7 @@ export default function App() {
       {navBar}
 
       <Switch>
-        {/* NEW paywall routes */}
+        {/* Paywall routes */}
         <Route path="/pro" component={ProLandingPage} />
         <Route path="/pro-success" component={ProSuccess} />
 
@@ -329,7 +311,8 @@ export default function App() {
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log"  component={CalorieHistory} />
         <Route path="/summary"      render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
-        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium }} />} />
+        {/* Pass the server-verified premium flag to your AI coach */}
+        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive }} />} />
         <Route path="/waitlist"     component={WaitlistSignup} />
         <Route path="/preferences"  component={AlertPreferences} />
         <Route exact path="/"       render={() => null} />
