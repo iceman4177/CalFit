@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, Typography, Chip, TextField, Stack, ToggleButton, ToggleButtonGroup, Divider
+  Button, Typography, Chip, TextField, Stack, ToggleButton, ToggleButtonGroup
 } from "@mui/material";
 import { supabase } from "../lib/supabaseClient";
 
@@ -17,24 +17,13 @@ function getOrCreateClientId() {
   return cid;
 }
 
-async function waitForSupabaseUser(maxMs = 6000, stepMs = 250) {
-  const start = Date.now();
-  for (;;) {
-    const { data, error } = await supabase.auth.getUser();
-    if (data?.user && !error) return data.user;
-    if (Date.now() - start > maxMs) return null;
-    await new Promise(r => setTimeout(r, stepMs));
-  }
-}
-
 export default function UpgradeModal({
   open,
   onClose,
-  title = "Upgrade to Slimcal Pro",
+  title = "Start your 7-Day Free Pro Trial",
   description = "Unlimited AI workouts, meals & premium insights.",
   annual = false,
   defaultPlan,
-  autoCheckoutOnOpen = false,
 }) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -62,7 +51,9 @@ export default function UpgradeModal({
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      const redirectUrl = `${window.location.origin}/?upgrade=1&plan=${plan}&autopay=1`;
+      // Persist intent (no query params needed)
+      localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
+      const redirectUrl = `${window.location.origin}/pro`; // exact URL whitelisted in Supabase
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -80,7 +71,8 @@ export default function UpgradeModal({
       return;
     }
     try {
-      const redirectUrl = `${window.location.origin}/?upgrade=1&plan=${plan}&autopay=1`;
+      localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
+      const redirectUrl = `${window.location.origin}/pro`;
       const { error } = await supabase.auth.signInWithOtp({
         email: emailForMagicLink,
         options: { emailRedirectTo: redirectUrl },
@@ -101,10 +93,9 @@ export default function UpgradeModal({
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
       const price_id = plan === "annual" ? PRICE_ANNUAL : PRICE_MONTHLY;
-      if (!price_id) throw new Error("Billing configuration missing.");
+      if (!price_id) throw new Error("Missing Stripe price configuration.");
 
       const clientId = getOrCreateClientId();
-
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,42 +110,15 @@ export default function UpgradeModal({
         }),
       });
 
-      const json = await resp.json();
-      if (!resp.ok) throw new Error(json?.error || "Checkout session failed");
-      if (!json?.url) throw new Error("No checkout URL returned");
-
-      window.location.href = json.url;
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.url) throw new Error(json?.error || "Checkout session failed");
+      window.location.assign(json.url);
     } catch (err) {
       console.error("[UpgradeModal] checkout error:", err);
       setApiError(err.message || "Something went wrong.");
       setLoading(false);
     }
   };
-
-  const simulateUpgradeDev = () => {
-    const clientId = getOrCreateClientId();
-    localStorage.setItem("isPro", "true");
-    localStorage.setItem("isProActive", "true");
-    if (!localStorage.getItem("trialStart")) {
-      const now = Date.now();
-      const end = now + 7 * 24 * 60 * 60 * 1000;
-      localStorage.setItem("trialStart", String(now));
-      localStorage.setItem("trialEndTs", String(end));
-    }
-    window.location.assign(`/pro-success?cid=${encodeURIComponent(clientId)}&dev=1`);
-  };
-
-  // auto-resume after OAuth
-  useEffect(() => {
-    if (!open || !autoCheckoutOnOpen) return;
-    (async () => {
-      const u = await waitForSupabaseUser();
-      if (u) {
-        setUser(u);
-        handleCheckout();
-      }
-    })();
-  }, [open, autoCheckoutOnOpen]);
 
   const isProUser = localStorage.getItem("isPro") === "true";
 
@@ -168,7 +132,7 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* Plan toggle */}
+        {/* Show plan toggle only after sign-in to keep UI simple */}
         {user && (
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
             <ToggleButtonGroup
@@ -227,7 +191,6 @@ export default function UpgradeModal({
             <Button onClick={handleCheckout} variant="contained" disabled={loading}>
               {loading ? "Redirecting…" : "Start Free Trial"}
             </Button>
-            <Button size="small" onClick={simulateUpgradeDev}>Simulate (DEV)</Button>
           </>
         ) : (
           <Button onClick={onClose}>Close</Button>

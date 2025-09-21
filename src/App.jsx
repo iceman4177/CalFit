@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -63,13 +62,13 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
-// ✅ Server-verified Pro status
+// ✅ Server-verified Pro status from our Entitlements context
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 
 // 🟦 Supabase browser client
 import { supabase } from './lib/supabaseClient';
 
-// 🔑 Stripe price IDs
+// 🔑 Stripe price IDs (used for auto-checkout)
 const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
 const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 
@@ -95,7 +94,6 @@ function PageTracker() {
   return null;
 }
 
-// --- helpers ---
 function getOrCreateClientId() {
   let cid = localStorage.getItem('clientId');
   if (!cid) {
@@ -171,7 +169,7 @@ export default function App() {
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
 
-  // --- MODAL state
+  // --- MODAL state + defaults for OAuth return ---
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
@@ -188,7 +186,7 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // Normalize stored premium & init some banners
+  // Normalize stored premium & init
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     const normalized = { ...saved, isPremium: isProActive };
@@ -207,7 +205,7 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // 🟩 Handle OAuth return (code or hash) and clean URL
+  // Handle OAuth return (either ?code=... or #access_token=...)
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
@@ -220,30 +218,30 @@ export default function App() {
         if (hasCode) {
           await supabase.auth.exchangeCodeForSession(window.location.href);
         } else {
-          // detectSessionInUrl: true in supabaseClient will auto-handle hash tokens
+          // detectSessionInUrl:true will consume hash tokens automatically
           await new Promise(r => setTimeout(r, 100));
         }
       } finally {
-        // strip auth params/hash but keep app clean
+        // Clean URL (auth params / hash)
         window.history.replaceState({}, '', `${url.origin}${url.pathname}`);
       }
     })();
   }, []);
 
-  // 🚀 Auto-checkout using upgrade intent stored in localStorage
+  // Auto-checkout using upgrade intent stored in localStorage
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
     const raw = localStorage.getItem('upgradeIntent');
     if (!raw) return;
 
-    const intent = (() => {
-      try { return JSON.parse(raw) || {}; } catch { return {}; }
-    })();
+    let intent = {};
+    try { intent = JSON.parse(raw) || {}; } catch { intent = {}; }
+
     const desiredPlan = intent.plan === 'annual' ? 'annual' : 'monthly';
     const autopay = Boolean(intent.autopay);
 
-    // Always open the modal for context if not Pro
+    // Always open the modal for user context
     setUpgradeDefaults({ plan: desiredPlan, autopay });
     setUpgradeOpen(true);
 
@@ -279,7 +277,7 @@ export default function App() {
       } catch (err) {
         console.error('[AutoCheckout] error', err);
       } finally {
-        // consume intent so we don't loop
+        // consume so we don't loop
         localStorage.removeItem('upgradeIntent');
       }
     })();
