@@ -1,17 +1,11 @@
 // src/components/UpgradeModal.jsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Typography,
-  Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Button, Typography, Chip, TextField, Stack
 } from "@mui/material";
-import { supabase } from "../lib/supabaseClient"; // reuse shared client
+import { supabase } from "../lib/supabaseClient";
 
-// ---- Client env (must be defined in Vercel as VITE_* and the app redeployed) ----
 const PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const PRICE_MONTHLY   = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
 const PRICE_ANNUAL    = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
@@ -24,51 +18,92 @@ export default function UpgradeModal({
   onClose,
   title = "Upgrade to Slimcal Pro",
   description = "Unlimited AI workouts, meals & premium insights.",
-  annual = false, // set true to default to annual
+  annual = false, // set true to default to annual plan
 }) {
-  const isProUser = localStorage.getItem("isPro") === "true";
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [user, setUser] = useState(null);
+  const [emailForMagicLink, setEmailForMagicLink] = useState("");
+
+  // Load auth state when modal opens and keep it in sync
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    (async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (mounted) setUser(error ? null : data.user);
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => sub.subscription?.unsubscribe?.();
+  }, [open]);
+
+  const signInWithGoogle = async () => {
+    setApiError("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin + "/pro" },
+      });
+      if (error) throw error;
+      // User will be redirected; on return, session will exist.
+    } catch (e) {
+      setApiError(e.message || "Sign-in failed. Please try again.");
+    }
+  };
+
+  const sendMagicLink = async () => {
+    setApiError("");
+    if (!emailForMagicLink) {
+      setApiError("Please enter an email.");
+      return;
+    }
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: emailForMagicLink,
+        options: { emailRedirectTo: window.location.origin + "/pro" },
+      });
+      if (error) throw error;
+      setApiError("Magic link sent! Check your email.");
+    } catch (e) {
+      setApiError(e.message || "Could not send magic link.");
+    }
+  };
 
   const handleCheckout = async () => {
     setLoading(true);
     setApiError("");
 
     try {
-      // 1) Ensure user is signed in (we need their id for entitlements)
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-      if (userErr) throw new Error(userErr.message);
-      if (!user) throw new Error("Please sign in to start your trial.");
+      // Ensure signed in
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw new Error(error.message);
+      if (!data?.user) throw new Error("Please sign in to start your trial.");
 
-      // 2) Choose correct (TEST) recurring price id from env
       const price_id = annual ? PRICE_ANNUAL : PRICE_MONTHLY;
       if (!price_id) throw new Error("Billing configuration missing (price_id).");
 
-      // 3) Create a Checkout Session on our server
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: data.user.id,
           price_id,
-          email: user.email || null,
+          email: data.user.email || null,
         }),
       });
 
       const json = await resp.json().catch(() => {
         throw new Error("Stripe server did not return JSON");
       });
-
       if (!resp.ok) throw new Error(json?.error || "Checkout session failed");
       if (!json?.url) throw new Error("No checkout URL returned from server");
 
-      // 4) Redirect to Stripe Checkout
+      // Redirect to Stripe Checkout
       window.location.href = json.url;
 
-      // Optimistic local trial marker (optional)
+      // Optional optimistic trial marker
       if (!localStorage.getItem("trialEndTs")) {
         const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
         localStorage.setItem("trialEndTs", String(trialEnd));
@@ -79,6 +114,8 @@ export default function UpgradeModal({
       setLoading(false);
     }
   };
+
+  const isProUser = localStorage.getItem("isPro") === "true";
 
   return (
     <Dialog open={open} onClose={onClose}>
@@ -101,12 +138,42 @@ export default function UpgradeModal({
             {apiError}
           </Typography>
         )}
+
+        {!user && (
+          <>
+            <Typography sx={{ mt: 2 }} variant="body2" color="textSecondary">
+              Sign in to start your free trial:
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 1 }}>
+              <Button variant="outlined" onClick={signInWithGoogle}>
+                Continue with Google
+              </Button>
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <TextField
+                size="small"
+                label="Email for magic link"
+                type="email"
+                value={emailForMagicLink}
+                onChange={(e) => setEmailForMagicLink(e.target.value)}
+              />
+              <Button variant="text" onClick={sendMagicLink}>Send link</Button>
+            </Stack>
+          </>
+        )}
       </DialogContent>
+
       <DialogActions>
         <Button onClick={onClose} disabled={loading}>Maybe later</Button>
-        <Button onClick={handleCheckout} variant="contained" disabled={loading}>
-          {loading ? "Redirecting…" : "Start Free Trial"}
-        </Button>
+        {user ? (
+          <Button onClick={handleCheckout} variant="contained" disabled={loading}>
+            {loading ? "Redirecting…" : "Start Free Trial"}
+          </Button>
+        ) : (
+          <Button onClick={signInWithGoogle} variant="contained">
+            Sign in to continue
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
