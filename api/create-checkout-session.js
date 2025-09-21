@@ -1,24 +1,11 @@
-// api/ai/create-checkout-session.js
-import Stripe from "stripe";
-import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+// api/create-checkout-session.js
+// Hardened: no module-scope throws; all errors reported as JSON 400; handles OPTIONS.
 
-// --- Config ---
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-const {
-  STRIPE_SECRET_KEY,
-  STRIPE_PRICE_ID_MONTHLY,
-  STRIPE_PRICE_ID_ANNUAL,
-  STRIPE_TRIAL_DAYS,
-  APP_BASE_URL = "https://slimcal.ai",
-  ALLOWED_ORIGIN = "https://slimcal.ai",
-} = process.env;
-
-// Some platforms use this; safe to keep
 export const config = { api: { bodyParser: false } };
 
-// CORS helpers
-function setCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+// ---- Small utilities ----
+function setCors(res, origin) {
+  res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
@@ -40,26 +27,32 @@ function absUrl(pathOrUrl, base) {
 }
 
 export default async function handler(req, res) {
-  setCors(res);
+  // Read envs inside handler so missing values don't crash at module load
+  const {
+    STRIPE_SECRET_KEY,
+    STRIPE_PRICE_ID_MONTHLY,
+    STRIPE_PRICE_ID_ANNUAL,
+    STRIPE_TRIAL_DAYS,
+    APP_BASE_URL = "https://slimcal.ai",
+    ALLOWED_ORIGIN = "https://slimcal.ai",
+  } = process.env;
 
-  // ✅ Let preflight pass
+  setCors(res, ALLOWED_ORIGIN);
+
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    if (!STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY");
-    if (!STRIPE_PRICE_ID_MONTHLY && !STRIPE_PRICE_ID_ANNUAL) {
-      throw new Error("Missing STRIPE_PRICE_ID_MONTHLY/ANNUAL");
-    }
+    // Lazy import Stripe inside try/catch
+    const { default: Stripe } = await import("stripe");
+    if (!STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY (server env)");
+    const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
     const body = await readJson(req);
     const {
       user_id,
       email,
-      period,                  // 'monthly' | 'annual'
+      period, // "monthly" | "annual"
       client_reference_id,
       success_path = "/pro-success",
       cancel_path  = "/",
@@ -71,17 +64,29 @@ export default async function handler(req, res) {
     }
 
     const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
-    if (!priceId) throw new Error(`Server missing price for period='${period}'`);
+    if (!priceId) throw new Error(`Server missing price for period='${period}' (check STRIPE_PRICE_ID_*)`);
 
-    // Ensure Stripe customer
+    // Try to lazy-import Supabase admin; if it fails (e.g., env missing), continue without DB mapping
+    let supabaseAdmin = null;
+    try {
+      const mod = await import("./_lib/supabaseAdmin.js");
+      supabaseAdmin = mod.supabaseAdmin || null;
+    } catch (e) {
+      console.warn("[checkout] Supabase admin not available, proceeding without DB mapping:", e?.message || e);
+    }
+
+    // Ensure or create Stripe customer, optionally persisting mapping
     let stripeCustomerId = null;
-    const { data: existing, error: existingErr } = await supabaseAdmin
-      .from("app_stripe_customers")
-      .select("customer_id")
-      .eq("user_id", user_id)
-      .maybeSingle();
-    if (existingErr) throw existingErr;
-    stripeCustomerId = existing?.customer_id || null;
+
+    if (supabaseAdmin) {
+      const { data: existing, error: existingErr } = await supabaseAdmin
+        .from("app_stripe_customers")
+        .select("customer_id")
+        .eq("user_id", user_id)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+      stripeCustomerId = existing?.customer_id || null;
+    }
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
@@ -90,18 +95,20 @@ export default async function handler(req, res) {
       });
       stripeCustomerId = customer.id;
 
-      const { error: mapErr } = await supabaseAdmin
-        .from("app_stripe_customers")
-        .upsert(
-          {
-            customer_id: stripeCustomerId,
-            user_id,
-            email: email ?? null,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "customer_id" }
-        );
-      if (mapErr) throw mapErr;
+      if (supabaseAdmin) {
+        const { error: mapErr } = await supabaseAdmin
+          .from("app_stripe_customers")
+          .upsert(
+            {
+              customer_id: stripeCustomerId,
+              user_id,
+              email: email ?? null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "customer_id" }
+          );
+        if (mapErr) throw mapErr;
+      }
     }
 
     const successUrl = absUrl(
@@ -128,7 +135,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (err) {
     console.error("[checkout] error", err);
-    // Return descriptive error so the frontend can display it
-    return res.status(400).json({ error: err.message || "Failed to create checkout session" });
+    // Always return a readable error (not a blank 500)
+    return res.status(400).json({ error: err?.message || "Failed to create checkout session" });
   }
 }
