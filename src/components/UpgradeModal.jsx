@@ -101,7 +101,7 @@ export default function UpgradeModal({
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
       const clientId = getOrCreateClientId();
-      const resp = await fetch("/api/create-checkout-session", {
+      const resp = await fetch("/api/ai/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

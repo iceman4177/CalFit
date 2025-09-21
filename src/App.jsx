@@ -231,7 +231,7 @@ export default function App() {
       try {
         const clientId = getOrCreateClientId();
 
-        const resp = await fetch('/api/create-checkout-session', {
+        const resp = await fetch('/api/ai/create-checkout-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
