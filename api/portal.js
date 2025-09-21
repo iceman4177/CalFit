@@ -1,39 +1,46 @@
 // api/portal.js
-import { stripe } from "./_lib/stripe.js";
+import Stripe from "stripe";
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
-function allowCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+export const config = { api: { bodyParser: false } };
+
+async function readJson(req) {
+  let raw;
+  if (typeof req.text === "function") raw = await req.text();
+  else {
+    const chunks = [];
+    for await (const c of req) chunks.push(typeof c === "string" ? Buffer.from(c) : c);
+    raw = Buffer.concat(chunks).toString("utf8");
+  }
+  return raw ? JSON.parse(raw) : {};
 }
 
+const BILLING_RETURN_URL = process.env.BILLING_RETURN_URL || "https://slimcal.ai/pro";
+
 export default async function handler(req, res) {
-  allowCors(res);
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") return res.status(405).end();
+  let body = {};
+  try { body = await readJson(req); } catch {}
 
-  try {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: "Missing email" });
+  const userId = body?.user_id;
+  if (!userId) return res.status(400).json({ error: "Missing user_id" });
 
-    const { data: cust, error } = await supabaseAdmin
-      .from("app_stripe_customers")
-      .select("*")
-      .eq("email", email)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    if (!cust) return res.status(404).json({ error: "No customer" });
+  // find their Stripe customer
+  const { data: cust, error } = await supabaseAdmin
+    .from("app_stripe_customers")
+    .select("customer_id")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-    const session = await stripe.billingPortal.sessions.create({
-      customer: cust.customer_id,
-      return_url: process.env.APP_BASE_URL || "https://slimcal.ai",
-    });
-    return res.json({ url: session.url });
-  } catch (err) {
-    console.error("/api/portal error", err);
-    return res.status(500).json({ error: "Server error" });
+  if (error || !cust?.customer_id) {
+    return res.status(404).json({ error: "No Stripe customer found" });
   }
+
+  const portal = await stripe.billingPortal.sessions.create({
+    customer: cust.customer_id,
+    return_url: BILLING_RETURN_URL,
+  });
+
+  return res.status(200).json({ url: portal.url });
 }
