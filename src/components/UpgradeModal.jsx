@@ -53,7 +53,7 @@ export default function UpgradeModal({
     try {
       // Persist intent (no query params needed)
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/pro`; // exact URL whitelisted in Supabase
+      const redirectUrl = `${window.location.origin}/`; // exact URL whitelisted in Supabase
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
