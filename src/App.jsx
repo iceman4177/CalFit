@@ -63,13 +63,13 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
-// ✅ Server-verified Pro status from our Entitlements context
+// ✅ Entitlements
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 
-// 🟦 Supabase browser client (anon) — required for OAuth/session in the SPA
+// 🟦 Supabase browser client
 import { supabase } from './lib/supabaseClient';
 
-// 🔑 Stripe price IDs for auto-checkout after OAuth
+// 🔑 Stripe price IDs (used for auto-checkout)
 const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
 const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 
@@ -133,7 +133,7 @@ export default function App() {
   // 🔗 capture referrals
   useReferral();
 
-  // 🔔 request notifications permission once
+  // 🔔 request notifications
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -197,7 +197,7 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // 🔁 Normalize user & misc UI init on route / Pro changes
+  // Normalize user & misc UI init
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     const normalized = { ...saved, isPremium: isProActive };
@@ -216,19 +216,31 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // 🟩 CRITICAL: Exchange Supabase OAuth code -> session on initial load
+  // 🟩 CRITICAL: Handle BOTH OAuth returns
+  //   - PKCE: ?code=...
+  //   - Implicit/hash: #access_token=...
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
-    if (!hasCode) return;
+    const hash = window.location.hash || '';
+    const hasHashTokens = /access_token=|refresh_token=/.test(hash);
+
+    if (!hasCode && !hasHashTokens) return;
 
     (async () => {
       try {
-        await supabase.auth.exchangeCodeForSession(window.location.href);
+        if (hasCode) {
+          // Exchange the OAuth code for a session
+          await supabase.auth.exchangeCodeForSession(window.location.href);
+        } else {
+          // Hash tokens: let Supabase auto-process (detectSessionInUrl: true),
+          // give it a micro-delay to initialize.
+          await new Promise(r => setTimeout(r, 50));
+        }
       } catch (e) {
-        console.error('[Auth] exchangeCodeForSession failed:', e);
+        console.error('[Auth] OAuth return handling failed:', e);
       } finally {
-        // Preserve upgrade intent; strip auth params from URL
+        // Preserve upgrade intent; strip auth params & hash from URL
         const keep = new URLSearchParams();
         for (const k of ['upgrade', 'plan', 'autopay']) {
           const v = url.searchParams.get(k);
@@ -243,7 +255,7 @@ export default function App() {
     })();
   }, []);
 
-  // 🚀 Robust global auto-checkout after OAuth return
+  // 🚀 Global auto-checkout after OAuth return
   useEffect(() => {
     const { upgrade, plan, autopay } = parseUpgradeIntent(location.search);
     const desiredPlan = plan || 'monthly';
@@ -260,10 +272,8 @@ export default function App() {
 
       (async () => {
         const supaUser = await waitForSupabaseUser(10000, 250);
-        if (!supaUser) {
-          // no session yet -> user can press Start Free Trial manually
-          return;
-        }
+        if (!supaUser) return; // no session yet -> user can press Start Free Trial manually
+
         try {
           const price_id = desiredPlan === 'annual' ? PRICE_ANNUAL : PRICE_MONTHLY;
           if (!price_id) throw new Error('Missing Stripe price_id env');
@@ -394,7 +404,6 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
-        {/* Show the upgrade CTA only if user is not Pro */}
         {!isProActive && (
           <Button
             variant="contained"
