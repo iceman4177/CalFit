@@ -1,14 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Typography, Chip, Stack, ToggleButton, ToggleButtonGroup
 } from "@mui/material";
 import { supabase } from "../lib/supabaseClient";
-
-const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
-const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
-const HAS_MONTHLY   = Boolean(PRICE_MONTHLY);
-const HAS_ANNUAL    = Boolean(PRICE_ANNUAL);
 
 function getOrCreateClientId() {
   let cid = localStorage.getItem("clientId");
@@ -33,20 +28,12 @@ export default function UpgradeModal({
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
   const pollingRef = useRef(false);
 
-  // Pick a valid plan if one price ID is missing
+  // Sync default plan if props change
   useEffect(() => {
-    let next = defaultPlan || (annual ? "annual" : "monthly");
-    if (next === "annual" && !HAS_ANNUAL && HAS_MONTHLY) next = "monthly";
-    if (next === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) next = "annual";
-    setPlan(next);
+    setPlan(defaultPlan || (annual ? "annual" : "monthly"));
   }, [defaultPlan, annual]);
 
-  const priceReady = useMemo(
-    () => (plan === "annual" ? HAS_ANNUAL : HAS_MONTHLY),
-    [plan]
-  );
-
-  // Keep Supabase auth state in sync
+  // Keep Supabase auth state in sync while modal is open
   useEffect(() => {
     if (!open) return;
     let mounted = true;
@@ -66,7 +53,7 @@ export default function UpgradeModal({
     };
   }, [open]);
 
-  // Briefly poll after opening/return to catch late sessions
+  // Small poll after opening/return to catch late sessions
   useEffect(() => {
     if (!open || pollingRef.current) return;
     pollingRef.current = true;
@@ -94,8 +81,7 @@ export default function UpgradeModal({
     try {
       // Save intent so App.jsx can auto-continue post-auth
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      // 🔑 Redirect to dedicated callback route so no other code can redirect first
-      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const redirectUrl = `${window.location.origin}/auth/callback`; // dedicated handler
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -110,19 +96,9 @@ export default function UpgradeModal({
     setLoading(true);
     setApiError("");
     try {
-      if (!priceReady) {
-        throw new Error(
-          plan === "annual"
-            ? "Annual price ID is not configured for this environment."
-            : "Monthly price ID is not configured for this environment."
-        );
-      }
-
       const { data, error } = await supabase.auth.getUser();
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error("Please sign in to start your trial.");
-
-      const price_id = plan === "annual" ? PRICE_ANNUAL : PRICE_MONTHLY;
 
       const clientId = getOrCreateClientId();
       const resp = await fetch("/api/create-checkout-session", {
@@ -131,11 +107,10 @@ export default function UpgradeModal({
         body: JSON.stringify({
           user_id: data.user.id,
           email: data.user.email || null,
-          price_id,
+          period: plan,                         // <-- server decides price_id
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
-          period: plan,
         }),
       });
 
@@ -161,22 +136,17 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* After sign-in: allow plan toggle (disabled if a price ID is missing) */}
+        {/* After sign-in: plan toggle */}
         {user && (
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
             <ToggleButtonGroup
               exclusive
               value={plan}
-              onChange={(_e, val) => {
-                if (!val) return;
-                if (val === "annual" && !HAS_ANNUAL && HAS_MONTHLY) return;
-                if (val === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) return;
-                setPlan(val);
-              }}
+              onChange={(_e, val) => val && setPlan(val)}
               size="small"
             >
-              <ToggleButton value="monthly" disabled={!HAS_MONTHLY}>Monthly</ToggleButton>
-              <ToggleButton value="annual"  disabled={!HAS_ANNUAL}>Annual</ToggleButton>
+              <ToggleButton value="monthly">Monthly</ToggleButton>
+              <ToggleButton value="annual">Annual</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
         )}
@@ -210,8 +180,7 @@ export default function UpgradeModal({
             <Button
               onClick={handleCheckout}
               variant="contained"
-              disabled={loading || !priceReady}
-              title={!priceReady ? "Stripe Price ID missing in this environment" : undefined}
+              disabled={loading}                  /* no client env gating */
             >
               {loading ? "Redirecting…" : "Start Free Trial"}
             </Button>

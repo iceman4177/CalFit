@@ -69,10 +69,6 @@ import { useEntitlements } from './context/EntitlementsContext.jsx';
 // 🟦 Supabase browser client
 import { supabase } from './lib/supabaseClient';
 
-// 🔑 Stripe price IDs (used for auto-checkout)
-const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
-const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
-
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -206,10 +202,9 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // ⛔️ Removed the old "OAuth return" effect.
-  // OAuth is now handled in the dedicated /auth/callback route (AuthCallback.jsx)
+  // OAuth handled by /auth/callback (AuthCallback.jsx)
 
-  // Auto-checkout using upgrade intent stored in localStorage
+  // Auto-checkout using upgrade intent stored in localStorage (server decides price)
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
@@ -234,8 +229,6 @@ export default function App() {
       if (!supaUser) return;
 
       try {
-        const price_id = desiredPlan === 'annual' ? PRICE_ANNUAL : PRICE_MONTHLY;
-        if (!price_id) throw new Error('Missing Stripe price_id env');
         const clientId = getOrCreateClientId();
 
         const resp = await fetch('/api/create-checkout-session', {
@@ -244,11 +237,10 @@ export default function App() {
           body: JSON.stringify({
             user_id: supaUser.id,
             email: supaUser.email || null,
-            price_id,
+            period: desiredPlan,                     // <-- server picks price_id
             client_reference_id: clientId,
             success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
             cancel_path: `/`,
-            period: desiredPlan,
           }),
         });
 
@@ -369,7 +361,7 @@ export default function App() {
       {navBar}
 
       <Switch>
-        {/* 🔐 OAuth callback FIRST so nothing else can pre-empt it */}
+        {/* OAuth callback FIRST so nothing else can pre-empt it */}
         <Route path="/auth/callback" component={AuthCallback} />
 
         {/* Paywall routes */}
