@@ -63,8 +63,15 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
-// ✅ NEW: use server-verified Pro status from our Entitlements context
+// ✅ Server-verified Pro status from our Entitlements context
 import { useEntitlements } from './context/EntitlementsContext.jsx';
+
+// 🟦 Supabase browser client (anon) — required for OAuth/session in the SPA
+import { supabase } from './lib/supabaseClient';
+
+// 🔑 Stripe price IDs for auto-checkout after OAuth
+const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
+const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
@@ -88,7 +95,7 @@ function PageTracker() {
   return null;
 }
 
-// --- NEW: parse OAuth/upgrade intent from URL ---
+// --- helpers ---
 function parseUpgradeIntent(search) {
   const p = new URLSearchParams(search);
   return {
@@ -98,10 +105,30 @@ function parseUpgradeIntent(search) {
   };
 }
 
+function getOrCreateClientId() {
+  let cid = localStorage.getItem('clientId');
+  if (!cid) {
+    cid = crypto?.randomUUID?.() || String(Date.now());
+    localStorage.setItem('clientId', cid);
+  }
+  return cid;
+}
+
+async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
+  const start = Date.now();
+  for (;;) {
+    const { data, error } = await supabase.auth.getUser();
+    if (data?.user && !error) return data.user;
+    if (Date.now() - start > maxMs) return null;
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+}
+
 export default function App() {
   const history      = useHistory();
   const location     = useLocation();
   const promptedRef  = useRef(false);
+  const autoRunRef   = useRef(false); // guard against double auto-checkout
 
   // 🔗 capture referrals
   useReferral();
@@ -170,9 +197,9 @@ export default function App() {
     setUserDataState(next);
   };
 
+  // 🔁 Normalize user & misc UI init on route / Pro changes
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
-    // normalize stored flag to server truth
     const normalized = { ...saved, isPremium: isProActive };
     setUserDataState(normalized);
     localStorage.setItem('userData', JSON.stringify(normalized));
@@ -187,19 +214,91 @@ export default function App() {
       setAmbassadorOpen(true);
       localStorage.setItem('hasSeenAmbassadorInvite', 'true');
     }
-    // re-run when Pro flips so UI stays in sync
   }, [isProActive, location.pathname, history]);
 
-  // --- NEW: after OAuth return, reopen modal and optionally auto-start checkout ---
+  // 🟩 CRITICAL: Exchange Supabase OAuth code -> session on initial load
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const hasCode = url.searchParams.get('code');
+    if (!hasCode) return;
+
+    (async () => {
+      try {
+        await supabase.auth.exchangeCodeForSession(window.location.href);
+      } catch (e) {
+        console.error('[Auth] exchangeCodeForSession failed:', e);
+      } finally {
+        // Preserve upgrade intent; strip auth params from URL
+        const keep = new URLSearchParams();
+        for (const k of ['upgrade', 'plan', 'autopay']) {
+          const v = url.searchParams.get(k);
+          if (v) keep.set(k, v);
+        }
+        window.history.replaceState(
+          {},
+          '',
+          `${url.origin}${url.pathname}${keep.toString() ? `?${keep.toString()}` : ''}`
+        );
+      }
+    })();
+  }, []);
+
+  // 🚀 Robust global auto-checkout after OAuth return
   useEffect(() => {
     const { upgrade, plan, autopay } = parseUpgradeIntent(location.search);
+    const desiredPlan = plan || 'monthly';
 
+    // Always re-open modal for context if upgrade intent present and not Pro
     if (upgrade && !isProActive) {
-      setUpgradeDefaults({ plan: plan || 'monthly', autopay });
+      setUpgradeDefaults({ plan: desiredPlan, autopay });
       setUpgradeOpen(true);
     }
 
-    // Clean URL so refreshes are tidy
+    // If autopay requested and not Pro, launch Stripe here (wait for Supabase user)
+    if (upgrade && autopay && !isProActive && !autoRunRef.current) {
+      autoRunRef.current = true;
+
+      (async () => {
+        const supaUser = await waitForSupabaseUser(10000, 250);
+        if (!supaUser) {
+          // no session yet -> user can press Start Free Trial manually
+          return;
+        }
+        try {
+          const price_id = desiredPlan === 'annual' ? PRICE_ANNUAL : PRICE_MONTHLY;
+          if (!price_id) throw new Error('Missing Stripe price_id env');
+
+          const clientId = getOrCreateClientId();
+
+          const resp = await fetch('/api/create-checkout-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: supaUser.id,
+              email: supaUser.email || null,
+              price_id,
+              client_reference_id: clientId,
+              success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
+              cancel_path: `/`,
+              period: desiredPlan,
+            }),
+          });
+
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok || !json?.url) {
+            console.error('[AutoCheckout] failed creating session', json);
+            return; // leave modal open; user can click Start Free Trial
+          }
+
+          window.location.assign(json.url);
+        } catch (err) {
+          console.error('[AutoCheckout] error', err);
+          // leave modal open for manual retry
+        }
+      })();
+    }
+
+    // Clean the intent params from URL so refreshes are tidy
     if (upgrade || plan || autopay) {
       const p = new URLSearchParams(location.search);
       p.delete('upgrade'); p.delete('plan'); p.delete('autopay');
