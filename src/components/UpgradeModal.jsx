@@ -44,7 +44,7 @@ export default function UpgradeModal({
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin + "/pro" },
+        options: { redirectTo: window.location.origin + "/" },
       });
       if (error) throw error;
       // User will be redirected; on return, session will exist.
@@ -62,7 +62,7 @@ export default function UpgradeModal({
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email: emailForMagicLink,
-        options: { emailRedirectTo: window.location.origin + "/pro" },
+        options: { emailRedirectTo: window.location.origin + "/" },
       });
       if (error) throw error;
       setApiError("Magic link sent! Check your email.");
