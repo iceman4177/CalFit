@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -63,11 +64,8 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
-// ✅ Server-verified Pro status from our Entitlements context
 import { useEntitlements } from './context/EntitlementsContext.jsx';
-
-// 🟦 Supabase browser client
-import { supabase } from './lib/supabaseClient';
+import { supabase }        from './lib/supabaseClient';
 
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
@@ -114,19 +112,16 @@ export default function App() {
   const history      = useHistory();
   const location     = useLocation();
   const promptedRef  = useRef(false);
-  const autoRunRef   = useRef(false); // guard for auto-checkout
+  const autoRunRef   = useRef(false);
 
-  // 🔗 capture referrals
   useReferral();
 
-  // 🔔 request notifications once
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
 
-  // ✅ Server-verified Pro state
   const { isProActive, status } = useEntitlements();
   const trialActive = status === 'trialing';
 
@@ -166,7 +161,6 @@ export default function App() {
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
 
-  // --- MODAL state + defaults for OAuth return ---
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
@@ -183,7 +177,6 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // Normalize stored premium & init
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     const normalized = { ...saved, isPremium: isProActive };
@@ -202,9 +195,31 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // OAuth handled by /auth/callback (AuthCallback.jsx)
+  // Handle OAuth return (Supabase hosted callback path)
+/* If you prefer a dedicated component route, keep <Route path="/auth/callback" component={AuthCallback} /> below.
+   Otherwise, Supabase can also exchange the code on root if detectSessionInUrl is used elsewhere. */
 
-  // Auto-checkout using upgrade intent stored in localStorage (server decides price)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const hasCode = url.searchParams.get('code');
+    const hash = window.location.hash || '';
+    const hasHashTokens = /access_token=|refresh_token=/.test(hash);
+    if (!hasCode && !hasHashTokens) return;
+
+    (async () => {
+      try {
+        if (hasCode) {
+          await supabase.auth.exchangeCodeForSession(window.location.href);
+        } else {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      } finally {
+        window.history.replaceState({}, '', `${url.origin}${url.pathname}`);
+      }
+    })();
+  }, []);
+
+  // Auto-checkout (server selects price by period)
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
@@ -217,7 +232,6 @@ export default function App() {
     const desiredPlan = intent.plan === 'annual' ? 'annual' : 'monthly';
     const autopay = Boolean(intent.autopay);
 
-    // Always open the modal for user context
     setUpgradeDefaults({ plan: desiredPlan, autopay });
     setUpgradeOpen(true);
 
@@ -231,13 +245,13 @@ export default function App() {
       try {
         const clientId = getOrCreateClientId();
 
-        const resp = await fetch('/api/ai/create-checkout-session', {
+        const resp = await fetch('/api/create-checkout-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             user_id: supaUser.id,
             email: supaUser.email || null,
-            period: desiredPlan,                     // <-- server picks price_id
+            period: desiredPlan,
             client_reference_id: clientId,
             success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
             cancel_path: `/`,
@@ -250,7 +264,6 @@ export default function App() {
       } catch (err) {
         console.error('[AutoCheckout] error', err);
       } finally {
-        // consume so we don't loop
         localStorage.removeItem('upgradeIntent');
       }
     })();
@@ -316,7 +329,6 @@ export default function App() {
     </Box>
   );
 
-  // Invite friends dialog
   const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
@@ -361,10 +373,7 @@ export default function App() {
       {navBar}
 
       <Switch>
-        {/* OAuth callback FIRST so nothing else can pre-empt it */}
         <Route path="/auth/callback" component={AuthCallback} />
-
-        {/* Paywall routes */}
         <Route path="/pro" component={ProLandingPage} />
         <Route path="/pro-success" component={ProSuccess} />
 
@@ -393,7 +402,6 @@ export default function App() {
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log"  component={CalorieHistory} />
         <Route path="/summary"      render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
-        {/* Pass the server-verified premium flag to your AI coach */}
         <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive }} />} />
         <Route path="/waitlist"     component={WaitlistSignup} />
         <Route path="/preferences"  component={AlertPreferences} />
@@ -410,7 +418,6 @@ export default function App() {
         <CampaignIcon />
       </Fab>
 
-      {/* UpgradeModal is always mounted, controlled by state */}
       <UpgradeModal
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}

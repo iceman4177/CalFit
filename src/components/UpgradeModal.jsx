@@ -101,13 +101,13 @@ export default function UpgradeModal({
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
       const clientId = getOrCreateClientId();
-      const resp = await fetch("/api/ai/create-checkout-session", {
+      const resp = await fetch("/api/create-checkout-session", {   // 👈 fixed path
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: data.user.id,
           email: data.user.email || null,
-          period: plan,                         // <-- server decides price_id
+          period: plan,                         // server decides price_id
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
@@ -180,7 +180,7 @@ export default function UpgradeModal({
             <Button
               onClick={handleCheckout}
               variant="contained"
-              disabled={loading}                  /* no client env gating */
+              disabled={loading}
             >
               {loading ? "Redirecting…" : "Start Free Trial"}
             </Button>
