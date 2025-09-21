@@ -66,10 +66,10 @@ import { logPageView }   from './analytics';
 // ✅ Server-verified Pro status
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 
-// 🟦 Supabase browser client (anon)
+// 🟦 Supabase browser client
 import { supabase } from './lib/supabaseClient';
 
-// 🔑 Stripe price IDs for auto-checkout
+// 🔑 Stripe price IDs
 const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
 const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 
@@ -96,15 +96,6 @@ function PageTracker() {
 }
 
 // --- helpers ---
-function parseUpgradeIntent(search) {
-  const p = new URLSearchParams(search);
-  return {
-    upgrade: p.get('upgrade') === '1',
-    plan: p.get('plan') === 'annual' ? 'annual' : (p.get('plan') === 'monthly' ? 'monthly' : null),
-    autopay: p.get('autopay') === '1',
-  };
-}
-
 function getOrCreateClientId() {
   let cid = localStorage.getItem('clientId');
   if (!cid) {
@@ -128,7 +119,7 @@ export default function App() {
   const history      = useHistory();
   const location     = useLocation();
   const promptedRef  = useRef(false);
-  const autoRunRef   = useRef(false); // guard against double auto-checkout
+  const autoRunRef   = useRef(false); // guard for auto-checkout
 
   // 🔗 capture referrals
   useReferral();
@@ -180,7 +171,7 @@ export default function App() {
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
 
-  // --- MODAL state + defaults for OAuth return ---
+  // --- MODAL state
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
@@ -216,117 +207,83 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // 🟩 CRITICAL: Handle OAuth return (code or hash)
+  // 🟩 Handle OAuth return (code or hash) and clean URL
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
     const hash = window.location.hash || '';
     const hasHashTokens = /access_token=|refresh_token=/.test(hash);
-
-    if (!hasCode && !hasHashTokens) {
-      console.log('[Auth] No OAuth params found on load.');
-      return;
-    }
+    if (!hasCode && !hasHashTokens) return;
 
     (async () => {
       try {
-        console.log('[Auth] OAuth return detected:', {
-          pathname: url.pathname,
-          search: url.search,
-          hasCode,
-          hasHashTokens
-        });
-
         if (hasCode) {
-          console.log('[Auth] Exchanging code for session…');
           await supabase.auth.exchangeCodeForSession(window.location.href);
-          console.log('[Auth] exchangeCodeForSession success.');
         } else {
-          // Hash tokens: detectSessionInUrl=true should auto-consume.
-          console.log('[Auth] Hash tokens detected; letting Supabase process them.');
-          await new Promise(r => setTimeout(r, 100)); // tiny settle time
+          // detectSessionInUrl: true in supabaseClient will auto-handle hash tokens
+          await new Promise(r => setTimeout(r, 100));
         }
-
-        const { data } = await supabase.auth.getUser();
-        console.log('[Auth] getUser after OAuth:', { hasUser: !!data?.user, id: data?.user?.id });
-      } catch (e) {
-        console.error('[Auth] OAuth handling failed:', e);
       } finally {
-        // Preserve upgrade intent; strip auth params & hash from URL
-        const keep = new URLSearchParams();
-        for (const k of ['upgrade', 'plan', 'autopay']) {
-          const v = url.searchParams.get(k);
-          if (v) keep.set(k, v);
-        }
-        const clean = `${url.origin}${url.pathname}${keep.toString() ? `?${keep.toString()}` : ''}`;
-        window.history.replaceState({}, '', clean);
-        console.log('[Auth] URL cleaned to', clean);
+        // strip auth params/hash but keep app clean
+        window.history.replaceState({}, '', `${url.origin}${url.pathname}`);
       }
     })();
   }, []);
 
-  // 🚀 Robust global auto-checkout after OAuth return
+  // 🚀 Auto-checkout using upgrade intent stored in localStorage
   useEffect(() => {
-    const { upgrade, plan, autopay } = parseUpgradeIntent(location.search);
-    const desiredPlan = plan || 'monthly';
+    if (isProActive || autoRunRef.current) return;
 
-    if (upgrade && !isProActive) {
-      setUpgradeDefaults({ plan: desiredPlan, autopay });
-      setUpgradeOpen(true);
-      console.log('[Upgrade] Intent detected. plan=', desiredPlan, 'autopay=', autopay);
-    }
+    const raw = localStorage.getItem('upgradeIntent');
+    if (!raw) return;
 
-    if (upgrade && autopay && !isProActive && !autoRunRef.current) {
-      autoRunRef.current = true;
+    const intent = (() => {
+      try { return JSON.parse(raw) || {}; } catch { return {}; }
+    })();
+    const desiredPlan = intent.plan === 'annual' ? 'annual' : 'monthly';
+    const autopay = Boolean(intent.autopay);
 
-      (async () => {
-        console.log('[Upgrade] Waiting for Supabase user to auto-start checkout…');
-        const supaUser = await waitForSupabaseUser(10000, 250);
-        console.log('[Upgrade] Supabase user after wait:', { hasUser: !!supaUser, id: supaUser?.id });
+    // Always open the modal for context if not Pro
+    setUpgradeDefaults({ plan: desiredPlan, autopay });
+    setUpgradeOpen(true);
 
-        if (!supaUser) return; // no session -> user can click manually
+    if (!autopay) return;
 
-        try {
-          const price_id = desiredPlan === 'annual' ? PRICE_ANNUAL : PRICE_MONTHLY;
-          if (!price_id) throw new Error('Missing Stripe price_id env');
-          const clientId = getOrCreateClientId();
+    autoRunRef.current = true;
+    (async () => {
+      const supaUser = await waitForSupabaseUser(10000, 250);
+      if (!supaUser) return;
 
-          console.log('[Upgrade] Creating Stripe Checkout session…');
-          const resp = await fetch('/api/create-checkout-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: supaUser.id,
-              email: supaUser.email || null,
-              price_id,
-              client_reference_id: clientId,
-              success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
-              cancel_path: `/`,
-              period: desiredPlan,
-            }),
-          });
+      try {
+        const price_id = desiredPlan === 'annual' ? PRICE_ANNUAL : PRICE_MONTHLY;
+        if (!price_id) throw new Error('Missing Stripe price_id env');
+        const clientId = getOrCreateClientId();
 
-          const json = await resp.json().catch(() => ({}));
-          console.log('[Upgrade] create-checkout-session response:', { ok: resp.ok, json });
+        const resp = await fetch('/api/create-checkout-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: supaUser.id,
+            email: supaUser.email || null,
+            price_id,
+            client_reference_id: clientId,
+            success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
+            cancel_path: `/`,
+            period: desiredPlan,
+          }),
+        });
 
-          if (!resp.ok || !json?.url) {
-            console.error('[Upgrade] Could not get checkout URL. Keeping modal open.');
-            return;
-          }
-          window.location.assign(json.url);
-        } catch (err) {
-          console.error('[Upgrade] Auto-checkout error:', err);
-        }
-      })();
-    }
-
-    // Clean intent params from URL
-    if (upgrade || plan || autopay) {
-      const p = new URLSearchParams(location.search);
-      p.delete('upgrade'); p.delete('plan'); p.delete('autopay');
-      history.replace({ pathname: location.pathname, search: p.toString() });
-    }
-  }, [location.search, isProActive, history, location.pathname]);
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.url) return;
+        window.location.assign(json.url);
+      } catch (err) {
+        console.error('[AutoCheckout] error', err);
+      } finally {
+        // consume intent so we don't loop
+        localStorage.removeItem('upgradeIntent');
+      }
+    })();
+  }, [isProActive]);
 
   function refreshCalories() {
     const today    = new Date().toLocaleDateString('en-US');
