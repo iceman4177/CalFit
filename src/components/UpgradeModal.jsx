@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, Typography, Chip, TextField, Stack, ToggleButton, ToggleButtonGroup
+  Button, Typography, Chip, Stack, ToggleButton, ToggleButtonGroup
 } from "@mui/material";
 import { supabase } from "../lib/supabaseClient";
 
@@ -30,13 +30,18 @@ export default function UpgradeModal({
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
   const [user, setUser] = useState(null);
-  const [emailForMagicLink, setEmailForMagicLink] = useState("");
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
 
+  // Keep plan in sync with props and available price IDs (auto-switch if needed)
   useEffect(() => {
-    setPlan(defaultPlan || (annual ? "annual" : "monthly"));
+    let next = defaultPlan || (annual ? "annual" : "monthly");
+    // If chosen plan has no price but the other one does, switch to the valid one
+    if (next === "annual" && !HAS_ANNUAL && HAS_MONTHLY) next = "monthly";
+    if (next === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) next = "annual";
+    setPlan(next);
   }, [defaultPlan, annual]);
 
+  // Load auth state when modal opens and keep it in sync
   useEffect(() => {
     if (!open) return;
     let mounted = true;
@@ -57,7 +62,7 @@ export default function UpgradeModal({
     try {
       // Persist intent so App.jsx can auto-continue post-OAuth
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/`; // root is whitelisted and won’t 404
+      const redirectUrl = `${window.location.origin}/`; // root avoids direct-load 404
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -65,26 +70,6 @@ export default function UpgradeModal({
       if (error) throw error;
     } catch (e) {
       setApiError(e.message || "Sign-in failed. Please try again.");
-    }
-  };
-
-  const sendMagicLink = async () => {
-    setApiError("");
-    if (!emailForMagicLink) {
-      setApiError("Please enter an email.");
-      return;
-    }
-    try {
-      localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/`; // use root to avoid 404
-      const { error } = await supabase.auth.signInWithOtp({
-        email: emailForMagicLink,
-        options: { emailRedirectTo: redirectUrl },
-      });
-      if (error) throw error;
-      setApiError("Magic link sent! Check your email.");
-    } catch (e) {
-      setApiError(e.message || "Could not send magic link.");
     }
   };
 
@@ -108,6 +93,7 @@ export default function UpgradeModal({
       if (!price_id) throw new Error("Missing Stripe price configuration.");
 
       const clientId = getOrCreateClientId();
+
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -144,17 +130,23 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* Show plan toggle only after sign-in to keep UI simple */}
+        {/* After sign-in: show plan toggle, otherwise keep it ultra-simple */}
         {user && (
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
             <ToggleButtonGroup
               exclusive
               value={plan}
-              onChange={(_e, val) => val && setPlan(val)}
+              onChange={(_e, val) => {
+                if (!val) return;
+                // If selected plan has no price, keep current
+                if (val === "annual" && !HAS_ANNUAL && HAS_MONTHLY) return;
+                if (val === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) return;
+                setPlan(val);
+              }}
               size="small"
             >
-              <ToggleButton value="monthly">Monthly</ToggleButton>
-              <ToggleButton value="annual">Annual</ToggleButton>
+              <ToggleButton value="monthly" disabled={!HAS_MONTHLY}>Monthly</ToggleButton>
+              <ToggleButton value="annual"  disabled={!HAS_ANNUAL}>Annual</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
         )}
@@ -171,28 +163,13 @@ export default function UpgradeModal({
           </Typography>
         )}
 
-        {/* Before sign-in: ONLY sign-in UI */}
+        {/* Before sign-in: ONLY the Google sign-in button as requested */}
         {!user && (
-          <>
-            <Typography sx={{ mt: 2 }} variant="body2" color="textSecondary">
-              Sign in to start your free trial:
-            </Typography>
-            <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 1 }}>
-              <Button variant="contained" onClick={signInWithGoogle}>
-                Continue with Google
-              </Button>
-            </Stack>
-            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-              <TextField
-                size="small"
-                label="Email for magic link"
-                type="email"
-                value={emailForMagicLink}
-                onChange={(e) => setEmailForMagicLink(e.target.value)}
-              />
-              <Button variant="text" onClick={sendMagicLink}>Send link</Button>
-            </Stack>
-          </>
+          <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 1 }}>
+            <Button variant="contained" onClick={signInWithGoogle}>
+              Continue with Google
+            </Button>
+          </Stack>
         )}
       </DialogContent>
 
