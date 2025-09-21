@@ -35,6 +35,7 @@ import ChatIcon          from '@mui/icons-material/Chat';
 
 import ProLandingPage from './ProLandingPage';
 import ProSuccess     from './ProSuccess';
+import AuthCallback   from './AuthCallback';
 
 import useDailyNotification from './hooks/useDailyNotification';
 import useVariableRewards    from './hooks/useVariableRewards';
@@ -205,28 +206,8 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // Handle OAuth return (either ?code=... or #access_token=...)
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const hasCode = url.searchParams.get('code');
-    const hash = window.location.hash || '';
-    const hasHashTokens = /access_token=|refresh_token=/.test(hash);
-    if (!hasCode && !hasHashTokens) return;
-
-    (async () => {
-      try {
-        if (hasCode) {
-          await supabase.auth.exchangeCodeForSession(window.location.href);
-        } else {
-          // detectSessionInUrl:true will consume hash tokens automatically
-          await new Promise(r => setTimeout(r, 100));
-        }
-      } finally {
-        // Clean URL (auth params / hash)
-        window.history.replaceState({}, '', `${url.origin}${url.pathname}`);
-      }
-    })();
-  }, []);
+  // ⛔️ Removed the old "OAuth return" effect.
+  // OAuth is now handled in the dedicated /auth/callback route (AuthCallback.jsx)
 
   // Auto-checkout using upgrade intent stored in localStorage
   useEffect(() => {
@@ -388,6 +369,9 @@ export default function App() {
       {navBar}
 
       <Switch>
+        {/* 🔐 OAuth callback FIRST so nothing else can pre-empt it */}
+        <Route path="/auth/callback" component={AuthCallback} />
+
         {/* Paywall routes */}
         <Route path="/pro" component={ProLandingPage} />
         <Route path="/pro-success" component={ProSuccess} />

@@ -33,7 +33,7 @@ export default function UpgradeModal({
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
   const pollingRef = useRef(false);
 
-  // pick a valid plan if one price id is missing
+  // Pick a valid plan if one price ID is missing
   useEffect(() => {
     let next = defaultPlan || (annual ? "annual" : "monthly");
     if (next === "annual" && !HAS_ANNUAL && HAS_MONTHLY) next = "monthly";
@@ -46,7 +46,7 @@ export default function UpgradeModal({
     [plan]
   );
 
-  // keep Supabase auth state in sync
+  // Keep Supabase auth state in sync
   useEffect(() => {
     if (!open) return;
     let mounted = true;
@@ -66,7 +66,7 @@ export default function UpgradeModal({
     };
   }, [open]);
 
-  // 🚦 Poll briefly after the modal opens (and after OAuth return) to catch late sessions
+  // Briefly poll after opening/return to catch late sessions
   useEffect(() => {
     if (!open || pollingRef.current) return;
     pollingRef.current = true;
@@ -75,40 +75,27 @@ export default function UpgradeModal({
     const start = Date.now();
 
     (async function poll() {
-      while (!stopped && Date.now() - start < 8000) { // up to 8s
+      while (!stopped && Date.now() - start < 8000) {
         const { data } = await supabase.auth.getUser();
         if (data?.user) {
           setUser(data.user);
           break;
         }
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, 300));
       }
-
-      // Auto-continue if intent was saved pre-auth (belt-and-suspenders with App.jsx)
-      try {
-        const raw = localStorage.getItem("upgradeIntent");
-        if (raw) {
-          const intent = JSON.parse(raw);
-          if (intent?.autopay && priceReady) {
-            // do nothing here; App.jsx will try auto-checkout too.
-            // If you want modal-level auto-checkout as well, uncomment:
-            // handleCheckout();
-          }
-        }
-      } catch {}
-
       pollingRef.current = false;
     })();
 
     return () => { stopped = true; };
-  }, [open, priceReady]);
+  }, [open]);
 
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      // save intent so App.jsx can resume the flow post-auth
+      // Save intent so App.jsx can auto-continue post-auth
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/`; // root avoids 404
+      // 🔑 Redirect to dedicated callback route so no other code can redirect first
+      const redirectUrl = `${window.location.origin}/auth/callback`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -174,7 +161,7 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* After sign-in: allow plan toggle (disabled if a price id is missing) */}
+        {/* After sign-in: allow plan toggle (disabled if a price ID is missing) */}
         {user && (
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
             <ToggleButtonGroup
@@ -206,7 +193,7 @@ export default function UpgradeModal({
           </Typography>
         )}
 
-        {/* Pre-auth: show ONLY the Google sign-in button (per your request) */}
+        {/* Pre-auth: ONLY the Google sign-in button (as requested) */}
         {!user && (
           <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 1 }}>
             <Button variant="contained" onClick={signInWithGoogle}>
