@@ -1,4 +1,4 @@
-// api/create-checkout-session.js
+// api/ai/create-checkout-session.js
 import Stripe from "stripe";
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
@@ -19,11 +19,32 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-// Optionally centralize where the portal should send users after managing billing
-const BILLING_RETURN_URL = process.env.BILLING_RETURN_URL || "https://slimcal.ai/pro";
+// Build absolute URL from a path and a base
+function buildUrl(pathOrUrl, base) {
+  try {
+    // If already absolute, return as-is
+    return new URL(pathOrUrl).toString();
+  } catch {
+    return new URL(pathOrUrl, base).toString();
+  }
+}
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  // ---- Server env (MUST be set on the server, not Vite) ----
+  const {
+    STRIPE_SECRET_KEY,
+    STRIPE_PRICE_ID_MONTHLY,
+    STRIPE_PRICE_ID_ANNUAL,
+    STRIPE_TRIAL_DAYS,
+    APP_BASE_URL = "https://slimcal.ai",
+  } = process.env;
+
+  if (!STRIPE_SECRET_KEY) return res.status(500).json({ error: "Missing STRIPE_SECRET_KEY (server env)" });
+  if (!STRIPE_PRICE_ID_MONTHLY && !STRIPE_PRICE_ID_ANNUAL) {
+    return res.status(500).json({ error: "Missing STRIPE_PRICE_ID_MONTHLY/ANNUAL (server env)" });
+  }
 
   let body;
   try {
@@ -33,31 +54,40 @@ export default async function handler(req, res) {
   }
 
   // REQUIRED from client/app:
-  // - user_id: your app's user (e.g., Supabase auth.uid())
-  // - price_id: a *recurring* price_... id in Stripe
+  // - user_id: Supabase auth user id
+  // - period : "monthly" | "annual"  (server chooses price from env)
   const userId  = body?.user_id || null;
-  const priceId = body?.price_id || null;
-  const email   = body?.email   || null; // helpful for creating customer
+  const period  = body?.period  || null; // <-- changed from price_id to period
+  const email   = body?.email   || null;
+  const clientReferenceId = body?.client_reference_id || undefined;
+
+  // Optional UI paths (can be relative like "/pro-success")
+  const successPath = body?.success_path || "/pro-success";
+  const cancelPath  = body?.cancel_path  || "/";
 
   if (!userId)  return res.status(400).json({ error: "Missing user_id" });
-  if (!priceId) return res.status(400).json({ error: "Missing price_id" });
+  if (period !== "monthly" && period !== "annual") {
+    return res.status(400).json({ error: "period must be 'monthly' or 'annual'" });
+  }
+
+  // Pick the server-side price id
+  const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
+  if (!priceId) {
+    return res.status(400).json({ error: `Server missing price for period='${period}'` });
+  }
 
   try {
-    // 1) Ensure we have (or create) a Stripe customer and persist the mapping
+    // 1) Ensure Stripe customer for this user (persist in DB)
     let stripeCustomerId = null;
 
-    // See if we already mapped this user to a customer
-    {
-      const { data: existing, error: existingErr } = await supabaseAdmin
-        .from("app_stripe_customers")
-        .select("customer_id")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (existingErr) throw existingErr;
-      stripeCustomerId = existing?.customer_id || null;
-    }
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("app_stripe_customers")
+      .select("customer_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+    stripeCustomerId = existing?.customer_id || null;
 
-    // Create a new customer in Stripe if we don't have one yet
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
         email: email || undefined,
@@ -65,12 +95,11 @@ export default async function handler(req, res) {
       });
       stripeCustomerId = customer.id;
 
-      // Upsert the mapping
       const { error: mapErr } = await supabaseAdmin
         .from("app_stripe_customers")
         .upsert(
           {
-            customer_id: stripeCustomerId, // your column name
+            customer_id: stripeCustomerId,
             user_id: userId,
             email: email ?? null,
             updated_at: new Date().toISOString(),
@@ -81,22 +110,30 @@ export default async function handler(req, res) {
     }
 
     // 2) Create the subscription checkout session
+    const successUrl = buildUrl(
+      successPath.includes("session_id") ? successPath : `${successPath}${successPath.includes("?") ? "&" : "?"}session_id={CHECKOUT_SESSION_ID}`,
+      APP_BASE_URL
+    );
+    const cancelUrl  = buildUrl(cancelPath, APP_BASE_URL);
+
+    const trialDays = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: "https://slimcal.ai/pro-success?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "https://slimcal.ai/pro",
       allow_promotion_codes: true,
-
-      // >>> CRITICAL: include app user id so the webhook can map subscription -> user
-      client_reference_id: userId,
-      metadata: { user_id: userId },
+      client_reference_id: clientReferenceId || userId,
+      metadata: { user_id: userId, period },
+      ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     });
 
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (e) {
     console.error("[checkout] error", e);
-    return res.status(500).json({ error: "Failed to create checkout session" });
+    // Return a descriptive error so the frontend can show it
+    return res.status(400).json({ error: e.message || "Failed to create checkout session" });
   }
 }
