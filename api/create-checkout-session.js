@@ -2,12 +2,27 @@
 import Stripe from "stripe";
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 
-// Use your current API version
+// --- Config ---
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+const {
+  STRIPE_SECRET_KEY,
+  STRIPE_PRICE_ID_MONTHLY,
+  STRIPE_PRICE_ID_ANNUAL,
+  STRIPE_TRIAL_DAYS,
+  APP_BASE_URL = "https://slimcal.ai",
+  ALLOWED_ORIGIN = "https://slimcal.ai",
+} = process.env;
 
+// Some platforms use this; safe to keep
 export const config = { api: { bodyParser: false } };
 
-// Read raw JSON body safely across runtimes
+// CORS helpers
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 async function readJson(req) {
   let raw;
   if (typeof req.text === "function") raw = await req.text();
@@ -19,71 +34,51 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-// Build absolute URL from a path and a base
-function buildUrl(pathOrUrl, base) {
-  try {
-    // If already absolute, return as-is
-    return new URL(pathOrUrl).toString();
-  } catch {
-    return new URL(pathOrUrl, base).toString();
-  }
+function absUrl(pathOrUrl, base) {
+  try { return new URL(pathOrUrl).toString(); }
+  catch { return new URL(pathOrUrl, base).toString(); }
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  setCors(res);
 
-  // ---- Server env (MUST be set on the server, not Vite) ----
-  const {
-    STRIPE_SECRET_KEY,
-    STRIPE_PRICE_ID_MONTHLY,
-    STRIPE_PRICE_ID_ANNUAL,
-    STRIPE_TRIAL_DAYS,
-    APP_BASE_URL = "https://slimcal.ai",
-  } = process.env;
+  // ✅ Let preflight pass
+  if (req.method === "OPTIONS") return res.status(200).end();
 
-  if (!STRIPE_SECRET_KEY) return res.status(500).json({ error: "Missing STRIPE_SECRET_KEY (server env)" });
-  if (!STRIPE_PRICE_ID_MONTHLY && !STRIPE_PRICE_ID_ANNUAL) {
-    return res.status(500).json({ error: "Missing STRIPE_PRICE_ID_MONTHLY/ANNUAL (server env)" });
-  }
-
-  let body;
-  try {
-    body = await readJson(req);
-  } catch {
-    return res.status(400).json({ error: "Invalid JSON" });
-  }
-
-  // REQUIRED from client/app:
-  // - user_id: Supabase auth user id
-  // - period : "monthly" | "annual"  (server chooses price from env)
-  const userId  = body?.user_id || null;
-  const period  = body?.period  || null; // <-- changed from price_id to period
-  const email   = body?.email   || null;
-  const clientReferenceId = body?.client_reference_id || undefined;
-
-  // Optional UI paths (can be relative like "/pro-success")
-  const successPath = body?.success_path || "/pro-success";
-  const cancelPath  = body?.cancel_path  || "/";
-
-  if (!userId)  return res.status(400).json({ error: "Missing user_id" });
-  if (period !== "monthly" && period !== "annual") {
-    return res.status(400).json({ error: "period must be 'monthly' or 'annual'" });
-  }
-
-  // Pick the server-side price id
-  const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
-  if (!priceId) {
-    return res.status(400).json({ error: `Server missing price for period='${period}'` });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    // 1) Ensure Stripe customer for this user (persist in DB)
+    if (!STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY");
+    if (!STRIPE_PRICE_ID_MONTHLY && !STRIPE_PRICE_ID_ANNUAL) {
+      throw new Error("Missing STRIPE_PRICE_ID_MONTHLY/ANNUAL");
+    }
+
+    const body = await readJson(req);
+    const {
+      user_id,
+      email,
+      period,                  // 'monthly' | 'annual'
+      client_reference_id,
+      success_path = "/pro-success",
+      cancel_path  = "/",
+    } = body || {};
+
+    if (!user_id) throw new Error("Missing user_id");
+    if (period !== "monthly" && period !== "annual") {
+      throw new Error("period must be 'monthly' or 'annual'");
+    }
+
+    const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
+    if (!priceId) throw new Error(`Server missing price for period='${period}'`);
+
+    // Ensure Stripe customer
     let stripeCustomerId = null;
-
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("app_stripe_customers")
       .select("customer_id")
-      .eq("user_id", userId)
+      .eq("user_id", user_id)
       .maybeSingle();
     if (existingErr) throw existingErr;
     stripeCustomerId = existing?.customer_id || null;
@@ -91,7 +86,7 @@ export default async function handler(req, res) {
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
         email: email || undefined,
-        metadata: { app_user_id: userId },
+        metadata: { app_user_id: user_id },
       });
       stripeCustomerId = customer.id;
 
@@ -100,7 +95,7 @@ export default async function handler(req, res) {
         .upsert(
           {
             customer_id: stripeCustomerId,
-            user_id: userId,
+            user_id,
             email: email ?? null,
             updated_at: new Date().toISOString(),
           },
@@ -109,31 +104,31 @@ export default async function handler(req, res) {
       if (mapErr) throw mapErr;
     }
 
-    // 2) Create the subscription checkout session
-    const successUrl = buildUrl(
-      successPath.includes("session_id") ? successPath : `${successPath}${successPath.includes("?") ? "&" : "?"}session_id={CHECKOUT_SESSION_ID}`,
+    const successUrl = absUrl(
+      success_path.includes("session_id")
+        ? success_path
+        : `${success_path}${success_path.includes("?") ? "&" : "?"}session_id={CHECKOUT_SESSION_ID}`,
       APP_BASE_URL
     );
-    const cancelUrl  = buildUrl(cancelPath, APP_BASE_URL);
-
-    const trialDays = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
+    const cancelUrl  = absUrl(cancel_path, APP_BASE_URL);
+    const trialDays  = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      client_reference_id: clientReferenceId || userId,
-      metadata: { user_id: userId, period },
+      client_reference_id: client_reference_id || user_id,
+      metadata: { user_id, period },
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,
     });
 
     return res.status(200).json({ id: session.id, url: session.url });
-  } catch (e) {
-    console.error("[checkout] error", e);
-    // Return a descriptive error so the frontend can show it
-    return res.status(400).json({ error: e.message || "Failed to create checkout session" });
+  } catch (err) {
+    console.error("[checkout] error", err);
+    // Return descriptive error so the frontend can display it
+    return res.status(400).json({ error: err.message || "Failed to create checkout session" });
   }
 }
