@@ -13,7 +13,7 @@ const PRICE_ANNUAL    = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 console.log("🔑 Using Stripe publishable key:", PUBLISHABLE_KEY);
 console.log("🧾 PRICE IDs:", { monthly: PRICE_MONTHLY, annual: PRICE_ANNUAL });
 
-// Utility: stable client id so webhook rows can be tied back to this browser
+// Stable browser id to link Stripe/Supabase rows (optional but helpful)
 function getOrCreateClientId() {
   let cid = localStorage.getItem("clientId");
   if (!cid) {
@@ -28,17 +28,19 @@ export default function UpgradeModal({
   onClose,
   title = "Upgrade to Slimcal Pro",
   description = "Unlimited AI workouts, meals & premium insights.",
-  annual = false, // default selection when opening
+  annual = false,             // legacy default
+  defaultPlan,                // "monthly" | "annual" (preferred)
+  autoCheckoutOnOpen = false, // when true and user is signed in, auto-start checkout
 }) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
   const [user, setUser] = useState(null);
   const [emailForMagicLink, setEmailForMagicLink] = useState("");
-  const [plan, setPlan] = useState(annual ? "annual" : "monthly"); // 'monthly' | 'annual'
+  const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly")); // 'monthly' | 'annual'
 
   useEffect(() => {
-    setPlan(annual ? "annual" : "monthly");
-  }, [annual]);
+    setPlan(defaultPlan || (annual ? "annual" : "monthly"));
+  }, [defaultPlan, annual]);
 
   // Load auth state when modal opens and keep it in sync
   useEffect(() => {
@@ -57,12 +59,13 @@ export default function UpgradeModal({
   const signInWithGoogle = async () => {
     setApiError("");
     try {
+      // Preserve upgrade intent across OAuth redirect and auto-resume checkout
+      const redirectUrl = `${window.location.origin}/?upgrade=1&plan=${plan}&autopay=1`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin + "/" },
+        options: { redirectTo: redirectUrl },
       });
       if (error) throw error;
-      // Redirected flow; session restored after return
     } catch (e) {
       setApiError(e.message || "Sign-in failed. Please try again.");
     }
@@ -75,9 +78,10 @@ export default function UpgradeModal({
       return;
     }
     try {
+      const redirectUrl = `${window.location.origin}/?upgrade=1&plan=${plan}&autopay=1`;
       const { error } = await supabase.auth.signInWithOtp({
         email: emailForMagicLink,
-        options: { emailRedirectTo: window.location.origin + "/" },
+        options: { emailRedirectTo: redirectUrl },
       });
       if (error) throw error;
       setApiError("Magic link sent! Check your email.");
@@ -86,7 +90,7 @@ export default function UpgradeModal({
     }
   };
 
-  // Real Stripe checkout (sends price_id + client_reference_id + success/cancel)
+  // Real Stripe checkout (sends price_id and client_reference_id + success/cancel)
   const handleCheckout = async () => {
     setLoading(true);
     setApiError("");
@@ -106,16 +110,15 @@ export default function UpgradeModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Keep backward-compatible fields your API expects
           user_id: data.user.id,
           email: data.user.email || null,
           price_id,
 
-          // Extra context (safe if server ignores; recommended to wire on server)
+          // Helpful context for webhook/Supabase linkage
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
-          period: plan, // 'monthly' | 'annual' (informational)
+          period: plan,
         }),
       });
 
@@ -128,7 +131,7 @@ export default function UpgradeModal({
       // Redirect to Stripe Checkout
       window.location.href = json.url;
 
-      // Optional optimistic trial marker (UI nicety; Entitlements remains source of truth)
+      // Optional optimistic trial marker
       if (!localStorage.getItem("trialEndTs")) {
         const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
         localStorage.setItem("trialEndTs", String(trialEnd));
@@ -140,12 +143,12 @@ export default function UpgradeModal({
     }
   };
 
-  // DEV/Test path: simulate upgrade locally (no Stripe, no Supabase)
+  // DEV/Test path: simulate upgrade locally (no Stripe, quick UI validation)
   const simulateUpgradeDev = () => {
     try {
       const clientId = getOrCreateClientId();
 
-      // Set legacy flags for immediate UI unlock (Entitlements will catch up when real sub exists)
+      // Legacy flags for immediate UI unlock (Entitlements remains source of truth)
       localStorage.setItem("isPro", "true");
       localStorage.setItem("isProActive", "true");
 
@@ -156,13 +159,22 @@ export default function UpgradeModal({
         localStorage.setItem("trialEndTs", String(end));
       }
 
-      // Navigate to /pro-success (mirrors real flow)
+      // Land on success page for consistency
       window.location.assign(`/pro-success?cid=${encodeURIComponent(clientId)}&dev=1`);
     } catch (e) {
       console.error("[UpgradeModal] simulate error:", e);
       setApiError("Could not simulate upgrade.");
     }
   };
+
+  // After OAuth return (user is present), optionally auto-start checkout
+  useEffect(() => {
+    if (!open || !autoCheckoutOnOpen) return;
+    if (user) {
+      const t = setTimeout(() => handleCheckout(), 150);
+      return () => clearTimeout(t);
+    }
+  }, [open, autoCheckoutOnOpen, user]); // handleCheckout in scope
 
   const isProUser = localStorage.getItem("isPro") === "true";
 
