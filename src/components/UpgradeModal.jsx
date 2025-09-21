@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, Typography, Chip, TextField, Stack
+  Button, Typography, Chip, TextField, Stack, ToggleButton, ToggleButtonGroup, Divider
 } from "@mui/material";
 import { supabase } from "../lib/supabaseClient";
 
@@ -13,17 +13,32 @@ const PRICE_ANNUAL    = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
 console.log("🔑 Using Stripe publishable key:", PUBLISHABLE_KEY);
 console.log("🧾 PRICE IDs:", { monthly: PRICE_MONTHLY, annual: PRICE_ANNUAL });
 
+// Utility: stable client id so webhook rows can be tied back to this browser
+function getOrCreateClientId() {
+  let cid = localStorage.getItem("clientId");
+  if (!cid) {
+    cid = (crypto?.randomUUID?.() || String(Date.now()));
+    localStorage.setItem("clientId", cid);
+  }
+  return cid;
+}
+
 export default function UpgradeModal({
   open,
   onClose,
   title = "Upgrade to Slimcal Pro",
   description = "Unlimited AI workouts, meals & premium insights.",
-  annual = false, // set true to default to annual plan
+  annual = false, // default selection when opening
 }) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
   const [user, setUser] = useState(null);
   const [emailForMagicLink, setEmailForMagicLink] = useState("");
+  const [plan, setPlan] = useState(annual ? "annual" : "monthly"); // 'monthly' | 'annual'
+
+  useEffect(() => {
+    setPlan(annual ? "annual" : "monthly");
+  }, [annual]);
 
   // Load auth state when modal opens and keep it in sync
   useEffect(() => {
@@ -47,7 +62,7 @@ export default function UpgradeModal({
         options: { redirectTo: window.location.origin + "/" },
       });
       if (error) throw error;
-      // User will be redirected; on return, session will exist.
+      // Redirected flow; session restored after return
     } catch (e) {
       setApiError(e.message || "Sign-in failed. Please try again.");
     }
@@ -71,6 +86,7 @@ export default function UpgradeModal({
     }
   };
 
+  // Real Stripe checkout (sends price_id + client_reference_id + success/cancel)
   const handleCheckout = async () => {
     setLoading(true);
     setApiError("");
@@ -81,16 +97,25 @@ export default function UpgradeModal({
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
-      const price_id = annual ? PRICE_ANNUAL : PRICE_MONTHLY;
+      const price_id = plan === "annual" ? PRICE_ANNUAL : PRICE_MONTHLY;
       if (!price_id) throw new Error("Billing configuration missing (price_id).");
+
+      const clientId = getOrCreateClientId();
 
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // Keep backward-compatible fields your API expects
           user_id: data.user.id,
-          price_id,
           email: data.user.email || null,
+          price_id,
+
+          // Extra context (safe if server ignores; recommended to wire on server)
+          client_reference_id: clientId,
+          success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
+          cancel_path: `/`,
+          period: plan, // 'monthly' | 'annual' (informational)
         }),
       });
 
@@ -103,7 +128,7 @@ export default function UpgradeModal({
       // Redirect to Stripe Checkout
       window.location.href = json.url;
 
-      // Optional optimistic trial marker
+      // Optional optimistic trial marker (UI nicety; Entitlements remains source of truth)
       if (!localStorage.getItem("trialEndTs")) {
         const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
         localStorage.setItem("trialEndTs", String(trialEnd));
@@ -115,10 +140,34 @@ export default function UpgradeModal({
     }
   };
 
+  // DEV/Test path: simulate upgrade locally (no Stripe, no Supabase)
+  const simulateUpgradeDev = () => {
+    try {
+      const clientId = getOrCreateClientId();
+
+      // Set legacy flags for immediate UI unlock (Entitlements will catch up when real sub exists)
+      localStorage.setItem("isPro", "true");
+      localStorage.setItem("isProActive", "true");
+
+      if (!localStorage.getItem("trialStart")) {
+        const now = Date.now();
+        const end = now + 7 * 24 * 60 * 60 * 1000;
+        localStorage.setItem("trialStart", String(now));
+        localStorage.setItem("trialEndTs", String(end));
+      }
+
+      // Navigate to /pro-success (mirrors real flow)
+      window.location.assign(`/pro-success?cid=${encodeURIComponent(clientId)}&dev=1`);
+    } catch (e) {
+      console.error("[UpgradeModal] simulate error:", e);
+      setApiError("Could not simulate upgrade.");
+    }
+  };
+
   const isProUser = localStorage.getItem("isPro") === "true";
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         <Typography sx={{ mb: 2 }}>{description}</Typography>
@@ -127,9 +176,22 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
+        {/* Plan toggle */}
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          <ToggleButtonGroup
+            exclusive
+            value={plan}
+            onChange={(_e, val) => val && setPlan(val)}
+            size="small"
+          >
+            <ToggleButton value="monthly">Monthly</ToggleButton>
+            <ToggleButton value="annual">Annual</ToggleButton>
+          </ToggleButtonGroup>
+        </Stack>
+
         <Typography>
-          <strong>{annual ? "$49.99/yr" : "$4.99/mo"}</strong>{" "}
-          billed {annual ? "yearly" : "monthly"} after trial.
+          <strong>{plan === "annual" ? "$49.99/yr" : "$4.99/mo"}</strong>{" "}
+          billed {plan === "annual" ? "yearly" : "monthly"} after trial.
         </Typography>
         <Typography variant="body2" color="textSecondary">Cancel anytime.</Typography>
 
@@ -139,6 +201,7 @@ export default function UpgradeModal({
           </Typography>
         )}
 
+        {/* Auth options */}
         {!user && (
           <>
             <Typography sx={{ mt: 2 }} variant="body2" color="textSecondary">
@@ -161,6 +224,17 @@ export default function UpgradeModal({
             </Stack>
           </>
         )}
+
+        {/* Dev/Test helper */}
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="overline" sx={{ opacity: 0.7 }}>
+          Developer tools
+        </Typography>
+        <Stack direction="row" spacing={1}>
+          <Button size="small" variant="text" onClick={simulateUpgradeDev}>
+            Simulate Upgrade (DEV)
+          </Button>
+        </Stack>
       </DialogContent>
 
       <DialogActions>
