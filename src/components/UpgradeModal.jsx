@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Typography, Chip, Stack, ToggleButton, ToggleButtonGroup
@@ -31,38 +31,84 @@ export default function UpgradeModal({
   const [apiError, setApiError] = useState("");
   const [user, setUser] = useState(null);
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
+  const pollingRef = useRef(false);
 
-  // Keep plan in sync with props and available price IDs (auto-switch if needed)
+  // pick a valid plan if one price id is missing
   useEffect(() => {
     let next = defaultPlan || (annual ? "annual" : "monthly");
-    // If chosen plan has no price but the other one does, switch to the valid one
     if (next === "annual" && !HAS_ANNUAL && HAS_MONTHLY) next = "monthly";
     if (next === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) next = "annual";
     setPlan(next);
   }, [defaultPlan, annual]);
 
-  // Load auth state when modal opens and keep it in sync
+  const priceReady = useMemo(
+    () => (plan === "annual" ? HAS_ANNUAL : HAS_MONTHLY),
+    [plan]
+  );
+
+  // keep Supabase auth state in sync
   useEffect(() => {
     if (!open) return;
     let mounted = true;
+
     (async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (mounted) setUser(error ? null : data.user);
+      const { data } = await supabase.auth.getUser();
+      if (mounted) setUser(data?.user ?? null);
     })();
+
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
     });
-    return () => sub.subscription?.unsubscribe?.();
+
+    return () => {
+      mounted = false;
+      sub.subscription?.unsubscribe?.();
+    };
   }, [open]);
 
-  const priceReady = plan === "annual" ? HAS_ANNUAL : HAS_MONTHLY;
+  // 🚦 Poll briefly after the modal opens (and after OAuth return) to catch late sessions
+  useEffect(() => {
+    if (!open || pollingRef.current) return;
+    pollingRef.current = true;
+
+    let stopped = false;
+    const start = Date.now();
+
+    (async function poll() {
+      while (!stopped && Date.now() - start < 8000) { // up to 8s
+        const { data } = await supabase.auth.getUser();
+        if (data?.user) {
+          setUser(data.user);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      // Auto-continue if intent was saved pre-auth (belt-and-suspenders with App.jsx)
+      try {
+        const raw = localStorage.getItem("upgradeIntent");
+        if (raw) {
+          const intent = JSON.parse(raw);
+          if (intent?.autopay && priceReady) {
+            // do nothing here; App.jsx will try auto-checkout too.
+            // If you want modal-level auto-checkout as well, uncomment:
+            // handleCheckout();
+          }
+        }
+      } catch {}
+
+      pollingRef.current = false;
+    })();
+
+    return () => { stopped = true; };
+  }, [open, priceReady]);
 
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      // Persist intent so App.jsx can auto-continue post-OAuth
+      // save intent so App.jsx can resume the flow post-auth
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/`; // root avoids direct-load 404
+      const redirectUrl = `${window.location.origin}/`; // root avoids 404
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -90,10 +136,8 @@ export default function UpgradeModal({
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
       const price_id = plan === "annual" ? PRICE_ANNUAL : PRICE_MONTHLY;
-      if (!price_id) throw new Error("Missing Stripe price configuration.");
 
       const clientId = getOrCreateClientId();
-
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -130,7 +174,7 @@ export default function UpgradeModal({
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* After sign-in: show plan toggle, otherwise keep it ultra-simple */}
+        {/* After sign-in: allow plan toggle (disabled if a price id is missing) */}
         {user && (
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
             <ToggleButtonGroup
@@ -138,7 +182,6 @@ export default function UpgradeModal({
               value={plan}
               onChange={(_e, val) => {
                 if (!val) return;
-                // If selected plan has no price, keep current
                 if (val === "annual" && !HAS_ANNUAL && HAS_MONTHLY) return;
                 if (val === "monthly" && !HAS_MONTHLY && HAS_ANNUAL) return;
                 setPlan(val);
@@ -163,7 +206,7 @@ export default function UpgradeModal({
           </Typography>
         )}
 
-        {/* Before sign-in: ONLY the Google sign-in button as requested */}
+        {/* Pre-auth: show ONLY the Google sign-in button (per your request) */}
         {!user && (
           <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 1 }}>
             <Button variant="contained" onClick={signInWithGoogle}>
