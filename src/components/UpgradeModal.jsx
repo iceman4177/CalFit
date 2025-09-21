@@ -7,6 +7,8 @@ import { supabase } from "../lib/supabaseClient";
 
 const PRICE_MONTHLY = import.meta.env.VITE_STRIPE_PRICE_ID_MONTHLY;
 const PRICE_ANNUAL  = import.meta.env.VITE_STRIPE_PRICE_ID_ANNUAL;
+const HAS_MONTHLY   = Boolean(PRICE_MONTHLY);
+const HAS_ANNUAL    = Boolean(PRICE_ANNUAL);
 
 function getOrCreateClientId() {
   let cid = localStorage.getItem("clientId");
@@ -48,12 +50,14 @@ export default function UpgradeModal({
     return () => sub.subscription?.unsubscribe?.();
   }, [open]);
 
+  const priceReady = plan === "annual" ? HAS_ANNUAL : HAS_MONTHLY;
+
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      // Persist intent (no query params needed)
+      // Persist intent so App.jsx can auto-continue post-OAuth
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/`; // exact URL whitelisted in Supabase
+      const redirectUrl = `${window.location.origin}/`; // root is whitelisted and won’t 404
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
@@ -72,7 +76,7 @@ export default function UpgradeModal({
     }
     try {
       localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/pro`;
+      const redirectUrl = `${window.location.origin}/`; // use root to avoid 404
       const { error } = await supabase.auth.signInWithOtp({
         email: emailForMagicLink,
         options: { emailRedirectTo: redirectUrl },
@@ -88,6 +92,14 @@ export default function UpgradeModal({
     setLoading(true);
     setApiError("");
     try {
+      if (!priceReady) {
+        throw new Error(
+          plan === "annual"
+            ? "Annual price ID is not configured for this environment."
+            : "Monthly price ID is not configured for this environment."
+        );
+      }
+
       const { data, error } = await supabase.auth.getUser();
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error("Please sign in to start your trial.");
@@ -188,7 +200,12 @@ export default function UpgradeModal({
         {user ? (
           <>
             <Button onClick={onClose} disabled={loading}>Maybe later</Button>
-            <Button onClick={handleCheckout} variant="contained" disabled={loading}>
+            <Button
+              onClick={handleCheckout}
+              variant="contained"
+              disabled={loading || !priceReady}
+              title={!priceReady ? "Stripe Price ID missing in this environment" : undefined}
+            >
               {loading ? "Redirecting…" : "Start Free Trial"}
             </Button>
           </>
