@@ -43,7 +43,6 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    // Lazy import Stripe inside try/catch
     const { default: Stripe } = await import("stripe");
     if (!STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY (server env)");
     const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
@@ -53,7 +52,7 @@ export default async function handler(req, res) {
       user_id,
       email,
       period, // "monthly" | "annual"
-      client_reference_id,
+      // NOTE: we intentionally ignore any client_reference_id coming from the client
       success_path = "/pro-success",
       cancel_path  = "/",
     } = body || {};
@@ -66,7 +65,7 @@ export default async function handler(req, res) {
     const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
     if (!priceId) throw new Error(`Server missing price for period='${period}' (check STRIPE_PRICE_ID_*)`);
 
-    // Try to lazy-import Supabase admin; if it fails (e.g., env missing), continue without DB mapping
+    // Lazy-import Supabase admin; if it fails (e.g., env missing), proceed without DB mapping
     let supabaseAdmin = null;
     try {
       const mod = await import("./_lib/supabaseAdmin.js");
@@ -120,13 +119,14 @@ export default async function handler(req, res) {
     const cancelUrl  = absUrl(cancel_path, APP_BASE_URL);
     const trialDays  = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
 
+    // ⬇️ KEY FIX: Always bind session to the real Supabase user_id
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      client_reference_id: client_reference_id || user_id,
-      metadata: { user_id, period },
+      client_reference_id: user_id,         // <- force
+      metadata: { user_id, period },        // <- also include in metadata
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -135,7 +135,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (err) {
     console.error("[checkout] error", err);
-    // Always return a readable error (not a blank 500)
     return res.status(400).json({ error: err?.message || "Failed to create checkout session" });
   }
 }
