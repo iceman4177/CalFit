@@ -26,7 +26,8 @@ export default function ProSuccess() {
   const cid = q.get("cid") || undefined;              // your clientId (optional)
   const dev = q.get("dev") === "1";
 
-  const [phase, setPhase] = useState<"checking" | "active" | "waiting" | "error">("checking");
+  // JS version (no TS generics)
+  const [phase, setPhase] = useState("checking"); // "checking" | "active" | "waiting" | "error"
   const [message, setMessage] = useState("");
 
   // Poll server truth (Supabase via secure API) instead of flipping local flags
