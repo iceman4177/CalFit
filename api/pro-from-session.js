@@ -16,7 +16,7 @@ async function upsertCustomer({ customer_id, user_id, email }) {
   const { error } = await supabaseAdmin
     .from("app_stripe_customers")
     .upsert(payload, { onConflict: "customer_id" });
-  if (error) throw new Error(`upsert customers failed: ${error.message}`);
+  if (error) throw new Error(error.message);
 }
 
 async function resolveUserIdFromCustomer(customer_id) {
@@ -26,16 +26,15 @@ async function resolveUserIdFromCustomer(customer_id) {
     .select("user_id")
     .eq("customer_id", customer_id)
     .maybeSingle();
-  if (error) throw new Error(`lookup mapping failed: ${error.message}`);
+  if (error) throw new Error(error.message);
   return data?.user_id || null;
 }
 
 async function upsertSubscription(sub, userHint = null) {
-  const stripe_subscription_id = sub.id;
   const customer_id = sub.customer;
   let user_id = asUuidOrNull(userHint) || asUuidOrNull(sub.metadata?.user_id) || null;
   if (!user_id) user_id = await resolveUserIdFromCustomer(customer_id);
-  if (!user_id) throw new Error("user_id missing for subscription upsert");
+  if (!user_id) throw new Error("user_id missing for subscription");
 
   const item = sub.items?.data?.[0];
   const price = item?.price;
@@ -46,7 +45,7 @@ async function upsertSubscription(sub, userHint = null) {
     .from("app_subscriptions")
     .upsert(
       {
-        stripe_subscription_id,
+        stripe_subscription_id: sub.id,
         user_id,
         status: sub.status,
         current_period_end: iso(sub.current_period_end),
@@ -58,9 +57,9 @@ async function upsertSubscription(sub, userHint = null) {
       },
       { onConflict: "stripe_subscription_id" }
     );
-  if (subErr) throw new Error(`upsert subscriptions failed: ${subErr.message}`);
+  if (subErr) throw new Error(subErr.message);
 
-  const is_pro = sub.status === "active" || sub.status === "trialing";
+  const is_pro = sub.status === "active" || "trialing";
   const { error: entErr } = await supabaseAdmin
     .from("entitlements")
     .upsert(
@@ -73,7 +72,7 @@ async function upsertSubscription(sub, userHint = null) {
       },
       { onConflict: "user_id" }
     );
-  if (entErr) throw new Error(`upsert entitlements failed: ${entErr.message}`);
+  if (entErr) throw new Error(entErr.message);
 }
 
 export default async function handler(req, res) {
@@ -81,26 +80,25 @@ export default async function handler(req, res) {
     if (!supabaseAdmin) return res.status(200).json({ ok: false, reason: "server_config" });
 
     const url = new URL(req.url, "http://x");
-    const session_id = url.searchParams.get("session_id") || null;
+    const session_id = url.searchParams.get("session_id");
     if (!session_id) return res.status(200).json({ ok: false, reason: "missing_session_id" });
 
-    // 1) Pull the checkout session
     const s = await stripe.checkout.sessions.retrieve(session_id, {
-      expand: ["subscription", "customer", "line_items", "subscription.items.data.price"],
+      expand: ["subscription", "customer", "subscription.items.data.price"],
     });
 
     const customer_id = s.customer || null;
     const email = s.customer_details?.email ?? s.customer_email ?? null;
-    const user_id = asUuidOrNull(s.client_reference_id) || asUuidOrNull(s.metadata?.user_id) || null;
+    const user_id =
+      asUuidOrNull(s.client_reference_id) || asUuidOrNull(s.metadata?.user_id) || null;
 
-    // 2) Ensure mapping
     await upsertCustomer({ customer_id, user_id, email });
 
-    // 3) Upsert subscription (from session or fetch by id)
-    if (s.mode === "subscription") {
-      const sub = s.subscription?.id
-        ? s.subscription // expanded object (if available)
-        : await stripe.subscriptions.retrieve(s.subscription, { expand: ["items.data.price"] });
+    if (s.mode === "subscription" && s.subscription) {
+      const sub =
+        typeof s.subscription === "string"
+          ? await stripe.subscriptions.retrieve(s.subscription, { expand: ["items.data.price"] })
+          : s.subscription;
       await upsertSubscription(sub, user_id);
     }
 
