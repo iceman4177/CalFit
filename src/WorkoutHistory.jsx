@@ -14,41 +14,61 @@ function calcCaloriesFromSets(sets) {
   if (!Array.isArray(sets) || sets.length === 0) return 0;
   let vol = 0;
   for (const s of sets) {
-    const w = Number(s.weight) || 0;
-    const r = Number(s.reps) || 0;
     // prefer explicit calories if present on the set
-    if (typeof s.calories === 'number' && !Number.isNaN(s.calories)) {
-      vol += s.calories / (SCALE || 1); // convert back to “volume units”
+    if (typeof s.calories === 'number' && Number.isFinite(s.calories)) {
+      vol += s.calories / (SCALE || 1);
       continue;
     }
+    const w = Number(s.weight) || 0;
+    const r = Number(s.reps) || 0;
     vol += w * r;
   }
   const est = Math.round(vol * SCALE);
   return Number.isFinite(est) ? est : 0;
 }
 
-function formatDateTime(iso) {
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
-}
-function toUS(iso) {
-  try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; }
+function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; } }
+
+// --- Local matching helpers --------------------------------------------------
+function normalizeName(s) { return (s || '').toLowerCase().trim(); }
+
+function bestLocalMatch(candidates = [], supaSets = []) {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const supaNames = new Set((supaSets || []).map(s => normalizeName(s.exercise_name)));
+  let best = null;
+  let bestScore = -1;
+
+  for (const sess of candidates) {
+    const locNames = new Set((sess.exercises || []).map(e => normalizeName(e.name)));
+    let overlap = 0;
+    for (const n of supaNames) if (n && locNames.has(n)) overlap++;
+    const score = overlap * 1000 + (sess.totalCalories || 0); // tie-breaker by total cals
+    if (score > bestScore) { best = sess; bestScore = score; }
+  }
+
+  return bestScore > 0 ? best : null;
 }
 
 export default function WorkoutHistory({ onHistoryChange }) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [rows, setRows]       = useState([]); // [{ id, started_at, ended_at, sets, total_calories?, shareLines }]
+  const [rows, setRows]       = useState([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareText, setShareText] = useState('');
 
-  // Local fallback + lookup by date for calories/share text
-  const localHistory = useMemo(() => {
-    const arr = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const map = new Map();
-    for (const sess of arr) {
-      map.set(sess.date, sess); // { date, totalCalories, exercises:[{name,sets,reps,calories}] }
+  // Build local indexes: raw array and by-day (array per day, not single!)
+  const localIdx = useMemo(() => {
+    const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const byDay = new Map(); // dayUS -> [sessions...]
+    for (const sess of raw) {
+      const arr = byDay.get(sess.date) || [];
+      arr.push(sess);
+      byDay.set(sess.date, arr);
     }
-    return { raw: arr, byDate: map };
+    return { raw, byDay };
   }, []);
 
   useEffect(() => {
@@ -56,7 +76,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     (async () => {
       if (!user) {
         // Pure local mode
-        const asRows = localHistory.raw
+        const asRows = localIdx.raw
           .slice()
           .sort((a,b) => new Date(b.date) - new Date(a.date))
           .map((h, idx) => ({
@@ -64,9 +84,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
             started_at: new Date(h.date).toISOString(),
             ended_at:   new Date(h.date).toISOString(),
             sets: (h.exercises || []).map(e => ({
-              exercise_name: e.name,
-              reps: e.reps ?? 0,
-              weight: e.weight ?? 0,
+              exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
               calories: typeof e.calories === 'number' ? e.calories : undefined,
             })),
             total_calories: Math.round(h.totalCalories || 0),
@@ -74,12 +92,12 @@ export default function WorkoutHistory({ onHistoryChange }) {
           }));
         if (!ignore) {
           setRows(asRows);
-          if (onHistoryChange) onHistoryChange(hardSum(asRows));
+          if (onHistoryChange) onHistoryChange(sumTotals(asRows));
         }
         return;
       }
 
-      // Signed-in: fetch from Supabase; enhance with local fallback per day
+      // Signed in: fetch from Supabase; use robust local fallback
       setLoading(true);
       try {
         const base = await getWorkouts(user.id, { limit: 100 });
@@ -87,23 +105,23 @@ export default function WorkoutHistory({ onHistoryChange }) {
           base.map(async w => {
             const sets = await getWorkoutSetsFor(w.id, user.id);
             const dayUS = toUS(w.started_at);
-            const local = localHistory.byDate.get(dayUS);
+            const candidates = localIdx.byDay.get(dayUS) || [];
+            const fallback = bestLocalMatch(candidates, sets);
 
             // Build share lines
             const shareLines =
-              sets?.length
+              (sets && sets.length > 0)
                 ? sets.map(s => `- ${s.exercise_name}: ${s.reps||0} reps${s.weight ? ` × ${s.weight} lb` : ''}`)
-                : (local?.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`);
+                : (fallback?.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`);
 
-            // Prefer explicit total_calories if present on server
-            let total = (typeof w.total_calories === 'number' && !Number.isNaN(w.total_calories))
+            // Determine total
+            let total = (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
               ? Math.round(w.total_calories)
               : calcCaloriesFromSets(sets);
 
-            // 👉 NEW: if computed is 0 (e.g., no weights), fallback to local session total for that day
-            if (!total || total <= 0) {
-              const localTotal = Math.round(local?.totalCalories || 0);
-              if (localTotal > 0) total = localTotal;
+            // Use local fallback ONLY if we have a confident match and computed total <= 0
+            if ((total || 0) <= 0 && fallback && Number.isFinite(fallback.totalCalories)) {
+              total = Math.round(fallback.totalCalories);
             }
 
             return { ...w, sets, total_calories: total, shareLines };
@@ -111,12 +129,12 @@ export default function WorkoutHistory({ onHistoryChange }) {
         );
         if (!ignore) {
           setRows(withSets);
-          if (onHistoryChange) onHistoryChange(hardSum(withSets));
+          if (onHistoryChange) onHistoryChange(sumTotals(withSets));
         }
       } catch (err) {
         console.error('[WorkoutHistory] fetch failed, falling back to local', err);
         if (!ignore) {
-          const asRows = localHistory.raw
+          const asRows = localIdx.raw
             .slice()
             .sort((a,b) => new Date(b.date) - new Date(a.date))
             .map((h, idx) => ({
@@ -131,16 +149,16 @@ export default function WorkoutHistory({ onHistoryChange }) {
               shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
             }));
           setRows(asRows);
-          if (onHistoryChange) onHistoryChange(hardSum(asRows));
+          if (onHistoryChange) onHistoryChange(sumTotals(asRows));
         }
       } finally {
         if (!ignore) setLoading(false);
       }
     })();
     return () => { ignore = true; };
-  }, [user, onHistoryChange, localHistory]);
+  }, [user, onHistoryChange, localIdx]);
 
-  function hardSum(list) {
+  function sumTotals(list) {
     return (list || []).reduce((s, r) => s + (r.total_calories || 0), 0);
   }
 
