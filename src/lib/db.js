@@ -4,7 +4,6 @@ import { supabase } from './supabaseClient';
 /** Ensure 'YYYY-MM-DD' */
 function toIsoDay(day) {
   if (!day) return new Date().toISOString().slice(0, 10);
-  // Accept Date, string, etc.
   try {
     if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
     const d = new Date(day);
@@ -37,7 +36,7 @@ export async function getOrCreateProfile(user) {
 }
 
 // -----------------------------------------------------------------------------
-// Workouts
+// Workouts (write)
 // -----------------------------------------------------------------------------
 export async function saveWorkout(userId, workout, sets = []) {
   if (!userId) throw new Error('saveWorkout: missing userId');
@@ -93,7 +92,7 @@ export async function upsertDailyMetrics(userId, day, deltaBurned = 0, deltaEate
 }
 
 // -----------------------------------------------------------------------------
-// Meals
+// Meals (write)
 // -----------------------------------------------------------------------------
 export async function saveMeal(userId, meal, items = []) {
   if (!userId) throw new Error('saveMeal: missing userId');
@@ -127,4 +126,57 @@ export async function saveMeal(userId, meal, items = []) {
   }
 
   return m;
+}
+
+// -----------------------------------------------------------------------------
+// Readers (for pages pulling from Supabase)
+// -----------------------------------------------------------------------------
+export async function getWorkouts(userId, { limit = 100 } = {}) {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('workouts')
+    .select('id, started_at, ended_at, goal, notes')
+    .eq('user_id', userId)
+    .order('started_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data;
+}
+
+export async function getWorkoutSetsFor(workoutId, userId) {
+  const { data, error } = await supabase
+    .from('workout_sets')
+    .select('exercise_name, reps, weight, tempo, volume, created_at')
+    .eq('workout_id', workoutId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+export async function getMeals(userId, { from, to, limit = 500 } = {}) {
+  if (!userId) return [];
+  let q = supabase.from('meals')
+    .select('id, eaten_at, title, total_calories')
+    .eq('user_id', userId)
+    .order('eaten_at', { ascending: false })
+    .limit(limit);
+  if (from) q = q.gte('eaten_at', from);
+  if (to)   q = q.lte('eaten_at', to);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data;
+}
+
+export async function getDailyMetricsRange(userId, from, to) {
+  if (!userId) return [];
+  let q = supabase.from('daily_metrics')
+    .select('day, cals_burned, cals_eaten, net_cals')
+    .eq('user_id', userId)
+    .order('day', { ascending: false });
+  if (from) q = q.gte('day', from);
+  if (to)   q = q.lte('day', to);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data;
 }

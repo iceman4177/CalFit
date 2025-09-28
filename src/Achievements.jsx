@@ -1,121 +1,53 @@
 // src/Achievements.jsx
-
-import React, { useEffect, useState } from 'react';
-import { Container, Typography, Grid, Card, CardContent, Chip, Box } from '@mui/material';
-
-const staticAchievements = [
-  {
-    id: 'first_workout',
-    name: 'First Workout',
-    description: 'Logged your first workout session!',
-    condition: (history) => history.length >= 1,
-    icon: '🏆'
-  },
-  {
-    id: 'five_workouts',
-    name: '5 Workouts Logged',
-    description: 'Logged 5 workout sessions!',
-    condition: (history) => history.length >= 5,
-    icon: '🎖️'
-  },
-  {
-    id: 'ten_workouts',
-    name: '10 Workouts Logged',
-    description: 'Logged 10 workout sessions!',
-    condition: (history) => history.length >= 10,
-    icon: '🥇'
-  },
-  {
-    id: '5000_calories',
-    name: '5,000 Calories Burned',
-    description: 'Burned 5,000 calories in total!',
-    condition: (history) =>
-      history.reduce((sum, session) => sum + session.totalCalories, 0) >= 5000,
-    icon: '🔥'
-  },
-  {
-    id: '10000_calories',
-    name: '10,000 Calories Burned',
-    description: 'Burned 10,000 calories in total!',
-    condition: (history) =>
-      history.reduce((sum, session) => sum + session.totalCalories, 0) >= 10000,
-    icon: '💪'
-  }
-];
+import React, { useEffect, useMemo, useState } from 'react';
+import { Container, Typography, Paper, List, ListItem, ListItemText } from '@mui/material';
+import { useAuth } from './context/AuthProvider.jsx';
+import { getDailyMetricsRange, getWorkouts } from './lib/db';
 
 export default function Achievements() {
-  const [workoutHistory, setWorkoutHistory] = useState([]);
-  const [earnedStatic, setEarnedStatic] = useState([]);
-  const [randomBadges, setRandomBadges] = useState([]);
+  const { user } = useAuth();
+  const [stats,setStats] = useState({workouts:0, burned:0, eaten:0});
 
-  useEffect(() => {
-    // load workout history
-    const savedHistory = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    setWorkoutHistory(savedHistory);
+  const local = useMemo(()=>{
+    const wh = JSON.parse(localStorage.getItem('workoutHistory')||'[]');
+    const mh = JSON.parse(localStorage.getItem('mealHistory')||'[]');
+    const burned = wh.reduce((s,w)=>s+(w.totalCalories||0),0);
+    const eaten = mh.reduce((s,day)=>s+(day.meals||[]).reduce((ss,m)=>ss+(m.calories||0),0),0);
+    return {workouts:wh.length, burned, eaten};
+  },[]);
 
-    // determine which static achievements are unlocked
-    const unlockedStatic = staticAchievements.filter(ach =>
-      ach.condition(savedHistory)
-    );
-    setEarnedStatic(unlockedStatic);
+  useEffect(()=>{
+    (async()=>{
+      if (!user){ setStats(local); return; }
+      try{
+        const ws = await getWorkouts(user.id,{limit:1000});
+        const dm = await getDailyMetricsRange(user.id,null,null);
+        const burned = dm.reduce((s,r)=>s+(r.cals_burned||0),0);
+        const eaten  = dm.reduce((s,r)=>s+(r.cals_eaten||0),0);
+        setStats({workouts:ws.length, burned, eaten});
+      }catch(err){
+        console.error('[Achievements] fallback',err);
+        setStats(local);
+      }
+    })();
+  },[user,local]);
 
-    // load any random “lucky drop” badges
-    const rnd = JSON.parse(localStorage.getItem('randomBadges') || '[]');
-    setRandomBadges(rnd);
-  }, []);
-
-  // merge static + random badges
-  const allBadges = [
-    ...earnedStatic.map(b => ({ ...b, random: false })),
-    ...randomBadges.map(b => ({ ...b, random: true }))
-  ];
+  const badges = [];
+  if (stats.workouts>=10) badges.push('🔥 10 Workouts');
+  if (stats.burned>=5000) badges.push('⚡ 5,000 Calories Burned');
+  if (stats.eaten>=10000) badges.push('🍽 10,000 Calories Logged');
 
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
-      <Typography variant="h3" align="center" gutterBottom>
-        Achievements
-      </Typography>
-
-      {allBadges.length === 0 ? (
-        <Box textAlign="center" mt={4}>
-          <Typography variant="body1">
-            No achievements yet. Start logging workouts or meals!
-          </Typography>
-        </Box>
-      ) : (
-        <Grid container spacing={2}>
-          {allBadges.map(badge => (
-            <Grid item xs={12} sm={6} md={4} key={badge.id}>
-              <Card
-                sx={{
-                  position: 'relative',
-                  opacity: 1,
-                  backgroundColor: '#f9f9f9'
-                }}
-              >
-                <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="h4">
-                    {badge.icon}
-                  </Typography>
-                  <Typography variant="h6" gutterBottom>
-                    {badge.name}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    {badge.description}
-                  </Typography>
-                  {badge.random && (
-                    <Chip
-                      label="🎉 Lucky Drop"
-                      size="small"
-                      sx={{ mt: 1 }}
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
+    <Container maxWidth="sm" sx={{py:4}}>
+      <Typography variant="h4" gutterBottom>Achievements</Typography>
+      <Paper variant="outlined">
+        <List>
+          {badges.length===0
+            ? <ListItem><ListItemText primary="No achievements yet." /></ListItem>
+            : badges.map((b,i)=><ListItem key={i}><ListItemText primary={b}/></ListItem>)
+          }
+        </List>
+      </Paper>
     </Container>
   );
 }

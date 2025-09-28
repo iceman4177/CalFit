@@ -1,140 +1,129 @@
 // src/CalorieHistory.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Container,
-  Typography,
-  Button,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Box
+  Box, Container, Divider, Typography, Table, TableBody, TableCell,
+  TableHead, TableRow, Paper, CircularProgress
 } from '@mui/material';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable'; // import the standalone function
+import { useAuth } from './context/AuthProvider.jsx';
+import { getDailyMetricsRange } from './lib/db';
 
-function exportToCsv(rows, filename) {
-  const header = Object.keys(rows[0]).join(',');
-  const csv = [
-    header,
-    ...rows.map(r => Object.values(r).join(','))
-  ].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+function toIsoDay(d) {
+  try {
+    return new Date(d).toISOString().slice(0,10);
+  } catch { return d; }
+}
+
+function getLastNDaysIso(n = 30) {
+  const today = new Date();
+  const from  = new Date(today.getTime() - (n-1)*864e5);
+  return { from: toIsoDay(from), to: toIsoDay(today) };
+}
+
+// Build a daily index from localStorage as a fallback
+function buildLocalDailyIndex() {
+  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); // [{date, totalCalories}]
+  const mealsArr = JSON.parse(localStorage.getItem('mealHistory')    || '[]'); // [{date, meals:[{calories}]}]
+
+  const idx = new Map(); // day -> { cals_burned, cals_eaten }
+  for (const w of workouts) {
+    const day = w.date;
+    const rec = idx.get(day) || { cals_burned:0, cals_eaten:0 };
+    rec.cals_burned += (w.totalCalories || 0);
+    idx.set(day, rec);
+  }
+  for (const d of mealsArr) {
+    const day = d.date;
+    const rec = idx.get(day) || { cals_burned:0, cals_eaten:0 };
+    const eaten = (d.meals || []).reduce((s,m) => s + (m.calories || 0), 0);
+    rec.cals_eaten += eaten;
+    idx.set(day, rec);
+  }
+  // normalize into array of { day(YYYY-MM-DD), cals_burned, cals_eaten, net_cals }
+  const out = [];
+  for (const [dayUS, rec] of idx.entries()) {
+    // local was stored as en-US; convert to ISO if possible
+    const iso = toIsoDay(dayUS);
+    out.push({
+      day: iso,
+      cals_burned: rec.cals_burned,
+      cals_eaten: rec.cals_eaten,
+      net_cals: rec.cals_eaten - rec.cals_burned,
+    });
+  }
+  // sort desc (newest first)
+  out.sort((a,b) => (a.day < b.day ? 1 : -1));
+  return out;
 }
 
 export default function CalorieHistory() {
-  const [history, setHistory] = useState([]);
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows]       = useState([]);
+
+  const localRows = useMemo(() => buildLocalDailyIndex(), []);
 
   useEffect(() => {
-    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-    const map = {};
-
-    workouts.forEach(w => {
-      const key = w.date;
-      map[key] = map[key] || { date: key, burned: 0, consumed: 0 };
-      map[key].burned += w.totalCalories;
-    });
-    meals.forEach(m => {
-      const key = m.date;
-      map[key] = map[key] || { date: key, burned: 0, consumed: 0 };
-      map[key].consumed += m.meals.reduce((sum, e) => sum + e.calories, 0);
-    });
-
-    const combined = Object.values(map)
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .map(r => ({
-        Date:     r.date,
-        Burned:   r.burned.toFixed(2),
-        Consumed: r.consumed.toFixed(2),
-        Net:      (r.consumed - r.burned).toFixed(2)
-      }));
-
-    setHistory(combined);
-  }, []);
-
-  const handleExportCsv = () => {
-    if (!history.length) return;
-    exportToCsv(history, 'slimcal_history.csv');
-  };
-
-  const handleExportPdf = () => {
-    if (!history.length) return;
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text('Slimcal.ai Calorie History', 14, 22);
-    doc.setFontSize(11);
-    const totalDays = history.length;
-    const avgNet = (
-      history.reduce((sum, r) => sum + parseFloat(r.Net), 0) /
-      totalDays
-    ).toFixed(2);
-    doc.text(`Days: ${totalDays}  |  Avg Net: ${avgNet} kcal`, 14, 30);
-
-    // use the standalone autoTable function
-    autoTable(doc, {
-      startY: 36,
-      head: [['Date', 'Burned', 'Consumed', 'Net']],
-      body: history.map(r => [r.Date, r.Burned, r.Consumed, r.Net]),
-      styles: { fontSize: 10 }
-    });
-
-    doc.save('slimcal_history.pdf');
-  };
+    let ignore = false;
+    (async () => {
+      if (!user) {
+        setRows(localRows);
+        return;
+      }
+      setLoading(true);
+      try {
+        const { from, to } = getLastNDaysIso(30);
+        const data = await getDailyMetricsRange(user.id, from, to);
+        if (!ignore) setRows(data);
+      } catch (err) {
+        console.error('[CalorieHistory] fetch failed, falling back to local', err);
+        if (!ignore) setRows(localRows);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [user, localRows]);
 
   return (
-    <Container maxWidth="sm" sx={{ py: 4 }}>
-      <Typography variant="h4" align="center" gutterBottom>
-        Calorie History
-      </Typography>
-      <Box sx={{ mb: 2, display: 'flex', gap: 2, justifyContent: 'center' }}>
-        <Button
-          variant="outlined"
-          onClick={handleExportCsv}
-          disabled={!history.length}
-        >
-          Export CSV
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleExportPdf}
-          disabled={!history.length}
-        >
-          Download PDF
-        </Button>
-      </Box>
-
-      {history.length === 0 ? (
-        <Typography>No history data to show.</Typography>
+    <Container maxWidth="md" sx={{ py:4 }}>
+      <Typography variant="h4" gutterBottom>Calorie History</Typography>
+      <Divider sx={{ mb:2 }} />
+      {loading ? (
+        <Box sx={{ display:'flex', justifyContent:'center', py:6 }}>
+          <CircularProgress />
+        </Box>
+      ) : rows.length === 0 ? (
+        <Typography>No data yet.</Typography>
       ) : (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Date</TableCell>
-              <TableCell align="right">Burned</TableCell>
-              <TableCell align="right">Consumed</TableCell>
-              <TableCell align="right">Net</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {history.map((row, idx) => (
-              <TableRow key={idx}>
-                <TableCell>{row.Date}</TableCell>
-                <TableCell align="right">{row.Burned}</TableCell>
-                <TableCell align="right">{row.Consumed}</TableCell>
-                <TableCell align="right">{row.Net}</TableCell>
+        <Paper variant="outlined">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>Date</strong></TableCell>
+                <TableCell align="right"><strong>Burned</strong></TableCell>
+                <TableCell align="right"><strong>Eaten</strong></TableCell>
+                <TableCell align="right"><strong>Net</strong></TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {rows.map((r, i) => (
+                <TableRow key={i}>
+                  <TableCell>
+                    {(() => {
+                      try { return new Date(r.day).toLocaleDateString('en-US'); }
+                      catch { return r.day; }
+                    })()}
+                  </TableCell>
+                  <TableCell align="right">{Math.round(r.cals_burned || 0)}</TableCell>
+                  <TableCell align="right">{Math.round(r.cals_eaten  || 0)}</TableCell>
+                  <TableCell align="right">
+                    {Math.round((r.net_cals != null ? r.net_cals : (r.cals_eaten || 0) - (r.cals_burned || 0)))}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Paper>
       )}
     </Container>
   );

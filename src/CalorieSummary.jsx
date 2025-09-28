@@ -1,62 +1,52 @@
 // src/CalorieSummary.jsx
-import React from 'react';
-import {
-  Container,
-  Typography,
-  Paper,
-  Box,
-  Chip
-} from '@mui/material';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Paper, Typography, Box } from '@mui/material';
+import { useAuth } from './context/AuthProvider.jsx';
+import { getDailyMetricsRange } from './lib/db';
 
-// Now receives burned & consumed from App, so it always matches the banner
-function CalorieSummary({ burned, consumed }) {
-  // Fallbacks: ensure numeric
-  const safeBurned = Number.isFinite(burned) ? burned : 0;
-  const safeConsumed = Number.isFinite(consumed) ? consumed : 0;
+function iso(d=new Date()){ return new Date(d).toISOString().slice(0,10); }
 
-  const net = safeConsumed - safeBurned;
-  const status =
-    net > 0
-      ? 'Calorie Surplus'
-      : net < 0
-      ? 'Calorie Deficit'
-      : 'Neutral';
+export default function CalorieSummary() {
+  const { user } = useAuth();
+  const [burned,setBurned]     = useState(0);
+  const [consumed,setConsumed] = useState(0);
+
+  const local = useMemo(()=>{
+    const today = new Date().toLocaleDateString('en-US');
+    const wh = JSON.parse(localStorage.getItem('workoutHistory')||'[]');
+    const mh = JSON.parse(localStorage.getItem('mealHistory')||'[]');
+    const burned = wh.filter(w=>w.date===today).reduce((s,w)=>s+(w.totalCalories||0),0);
+    const meals = mh.find(m=>m.date===today);
+    const eaten = meals ? (meals.meals||[]).reduce((s,m)=>s+(m.calories||0),0) : 0;
+    return {burned,eaten};
+  },[]);
+
+  useEffect(()=>{
+    (async()=>{
+      if (!user){ setBurned(local.burned); setConsumed(local.eaten); return; }
+      try{
+        const today = iso();
+        const rows = await getDailyMetricsRange(user.id,today,today);
+        const r = rows[0]||{};
+        setBurned(r.cals_burned||0);
+        setConsumed(r.cals_eaten||0);
+      }catch(err){
+        console.error('[CalorieSummary] fallback',err);
+        setBurned(local.burned); setConsumed(local.eaten);
+      }
+    })();
+  },[user,local]);
+
+  const net = consumed - burned;
 
   return (
-    <Container maxWidth="sm" sx={{ py: 4 }}>
-      <Typography variant="h4" align="center" gutterBottom>
-        Daily Calorie Summary
-      </Typography>
-
-      <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
-        <Typography variant="h6">🍽 Calories Consumed:</Typography>
-        <Typography variant="body1" sx={{ mb: 2 }}>
-          {safeConsumed.toFixed(2)} cals
-        </Typography>
-
-        <Typography variant="h6">🔥 Calories Burned:</Typography>
-        <Typography variant="body1" sx={{ mb: 2 }}>
-          {safeBurned.toFixed(2)} cals
-        </Typography>
-
-        <Typography variant="h6">⚖️ Net Calories:</Typography>
-        <Box display="flex" alignItems="center" gap={1}>
-          <Typography
-            variant="body1"
-            sx={{
-              color: net > 0 ? 'green' : net < 0 ? 'red' : 'gray'
-            }}
-          >
-            {net.toFixed(2)} cals
-          </Typography>
-          <Chip
-            label={status}
-            color={net > 0 ? 'success' : net < 0 ? 'error' : 'default'}
-          />
-        </Box>
-      </Paper>
-    </Container>
+    <Paper elevation={3} sx={{p:3, mt:4}}>
+      <Typography variant="h5" gutterBottom>Today’s Summary</Typography>
+      <Box sx={{display:'flex', justifyContent:'space-around'}}>
+        <Typography>Burned: {burned}</Typography>
+        <Typography>Eaten: {consumed}</Typography>
+        <Typography>Net: {net} ({net>=0?'Surplus':'Deficit'})</Typography>
+      </Box>
+    </Paper>
   );
 }
-
-export default CalorieSummary;
