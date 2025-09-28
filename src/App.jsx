@@ -350,6 +350,18 @@ export default function App() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
 
+  // Local pro flag for immediate UI after /pro-success
+  const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'isPro') setLocalPro(e.newValue === 'true');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const showTryPro = !(isProActive || localPro);
+
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
       <PageTracker />
@@ -375,7 +387,6 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
-        {/* 👇 show Login when logged out */}
         {!authUser && (
           <Button
             variant="contained"
@@ -391,8 +402,7 @@ export default function App() {
           </Button>
         )}
 
-        {/* 👇 hide TRY PRO FREE for Pro users */}
-        {!isProActive && (
+        {showTryPro && (
           <Button
             variant="contained"
             sx={{ mt: 2 }}
@@ -402,7 +412,6 @@ export default function App() {
           </Button>
         )}
 
-        {/* Signed-in line */}
         {authUser && (
           <Typography variant="body2" sx={{ mt: 1 }}>
             Signed in as {authUser.email}{' '}
@@ -427,31 +436,20 @@ export default function App() {
         <Route path="/pro-success" component={ProSuccess} />
 
         <Route path="/edit-info" render={() =>
-          <HealthDataForm setUserData={data => { setUserData(data); history.push('/'); }} />
+          <HealthDataForm setUserData={data => { const prev = JSON.parse(localStorage.getItem('userData') || '{}'); const next = { ...prev, ...data, isPremium: isProActive || localPro }; localStorage.setItem('userData', JSON.stringify(next)); setUserDataState(next); history.push('/'); }} />
         }/>
         <Route path="/workout" render={() =>
-          <WorkoutPage userData={userData} onWorkoutLogged={refreshCalories} />
+          <WorkoutPage userData={userData} onWorkoutLogged={() => { const today = new Date().toLocaleDateString('en-US'); const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]'); const todayRec = meals.find(m => m.date === today); setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0)); setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0); }} />
         }/>
         <Route path="/meals" render={() =>
-          <MealTracker onMealUpdate={refreshCalories} />
+          <MealTracker onMealUpdate={() => { const today = new Date().toLocaleDateString('en-US'); const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]'); const todayRec = meals.find(m => m.date === today); setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0)); setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0); }} />
         }/>
-        <Route path="/history" render={() =>
-          <WorkoutHistory onHistoryChange={refreshCalories} />
-        }/>
-        <Route path="/dashboard" render={() => (
-          <>
-            <Box sx={{ p:2, mb:2, bgcolor:'#e0f7fa', borderRadius:1, textAlign:'center' }}>
-              <Typography variant="subtitle1">🚀 Grow Slimcal.ai! Invite friends & earn perks.</Typography>
-              <Button variant="text" onClick={() => setInviteOpen(true)}>Invite Now</Button>
-            </Box>
-            <ProgressDashboard />
-            <ReferralDashboard />
-          </>
-        )}/>
+        <Route path="/history" component={WorkoutHistory} />
+        <Route path="/dashboard" component={ProgressDashboard} />
         <Route path="/achievements" component={Achievements} />
         <Route path="/calorie-log"  component={CalorieHistory} />
-        <Route path="/summary"      render={() => <CalorieSummary burned={burnedCalories} consumed={consumedCalories} />} />
-        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive }} />} />
+        <Route path="/summary"      component={CalorieSummary} />
+        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive || localPro }} />} />
         <Route path="/waitlist"     component={WaitlistSignup} />
         <Route path="/preferences"  component={AlertPreferences} />
         <Route exact path="/"       render={() => null} />

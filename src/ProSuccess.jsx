@@ -29,38 +29,32 @@ export default function ProSuccess() {
   const [phase, setPhase] = useState("checking"); // "checking" | "active" | "waiting" | "error"
   const [message, setMessage] = useState("");
 
-  // 🔹 1) One-time backfill: if the success URL has a session_id, ask the server
-  //     to create/refresh the subscription & mapping immediately.
+  // 1) Fire-and-forget: use the Checkout session_id to finalize server state ASAP
   useEffect(() => {
     if (!sessionId) return;
     let aborted = false;
-
     (async () => {
       try {
         await fetch(`/api/pro-from-session?session_id=${encodeURIComponent(sessionId)}`, {
           method: "GET",
-          // avoid caching to ensure we actually hit the server once
           headers: { "Cache-Control": "no-cache" },
         });
       } catch {
-        // Don't block the flow if this fails; the webhook/polling can still succeed.
+        // webhook/polling will still recover
       }
       if (!aborted) {
-        // tiny pause to give the DB a chance to write
         await new Promise((r) => setTimeout(r, 500));
       }
     })();
-
     return () => { aborted = true; };
   }, [sessionId]);
 
-  // 🔹 2) Poll server truth (Supabase via secure API) instead of flipping local flags
+  // 2) Poll server truth (via your secure API that reads Supabase/Postgres)
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        // Ensure we have an authenticated user
         const { data: auth } = await supabase.auth.getUser();
         const user = auth?.user || null;
         if (!user) {
@@ -69,12 +63,10 @@ export default function ProSuccess() {
           return;
         }
 
-        // Give webhook/backfill a moment to arrive; then poll the API for ~30s
         const start = Date.now();
         const maxMs = 30000;
         const step = 1200;
 
-        // Small initial delay improves odds the first check succeeds
         await new Promise((r) => setTimeout(r, 1200));
 
         while (!cancelled && Date.now() - start < maxMs) {
@@ -89,13 +81,11 @@ export default function ProSuccess() {
             return;
           }
 
-          // Not active yet → keep waiting
           setPhase("waiting");
           setMessage("Finalizing your Pro access… This can take a few seconds.");
           await new Promise((r) => setTimeout(r, step));
         }
 
-        // Timed out
         if (!cancelled) {
           setPhase("error");
           setMessage(
@@ -111,14 +101,24 @@ export default function ProSuccess() {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  const go = (path) => () => {
-    window.location.href = path;
-  };
+  // 3) When active, flip local flags so the UI (header CTA) updates immediately
+  useEffect(() => {
+    if (phase !== "active") return;
+    try {
+      localStorage.setItem("isPro", "true");
+      const ud = JSON.parse(localStorage.getItem("userData") || "{}");
+      if (!ud.isPremium) {
+        localStorage.setItem("userData", JSON.stringify({ ...ud, isPremium: true }));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [phase]);
+
+  const go = (path) => () => { window.location.href = path; };
 
   return (
     <Container maxWidth="sm" sx={{ py: 6 }}>
@@ -143,8 +143,8 @@ export default function ProSuccess() {
                 )}
                 <Box sx={{ mt: 3 }}>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="center">
-                    <Button variant="contained" onClick={go("/dashboard")}>
-                      Go to Dashboard
+                    <Button variant="contained" onClick={go("/")}>
+                      Go Home
                     </Button>
                     <Button variant="outlined" onClick={go("/workout")}>
                       Log a Workout
