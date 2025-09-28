@@ -1,4 +1,5 @@
-// Hardened: no module-scope throws; all errors reported as JSON 400; handles OPTIONS.
+// api/create-checkout-session.js
+// No module-scope throws; all errors are JSON 400; handles OPTIONS.
 
 export const config = { api: { bodyParser: false } };
 
@@ -69,17 +70,44 @@ export default async function handler(req, res) {
       supabaseAdmin = mod.supabaseAdmin || null;
     } catch {}
 
-    // Ensure or create Stripe customer, optionally persisting mapping
+    // ---------- Ensure or create Stripe customer (and persist mapping) ----------
     let stripeCustomerId = null;
 
     if (supabaseAdmin) {
-      const { data: existing, error: existingErr } = await supabaseAdmin
+      // Instead of maybeSingle(), read the newest mapping (handles duplicates safely)
+      const { data: rows, error: selectErr } = await supabaseAdmin
         .from("app_stripe_customers")
-        .select("customer_id")
+        .select("customer_id, updated_at, user_id")
         .eq("user_id", user_id)
-        .maybeSingle();
-      if (existingErr) throw existingErr;
-      stripeCustomerId = existing?.customer_id || null;
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      if (selectErr) throw selectErr;
+      stripeCustomerId = rows?.[0]?.customer_id || null;
+
+      // Optional: best-effort dedupe older duplicates (no throw if it fails)
+      try {
+        const { data: allRows } = await supabaseAdmin
+          .from("app_stripe_customers")
+          .select("customer_id, updated_at")
+          .eq("user_id", user_id);
+
+        if (allRows && allRows.length > 1) {
+          const keep = new Set([rows[0].customer_id]);
+          const toDelete = allRows
+            .filter(r => !keep.has(r.customer_id))
+            .map(r => r.customer_id);
+
+          if (toDelete.length) {
+            await supabaseAdmin
+              .from("app_stripe_customers")
+              .delete()
+              .in("customer_id", toDelete);
+          }
+        }
+      } catch (e) {
+        console.warn("[checkout] dedupe mapping skipped:", e?.message || e);
+      }
     }
 
     if (!stripeCustomerId) {
@@ -114,13 +142,12 @@ export default async function handler(req, res) {
     const cancelUrl  = absUrl(cancel_path, APP_BASE_URL);
     const trialDays  = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
 
-    // ⬇️ Always bind session to the real Supabase user_id
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      client_reference_id: user_id,
+      client_reference_id: user_id,            // bind session to real user
       metadata: { user_id, period },
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
