@@ -1,15 +1,12 @@
 // api/create-checkout-session.js
-// No module-scope throws; all errors are JSON 400; handles OPTIONS.
-
 export const config = { api: { bodyParser: false } };
 
-// ---- Small utilities ----
+// ---- utils ----
 function setCors(res, origin) {
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
-
 async function readJson(req) {
   let raw;
   if (typeof req.text === "function") raw = await req.text();
@@ -20,10 +17,24 @@ async function readJson(req) {
   }
   return raw ? JSON.parse(raw) : {};
 }
-
 function absUrl(pathOrUrl, base) {
   try { return new URL(pathOrUrl).toString(); }
   catch { return new URL(pathOrUrl, base).toString(); }
+}
+function coerceCustomerId(val) {
+  if (!val) return null;
+  if (typeof val === "string") {
+    const s = val.trim();
+    if (s.startsWith("{")) {
+      try {
+        const o = JSON.parse(s);
+        return typeof o?.id === "string" ? o.id : null;
+      } catch { /* fallthrough */ }
+    }
+    return s;
+  }
+  if (typeof val === "object" && val && typeof val.id === "string") return val.id;
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -74,39 +85,29 @@ export default async function handler(req, res) {
     let stripeCustomerId = null;
 
     if (supabaseAdmin) {
-      // Instead of maybeSingle(), read the newest mapping (handles duplicates safely)
+      // Read newest mapping (duplicates safe)
       const { data: rows, error: selectErr } = await supabaseAdmin
         .from("app_stripe_customers")
         .select("customer_id, updated_at, user_id")
         .eq("user_id", user_id)
         .order("updated_at", { ascending: false })
         .limit(1);
-
       if (selectErr) throw selectErr;
-      stripeCustomerId = rows?.[0]?.customer_id || null;
 
-      // Optional: best-effort dedupe older duplicates (no throw if it fails)
-      try {
-        const { data: allRows } = await supabaseAdmin
-          .from("app_stripe_customers")
-          .select("customer_id, updated_at")
-          .eq("user_id", user_id);
+      stripeCustomerId = coerceCustomerId(rows?.[0]?.customer_id);
 
-        if (allRows && allRows.length > 1) {
-          const keep = new Set([rows[0].customer_id]);
-          const toDelete = allRows
-            .filter(r => !keep.has(r.customer_id))
-            .map(r => r.customer_id);
-
-          if (toDelete.length) {
-            await supabaseAdmin
-              .from("app_stripe_customers")
-              .delete()
-              .in("customer_id", toDelete);
-          }
-        }
-      } catch (e) {
-        console.warn("[checkout] dedupe mapping skipped:", e?.message || e);
+      // Best-effort clean-up: if the newest row is JSON, rewrite it to just the ID
+      if (rows?.[0]?.customer_id && rows[0].customer_id !== stripeCustomerId) {
+        try {
+          await supabaseAdmin
+            .from("app_stripe_customers")
+            .update({
+              customer_id: stripeCustomerId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", user_id)
+            .eq("customer_id", rows[0].customer_id);
+        } catch {}
       }
     }
 
@@ -144,10 +145,10 @@ export default async function handler(req, res) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: stripeCustomerId,
+      customer: stripeCustomerId,               // always a plain "cus_..." here
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      client_reference_id: user_id,            // bind session to real user
+      client_reference_id: user_id,
       metadata: { user_id, period },
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
