@@ -115,7 +115,9 @@ export default function App() {
   const promptedRef  = useRef(false);
   const autoRunRef   = useRef(false);
 
-  // 🔐 Track auth user for showing "Login" when logged out
+  useReferral();
+
+  // Track auth state for Login/Sign Out UI
   const [authUser, setAuthUser] = useState(null);
   useEffect(() => {
     let mounted = true;
@@ -135,8 +137,6 @@ export default function App() {
 
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
-
-  useReferral();
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -217,7 +217,7 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // Handle OAuth return (Supabase hosted callback path)
+  // Handle OAuth callback
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
@@ -238,7 +238,7 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-checkout (server selects price by period)
+  // Auto-checkout
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
@@ -375,7 +375,7 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
-        {/* 👇 Show Login when logged out */}
+        {/* 👇 show Login when logged out */}
         {!authUser && (
           <Button
             variant="contained"
@@ -383,9 +383,7 @@ export default function App() {
             onClick={() =>
               supabase.auth.signInWithOAuth({
                 provider: 'google',
-                options: {
-                  redirectTo: `${window.location.origin}/auth/callback`,
-                },
+                options: { redirectTo: `${window.location.origin}/auth/callback` },
               })
             }
           >
@@ -393,7 +391,7 @@ export default function App() {
           </Button>
         )}
 
-        {/* 👇 Hide for Pro users */}
+        {/* 👇 hide TRY PRO FREE for Pro users */}
         {!isProActive && (
           <Button
             variant="contained"
@@ -402,6 +400,19 @@ export default function App() {
           >
             TRY PRO FREE
           </Button>
+        )}
+
+        {/* Signed-in line */}
+        {authUser && (
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Signed in as {authUser.email}{' '}
+            <Button
+              size="small"
+              onClick={async () => { await supabase.auth.signOut(); }}
+            >
+              SIGN OUT
+            </Button>
+          </Typography>
         )}
       </Box>
 
