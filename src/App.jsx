@@ -115,6 +115,27 @@ export default function App() {
   const promptedRef  = useRef(false);
   const autoRunRef   = useRef(false);
 
+  // 🔐 Track auth user for showing "Login" when logged out
+  const [authUser, setAuthUser] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (mounted) setAuthUser(data?.user ?? null);
+      } catch {
+        if (mounted) setAuthUser(null);
+      }
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+
+    return () => sub?.subscription?.unsubscribe?.();
+  }, []);
+
   useReferral();
 
   useEffect(() => {
@@ -196,7 +217,7 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // Handle OAuth return
+  // Handle OAuth return (Supabase hosted callback path)
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
@@ -217,7 +238,7 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-checkout
+  // Auto-checkout (server selects price by period)
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
@@ -354,7 +375,25 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
-        {/* Hide for Pro users */}
+        {/* 👇 Show Login when logged out */}
+        {!authUser && (
+          <Button
+            variant="contained"
+            sx={{ mt: 2, mr: 1 }}
+            onClick={() =>
+              supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                  redirectTo: `${window.location.origin}/auth/callback`,
+                },
+              })
+            }
+          >
+            Login
+          </Button>
+        )}
+
+        {/* 👇 Hide for Pro users */}
         {!isProActive && (
           <Button
             variant="contained"
