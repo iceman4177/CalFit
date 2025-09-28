@@ -16,9 +16,15 @@ function calcCaloriesFromSets(sets) {
   for (const s of sets) {
     const w = Number(s.weight) || 0;
     const r = Number(s.reps) || 0;
+    // prefer explicit calories if present on the set
+    if (typeof s.calories === 'number' && !Number.isNaN(s.calories)) {
+      vol += s.calories / (SCALE || 1); // convert back to “volume units”
+      continue;
+    }
     vol += w * r;
   }
-  return Math.round(vol * SCALE);
+  const est = Math.round(vol * SCALE);
+  return Number.isFinite(est) ? est : 0;
 }
 
 function formatDateTime(iso) {
@@ -38,7 +44,6 @@ export default function WorkoutHistory({ onHistoryChange }) {
   // Local fallback + lookup by date for calories/share text
   const localHistory = useMemo(() => {
     const arr = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    // Key by US date -> local session (take most recent for that date)
     const map = new Map();
     for (const sess of arr) {
       map.set(sess.date, sess); // { date, totalCalories, exercises:[{name,sets,reps,calories}] }
@@ -62,6 +67,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
               exercise_name: e.name,
               reps: e.reps ?? 0,
               weight: e.weight ?? 0,
+              calories: typeof e.calories === 'number' ? e.calories : undefined,
             })),
             total_calories: Math.round(h.totalCalories || 0),
             shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
@@ -80,19 +86,25 @@ export default function WorkoutHistory({ onHistoryChange }) {
         const withSets = await Promise.all(
           base.map(async w => {
             const sets = await getWorkoutSetsFor(w.id, user.id);
-            // Fallback: if no sets & no total on server, try local session matching that US date
             const dayUS = toUS(w.started_at);
             const local = localHistory.byDate.get(dayUS);
+
+            // Build share lines
             const shareLines =
               sets?.length
                 ? sets.map(s => `- ${s.exercise_name}: ${s.reps||0} reps${s.weight ? ` × ${s.weight} lb` : ''}`)
                 : (local?.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`);
 
-            const total =
-              (typeof w.total_calories === 'number' && !Number.isNaN(w.total_calories))
-                ? Math.round(w.total_calories)
-                : (sets?.length ? calcCaloriesFromSets(sets)
-                                : Math.round(local?.totalCalories || 0));
+            // Prefer explicit total_calories if present on server
+            let total = (typeof w.total_calories === 'number' && !Number.isNaN(w.total_calories))
+              ? Math.round(w.total_calories)
+              : calcCaloriesFromSets(sets);
+
+            // 👉 NEW: if computed is 0 (e.g., no weights), fallback to local session total for that day
+            if (!total || total <= 0) {
+              const localTotal = Math.round(local?.totalCalories || 0);
+              if (localTotal > 0) total = localTotal;
+            }
 
             return { ...w, sets, total_calories: total, shareLines };
           })
@@ -112,7 +124,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
               started_at: new Date(h.date).toISOString(),
               ended_at:   new Date(h.date).toISOString(),
               sets: (h.exercises || []).map(e => ({
-                exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0
+                exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
+                calories: typeof e.calories === 'number' ? e.calories : undefined,
               })),
               total_calories: Math.round(h.totalCalories || 0),
               shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
