@@ -30,6 +30,61 @@ async function resolveUserIdFromCustomer(customer_id) {
   return data?.user_id || null;
 }
 
+async function insertOrUpdateSubscription({
+  user_id,
+  customer_id,
+  status,
+  current_period_end,
+  price_id,
+  cancel_at_period_end,
+  trial_end,
+}) {
+  let existingId = null;
+
+  if (user_id) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("id")
+      .eq("user_id", user_id)
+      .limit(1)
+      .maybeSingle();
+    existingId = data?.id || null;
+  }
+  if (!existingId && customer_id) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("id")
+      .eq("customer_id", customer_id)
+      .limit(1)
+      .maybeSingle();
+    existingId = data?.id || null;
+  }
+
+  const payload = {
+    user_id,
+    customer_id,
+    status,
+    current_period_end,
+    price_id,
+    cancel_at_period_end,
+    trial_end,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingId) {
+    const { error } = await supabaseAdmin
+      .from("app_subscriptions")
+      .update(payload)
+      .eq("id", existingId);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabaseAdmin
+      .from("app_subscriptions")
+      .insert(payload);
+    if (error) throw new Error(error.message);
+  }
+}
+
 async function upsertSubscription(sub, userHint = null) {
   const customer_id = sub.customer;
   let user_id = asUuidOrNull(userHint) || asUuidOrNull(sub.metadata?.user_id) || null;
@@ -39,27 +94,18 @@ async function upsertSubscription(sub, userHint = null) {
   const item = sub.items?.data?.[0];
   const price = item?.price;
   const price_id = price?.id ?? null;
-  const product_id = typeof price?.product === "string" ? price.product : price?.product?.id ?? null;
 
-  const { error: subErr } = await supabaseAdmin
-    .from("app_subscriptions")
-    .upsert(
-      {
-        stripe_subscription_id: sub.id,
-        user_id,
-        status: sub.status,
-        current_period_end: iso(sub.current_period_end),
-        price_id,
-        product_id,
-        cancel_at_period_end: !!sub.cancel_at_period_end,
-        trial_end: iso(sub.trial_end),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "stripe_subscription_id" }
-    );
-  if (subErr) throw new Error(subErr.message);
+  await insertOrUpdateSubscription({
+    user_id,
+    customer_id,
+    status: sub.status,
+    current_period_end: iso(sub.current_period_end),
+    price_id,
+    cancel_at_period_end: !!sub.cancel_at_period_end,
+    trial_end: iso(sub.trial_end),
+  });
 
-  const is_pro = sub.status === "active" || "trialing";
+  const is_pro = sub.status === "active" || sub.status === "trialing";
   const { error: entErr } = await supabaseAdmin
     .from("entitlements")
     .upsert(

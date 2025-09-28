@@ -26,11 +26,35 @@ export default function ProSuccess() {
   const cid = q.get("cid") || undefined;              // your clientId (optional)
   const dev = q.get("dev") === "1";
 
-  // JS version (no TS generics)
   const [phase, setPhase] = useState("checking"); // "checking" | "active" | "waiting" | "error"
   const [message, setMessage] = useState("");
 
-  // Poll server truth (Supabase via secure API) instead of flipping local flags
+  // 🔹 1) One-time backfill: if the success URL has a session_id, ask the server
+  //     to create/refresh the subscription & mapping immediately.
+  useEffect(() => {
+    if (!sessionId) return;
+    let aborted = false;
+
+    (async () => {
+      try {
+        await fetch(`/api/pro-from-session?session_id=${encodeURIComponent(sessionId)}`, {
+          method: "GET",
+          // avoid caching to ensure we actually hit the server once
+          headers: { "Cache-Control": "no-cache" },
+        });
+      } catch {
+        // Don't block the flow if this fails; the webhook/polling can still succeed.
+      }
+      if (!aborted) {
+        // tiny pause to give the DB a chance to write
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    })();
+
+    return () => { aborted = true; };
+  }, [sessionId]);
+
+  // 🔹 2) Poll server truth (Supabase via secure API) instead of flipping local flags
   useEffect(() => {
     let cancelled = false;
 
@@ -45,7 +69,7 @@ export default function ProSuccess() {
           return;
         }
 
-        // Give the webhook a moment to arrive; then poll the API for ~30s
+        // Give webhook/backfill a moment to arrive; then poll the API for ~30s
         const start = Date.now();
         const maxMs = 30000;
         const step = 1200;
@@ -54,7 +78,9 @@ export default function ProSuccess() {
         await new Promise((r) => setTimeout(r, 1200));
 
         while (!cancelled && Date.now() - start < maxMs) {
-          const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(user.id)}`);
+          const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(user.id)}`, {
+            headers: { "Cache-Control": "no-cache" },
+          });
           const json = await res.json().catch(() => ({}));
 
           if (res.ok && json?.isPro) {
@@ -108,9 +134,11 @@ export default function ProSuccess() {
                 <Typography variant="body1" align="center" sx={{ opacity: 0.9 }}>
                   {message}
                 </Typography>
-                {cid && (
+                {(cid || sessionId) && (
                   <Typography variant="caption" sx={{ mt: 1, opacity: 0.6 }}>
-                    Ref: {cid}{dev ? " (dev)" : ""}{sessionId ? ` • session ${sessionId}` : ""}
+                    {cid ? `Ref: ${cid}${dev ? " (dev)" : ""}` : ""}
+                    {cid && sessionId ? " • " : ""}
+                    {sessionId ? `session ${sessionId}` : ""}
                   </Typography>
                 )}
                 <Box sx={{ mt: 3 }}>

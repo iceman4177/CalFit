@@ -26,7 +26,6 @@ function absUrl(pathOrUrl, base) {
 }
 
 export default async function handler(req, res) {
-  // Read envs inside handler so missing values don't crash at module load
   const {
     STRIPE_SECRET_KEY,
     STRIPE_PRICE_ID_MONTHLY,
@@ -51,7 +50,6 @@ export default async function handler(req, res) {
       user_id,
       email,
       period, // "monthly" | "annual"
-      // NOTE: we intentionally ignore any client_reference_id coming from the client
       success_path = "/pro-success",
       cancel_path  = "/",
     } = body || {};
@@ -64,14 +62,12 @@ export default async function handler(req, res) {
     const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
     if (!priceId) throw new Error(`Server missing price for period='${period}' (check STRIPE_PRICE_ID_*)`);
 
-    // Lazy-import Supabase admin; if it fails (e.g., env missing), proceed without DB mapping
+    // Try to import Supabase admin; continue if unavailable
     let supabaseAdmin = null;
     try {
       const mod = await import("./_lib/supabaseAdmin.js");
       supabaseAdmin = mod.supabaseAdmin || null;
-    } catch (e) {
-      console.warn("[checkout] Supabase admin not available, proceeding without DB mapping:", e?.message || e);
-    }
+    } catch {}
 
     // Ensure or create Stripe customer, optionally persisting mapping
     let stripeCustomerId = null;
@@ -118,14 +114,14 @@ export default async function handler(req, res) {
     const cancelUrl  = absUrl(cancel_path, APP_BASE_URL);
     const trialDays  = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
 
-    // ⬇️ KEY FIX: Always bind session to the real Supabase user_id
+    // ⬇️ Always bind session to the real Supabase user_id
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      client_reference_id: user_id,         // <- force
-      metadata: { user_id, period },        // <- also include in metadata
+      client_reference_id: user_id,
+      metadata: { user_id, period },
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,

@@ -49,49 +49,96 @@ async function resolveUserIdFromCustomer(customer_id) {
   return data?.user_id || null;
 }
 
+// Insert or update by existing row for this user/customer (no unique constraint required)
+async function insertOrUpdateSubscription({
+  user_id,
+  customer_id,
+  status,
+  current_period_end,
+  price_id,
+  cancel_at_period_end,
+  trial_end,
+}) {
+  // Try to find an existing row for this user (or customer) to update
+  let existingId = null;
+
+  // Prefer user_id match
+  if (user_id) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("id")
+      .eq("user_id", user_id)
+      .limit(1)
+      .maybeSingle();
+    existingId = data?.id || null;
+  }
+
+  // Fallback: look by customer_id
+  if (!existingId && customer_id) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("id")
+      .eq("customer_id", customer_id)
+      .limit(1)
+      .maybeSingle();
+    existingId = data?.id || null;
+  }
+
+  const payload = {
+    user_id,
+    customer_id,
+    status,
+    current_period_end,
+    price_id,
+    cancel_at_period_end,
+    trial_end,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingId) {
+    const { error } = await supabaseAdmin
+      .from("app_subscriptions")
+      .update(payload)
+      .eq("id", existingId);
+    logDbError("app_subscriptions.update", error);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabaseAdmin
+      .from("app_subscriptions")
+      .insert(payload); // id will auto-generate (uuid default)
+    logDbError("app_subscriptions.insert", error);
+    if (error) throw new Error(error.message);
+  }
+}
+
 async function upsertSubscription(sub, userHint = null) {
-  const stripe_subscription_id = sub.id;
   const customer_id = sub.customer;
   let user_id =
     asUuidOrNull(userHint) ||
     asUuidOrNull(sub.metadata?.user_id) ||
     null;
 
-  // Fallback: look up mapping if user not provided on event
   if (!user_id) user_id = await resolveUserIdFromCustomer(customer_id);
-
-  // If still no user_id, ask Stripe to retry later (mapping may arrive shortly)
   if (!user_id) {
-    console.warn("[wh] ⚠ no user_id for subscription", { subId: stripe_subscription_id, customer_id });
+    console.warn("[wh] ⚠ no user_id for subscription", { customer_id });
     throw new Error("user_id missing for subscription upsert");
   }
 
   const item = sub.items?.data?.[0];
   const price = item?.price;
   const price_id = price?.id ?? null;
-  // In subscription events, price.product is typically a product ID string (not expanded)
-  const product_id = typeof price?.product === "string" ? price.product : price?.product?.id ?? null;
 
-  const payload = {
-    stripe_subscription_id,
+  await insertOrUpdateSubscription({
     user_id,
+    customer_id,
     status: sub.status,
     current_period_end: iso(sub.current_period_end),
     price_id,
-    product_id,
     cancel_at_period_end: !!sub.cancel_at_period_end,
     trial_end: iso(sub.trial_end),
-    updated_at: new Date().toISOString(),
-  };
+  });
 
-  const { error } = await supabaseAdmin
-    .from("app_subscriptions")
-    .upsert(payload, { onConflict: "stripe_subscription_id" });
-
-  logDbError("app_subscriptions.upsert", error);
-  if (error) throw new Error(`upsert app_subscriptions failed: ${error.message}`);
-
-  // Optional entitlement mirror (your schema already expects this)
+  // Mirror entitlements
   const is_pro = sub.status === "active" || sub.status === "trialing";
   const { error: entErr } = await supabaseAdmin
     .from("entitlements")
@@ -139,7 +186,6 @@ export default async function handler(req, res) {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
-        // Guard: only accept a valid UUID; otherwise fall back to metadata
         const userId =
           asUuidOrNull(s.client_reference_id) ||
           asUuidOrNull(s.metadata?.user_id) ||
@@ -150,13 +196,11 @@ export default async function handler(req, res) {
 
         console.log("[wh] checkout.session.completed", { userId, customerId });
 
-        // 1) Always upsert customer mapping
         await upsertCustomer({ customer_id: customerId, user_id: userId, email });
 
-        // 2) If subscription already exists on the session, fetch and upsert it now
         if (s.mode === "subscription" && s.subscription) {
           const sub = await stripe.subscriptions.retrieve(s.subscription, {
-            expand: ["items.data.price"], // price.product remains ID string; we handle both
+            expand: ["items.data.price"],
           });
           await upsertSubscription(sub, userId);
         }
@@ -177,7 +221,6 @@ export default async function handler(req, res) {
         break;
       }
 
-      // Optional: observe invoices for debugging (no DB writes)
       case "invoice.paid":
       case "invoice.payment_failed":
       case "customer.subscription.trial_will_end":
@@ -185,15 +228,13 @@ export default async function handler(req, res) {
         break;
 
       default:
-        // ignore other events to keep logs clean
         break;
     }
 
-    // Success
     return res.status(200).json({ received: true });
   } catch (e) {
-    // Return 400 so Stripe retries if we failed transiently (e.g., mapping not yet present)
     console.error("[wh] ❌ handler error:", e.message);
+    // 400 so Stripe retries if we failed transiently
     return res.status(400).send("Webhook handler failed");
   }
 }
