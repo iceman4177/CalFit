@@ -1,4 +1,3 @@
-// src/WorkoutPage.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -25,7 +24,11 @@ import { MET_VALUES } from './exerciseMeta';
 import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
 import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
-import UpgradeModal from './components/UpgradeModal'; // <-- ADDED for paywall modal
+import UpgradeModal from './components/UpgradeModal';
+
+// ✅ NEW: auth + db
+import { useAuth } from './context/AuthProvider.jsx';
+import { saveWorkout, upsertDailyMetrics } from './lib/db';
 
 // ---- Paywall helpers (localStorage-based until backend arrives) ----
 const isProUser = () => {
@@ -42,6 +45,7 @@ const incAICount = () =>
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
+  const { user } = useAuth();   // ✅ who is signed in (if any)
 
   useEffect(() => {
     if (!userData) history.replace('/edit-info');
@@ -80,11 +84,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     localStorage.setItem(key, 'true');
     setter(false);
     if (cb) cb();
-  };
-
-  const triggerOrHandle = (key, setter, cb) => {
-    if (!localStorage.getItem(key)) setter(true);
-    else cb();
   };
 
   const handleLoadTemplate = exercises => {
@@ -247,7 +246,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTemp('180');
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const newSession = {
       date: new Date().toLocaleDateString('en-US'),
@@ -264,6 +263,31 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
     onWorkoutLogged(total);
     updateStreak();
+
+    // ✅ Cloud write-through (if logged in)
+    try {
+      if (user?.id) {
+        const nowISO = new Date().toISOString();
+        await saveWorkout(
+          user.id,
+          { started_at: nowISO, ended_at: nowISO, goal: null, notes: null },
+          (newSession.exercises || []).map(s => ({
+            exercise_name: s.name,
+            equipment: null,
+            muscle_group: null,
+            weight: null,
+            reps: s.reps || null,
+            tempo: null,
+            volume: (s.reps || 0) * (s.sets || 0),
+          }))
+        );
+        const day = new Date().toISOString().slice(0,10);
+        await upsertDailyMetrics(user.id, day, total || 0, 0);
+      }
+    } catch (err) {
+      console.error('[WorkoutPage] cloud save failed', err);
+    }
+
     history.push('/history');
   };
 
@@ -309,7 +333,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ---- PRO GATE: Suggest Workout (AI) button ----
   const handleSuggestAIClick = () => {
-    // If we're opening the card (showSuggestCard is currently false), enforce the cap
     if (!showSuggestCard) {
       if (!isProUser()) {
         const used = getAICount();
@@ -317,13 +340,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           setShowUpgrade(true);
           return;
         }
-        // Count this AI suggestion usage
         incAICount();
       }
       setShowSuggestCard(true);
       return;
     }
-    // If closing, just toggle off
     setShowSuggestCard(false);
   };
 
@@ -459,7 +480,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             <Button
               variant="contained"
               fullWidth
-              onClick={handleSuggestAIClick} // <-- paywall-gated toggle
+              onClick={handleSuggestAIClick}
             >
               Suggest a Workout (AI)
             </Button>

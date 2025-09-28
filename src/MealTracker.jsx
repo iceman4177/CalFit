@@ -1,4 +1,3 @@
-// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Typography, Box, TextField,
@@ -10,6 +9,10 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
+
+// ✅ NEW: auth + db
+import { useAuth } from './context/AuthProvider.jsx';
+import { saveMeal, upsertDailyMetrics } from './lib/db';
 
 // ---- Pro gating helpers ----
 const isProUser = () => {
@@ -37,6 +40,9 @@ export default function MealTracker({ onMealUpdate }) {
   const [showSuggest, setShowSuggest]     = useState(false);
   const [showUpgrade, setShowUpgrade]     = useState(false);
 
+  // ✅ who is signed in (if any)
+  const { user } = useAuth();
+
   const today       = new Date().toLocaleDateString('en-US');
   const stored      = JSON.parse(localStorage.getItem('userData')||'{}');
   const dailyGoal   = stored.dailyGoal || 0;
@@ -60,7 +66,7 @@ export default function MealTracker({ onMealUpdate }) {
     onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     const c = parseInt(calories,10);
     if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
       return alert('Enter a valid food & calories.');
@@ -69,6 +75,25 @@ export default function MealTracker({ onMealUpdate }) {
     const upd = [...mealLog,nm];
     setMealLog(upd); save(upd); updateStreak();
     setFoodInput(''); setCalories(''); setSelectedFood(null);
+
+    // ✅ Cloud write-through (if logged in)
+    try {
+      if (user?.id) {
+        const eatenISO = new Date().toISOString();
+        await saveMeal(user.id, {
+          eaten_at: eatenISO,
+          title: nm.name,
+          total_calories: nm.calories,
+        }, [{
+          food_name: nm.name, qty: 1, unit: 'serving',
+          calories: nm.calories, protein: null, carbs: null, fat: null,
+        }]);
+        const day = eatenISO.slice(0,10);
+        await upsertDailyMetrics(user.id, day, 0, nm.calories || 0);
+      }
+    } catch (err) {
+      console.error('[MealTracker] cloud save failed', err);
+    }
   };
 
   const handleClear = () => {

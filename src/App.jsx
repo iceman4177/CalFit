@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -67,6 +66,10 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
+// ✅ NEW: app auth + migration
+import { useAuth } from './context/AuthProvider.jsx';
+import { migrateLocalToCloud } from './lib/migrateLocalToCloud';
+
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -113,6 +116,9 @@ export default function App() {
   const location     = useLocation();
   const promptedRef  = useRef(false);
   const autoRunRef   = useRef(false);
+
+  // ✅ NEW: access the signed-in user
+  const { user, loading, signInWithGoogle, signOut } = useAuth();
 
   useReferral();
 
@@ -195,10 +201,14 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // Handle OAuth return (Supabase hosted callback path)
-/* If you prefer a dedicated component route, keep <Route path="/auth/callback" component={AuthCallback} /> below.
-   Otherwise, Supabase can also exchange the code on root if detectSessionInUrl is used elsewhere. */
+  // ✅ NEW: run local → cloud migration once after sign-in
+  useEffect(() => {
+    if (!loading && user) {
+      migrateLocalToCloud(user).catch(err => console.error('[migrateLocalToCloud]', err));
+    }
+  }, [loading, user]);
 
+  // Handle OAuth return (Supabase hosted callback path)
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
@@ -356,10 +366,21 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
+        {!user ? (
+          <Button variant="contained" sx={{ mt: 2 }} onClick={signInWithGoogle}>
+            Sign in with Google
+          </Button>
+        ) : (
+          <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2 }}>
+            <Typography variant="body2">Signed in as {user.email}</Typography>
+            <Button variant="text" onClick={signOut}>Sign out</Button>
+          </Stack>
+        )}
+
         {!isProActive && (
           <Button
             variant="contained"
-            sx={{ mt: 2 }}
+            sx={{ mt: 2, ml: 2 }}
             onClick={() => setUpgradeOpen(true)}
           >
             Try Pro Free

@@ -7,21 +7,24 @@ import theme from './theme';
 import './App.css';
 import { BrowserRouter } from 'react-router-dom';
 import { UserDataProvider } from './UserDataContext';
-import { EntitlementsProvider } from './context/EntitlementsContext.jsx';  // ✅ make sure this path is correct
+import { EntitlementsProvider } from './context/EntitlementsContext.jsx';
 import { initGA } from './analytics';
+import { AuthProvider } from './context/AuthProvider.jsx';   // ✅ NEW: app-wide auth context
 
 initGA();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
-  <EntitlementsProvider>
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <BrowserRouter>
-        <UserDataProvider>
-          <App />
-        </UserDataProvider>
-      </BrowserRouter>
-    </ThemeProvider>
-  </EntitlementsProvider>
+  <AuthProvider>
+    <EntitlementsProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter>
+          <UserDataProvider>
+            <App />
+          </UserDataProvider>
+        </BrowserRouter>
+      </ThemeProvider>
+    </EntitlementsProvider>
+  </AuthProvider>
 );
