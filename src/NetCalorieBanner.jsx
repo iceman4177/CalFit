@@ -4,7 +4,8 @@ import { Alert, Box, Chip, Paper, Stack, Typography } from '@mui/material';
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
 
-// Helper: ISO yyyy-mm-dd for "today"
+const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+
 function isoToday() {
   try { return new Date().toISOString().slice(0, 10); } catch { return null; }
 }
@@ -30,12 +31,12 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     return { burned, consumed };
   }, []);
 
-  // State that powers the UI
+  // State that powers the UI (rounded for display)
   const [burned, setBurned]     = useState(
-    Number.isFinite(burnedProp) ? burnedProp : local.burned
+    Number.isFinite(burnedProp) ? Math.round(burnedProp) : Math.round(local.burned || 0)
   );
   const [consumed, setConsumed] = useState(
-    Number.isFinite(consumedProp) ? consumedProp : local.consumed
+    Number.isFinite(consumedProp) ? Math.round(consumedProp) : Math.round(local.consumed || 0)
   );
 
   // If signed in, prefer Supabase’s daily_metrics for today
@@ -60,10 +61,10 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
 
   // If props change later, allow them to nudge state when unauthenticated
   useEffect(() => {
-    if (!user && Number.isFinite(burnedProp)) setBurned(burnedProp);
+    if (!user && Number.isFinite(burnedProp)) setBurned(Math.round(burnedProp));
   }, [burnedProp, user]);
   useEffect(() => {
-    if (!user && Number.isFinite(consumedProp)) setConsumed(consumedProp);
+    if (!user && Number.isFinite(consumedProp)) setConsumed(Math.round(consumedProp));
   }, [consumedProp, user]);
 
   const net = (consumed || 0) - (burned || 0);
@@ -93,7 +94,7 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
           </Typography>
           <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.5 }}>
             <Typography variant="h5" component="div">
-              {net}
+              {nf0.format(net)}
             </Typography>
             <Chip
               label={status}
@@ -103,11 +104,10 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
             />
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            Eaten: {Math.round(consumed || 0)} • Burned: {Math.round(burned || 0)}
+            Eaten: {nf0.format(consumed || 0)} • Burned: {nf0.format(burned || 0)}
           </Typography>
         </Box>
 
-        {/* Optional nudge if not signed in */}
         {!user && (
           <Alert
             severity="info"
