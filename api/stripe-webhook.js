@@ -1,4 +1,3 @@
-// api/stripe-webhook.js
 import Stripe from "stripe";
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
@@ -13,6 +12,8 @@ async function readRaw(req) {
   return Buffer.concat(chunks);
 }
 const iso = (ts) => (typeof ts === "number" ? new Date(ts * 1000).toISOString() : null);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const asUuidOrNull = (v) => (UUID_RE.test(String(v || "")) ? v : null);
 
 function logDbError(where, error) {
   if (error) console.error(`[wh] DB error @ ${where}:`, error.message || error);
@@ -51,7 +52,10 @@ async function resolveUserIdFromCustomer(customer_id) {
 async function upsertSubscription(sub, userHint = null) {
   const stripe_subscription_id = sub.id;
   const customer_id = sub.customer;
-  let user_id = userHint || sub.metadata?.user_id || null;
+  let user_id =
+    asUuidOrNull(userHint) ||
+    asUuidOrNull(sub.metadata?.user_id) ||
+    null;
 
   // Fallback: look up mapping if user not provided on event
   if (!user_id) user_id = await resolveUserIdFromCustomer(customer_id);
@@ -135,7 +139,12 @@ export default async function handler(req, res) {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
-        const userId = s.client_reference_id || s.metadata?.user_id || null;
+        // Guard: only accept a valid UUID; otherwise fall back to metadata
+        const userId =
+          asUuidOrNull(s.client_reference_id) ||
+          asUuidOrNull(s.metadata?.user_id) ||
+          null;
+
         const customerId = s.customer || null;
         const email = s.customer_details?.email ?? s.customer_email ?? null;
 

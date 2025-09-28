@@ -1,4 +1,3 @@
-// api/create-checkout-session.js
 // Hardened: no module-scope throws; all errors reported as JSON 400; handles OPTIONS.
 
 export const config = { api: { bodyParser: false } };
