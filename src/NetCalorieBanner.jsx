@@ -1,6 +1,6 @@
 // src/NetCalorieBanner.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Box, Chip, Paper, Stack, Typography } from '@mui/material';
+import { Box, Paper, Typography } from '@mui/material';
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
 
@@ -68,56 +68,55 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
   }, [consumedProp, user]);
 
   const net = (consumed || 0) - (burned || 0);
-  const status = net >= 0 ? 'Surplus' : 'Deficit';
+  const pillBg =
+    net > 0 ? 'error.main' : net < 0 ? 'success.main' : 'grey.500';
+  const pillLabel =
+    net > 0 ? 'Surplus' : net < 0 ? 'Deficit' : 'Balanced';
 
   return (
     <Paper
-      elevation={0}
+      elevation={3}
       sx={{
-        mb: 2,
-        p: 2,
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: 1,
-        bgcolor: 'background.paper',
+        p: 3,
+        mb: 4,
+        textAlign: 'center',
+        borderRadius: 2
       }}
     >
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={2}
-        alignItems={{ xs: 'flex-start', sm: 'center' }}
-        justifyContent="space-between"
-      >
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            Today’s Net Calories
-          </Typography>
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.5 }}>
-            <Typography variant="h5" component="div">
-              {nf0.format(net)}
-            </Typography>
-            <Chip
-              label={status}
-              color={net >= 0 ? 'warning' : 'success'}
-              size="small"
-              variant="filled"
-            />
-          </Stack>
-          <Typography variant="caption" color="text.secondary">
-            Eaten: {nf0.format(consumed || 0)} • Burned: {nf0.format(burned || 0)}
-          </Typography>
-        </Box>
+      <Typography variant="h6" sx={{ mb: 1 }}>
+        Today’s Net Calories
+      </Typography>
 
-        {!user && (
-          <Alert
-            severity="info"
-            variant="outlined"
-            sx={{ p: 1, alignSelf: { xs: 'stretch', sm: 'center' } }}
-          >
-            Sign in to back up your data and sync across devices.
-          </Alert>
-        )}
-      </Stack>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1,
+          mb: 1
+        }}
+      >
+        <Typography variant="h3" component="div" sx={{ lineHeight: 1 }}>
+          {nf0.format(net)}
+        </Typography>
+        <Box
+          sx={{
+            px: 1.5,
+            py: 0.5,
+            borderRadius: 999,
+            bgcolor: pillBg,
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '0.9rem'
+          }}
+        >
+          {pillLabel}
+        </Box>
+      </Box>
+
+      <Typography variant="body2" color="text.secondary">
+        Eaten: {nf0.format(consumed || 0)} • Burned: {nf0.format(burned || 0)}
+      </Typography>
     </Paper>
   );
 }

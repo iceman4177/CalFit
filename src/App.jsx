@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -66,10 +67,6 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
-// ✅ NEW: app auth + migration
-import { useAuth } from './context/AuthProvider.jsx';
-import { migrateLocalToCloud } from './lib/migrateLocalToCloud';
-
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -107,6 +104,7 @@ async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
     const { data, error } = await supabase.auth.getUser();
     if (data?.user && !error) return data.user;
     if (Date.now() - start > maxMs) return null;
+    // eslint-disable-next-line no-await-in-loop
     await new Promise(r => setTimeout(r, stepMs));
   }
 }
@@ -116,9 +114,6 @@ export default function App() {
   const location     = useLocation();
   const promptedRef  = useRef(false);
   const autoRunRef   = useRef(false);
-
-  // ✅ NEW: access the signed-in user
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
 
   useReferral();
 
@@ -201,14 +196,7 @@ export default function App() {
     }
   }, [isProActive, location.pathname, history]);
 
-  // ✅ NEW: run local → cloud migration once after sign-in
-  useEffect(() => {
-    if (!loading && user) {
-      migrateLocalToCloud(user).catch(err => console.error('[migrateLocalToCloud]', err));
-    }
-  }, [loading, user]);
-
-  // Handle OAuth return (Supabase hosted callback path)
+  // Handle OAuth return
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasCode = url.searchParams.get('code');
@@ -229,7 +217,7 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-checkout (server selects price by period)
+  // Auto-checkout
   useEffect(() => {
     if (isProActive || autoRunRef.current) return;
 
@@ -306,22 +294,22 @@ export default function App() {
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
         <Tooltip title="Log Workout">
           <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
-            Workout
+            WORKOUT
           </Button>
         </Tooltip>
         <Tooltip title="Log Meal">
           <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
-            Meals
+            MEALS
           </Button>
         </Tooltip>
         <Tooltip title="Invite Friends">
           <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
-            Invite
+            INVITE
           </Button>
         </Tooltip>
         <Tooltip title="More options">
           <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
-            More
+            MORE
           </Button>
         </Tooltip>
       </Stack>
@@ -366,24 +354,14 @@ export default function App() {
           Track your workouts, meals, and calories all in one place.
         </Typography>
 
-        {!user ? (
-          <Button variant="contained" sx={{ mt: 2 }} onClick={signInWithGoogle}>
-            Sign in with Google
-          </Button>
-        ) : (
-          <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2 }}>
-            <Typography variant="body2">Signed in as {user.email}</Typography>
-            <Button variant="text" onClick={signOut}>Sign out</Button>
-          </Stack>
-        )}
-
+        {/* Hide for Pro users */}
         {!isProActive && (
           <Button
             variant="contained"
-            sx={{ mt: 2, ml: 2 }}
+            sx={{ mt: 2 }}
             onClick={() => setUpgradeOpen(true)}
           >
-            Try Pro Free
+            TRY PRO FREE
           </Button>
         )}
       </Box>
