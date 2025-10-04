@@ -16,7 +16,7 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
 
-  // First-time tips
+  // ---- First-time tips ----
   const [AgeTip, triggerAgeTip] = useFirstTimeTip(
     'tip_age',
     'Enter your age to personalize calculations.'
@@ -45,21 +45,39 @@ export default function HealthDataForm({ setUserData }) {
     'tip_goalType',
     'Select your fitness goal (bulking, cutting, or maintenance).'
   );
+  // NEW: tips for the added fields
+  const [DietPrefTip, triggerDietPrefTip] = useFirstTimeTip(
+    'tip_dietPreference',
+    'Pick the diet style that best matches how you like to eat.'
+  );
+  const [TrainingIntentTip, triggerTrainingIntentTip] = useFirstTimeTip(
+    'tip_trainingIntent',
+    'Tell us what you’re training for so we can tailor protein targets and workouts.'
+  );
 
-  // Dropdown open states
+  // ---- Dropdown open states ----
   const [activityOpen, setActivityOpen] = useState(false);
   const [goalTypeOpen, setGoalTypeOpen] = useState(false);
+  const [dietOpen, setDietOpen] = useState(false);
+  const [trainingOpen, setTrainingOpen] = useState(false);
 
-  // Form state
+  // ---- Form state ----
   const [age, setAge] = useState('');
-  const [weight, setWeight] = useState('');
+  const [weight, setWeight] = useState(''); // lbs
   const [heightFeet, setHeightFeet] = useState('');
   const [heightInches, setHeightInches] = useState('');
   const [activityLevel, setActivityLevel] = useState('');
   const [dailyGoal, setDailyGoal] = useState('');
   const [goalType, setGoalType] = useState('');
+  // NEW fields
+  const [dietPreference, setDietPreference] = useState(
+    localStorage.getItem('diet_preference') || 'omnivore'
+  );
+  const [trainingIntent, setTrainingIntent] = useState(
+    localStorage.getItem('training_intent') || 'general'
+  );
 
-  // Load any existing saved values
+  // ---- Load any existing saved values ----
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     if (saved.age) setAge(saved.age);
@@ -69,9 +87,43 @@ export default function HealthDataForm({ setUserData }) {
     if (saved.activityLevel) setActivityLevel(saved.activityLevel);
     if (saved.dailyGoal) setDailyGoal(saved.dailyGoal);
     if (saved.goalType) setGoalType(saved.goalType);
+    // keep previously saved diet/training intent if present
+    const dp = localStorage.getItem('diet_preference');
+    const ti = localStorage.getItem('training_intent');
+    if (dp) setDietPreference(dp);
+    if (ti) setTrainingIntent(ti);
   }, []);
 
-  const handleSubmit = e => {
+  // ---- Helpers (science-backed defaults kept simple) ----
+  const lbToKg = (lb) => (lb ? lb / 2.20462 : 0);
+
+  // Protein per lb by training intent
+  // (≈ ISSN-aligned: bodybuilder ~1.0 g/lb ≈ 2.2 g/kg; general 0.8; endurance/yoga ~0.7)
+  const proteinPerLbByIntent = (intent) => {
+    switch (intent) {
+      case 'bodybuilder':  return 1.0;
+      case 'powerlifter':  return 0.9;
+      case 'recomp':       return 0.9;
+      case 'endurance':    return 0.7;
+      case 'yoga_pilates': return 0.7;
+      default:             return 0.8; // general
+    }
+  };
+
+  // Per-meal protein target ~0.25 g/kg (clamped to 20–40 g for practicality)
+  const perMealProteinTarget = (weightKg) => {
+    const g = Math.round(0.25 * weightKg);
+    return Math.min(Math.max(g, 20), 40);
+  };
+
+  // Small calorie bias used by AI suggestions later (bulk/cut)
+  const goalToCalorieBias = (goal) => {
+    if (goal === 'bulking') return 300;   // modest surplus
+    if (goal === 'cutting') return -500;  // sustainable deficit
+    return 0; // maintenance
+  };
+
+  const handleSubmit = (e) => {
     e.preventDefault();
 
     // Base user data
@@ -84,19 +136,43 @@ export default function HealthDataForm({ setUserData }) {
       goalType
     };
 
-    // Initialize streak and new preference flags
+    // Derived targets
+    const weightLbNum = Number(weight || '0');
+    const weightKg = lbToKg(weightLbNum);
+    const perLb = proteinPerLbByIntent(trainingIntent);
+    const proteinDailyG = Math.round(perLb * weightLbNum);
+    const proteinMealG = perMealProteinTarget(weightKg);
+    const calorieBias = goalToCalorieBias(goalType);
+
+    // Initialize streak and preference flags + NEW persisted prefs/targets
     const enriched = {
       ...baseData,
       lastLogDate: '',
       currentStreak: 0,
-      // NEW FLAGS — default to true
       showFirstTimeTips: true,
-      showMealReminders: true
+      showMealReminders: true,
+      // New personalization fields
+      dietPreference,
+      trainingIntent,
+      proteinTargets: {
+        daily_g: proteinDailyG,
+        per_meal_g: proteinMealG
+      },
+      calorieBias
     };
 
+    // Persist for the rest of the app (meals/workouts/AI)
     localStorage.setItem('userData', JSON.stringify(enriched));
-    setUserData(enriched);
     localStorage.setItem('hasCompletedHealthData', 'true');
+    localStorage.setItem('diet_preference', dietPreference);
+    localStorage.setItem('training_intent', trainingIntent);
+    localStorage.setItem('protein_target_daily_g', String(proteinDailyG));
+    localStorage.setItem('protein_target_meal_g', String(proteinMealG));
+    localStorage.setItem('calorie_bias', String(calorieBias));
+    // Optional: keep a simple goal alias others already read
+    localStorage.setItem('fitness_goal', goalType);
+
+    setUserData(enriched);
     history.push('/');
   };
 
@@ -110,11 +186,14 @@ export default function HealthDataForm({ setUserData }) {
       <ActivityTip />
       <GoalTip />
       <GoalTypeTip />
+      <DietPrefTip />
+      <TrainingIntentTip />
 
       <Paper elevation={3} sx={{ p: 4, mt: 4, borderRadius: 2 }}>
         <Typography variant="h4" align="center" gutterBottom>
           Enter Your Health & Fitness Goals
         </Typography>
+
         <form onSubmit={handleSubmit} autoComplete="off">
           <Box sx={{ mb: 2 }}>
             <TextField
@@ -127,6 +206,7 @@ export default function HealthDataForm({ setUserData }) {
               required
             />
           </Box>
+
           <Box sx={{ mb: 2 }}>
             <TextField
               label="Weight (lbs)"
@@ -138,6 +218,7 @@ export default function HealthDataForm({ setUserData }) {
               required
             />
           </Box>
+
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <TextField
               label="Height (feet)"
@@ -158,6 +239,7 @@ export default function HealthDataForm({ setUserData }) {
               required
             />
           </Box>
+
           <Box sx={{ mb: 2 }}>
             <Select
               open={activityOpen}
@@ -178,6 +260,7 @@ export default function HealthDataForm({ setUserData }) {
               <MenuItem value="intense">Intense Exercise</MenuItem>
             </Select>
           </Box>
+
           <Box sx={{ mb: 2 }}>
             <TextField
               label="Daily Calorie Goal (kcal)"
@@ -189,7 +272,8 @@ export default function HealthDataForm({ setUserData }) {
               required
             />
           </Box>
-          <Box sx={{ mb: 3 }}>
+
+          <Box sx={{ mb: 2 }}>
             <Select
               open={goalTypeOpen}
               onOpen={() => triggerGoalTypeTip(() => setGoalTypeOpen(true))}
@@ -208,6 +292,55 @@ export default function HealthDataForm({ setUserData }) {
               <MenuItem value="maintenance">Maintenance</MenuItem>
             </Select>
           </Box>
+
+          {/* NEW: Diet Preference */}
+          <Box sx={{ mb: 2 }}>
+            <Select
+              open={dietOpen}
+              onOpen={() => triggerDietPrefTip(() => setDietOpen(true))}
+              onClose={() => setDietOpen(false)}
+              value={dietPreference}
+              onChange={e => setDietPreference(e.target.value)}
+              fullWidth
+              displayEmpty
+              required
+            >
+              <MenuItem value="" disabled>
+                Select Diet Preference
+              </MenuItem>
+              <MenuItem value="omnivore">Omnivore</MenuItem>
+              <MenuItem value="vegan">Vegan</MenuItem>
+              <MenuItem value="vegetarian">Vegetarian</MenuItem>
+              <MenuItem value="pescatarian">Pescatarian</MenuItem>
+              <MenuItem value="keto">Keto</MenuItem>
+              <MenuItem value="mediterranean">Mediterranean</MenuItem>
+            </Select>
+          </Box>
+
+          {/* NEW: Training Intent */}
+          <Box sx={{ mb: 3 }}>
+            <Select
+              open={trainingOpen}
+              onOpen={() => triggerTrainingIntentTip(() => setTrainingOpen(true))}
+              onClose={() => setTrainingOpen(false)}
+              value={trainingIntent}
+              onChange={e => setTrainingIntent(e.target.value)}
+              fullWidth
+              displayEmpty
+              required
+            >
+              <MenuItem value="" disabled>
+                Select Training Intent
+              </MenuItem>
+              <MenuItem value="general">General Fitness</MenuItem>
+              <MenuItem value="bodybuilder">Bodybuilder (Hypertrophy)</MenuItem>
+              <MenuItem value="powerlifter">Powerlifter (Strength)</MenuItem>
+              <MenuItem value="endurance">Endurance / Cardio</MenuItem>
+              <MenuItem value="yoga_pilates">Yoga / Pilates</MenuItem>
+              <MenuItem value="recomp">Recomposition</MenuItem>
+            </Select>
+          </Box>
+
           <Button variant="contained" fullWidth type="submit">
             Save & Continue
           </Button>

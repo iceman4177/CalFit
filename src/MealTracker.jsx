@@ -14,7 +14,7 @@ import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
 
-// ---- Pro gating helpers ----
+// ---- Pro gating helpers (kept as a client-side fallback) ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -104,21 +104,58 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   // ---- PRO GATE: Suggest a Meal (AI) ----
-  const handleAIMealSuggestClick = useCallback(() => {
+  // Keep your local 3/day fallback, but prefer server gating via /api/ai/generate
+  const handleAIMealSuggestClick = useCallback(async () => {
     if (!showSuggest) {
+      // quick client fallback
       if (!isProUser()) {
         const used = getMealAICount();
         if (used >= 3) {
           setShowUpgrade(true);
           return;
         }
-        incMealAICount();
       }
+
+      // ping the gateway once to see if server wants to gate (returns 402)
+      try {
+        const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
+        const trainingIntent   = localStorage.getItem('training_intent') || 'general';
+        const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
+        const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
+
+        const resp = await fetch('/api/ai/generate', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            feature: 'meal',
+            user_id: user?.id || null, // null triggers 402/login/upgrade path server-side
+            goal: goalType || 'maintenance',
+            constraints: {
+              diet_preference: dietPreference,
+              training_intent: trainingIntent,
+              protein_per_meal_g: proteinMealG || undefined,
+              calorie_bias: calorieBias || undefined,
+            },
+            count: 1 // just a probe; MealSuggestion will fetch the real pack
+          })
+        });
+
+        if (resp.status === 402) {
+          setShowUpgrade(true);
+          return;
+        }
+        // ok to show the UI; MealSuggestion will do the real fetch
+      } catch (e) {
+        // if gateway unreachable, fall back to old behavior
+        console.warn('[MealTracker] gateway probe failed, showing local suggestions UI', e);
+      }
+
+      if (!isProUser()) incMealAICount();
       setShowSuggest(true);
       return;
     }
     setShowSuggest(false);
-  }, [showSuggest]);
+  }, [showSuggest, user?.id, goalType]);
 
   const total = mealLog.reduce((s,m)=>s+(m.calories||0),0);
 

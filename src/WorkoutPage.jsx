@@ -332,16 +332,46 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   };
 
   // ---- PRO GATE: Suggest Workout (AI) button ----
-  const handleSuggestAIClick = () => {
+  const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
+      // client-side free cap
       if (!isProUser()) {
         const used = getAICount();
         if (used >= 3) {
           setShowUpgrade(true);
           return;
         }
-        incAICount();
       }
+
+      // ✅ Server probe — if the gateway returns 402, show upgrade
+      try {
+        const trainingIntent = localStorage.getItem('training_intent') || 'general';
+        const fitnessGoal    = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+        const equipmentList  = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
+
+        const resp = await fetch('/api/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            feature: 'workout',
+            user_id: user?.id || null,    // null → server will gate
+            goal: fitnessGoal,
+            focus: localStorage.getItem('last_focus') || 'upper',
+            equipment: equipmentList,
+            constraints: { training_intent: trainingIntent },
+            count: 1 // probe only; the card fetches a full pack
+          })
+        });
+
+        if (resp.status === 402) {
+          setShowUpgrade(true);
+          return;
+        }
+      } catch (e) {
+        console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
+      }
+
+      if (!isProUser()) incAICount();
       setShowSuggestCard(true);
       return;
     }

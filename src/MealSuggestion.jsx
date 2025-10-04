@@ -1,4 +1,3 @@
-// src/MealSuggestion.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
@@ -13,7 +12,7 @@ import {
 import { useUserData } from './UserDataContext';
 import UpgradeModal from './components/UpgradeModal';
 
-// ---- Pro gating helpers ----
+// ---- Pro gating helpers (still used for refresh button fallback) ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -43,6 +42,16 @@ const incMealAIRefreshCount = () => {
   localStorage.setItem('aiMealRefreshCount', String(newCount));
 };
 
+// small inline helpers to avoid extra files
+function withinSoftMacroRanges({ kcal, p, c, f }) {
+  if (!kcal || kcal <= 0) return true;
+  const pK = (p || 0) * 4, cK = (c || 0) * 4, fK = (f || 0) * 9;
+  const tot = pK + cK + fK || 1;
+  const carbPct = (cK / tot) * 100;
+  const fatPct  = (fK / tot) * 100;
+  return carbPct >= 35 && carbPct <= 70 && fatPct >= 15 && fatPct <= 40;
+}
+
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const { dailyGoal, goalType, recentMeals } = useUserData();
 
@@ -64,17 +73,41 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     setError(null);
 
     try {
-      const resp = await fetch('/api/ai/meal-suggestion', {
+      // pull personalization context saved by HealthDataForm
+      const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
+      const trainingIntent   = localStorage.getItem('training_intent') || 'general';
+      const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
+      const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
+
+      // derive a suggested budget for this meal based on remaining calories
+      const remaining = Math.max(0, (dailyGoal || 0) + (calorieBias || 0) - (consumedCalories || 0));
+      const mealBudget = Math.max(250, Math.round(remaining / 3)); // soft heuristic
+
+      const resp = await fetch('/api/ai/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          period,
-          goalType,
-          dailyGoal,
-          consumedCalories,
-          recentMeals
+          feature: 'meal',
+          user_id: JSON.parse(localStorage.getItem('supabase.auth.token') || 'null')?.user?.id || null, // if available
+          goal: goalType || 'maintenance',
+          constraints: {
+            diet_preference: dietPreference,
+            training_intent: trainingIntent,
+            protein_per_meal_g: proteinMealG || undefined,
+            calorie_bias: calorieBias || undefined,
+            meal_budget_kcal: mealBudget,
+            avoid_recent: recentMeals?.slice(-5) || []
+          },
+          count: 5
         })
       });
+
+      if (resp.status === 402) {
+        setShowUpgrade(true);
+        setSuggestions([]);
+        setLoading(false);
+        return;
+      }
 
       const raw = await resp.text();
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
@@ -86,15 +119,31 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         throw new Error('Invalid JSON from server');
       }
 
+      // gateway returns { suggestions: [ { title, calories, protein_g, carbs_g, fat_g, ingredients, instructions } ] }
       let meals = Array.isArray(data?.suggestions) ? data.suggestions : [];
 
-      // ✅ Defensive parsing, but backend already sanitizes calories + macros
-      meals = meals.map((m) => ({
-        name: m?.name || "Unknown meal",
-        calories: m?.calories || 0,
-        macros: m?.macros || { p: 0, c: 0, f: 0 },
-        prepMinutes: m?.prepMinutes || null,
-      }));
+      meals = meals.map((m) => {
+        const name = m?.title || m?.name || "Suggested meal";
+        const kcal = Number.isFinite(+m?.calories) ? +m.calories : 0;
+        const p = Number.isFinite(+m?.protein_g) ? +m.protein_g : (m?.macros?.p || 0);
+        const c = Number.isFinite(+m?.carbs_g)   ? +m.carbs_g   : (m?.macros?.c || 0);
+        const f = Number.isFinite(+m?.fat_g)     ? +m.fat_g     : (m?.macros?.f || 0);
+
+        const ok = withinSoftMacroRanges({ kcal, p, c, f });
+        const why = [
+          proteinMealG ? (p >= proteinMealG - 3 ? `Hits ~${proteinMealG}g protein/meal` : `Aim ~${proteinMealG}g protein/meal`) : null,
+          ok ? "Balanced macros" : "Adjust carbs/fats to balance macros",
+          dietPreference ? `Diet: ${dietPreference}` : null
+        ].filter(Boolean).join(" • ");
+
+        return {
+          name,
+          calories: kcal,
+          macros: { p, c, f },
+          prepMinutes: m?.prepMinutes ?? null,
+          _why: why
+        };
+      });
 
       if (!meals.length) throw new Error('No meal suggestions found');
 
@@ -113,6 +162,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   }, [fetchSuggestions, refreshKey]);
 
   const handleRetry = () => {
+    // client-side fallback limit for refreshes
     if (!isProUser() && !isTrialActive()) {
       const used = getMealAIRefreshCount();
       if (used >= 3) {
@@ -153,7 +203,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       {suggestions.map((s, idx) => (
         <Card key={idx} sx={{ p: 1, mb: 2, maxWidth: 400, mx: "auto" }}>
           <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1, justifyContent: 'space-between' }}>
               <Typography variant="subtitle1">{s.name}</Typography>
               <Chip label={period} size="small" />
             </Box>
@@ -168,6 +218,12 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                 </>
               )}
             </Box>
+
+            {s._why && (
+              <Typography variant="body2" color="textSecondary">
+                💡 {s._why}
+              </Typography>
+            )}
 
             {s.prepMinutes != null && (
               <Typography variant="body2" color="textSecondary">
@@ -192,7 +248,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
-        description="You’ve reached your 3 free daily AI meal suggestions. Upgrade for unlimited access."
+        description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
       />
     </Box>
   );
