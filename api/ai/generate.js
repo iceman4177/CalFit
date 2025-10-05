@@ -3,10 +3,13 @@ import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
 
 const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY /* , timeout: 6000 */ })
   : null;
 
+// Hard limit the function so Vercel doesn't 504 on us
 export const config = { api: { bodyParser: false } };
+// Vercel Node functions support maxDuration; keep it modest
+export const maxDuration = 10;
 
 // ---- utils ----
 async function readJson(req) {
@@ -58,6 +61,35 @@ function allowFree(req, cap = 3) {
     return true;
   }
   return false;
+}
+
+// -------------------- TIMEOUT HELPERS --------------------
+const OPENAI_TIMEOUT_MS = 6000;
+function withTimeout(promise, ms, onTimeoutValue) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const t = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(onTimeoutValue);
+      }
+    }, ms);
+    promise
+      .then((v) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(t);
+          resolve(v);
+        }
+      })
+      .catch(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(t);
+          resolve(onTimeoutValue);
+        }
+      });
+  });
 }
 
 // -------------------- WORKOUTS --------------------
@@ -250,7 +282,7 @@ Rules:
 - include optional "tempo" like "2-1-2"
 - use only movements feasible with the allowed equipment`;
 
-  const res = await openai.chat.completions.create({
+  const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: sys },
@@ -259,9 +291,13 @@ Rules:
     temperature: 0.6
   });
 
+  // Enforce timeout → fallback pack
+  const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+  if (!res) return fallbackWorkoutPack(payload, count);
+
   const txt = res?.choices?.[0]?.message?.content || "";
   let json = null;
-  try { json = JSON.parse(txt); } catch { /* fall back */ }
+  try { json = JSON.parse(txt); } catch {}
   const suggestions = Array.isArray(json?.suggestions)
     ? json.suggestions
     : fallbackWorkoutPack(payload, count);
@@ -394,16 +430,13 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
     plans.push({
       title: pick.title,
       items: pick.items,
-      total_calories: totals.calories + (calorieBias || 0), // apply goal bias lightly
+      total_calories: totals.calories + (calorieBias || 0),
       total_protein_g: totals.protein_g
     });
   }
-
-  // quick bias for intent: ensure protein trending toward target if bodybuilder/powerlifter
   if (["bodybuilder","powerlifter","recomp"].includes(intent) && proteinTargetG) {
     return plans.map(p => ({
       ...p,
-      // annotate a tiny nudge note (client can ignore)
       note: p.total_protein_g < proteinTargetG / 3
         ? "Consider adding a shake or extra lean protein to hit targets."
         : undefined
@@ -415,13 +448,7 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
 async function openAIMealPack(payload, count = 3) {
   if (!openai) return fallbackMealPack(payload, count);
 
-  const {
-    diet = "omnivore",
-    intent = "general",
-    calorieBias = 0,
-    proteinTargetG = 120
-  } = payload;
-
+  const { diet = "omnivore", intent = "general", calorieBias = 0, proteinTargetG = 120 } = payload;
   const d = normalizeDiet(diet);
   const normIntent = normalizeIntent(intent);
 
@@ -435,21 +462,21 @@ async function openAIMealPack(payload, count = 3) {
 
   const sys = `You are a sports nutrition coach. Output ONLY valid JSON:
 {"meals":[{"title":"...","items":[{"food":"...","qty":"...", "protein_g":25, "calories":350}],"total_protein_g":90,"total_calories":2100}]}
-No prose or markdown. Foods must respect the diet preference. Provide 3 distinct meal ideas (can be full meals or macro-friendly bowls).`;
+No prose or markdown. Foods must respect the diet preference. Provide 3 distinct meal ideas.`;
 
   const usr = `Create ${count} meal ideas for:
 - diet_preference: ${d}
 - training_intent: ${normIntent}
 - target_protein_g: ~${proteinTargetG}
-- calorie_bias_per_meal: ${calorieBias} (positive = bulking, negative = cutting)
+- calorie_bias_per_meal: ${calorieBias}
 Bias:
 - ${biasText}
 Rules:
 - Each meal: 2–4 items with qty, protein_g, calories
-- Total per meal: include "total_protein_g" and "total_calories"
+- Totals: include "total_protein_g" and "total_calories"
 - Respect diet strictly (e.g., vegan = no animal products)`;
 
-  const res = await openai.chat.completions.create({
+  const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: sys },
@@ -458,13 +485,16 @@ Rules:
     temperature: 0.5
   });
 
+  const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+  if (!res) return fallbackMealPack(payload, count);
+
   const txt = res?.choices?.[0]?.message?.content || "";
   let json = null;
   try { json = JSON.parse(txt); } catch {}
   const meals = Array.isArray(json?.meals)
     ? json.meals
     : fallbackMealPack(payload, count);
-  // light adjustment for bias
+
   return meals.map(m => ({
     ...m,
     total_calories: (m.total_calories ?? 0) + (payload.calorieBias || 0)
@@ -482,14 +512,13 @@ export default async function handler(req, res) {
   const {
     feature = "workout",     // "workout" | "meal"
     user_id = null,
-    // shared-ish context
-    constraints = {},        // { training_intent, diet_preference, protein_target_daily_g, calorie_bias }
+    constraints = {},
     count = 5,
-    // workout fields
+    // workout
     goal = "maintenance",
     focus = "upper",
     equipment = ["dumbbell", "barbell", "machine", "bodyweight"],
-    // meal fields (optional, but we can infer from constraints/local)
+    // meals
     diet = constraints?.diet_preference || "omnivore",
     proteinTargetG = constraints?.protein_target_daily_g || 120,
     calorieBias = constraints?.calorie_bias || 0
@@ -513,7 +542,12 @@ export default async function handler(req, res) {
       return;
     } catch (e) {
       console.error("[ai/generate] workout error:", e);
-      res.status(500).json({ error: "Failed to generate workout suggestions" });
+      // Final guard: never 504 the client
+      const fallback = fallbackWorkoutPack(
+        { focus, goal, intent: normalizeIntent(constraints?.training_intent || "general") },
+        Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
+      );
+      res.status(200).json({ suggestions: fallback });
       return;
     }
   }
@@ -529,7 +563,11 @@ export default async function handler(req, res) {
       return;
     } catch (e) {
       console.error("[ai/generate] meal error:", e);
-      res.status(500).json({ error: "Failed to generate meal ideas" });
+      const fallback = fallbackMealPack(
+        { diet, intent: normalizeIntent(constraints?.training_intent || "general"), proteinTargetG, calorieBias },
+        Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
+      );
+      res.status(200).json({ meals: fallback });
       return;
     }
   }
