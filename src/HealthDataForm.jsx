@@ -123,6 +123,53 @@ export default function HealthDataForm({ setUserData }) {
     return 0; // maintenance
   };
 
+  // ---------- LIVE PREVIEW (no new files) ----------
+  const weightLbNum = Number(weight || '0');
+  const weightKg = lbToKg(weightLbNum);
+  const perLb = proteinPerLbByIntent(trainingIntent);
+  const previewProteinDailyG = Math.round(perLb * weightLbNum || 0);
+  const previewProteinMealG  = perMealProteinTarget(weightKg || 0);
+
+  const proteinSourcesByDiet = {
+    vegan: [
+      'Tofu/Tempeh/Seitan',
+      'Lentils & beans',
+      'Edamame',
+      'Vegan protein powder'
+    ],
+    vegetarian: [
+      'Eggs/Greek yogurt',
+      'Cottage cheese',
+      'Lentils/beans',
+      'Whey/casein (if ok)'
+    ],
+    pescatarian: [
+      'Salmon/Tuna',
+      'Shrimp',
+      'Eggs/Greek yogurt',
+      'Whey/casein'
+    ],
+    keto: [
+      'Steak/Chicken/Salmon',
+      'Eggs/Cheese',
+      'Greek yogurt (low-carb)',
+      'Protein isolate'
+    ],
+    mediterranean: [
+      'Fish/Seafood',
+      'Greek yogurt/Feta',
+      'Lentils/Chickpeas',
+      'Chicken/Turkey'
+    ],
+    omnivore: [
+      'Chicken/Turkey/Lean beef',
+      'Eggs/Greek yogurt',
+      'Whey/Casein',
+      'Beans/Lentils'
+    ]
+  };
+  const sourceList = proteinSourcesByDiet[dietPreference] || proteinSourcesByDiet.omnivore;
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
@@ -136,15 +183,9 @@ export default function HealthDataForm({ setUserData }) {
       goalType
     };
 
-    // Derived targets
-    const weightLbNum = Number(weight || '0');
-    const weightKg = lbToKg(weightLbNum);
-    const perLb = proteinPerLbByIntent(trainingIntent);
-    const proteinDailyG = Math.round(perLb * weightLbNum);
-    const proteinMealG = perMealProteinTarget(weightKg);
+    // Derived targets (commit the preview numbers)
     const calorieBias = goalToCalorieBias(goalType);
 
-    // Initialize streak and preference flags + NEW persisted prefs/targets
     const enriched = {
       ...baseData,
       lastLogDate: '',
@@ -155,8 +196,8 @@ export default function HealthDataForm({ setUserData }) {
       dietPreference,
       trainingIntent,
       proteinTargets: {
-        daily_g: proteinDailyG,
-        per_meal_g: proteinMealG
+        daily_g: previewProteinDailyG,
+        per_meal_g: previewProteinMealG
       },
       calorieBias
     };
@@ -166,8 +207,8 @@ export default function HealthDataForm({ setUserData }) {
     localStorage.setItem('hasCompletedHealthData', 'true');
     localStorage.setItem('diet_preference', dietPreference);
     localStorage.setItem('training_intent', trainingIntent);
-    localStorage.setItem('protein_target_daily_g', String(proteinDailyG));
-    localStorage.setItem('protein_target_meal_g', String(proteinMealG));
+    localStorage.setItem('protein_target_daily_g', String(previewProteinDailyG));
+    localStorage.setItem('protein_target_meal_g', String(previewProteinMealG));
     localStorage.setItem('calorie_bias', String(calorieBias));
     // Optional: keep a simple goal alias others already read
     localStorage.setItem('fitness_goal', goalType);
@@ -340,6 +381,27 @@ export default function HealthDataForm({ setUserData }) {
               <MenuItem value="recomp">Recomposition</MenuItem>
             </Select>
           </Box>
+
+          {/* LIVE PREVIEW CARD — relatable, no extra files */}
+          <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Your Personalized Targets
+            </Typography>
+            <Typography variant="body2">
+              Training mode: <b>{trainingIntent.replace('_', ' ')}</b>{' '}
+              {goalType ? <>• Goal: <b>{goalType}</b></> : null}
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Protein target: <b>{isFinite(previewProteinDailyG) ? previewProteinDailyG : 0} g/day</b> 
+              {' '}(~<b>{isFinite(previewProteinMealG) ? previewProteinMealG : 0} g/meal</b>)
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Suggested sources ({dietPreference}): {sourceList.join(' • ')}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              Tip: Bodybuilders often aim for ~1g protein/lb; endurance & yoga can run lighter.
+            </Typography>
+          </Paper>
 
           <Button variant="contained" fullWidth type="submit">
             Save & Continue
