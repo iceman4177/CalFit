@@ -27,6 +27,42 @@ const getMealAICount = () =>
 const incMealAICount = () =>
   localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
+// Lightweight POST for entitlement probe
+async function probeEntitlement(payload) {
+  // Try unified first with generous keys
+  const base = {
+    feature: 'meal',
+    type: 'meal',
+    mode: 'meal',
+    ...payload,
+    count: 1
+  };
+
+  try {
+    let resp = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(base)
+    });
+    if (resp.status === 402) return { gated: true };
+    if (resp.ok) return { gated: false };
+    // try legacy if 400/404
+    if (resp.status === 400 || resp.status === 404) {
+      resp = await fetch('/api/ai/meal-suggestion', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(base)
+      });
+      if (resp.status === 402) return { gated: true };
+      return { gated: !resp.ok };
+    }
+    return { gated: !resp.ok };
+  } catch {
+    // Network failure: do not falsely gate; allow UI and let MealSuggestion handle fallback
+    return { gated: false };
+  }
+}
+
 export default function MealTracker({ onMealUpdate }) {
   const [FoodTip,  triggerFoodTip]  = useFirstTimeTip('tip_food',  'Search or type a food name.');
   const [CalTip,   triggerCalTip]   = useFirstTimeTip('tip_cal',   'Enter calories.');
@@ -123,24 +159,19 @@ export default function MealTracker({ onMealUpdate }) {
         const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
         const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
 
-        const resp = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
-            feature: 'meal',
-            user_id: user?.id || null, // null triggers 402/login/upgrade path server-side
-            goal: goalType || 'maintenance',
-            constraints: {
-              diet_preference: dietPreference,
-              training_intent: trainingIntent,
-              protein_per_meal_g: proteinMealG || undefined,
-              calorie_bias: calorieBias || undefined,
-            },
-            count: 1 // just a probe; MealSuggestion will fetch the real pack
-          })
-        });
+        const probePayload = {
+          user_id: user?.id || null, // null triggers 402/login/upgrade path server-side
+          goal: goalType || 'maintenance',
+          constraints: {
+            diet_preference: dietPreference,
+            training_intent: trainingIntent,
+            protein_per_meal_g: proteinMealG || undefined,
+            calorie_bias: calorieBias || undefined,
+          }
+        };
 
-        if (resp.status === 402) {
+        const { gated } = await probeEntitlement(probePayload);
+        if (gated) {
           setShowUpgrade(true);
           return;
         }
