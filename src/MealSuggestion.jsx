@@ -65,40 +65,56 @@ async function postJSON(url, payload) {
   return { resp, json, raw: text };
 }
 
+// Accept more server shapes, including nested nutrition fields
 function coerceMeals(data) {
-  if (!data || typeof data !== 'object') return [];
-  // Accept common shapes
+  if (!data) return [];
   const arr =
-    data.suggestions ||
-    data.meals ||
-    data.items ||
     (Array.isArray(data) ? data : null) ||
+    data?.suggestions ||
+    data?.meals ||
+    data?.items ||
     data?.data ||
     data?.result ||
     [];
 
   const list = Array.isArray(arr) ? arr : [];
-  // Map to a stable shape
   return list.map((m) => {
-    const name = m?.title || m?.name || 'Suggested meal';
-    const kcal = Number.isFinite(+m?.calories) ? +m.calories
-               : Number.isFinite(+m?.kcal) ? +m.kcal
-               : Number.isFinite(+m?.energy_kcal) ? +m.energy_kcal
-               : 0;
+    const name =
+      m?.title ||
+      m?.name ||
+      m?.label ||
+      'Suggested meal';
 
-    const p = Number.isFinite(+m?.protein_g) ? +m.protein_g
-            : Number.isFinite(+m?.protein) ? +m.protein
-            : (m?.macros?.p ?? 0);
-    const c = Number.isFinite(+m?.carbs_g) ? +m.carbs_g
-            : Number.isFinite(+m?.carbs) ? +m.carbs
-            : (m?.macros?.c ?? 0);
-    const f = Number.isFinite(+m?.fat_g) ? +m.fat_g
-            : Number.isFinite(+m?.fat) ? +m.fat
-            : (m?.macros?.f ?? 0);
+    // calories from several possible keys
+    const kcal =
+      (Number.isFinite(+m?.calories) ? +m.calories : null) ??
+      (Number.isFinite(+m?.kcal) ? +m.kcal : null) ??
+      (Number.isFinite(+m?.energy_kcal) ? +m.energy_kcal : null) ??
+      (Number.isFinite(+m?.nutrition?.calories) ? +m.nutrition.calories : null) ??
+      0;
+
+    // macros from several shapes / names
+    const p =
+      (Number.isFinite(+m?.protein_g) ? +m.protein_g : null) ??
+      (Number.isFinite(+m?.protein) ? +m.protein : null) ??
+      (Number.isFinite(+m?.nutrition?.protein_g) ? +m.nutrition.protein_g : null) ??
+      (m?.macros?.p ?? 0);
+
+    const c =
+      (Number.isFinite(+m?.carbs_g) ? +m.carbs_g : null) ??
+      (Number.isFinite(+m?.carbs) ? +m.carbs : null) ??
+      (Number.isFinite(+m?.nutrition?.carbs_g) ? +m.nutrition.carbs_g : null) ??
+      (m?.macros?.c ?? 0);
+
+    const f =
+      (Number.isFinite(+m?.fat_g) ? +m.fat_g : null) ??
+      (Number.isFinite(+m?.fat) ? +m.fat : null) ??
+      (Number.isFinite(+m?.nutrition?.fat_g) ? +m.nutrition.fat_g : null) ??
+      (m?.macros?.f ?? 0);
 
     const prepMinutes = m?.prepMinutes ?? m?.prep_min ?? null;
 
-    return { name, calories: kcal, macros: { p, c, f }, prepMinutes };
+    return { name, calories: kcal || 0, macros: { p: p || 0, c: c || 0, f: f || 0 }, prepMinutes };
   });
 }
 
@@ -139,11 +155,10 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       // Build payload tolerant to server expectations (feature/type/mode)
       const basePayload = {
-        // send all three keys; server will ignore unknowns
         feature: 'meal',
         type: 'meal',
         mode: 'meal',
-        user_id: user?.id || null, // prefer real auth id
+        user_id: user?.id || null, // real auth id (fixes 402)
         goal: goalType || 'maintenance',
         constraints: {
           diet_preference: dietPreference,
@@ -177,6 +192,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       // Accept multiple shapes
       let meals = coerceMeals(json);
+
       // Add lightweight reasoning/why
       meals = meals.map((m) => {
         const p = m.macros?.p ?? 0, c = m.macros?.c ?? 0, f = m.macros?.f ?? 0;
