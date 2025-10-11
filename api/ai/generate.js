@@ -445,8 +445,41 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
   return plans;
 }
 
+function flattenMealsToSuggestions(meals) {
+  // Accepts either AI format or fallback format, returns flat suggestions
+  return (Array.isArray(meals) ? meals : []).map((m) => {
+    // totals or per-meal numeric fields
+    const calories =
+      Number(m.total_calories) || Number(m.calories) ||
+      Number(m.kcal) || Number(m.energy_kcal) ||
+      Number(m?.nutrition?.calories) || 0;
+
+    const protein_g =
+      Number(m.total_protein_g) || Number(m.protein_g) ||
+      Number(m?.nutrition?.protein_g) || 0;
+
+    const carbs_g =
+      Number(m.total_carbs_g) || Number(m.carbs_g) ||
+      Number(m?.nutrition?.carbs_g) || 0;
+
+    const fat_g =
+      Number(m.total_fat_g) || Number(m.fat_g) ||
+      Number(m?.nutrition?.fat_g) || 0;
+
+    return {
+      title: m.title || m.name || "Suggested meal",
+      calories: Math.max(0, calories || 0),
+      protein_g: Math.max(0, protein_g || 0),
+      carbs_g: Math.max(0, carbs_g || 0),
+      fat_g: Math.max(0, fat_g || 0),
+      // keep optional fields if present
+      prepMinutes: m.prepMinutes ?? m.prep_min ?? null
+    };
+  });
+}
+
 async function openAIMealPack(payload, count = 3) {
-  if (!openai) return fallbackMealPack(payload, count);
+  if (!openai) return flattenMealsToSuggestions(fallbackMealPack(payload, count));
 
   const { diet = "omnivore", intent = "general", calorieBias = 0, proteinTargetG = 120 } = payload;
   const d = normalizeDiet(diet);
@@ -460,9 +493,12 @@ async function openAIMealPack(payload, count = 3) {
     general: `Balanced macro distribution.`
   }[normIntent];
 
-  const sys = `You are a sports nutrition coach. Output ONLY valid JSON:
-{"meals":[{"title":"...","items":[{"food":"...","qty":"...", "protein_g":25, "calories":350}],"total_protein_g":90,"total_calories":2100}]}
-No prose or markdown. Foods must respect the diet preference. Provide 3 distinct meal ideas.`;
+  // Ask the model for *flat* meal-level numbers to match the UI
+  const sys = `You are a sports nutrition coach. Output ONLY valid JSON matching this schema:
+{"suggestions":[{"title":"...","calories":650,"protein_g":40,"carbs_g":60,"fat_g":20}]}
+- No prose or markdown.
+- "calories", "protein_g", "carbs_g", "fat_g" must be numbers.
+- Respect the diet preference strictly. Create ${count} unique meals.`;
 
   const usr = `Create ${count} meal ideas for:
 - diet_preference: ${d}
@@ -472,9 +508,9 @@ No prose or markdown. Foods must respect the diet preference. Provide 3 distinct
 Bias:
 - ${biasText}
 Rules:
-- Each meal: 2–4 items with qty, protein_g, calories
-- Totals: include "total_protein_g" and "total_calories"
-- Respect diet strictly (e.g., vegan = no animal products)`;
+- Output only the top-level flattened values per meal (no nested items).
+- Each suggestion must include: title, calories, protein_g, carbs_g, fat_g (numbers).
+- Do not include any fields other than those required.`;
 
   const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -486,19 +522,26 @@ Rules:
   });
 
   const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
-  if (!res) return fallbackMealPack(payload, count);
+  if (!res) return flattenMealsToSuggestions(fallbackMealPack(payload, count));
 
   const txt = res?.choices?.[0]?.message?.content || "";
   let json = null;
   try { json = JSON.parse(txt); } catch {}
-  const meals = Array.isArray(json?.meals)
-    ? json.meals
-    : fallbackMealPack(payload, count);
+  let suggestions = Array.isArray(json?.suggestions) ? json.suggestions : null;
 
-  return meals.map(m => ({
-    ...m,
-    total_calories: (m.total_calories ?? 0) + (payload.calorieBias || 0)
+  // If the model ignored schema, fall back to old shape → flatten
+  if (!suggestions) {
+    const meals = Array.isArray(json?.meals) ? json.meals : fallbackMealPack(payload, count);
+    suggestions = flattenMealsToSuggestions(meals);
+  }
+
+  // Apply per-meal calorie bias if provided
+  suggestions = suggestions.map(s => ({
+    ...s,
+    calories: Math.max(0, Number(s.calories || 0) + (Number(calorieBias) || 0))
   }));
+
+  return suggestions;
 }
 
 // ---- handler ----
@@ -509,8 +552,12 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
+
+  // Accept any of the three keys for mode selection
+  const modeKey = (body?.type || body?.mode || body?.feature || "workout");
+  const feature = String(modeKey).toLowerCase();
+
   const {
-    feature = "workout",     // "workout" | "meal"
     user_id = null,
     constraints = {},
     count = 5,
@@ -520,7 +567,7 @@ export default async function handler(req, res) {
     equipment = ["dumbbell", "barbell", "machine", "bodyweight"],
     // meals
     diet = constraints?.diet_preference || "omnivore",
-    proteinTargetG = constraints?.protein_target_daily_g || 120,
+    proteinTargetG = constraints?.protein_target_daily_g || constraints?.protein_per_meal_g || 120,
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
@@ -555,19 +602,21 @@ export default async function handler(req, res) {
   if (feature === "meal") {
     try {
       const intent = normalizeIntent(constraints?.training_intent || "general");
-      const meals = await openAIMealPack(
+      const suggestions = await openAIMealPack(
         { diet, intent, proteinTargetG, calorieBias },
         Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
       );
-      res.status(200).json({ meals });
+      res.status(200).json({ suggestions });
       return;
     } catch (e) {
       console.error("[ai/generate] meal error:", e);
-      const fallback = fallbackMealPack(
-        { diet, intent: normalizeIntent(constraints?.training_intent || "general"), proteinTargetG, calorieBias },
-        Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
+      const fallback = flattenMealsToSuggestions(
+        fallbackMealPack(
+          { diet, intent: normalizeIntent(constraints?.training_intent || "general"), proteinTargetG, calorieBias },
+          Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
+        )
       );
-      res.status(200).json({ meals: fallback });
+      res.status(200).json({ suggestions: fallback });
       return;
     }
   }
