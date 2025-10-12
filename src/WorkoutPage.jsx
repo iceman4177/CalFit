@@ -1,3 +1,4 @@
+// src/WorkoutPage.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -29,6 +30,9 @@ import UpgradeModal from './components/UpgradeModal';
 // ✅ NEW: auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveWorkout, upsertDailyMetrics } from './lib/db';
+
+// ✅ Hybrid calc from analytics utils
+import { calcExerciseCaloriesHybrid } from './analytics';
 
 // ---- Paywall helpers (localStorage-based until backend arrives) ----
 const isProUser = () => {
@@ -133,22 +137,29 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
   };
 
+  // Updated per-exercise calculation (intent-aware)
   const calculateCalories = () => {
-    const bwLbs = parseFloat(userData.weight) || 0;
-    const reps = parseInt(newExercise.reps, 10) || 0;
-    const sets = parseInt(newExercise.sets, 10) || 1;
-    const key = newExercise.exerciseName || newExercise.exerciseType;
-    const conc = parseFloat(newExercise.concentricTime) || 2;
-    const ecc = parseFloat(newExercise.eccentricTime) || 2;
-    const activeMin = (reps * sets * (conc + ecc)) / 60;
-    const met = MET_VALUES[key] ?? MET_VALUES.default;
-    const bodyKg = bwLbs * 0.453592;
-    const metCals = met * bodyKg * activeMin;
-    const loadKg = (parseFloat(newExercise.weight) || 0) * 0.453592;
-    const rom = EXERCISE_ROM[key] ?? 0.5;
-    const workJ = loadKg * G * rom * reps * sets;
-    const mechCals = workJ / (4184 * EFFICIENCY);
-    const total = metCals + mechCals;
+    if (!newExercise.exerciseName && newExercise.exerciseType !== 'cardio') {
+      setCurrentCalories(0);
+      return 0;
+    }
+
+    const entry = {
+      exerciseName: newExercise.exerciseName || newExercise.exerciseType,
+      sets: newExercise.sets,
+      reps: newExercise.reps,
+      // if user entered separate times, helper will combine; otherwise tempo string is fine
+      tempo: `${newExercise.concentricTime || 2}-1-${newExercise.eccentricTime || 2}`,
+      weight: newExercise.weight
+    };
+
+    const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
+    const total = calcExerciseCaloriesHybrid(
+      entry,
+      { weight: userData?.weight },
+      { MET_VALUES, EXERCISE_ROM },
+      intent
+    );
     setCurrentCalories(total);
     return total;
   };
@@ -302,30 +313,32 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
+  // ✅ Use the improved hybrid calc for AI-accepted workouts too (intent-aware)
   const handleAcceptSuggested = workout => {
+    const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
     const enriched = workout.exercises.map(ex => {
-      const repsNum = parseInt(ex.reps, 10) || 0;
-      const setsNum = parseInt(ex.sets, 10) || 1;
-      const conc = parseFloat(ex.concentricTime) || 2;
-      const ecc = parseFloat(ex.eccentricTime) || 2;
-      const activeMin = (repsNum * setsNum * (conc + ecc)) / 60;
-      const met = MET_VALUES[ex.exerciseName] ?? MET_VALUES.default;
-      const bodyKg = parseFloat(userData.weight || 0) * 0.453592;
-      const metCals = met * bodyKg * activeMin;
-      const loadKg = parseFloat(ex.weight || 0) * 0.453592;
-      const rom = EXERCISE_ROM[ex.exerciseName] ?? 0.5;
-      const workJ = loadKg * G * rom * repsNum * setsNum;
-      const mechCals = workJ / (4184 * EFFICIENCY);
+      const entry = {
+        exerciseName: ex.exerciseName || ex.name || ex.exercise,
+        sets: ex.sets || 3,
+        reps: ex.reps || '8-12',
+        tempo: ex.tempo, // if AI provided; helper will fallback to intent defaults otherwise
+        weight: ex.weight || 0
+      };
       return {
         exerciseType: ex.exerciseType || '',
         muscleGroup: ex.muscleGroup || '',
-        exerciseName: ex.exerciseName,
-        weight: ex.weight,
-        sets: ex.sets,
-        reps: ex.reps,
+        exerciseName: entry.exerciseName,
+        weight: entry.weight,
+        sets: entry.sets,
+        reps: entry.reps,
         concentricTime: ex.concentricTime,
         eccentricTime: ex.eccentricTime,
-        calories: metCals + mechCals
+        calories: calcExerciseCaloriesHybrid(
+          entry,
+          { weight: userData?.weight },
+          { MET_VALUES, EXERCISE_ROM },
+          intent
+        )
       };
     });
     setCumulativeExercises(enriched);
