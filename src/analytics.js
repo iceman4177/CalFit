@@ -1,6 +1,8 @@
 // src/analytics.js
 import ReactGA from 'react-ga4';
 
+/* ------------------------------ GA Utilities ------------------------------ */
+
 // Replace with your actual GA4 Measurement ID
 export function initGA() {
   ReactGA.initialize('G-0PBM0SW18X');
@@ -11,22 +13,31 @@ export function logPageView(page) {
   ReactGA.send({ hitType: 'pageview', page });
 }
 
-/* --------------------------- Hybrid Calc Helpers --------------------------- */
-/**
- * Proprietary Hybrid “Mechanical + Physiological” Calorie‐burn:
- * total_kcal = MET_kcal + Mechanical_kcal
- * MET_kcal = MET * bodyKg * activeMinutes
- * Mechanical_kcal = (m(kg) * g * ROM(m) * reps*sets) / (4184 * EFFICIENCY)
- * Tempo-aware active time; intent-aware defaults & MET scaling.
- */
+/* --------------- Proprietary Hybrid Energy Expenditure Helpers ------------
+ * We compute calories as:
+ *   total_kcal = MET_kcal + Mechanical_kcal
+ *
+ * - MET_kcal:
+ *     MET (kcal·kg⁻¹·hr⁻¹) × bodyKg × activeHours
+ * - Mechanical_kcal:
+ *     (loadKg × g × ROM(m) × totalReps) / (4184 × EFFICIENCY)
+ *
+ *   where totalReps = sets × reps
+ *   and activeHours is based on tempo (time-under-tension).
+ *
+ * References:
+ * - Ainsworth BE et al. Compendium of Physical Activities (2011 and updates).
+ * - Basic physics of work: W = m·g·h.
+ * - Typical muscular efficiency ~ 20–25%.
+ * ------------------------------------------------------------------------- */
 
 export const EFFICIENCY = 0.20; // typical muscular efficiency (0.20–0.25)
-export const G = 9.81;          // gravity
+export const G = 9.81;          // gravity (m/s^2)
 
 // Intent → default tempo [concentric, isometric, eccentric] and small MET bias
 const INTENT_PROFILES = {
   bodybuilder:   { defaultTempo: [2, 1, 3], metFactor: 1.00 }, // slower eccentrics for hypertrophy
-  powerlifter:   { defaultTempo: [1, 0, 2], metFactor: 1.05 }, // brief reps, higher peak effort/bracing
+  powerlifter:   { defaultTempo: [1, 0, 2], metFactor: 1.05 }, // brief reps; higher bracing/peak force
   endurance:     { defaultTempo: [2, 1, 2], metFactor: 1.10 }, // more sustained metabolic demand
   yoga_pilates:  { defaultTempo: [3, 1, 3], metFactor: 0.90 }, // lower global intensity
   general:       { defaultTempo: [2, 1, 2], metFactor: 1.00 },
@@ -129,18 +140,19 @@ export function calcExerciseCaloriesHybrid(entry, user, tables, intent = 'genera
     profile
   );
 
-  // 1) MET component with intent factor
-  const baseMet = metForExercise(entry?.exerciseName || entry?.name || entry?.exercise, MET_VALUES);
-  const met     = baseMet * profile.metFactor;
-  const activeMin = (sets * reps * tempoS) / 60;
-  const metCals = met * bodyKg * activeMin;            // (kcal)
+  /* ----------------------- 1) MET component (kcal) ----------------------- */
+  const baseMet     = metForExercise(entry?.exerciseName || entry?.name || entry?.exercise, MET_VALUES);
+  const met         = baseMet * profile.metFactor;
+  const activeSec   = sets * reps * tempoS;  // time-under-tension in seconds
+  const activeHours = activeSec / 3600;      // ✅ MET expects HOURS, not minutes
+  const metCals     = met * bodyKg * activeHours;
 
-  // 2) Mechanical-work component (physics-based)
-  const loadKg  = (Number(entry?.weight) || 0) * 0.453592;
-  const rom     = EXERCISE_ROM?.[entry?.exerciseName] ?? EXERCISE_ROM?.[entry?.name] ?? 0.5; // meters
-  const workJ   = loadKg * G * rom * (sets * reps);    // Joules
-  const mechCals= workJ / (4184 * EFFICIENCY);         // kcal
+  /* ------------------- 2) Mechanical-work component (kcal) ---------------- */
+  const loadKg   = (Number(entry?.weight) || 0) * 0.453592;
+  const rom      = EXERCISE_ROM?.[entry?.exerciseName] ?? EXERCISE_ROM?.[entry?.name] ?? 0.5; // meters
+  const workJ    = loadKg * G * rom * (sets * reps);   // Joules
+  const mechCals = workJ / (4184 * EFFICIENCY);        // kcal
 
-  const total   = metCals + mechCals;
+  const total = metCals + mechCals;
   return Number.isFinite(total) && total > 0 ? total : 0;
 }
