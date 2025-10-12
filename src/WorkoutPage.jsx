@@ -47,6 +47,46 @@ const getAICount = () =>
 const incAICount = () =>
   localStorage.setItem('aiWorkoutCount', String(getAICount() + 1));
 
+/** Pretty-print a session line with sets×reps (+ optional weight) before calories.
+ * Examples:
+ *  - "Incline Dumbbell Press — 4×12 @ 60 lb — 53.86 cals"
+ *  - "Lateral Raise — 4×8-12 — 37.41 cals"
+ */
+function formatExerciseLine(ex) {
+  const setsNum = parseInt(ex.sets, 10);
+  const hasSets = Number.isFinite(setsNum) && setsNum > 0;
+
+  // allow "8-12" strings or single numbers
+  let repsStr = '';
+  if (typeof ex.reps === 'string') {
+    repsStr = ex.reps.trim();
+  } else {
+    const r = parseInt(ex.reps, 10);
+    repsStr = Number.isFinite(r) && r > 0 ? String(r) : '';
+  }
+  const hasReps = repsStr !== '' && repsStr !== '0';
+
+  const weight = parseFloat(ex.weight);
+  const hasWeight = Number.isFinite(weight) && weight > 0;
+
+  const vol =
+    hasSets && hasReps ? `${setsNum}×${repsStr}`
+    : hasSets ? `${setsNum}×`
+    : hasReps ? `×${repsStr}`
+    : '';
+
+  const wt = hasWeight ? ` @ ${weight} lb` : '';
+
+  const name = ex.exerciseName || ex.name || 'Exercise';
+  const kcals = ((+ex.calories) || 0).toFixed(2);
+
+  // If no sets/reps info, still return something clean
+  if (!vol && !hasWeight) {
+    return `${name} — ${kcals} cals`;
+  }
+  return `${name} — ${vol}${wt} — ${kcals} cals`;
+}
+
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();   // ✅ who is signed in (if any)
@@ -266,6 +306,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         name: ex.exerciseName,
         sets: ex.sets,
         reps: ex.reps,
+        weight: ex.weight || null,
         calories: ex.calories
       }))
     };
@@ -286,10 +327,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             exercise_name: s.name,
             equipment: null,
             muscle_group: null,
-            weight: null,
+            weight: s.weight || null,
             reps: s.reps || null,
             tempo: null,
-            volume: (s.reps || 0) * (s.sets || 0),
+            volume: (parseInt(s.reps, 10) || 0) * (parseInt(s.sets, 10) || 0),
           }))
         );
         const day = new Date().toISOString().slice(0,10);
@@ -417,7 +458,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             }}
           >
             <Typography variant="body1">
-              {ex.exerciseName} – {ex.calories.toFixed(2)} cals
+              {formatExerciseLine(ex)}
             </Typography>
             <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
               Remove
@@ -560,7 +601,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                     }}
                   >
                     <Typography>
-                      {ex.exerciseName} – {ex.calories.toFixed(2)} cals
+                      {formatExerciseLine(ex)}
                     </Typography>
                     <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
                       Remove
