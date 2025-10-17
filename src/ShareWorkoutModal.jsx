@@ -11,49 +11,38 @@ import {
   Typography
 } from '@mui/material';
 
-function ShareWorkoutModal({ open, onClose, shareText, shareUrl }) {
-  // Pull latest session from localStorage (no prop changes needed)
+function ShareWorkoutModal({ open, onClose, shareText }) {
+  // Always pull from localStorage first to avoid any async server lag
   const latest = React.useMemo(() => {
     try {
       const hist = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      return hist[hist.length - 1] || null;
+      return hist.length ? hist[hist.length - 1] : null;
     } catch {
       return null;
     }
-  }, []);
+  }, [open]); // recompute each time modal opens
 
   const linesFromLatest = React.useMemo(() => {
     if (!latest || !Array.isArray(latest.exercises)) return [];
-
-    const fmtNum = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
+    const fmt = (v) => (Number.isFinite(+v) ? +v : null);
 
     return latest.exercises.map((ex) => {
       const name = ex.exerciseName || ex.name || 'Exercise';
       const isSauna = (ex.exerciseType === 'Sauna') || /sauna/i.test(name);
-      const sets = fmtNum(ex.sets);
-      const reps = typeof ex.reps === 'string' ? ex.reps.trim() : fmtNum(ex.reps);
-      const weight = fmtNum(ex.weight);
-      const cals = fmtNum(ex.calories);
+      const sets = fmt(ex.sets);
+      const reps = typeof ex.reps === 'string' ? ex.reps.trim() : fmt(ex.reps);
+      const weight = fmt(ex.weight);
+      const cals = fmt(ex.calories);
 
-      // Build volume string
       let vol = '';
       if (sets && reps && reps !== 0 && reps !== '0') vol = `${sets}×${reps}`;
       else if (sets) vol = `${sets}×`;
       else if (reps && reps !== 0 && reps !== '0') vol = `×${reps}`;
 
-      // Build weight string
       const wt = weight && weight > 0 ? ` @ ${weight} lb` : '';
-
-      // Per-item calories
       const kcal = cals && cals > 0 ? ` — ${Math.round(cals)} kcal` : '';
 
-      // Sauna gets a friendlier label
       if (isSauna) return `• Sauna Session${kcal}`;
-
-      // Strength/cardio
       return `• ${name}${vol || wt ? ` — ${vol}${wt}` : ''}${kcal}`;
     });
   }, [latest]);
@@ -64,18 +53,17 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl }) {
       const header = total > 0
         ? `🔥 Just crushed my workout — ${total} kcal burned!`
         : `🔥 Just finished my workout!`;
-
       const body = linesFromLatest.join('\n');
       const footer = `\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
-
       return `${header}\n${body}${footer}`.trim();
     }
 
-    // Fallback: clean up any old shareText a bit (remove timestamps & “items”)
+    // Fallback to whatever was passed in, but clean it up a bit
     if (shareText) {
       let t = shareText.replace(/\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
       t = t.replace(/\b\d+\s*items?,?\s*/i, '').trim();
-      return `${t}\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
+      if (!/Slimcal/i.test(t)) t += `\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
+      return t;
     }
     return '🔥 Just finished my workout!\n\nTracked with Slimcal.ai 💪 #SlimcalAI';
   }, [latest, linesFromLatest, shareText]);
