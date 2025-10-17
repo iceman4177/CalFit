@@ -1,4 +1,4 @@
-// ShareWorkoutModal.jsx
+// src/ShareWorkoutModal.jsx
 import React from 'react';
 import {
   Dialog,
@@ -12,10 +12,35 @@ import {
 } from '@mui/material';
 
 function ShareWorkoutModal({ open, onClose, shareText, shareUrl }) {
+  // Helper to clean up share text (remove timestamp, fix sauna)
+  const formattedText = React.useMemo(() => {
+    if (!shareText) return '';
+
+    let text = shareText;
+
+    // Remove timestamp (keep date only)
+    text = text.replace(/\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
+
+    // Replace sauna line if present
+    text = text.replace(/-+\s*Sauna.*0 reps/i, match => {
+      const caloriesMatch = shareText.match(/(\d+(?:\.\d+)?)\s*cal/i);
+      const cals = caloriesMatch ? `${caloriesMatch[1]} cals` : '';
+      return `- Sauna Session${cals ? ` (${cals})` : ''}`;
+    });
+
+    // Simplify intro sentence
+    text = text.replace(
+      /I just logged a workout on\s*(.*)with Slimcal\.ai — ([\d.]+)\s*calories burned! #SlimcalAI/i,
+      'I just finished a workout with Slimcal.ai — $2 burned! #SlimcalAI'
+    );
+
+    return text;
+  }, [shareText]);
+
   // Handler to copy text to clipboard
   const handleCopy = () => {
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(shareText)
+      navigator.clipboard.writeText(formattedText)
         .then(() => alert('Workout summary copied to clipboard!'))
         .catch(() => alert('Failed to copy workout summary'));
     } else {
@@ -23,7 +48,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl }) {
     }
   };
 
-  // Define social media links that ideally open a new post (or the homepage if no dedicated composer exists)
+  // Define social media links that ideally open a new post (or homepage if no composer exists)
   const socialLinks = [
     { name: 'Facebook', url: 'https://www.facebook.com/' },
     { name: 'Twitter', url: 'https://twitter.com/compose/tweet' },
@@ -41,7 +66,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl }) {
             multiline
             fullWidth
             variant="outlined"
-            value={shareText}
+            value={formattedText}
             InputProps={{ readOnly: true }}
           />
           <Button variant="contained" onClick={handleCopy}>
