@@ -12,10 +12,13 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Tooltip,
-  IconButton
+  IconButton,
+  Checkbox,
+  FormControlLabel
 } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
+import { ROM_DEPTH_OPTIONS } from './exerciseConstants';
 
 export default function ExerciseForm({
   newExercise,
@@ -96,7 +99,11 @@ export default function ExerciseForm({
       sets:            '1',
       reps:            '',
       concentricTime:  '',
-      eccentricTime:   ''
+      eccentricTime:   '',
+      // failure/partials reset
+      wentToFailure: false,
+      lastSetPartialReps: 0,
+      lastSetPartialDepth: 'HALF'
     });
     triggerEquipTip();
     setEquipOpen(false);
@@ -125,6 +132,18 @@ export default function ExerciseForm({
       setTempoMode(newExercise.tempoMode);
     }
   }, [newExercise.tempoMode]);
+
+  // Partial reps controls (toggle + fields)
+  const handleWentToFailure = (e) => {
+    const checked = e.target.checked;
+    setNewExercise(prev => ({
+      ...prev,
+      wentToFailure: checked,
+      // keep last values if toggling off/on; otherwise default
+      lastSetPartialReps: checked ? (prev.lastSetPartialReps ?? 0) : 0,
+      lastSetPartialDepth: checked ? (prev.lastSetPartialDepth || 'HALF') : 'HALF'
+    }));
+  };
 
   return (
     <Box>
@@ -263,7 +282,7 @@ export default function ExerciseForm({
             label="Sets"
             type="number"
             fullWidth
-            sx={{ mb: 3 }}
+            sx={{ mb: 2 }}
             value={newExercise.sets || ''}
             onFocus={triggerSetsTip}
             onChange={handleChange('sets')}
@@ -300,13 +319,57 @@ export default function ExerciseForm({
                 label="Eccentric Time (s)"
                 type="number"
                 fullWidth
-                sx={{ mb: 3 }}
+                sx={{ mb: 2 }}
                 value={newExercise.eccentricTime || ''}
                 onFocus={triggerEccTip}
                 onChange={handleChange('eccentricTime')}
               />
             </>
           )}
+
+          {/* Failure / partials (last set only) */}
+          <Box sx={{ mt: 2, mb: 1 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!newExercise.wentToFailure}
+                  onChange={handleWentToFailure}
+                />
+              }
+              label="Went to failure on last set"
+            />
+          </Box>
+
+          {newExercise.wentToFailure && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
+              <TextField
+                type="number"
+                label="Partial reps (last set)"
+                value={newExercise.lastSetPartialReps ?? 0}
+                onChange={(e) => {
+                  const v = Math.max(0, parseInt(e.target.value || '0', 10));
+                  setNewExercise(prev => ({ ...prev, lastSetPartialReps: v }));
+                }}
+                inputProps={{ min: 0, step: 1 }}
+              />
+              <TextField
+                select
+                label="Rep depth (last set)"
+                value={newExercise.lastSetPartialDepth || 'HALF'}
+                onChange={(e) => setNewExercise(prev => ({ ...prev, lastSetPartialDepth: e.target.value }))}
+                SelectProps={{ native: true }}
+              >
+                {ROM_DEPTH_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </TextField>
+            </Box>
+          )}
+
+          {/* ROM assumption note */}
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 2 }}>
+            Calorie estimates assume <strong>full range-of-motion (full ROM)</strong> reps unless you specify partial reps on the last set.
+          </Typography>
         </>
       )}
 
