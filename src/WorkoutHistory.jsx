@@ -9,29 +9,29 @@ import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 // --- Calorie estimator (proxy) ----------------------------------------------
-const SCALE = 0.1; // kcal per (lb * rep); tweak if needed
+// Only used as a LAST resort when we have no saved totals anywhere.
+const SCALE = 0.1; // kcal per (lb * rep)
 function calcCaloriesFromSets(sets) {
   if (!Array.isArray(sets) || sets.length === 0) return 0;
   let vol = 0;
   for (const s of sets) {
-    // prefer explicit calories if present on the set
     if (typeof s.calories === 'number' && Number.isFinite(s.calories)) {
-      vol += s.calories / (SCALE || 1);
+      // if the set already has calories, trust it directly
+      vol += s.calories;
       continue;
     }
     const w = Number(s.weight) || 0;
     const r = Number(s.reps) || 0;
-    vol += w * r;
+    vol += w * r * SCALE;
   }
-  const est = vol * SCALE; // keep as float (no rounding)
-  return Number.isFinite(est) ? est : 0;
+  return Number.isFinite(vol) ? vol : 0;
 }
 
 function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
 function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; } }
 
 // --- Local matching helpers --------------------------------------------------
-function normalizeName(s) { return (s || '').toLowerCase().trim(); }
+const normalizeName = s => (s || '').toLowerCase().trim();
 
 function bestLocalMatch(candidates = [], supaSets = []) {
   if (candidates.length === 0) return null;
@@ -45,10 +45,9 @@ function bestLocalMatch(candidates = [], supaSets = []) {
     const locNames = new Set((sess.exercises || []).map(e => normalizeName(e.name)));
     let overlap = 0;
     for (const n of supaNames) if (n && locNames.has(n)) overlap++;
-    const score = overlap * 1000 + (Number(sess.totalCalories) || 0); // tie-breaker by total cals
+    const score = overlap * 1000 + (Number(sess.totalCalories) || 0); // tie-break by calories
     if (score > bestScore) { best = sess; bestScore = score; }
   }
-
   return bestScore > 0 ? best : null;
 }
 
@@ -58,8 +57,10 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [rows, setRows]       = useState([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareText, setShareText] = useState('');
+  const [shareExercises, setShareExercises] = useState([]);
+  const [shareTotal, setShareTotal] = useState(0);
 
-  // Build local indexes: raw array and by-day (array per day, not single!)
+  // Build local indexes: raw array and by-day
   const localIdx = useMemo(() => {
     const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const byDay = new Map(); // dayUS -> [sessions...]
@@ -84,12 +85,21 @@ export default function WorkoutHistory({ onHistoryChange }) {
             started_at: new Date(h.date).toISOString(),
             ended_at:   new Date(h.date).toISOString(),
             sets: (h.exercises || []).map(e => ({
-              exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
+              exercise_name: e.name,
+              reps: e.reps ?? 0,
+              weight: e.weight ?? 0,
               calories: typeof e.calories === 'number' ? e.calories : undefined,
+              exerciseType: e.exerciseType || undefined
             })),
-            // use exact stored total (no rounding)
             total_calories: Number(h.totalCalories) || 0,
-            shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
+            shareLines: (h.exercises || []).map(e =>
+              `- ${e.name}: ${e.sets}×${e.reps}${e.weight ? ` @ ${e.weight} lb` : ''} (${(e.calories||0).toFixed(0)} cal)`
+            ),
+            exercisesForShare: (h.exercises || []).map(e => ({
+              exerciseName: e.name,
+              sets: e.sets, reps: e.reps, weight: e.weight, calories: e.calories,
+              exerciseType: e.exerciseType || undefined
+            }))
           }));
         if (!ignore) {
           setRows(asRows);
@@ -98,7 +108,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
         return;
       }
 
-      // Signed in: fetch from Supabase; use robust local fallback
+      // Signed in: fetch from Supabase; prefer local totals if server lacks them
       setLoading(true);
       try {
         const base = await getWorkouts(user.id, { limit: 100 });
@@ -109,24 +119,41 @@ export default function WorkoutHistory({ onHistoryChange }) {
             const candidates = localIdx.byDay.get(dayUS) || [];
             const fallback = bestLocalMatch(candidates, sets);
 
-            // Build share lines
-            const shareLines =
-              (sets && sets.length > 0)
-                ? sets.map(s => `- ${s.exercise_name}: ${s.reps||0} reps${s.weight ? ` × ${s.weight} lb` : ''}`)
-                : (fallback?.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`);
+            // Prefer server-provided total when present; else prefer local exact total; else last-resort proxy calc
+            let total = (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
+              ? Number(w.total_calories)
+              : (fallback && Number.isFinite(fallback.totalCalories))
+              ? Number(fallback.totalCalories)
+              : calcCaloriesFromSets(sets);
 
-            // Determine total (prefer exact server total if present)
-            let total =
-              (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
-                ? Number(w.total_calories)
-                : calcCaloriesFromSets(sets);
-
-            // Use local fallback ONLY if we have a confident match and computed total <= 0
-            if ((total || 0) <= 0 && fallback && Number.isFinite(fallback.totalCalories)) {
-              total = Number(fallback.totalCalories);
+            // Build exercises list for sharing (structured)
+            let exercisesForShare = [];
+            if (sets && sets.length > 0) {
+              exercisesForShare = sets.map(s => ({
+                exerciseName: s.exercise_name,
+                sets: null, // not tracked at set-row granularity
+                reps: s.reps ?? 0,
+                weight: s.weight ?? 0,
+                calories: typeof s.calories === 'number' ? s.calories : undefined,
+                exerciseType: s.exercise_type || undefined
+              }));
+            } else if (fallback?.exercises) {
+              exercisesForShare = fallback.exercises.map(e => ({
+                exerciseName: e.name,
+                sets: e.sets, reps: e.reps, weight: e.weight, calories: e.calories,
+                exerciseType: e.exerciseType || undefined
+              }));
             }
 
-            return { ...w, sets, total_calories: total, shareLines };
+            // Pretty lines for the list body
+            const shareLines =
+              exercisesForShare.length > 0
+                ? exercisesForShare.map(e =>
+                    `- ${e.exerciseName}${e.sets ? `: ${e.sets}×${e.reps || ''}` : e.reps ? `: ×${e.reps}` : ''}${e.weight ? ` @ ${e.weight} lb` : ''}${Number.isFinite(e.calories) ? ` (${Math.round(e.calories)} cal)` : ''}`
+                  )
+                : [];
+
+            return { ...w, sets, total_calories: total, shareLines, exercisesForShare };
           })
         );
         if (!ignore) {
@@ -146,9 +173,17 @@ export default function WorkoutHistory({ onHistoryChange }) {
               sets: (h.exercises || []).map(e => ({
                 exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
                 calories: typeof e.calories === 'number' ? e.calories : undefined,
+                exerciseType: e.exerciseType || undefined
               })),
               total_calories: Number(h.totalCalories) || 0,
-              shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
+              shareLines: (h.exercises || []).map(e =>
+                `- ${e.name}: ${e.sets}×${e.reps}${e.weight ? ` @ ${e.weight} lb` : ''} (${(e.calories||0).toFixed(0)} cal)`
+              ),
+              exercisesForShare: (h.exercises || []).map(e => ({
+                exerciseName: e.name,
+                sets: e.sets, reps: e.reps, weight: e.weight, calories: e.calories,
+                exerciseType: e.exerciseType || undefined
+              }))
             }));
           setRows(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
@@ -169,7 +204,10 @@ export default function WorkoutHistory({ onHistoryChange }) {
     const total = Number(row.total_calories) || 0;
     const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(2)} calories burned! #SlimcalAI`;
     const body = (row.shareLines || []).join('\n');
+
     setShareText(`${header}\n\n${body}`);
+    setShareTotal(total);
+    setShareExercises(row.exercisesForShare || []);
     setShareOpen(true);
   }
 
@@ -193,7 +231,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="h6">{formatDateTime(w.started_at)}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {`${(Number(w.total_calories) || 0).toFixed(2)} cals`}
+                        {(Number(w.total_calories) || 0).toFixed(2)} cals
                       </Typography>
                     </Stack>
                   }
@@ -202,7 +240,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
                       {(w.sets || []).length > 0 ? (
                         w.sets.map((s, i) => (
                           <Typography key={i} variant="body2">
-                            • {s.exercise_name} {s.reps ? `× ${s.reps}` : ''}{s.weight ? ` @ ${s.weight}` : ''}
+                            • {s.exercise_name} {s.reps ? `× ${s.reps}` : ''}
+                            {s.weight ? ` @ ${s.weight}` : ''}
                           </Typography>
                         ))
                       ) : (
@@ -229,6 +268,9 @@ export default function WorkoutHistory({ onHistoryChange }) {
         onClose={() => setShareOpen(false)}
         shareText={shareText}
         shareUrl={window.location.href}
+        // NEW: pass exact row data so modal doesn't use an old session
+        exercises={shareExercises}
+        totalCalories={shareTotal}
       />
     </Container>
   );
