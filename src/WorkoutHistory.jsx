@@ -23,7 +23,7 @@ function calcCaloriesFromSets(sets) {
     const r = Number(s.reps) || 0;
     vol += w * r;
   }
-  const est = Math.round(vol * SCALE);
+  const est = vol * SCALE; // keep as float (no rounding)
   return Number.isFinite(est) ? est : 0;
 }
 
@@ -45,7 +45,7 @@ function bestLocalMatch(candidates = [], supaSets = []) {
     const locNames = new Set((sess.exercises || []).map(e => normalizeName(e.name)));
     let overlap = 0;
     for (const n of supaNames) if (n && locNames.has(n)) overlap++;
-    const score = overlap * 1000 + (sess.totalCalories || 0); // tie-breaker by total cals
+    const score = overlap * 1000 + (Number(sess.totalCalories) || 0); // tie-breaker by total cals
     if (score > bestScore) { best = sess; bestScore = score; }
   }
 
@@ -87,7 +87,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
               exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
               calories: typeof e.calories === 'number' ? e.calories : undefined,
             })),
-            total_calories: Math.round(h.totalCalories || 0),
+            // use exact stored total (no rounding)
+            total_calories: Number(h.totalCalories) || 0,
             shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
           }));
         if (!ignore) {
@@ -114,14 +115,15 @@ export default function WorkoutHistory({ onHistoryChange }) {
                 ? sets.map(s => `- ${s.exercise_name}: ${s.reps||0} reps${s.weight ? ` × ${s.weight} lb` : ''}`)
                 : (fallback?.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`);
 
-            // Determine total
-            let total = (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
-              ? Math.round(w.total_calories)
-              : calcCaloriesFromSets(sets);
+            // Determine total (prefer exact server total if present)
+            let total =
+              (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
+                ? Number(w.total_calories)
+                : calcCaloriesFromSets(sets);
 
             // Use local fallback ONLY if we have a confident match and computed total <= 0
             if ((total || 0) <= 0 && fallback && Number.isFinite(fallback.totalCalories)) {
-              total = Math.round(fallback.totalCalories);
+              total = Number(fallback.totalCalories);
             }
 
             return { ...w, sets, total_calories: total, shareLines };
@@ -145,7 +147,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                 exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0,
                 calories: typeof e.calories === 'number' ? e.calories : undefined,
               })),
-              total_calories: Math.round(h.totalCalories || 0),
+              total_calories: Number(h.totalCalories) || 0,
               shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps} (${(e.calories||0).toFixed(0)} cal)`),
             }));
           setRows(asRows);
@@ -159,13 +161,13 @@ export default function WorkoutHistory({ onHistoryChange }) {
   }, [user, onHistoryChange, localIdx]);
 
   function sumTotals(list) {
-    return (list || []).reduce((s, r) => s + (r.total_calories || 0), 0);
+    return (list || []).reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
   }
 
   function openShareFor(row) {
     const date = formatDateTime(row.started_at);
-    const total = Math.round(row.total_calories || 0);
-    const header = `I just logged a workout on ${date} with Slimcal.ai — ${total} calories burned! #SlimcalAI`;
+    const total = Number(row.total_calories) || 0;
+    const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(2)} calories burned! #SlimcalAI`;
     const body = (row.shareLines || []).join('\n');
     setShareText(`${header}\n\n${body}`);
     setShareOpen(true);
@@ -191,7 +193,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="h6">{formatDateTime(w.started_at)}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        ~ {Math.round(w.total_calories || 0)} cals
+                        {`${(Number(w.total_calories) || 0).toFixed(2)} cals`}
                       </Typography>
                     </Stack>
                   }
