@@ -22,19 +22,15 @@ import SaunaForm from './SaunaForm';
 import ShareWorkoutModal from './ShareWorkoutModal';
 import TemplateSelector from './TemplateSelector';
 import { MET_VALUES } from './exerciseMeta';
-import { EXERCISE_ROM, G, EFFICIENCY } from './exerciseConstants';
+import { EXERCISE_ROM } from './exerciseConstants';
 import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
-
-// ✅ NEW: auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveWorkout, upsertDailyMetrics } from './lib/db';
-
-// ✅ Hybrid calc from analytics utils
 import { calcExerciseCaloriesHybrid } from './analytics';
 
-// ---- Paywall helpers (localStorage-based until backend arrives) ----
+// ---- Paywall helpers ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -43,53 +39,35 @@ const isProUser = () => {
 
 const getAICount = () =>
   parseInt(localStorage.getItem('aiWorkoutCount') || '0', 10);
-
 const incAICount = () =>
   localStorage.setItem('aiWorkoutCount', String(getAICount() + 1));
 
-/** Pretty-print a session line with sets×reps (+ optional weight) before calories.
- * Examples:
- *  - "Incline Dumbbell Press — 4×12 @ 60 lb — 53.86 cals"
- *  - "Lateral Raise — 4×8-12 — 37.41 cals"
- */
 function formatExerciseLine(ex) {
   const setsNum = parseInt(ex.sets, 10);
   const hasSets = Number.isFinite(setsNum) && setsNum > 0;
-
-  // allow "8-12" strings or single numbers
   let repsStr = '';
-  if (typeof ex.reps === 'string') {
-    repsStr = ex.reps.trim();
-  } else {
+  if (typeof ex.reps === 'string') repsStr = ex.reps.trim();
+  else {
     const r = parseInt(ex.reps, 10);
     repsStr = Number.isFinite(r) && r > 0 ? String(r) : '';
   }
   const hasReps = repsStr !== '' && repsStr !== '0';
-
   const weight = parseFloat(ex.weight);
   const hasWeight = Number.isFinite(weight) && weight > 0;
-
   const vol =
-    hasSets && hasReps ? `${setsNum}×${repsStr}`
-    : hasSets ? `${setsNum}×`
-    : hasReps ? `×${repsStr}`
-    : '';
-
+    hasSets && hasReps ? `${setsNum}×${repsStr}` :
+    hasSets ? `${setsNum}×` :
+    hasReps ? `×${repsStr}` : '';
   const wt = hasWeight ? ` @ ${weight} lb` : '';
-
   const name = ex.exerciseName || ex.name || 'Exercise';
   const kcals = ((+ex.calories) || 0).toFixed(2);
-
-  // If no sets/reps info, still return something clean
-  if (!vol && !hasWeight) {
-    return `${name} — ${kcals} cals`;
-  }
+  if (!vol && !hasWeight) return `${name} — ${kcals} cals`;
   return `${name} — ${vol}${wt} — ${kcals} cals`;
 }
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
-  const { user } = useAuth();   // ✅ who is signed in (if any)
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!userData) history.replace('/edit-info');
@@ -116,13 +94,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showSuggestCard, setShowSuggestCard] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [showBackHelp, setShowBackHelp] = useState(false);
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
-
-  // NEW: paywall modal state
-  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const handleDismiss = (key, setter, cb) => {
     localStorage.setItem(key, 'true');
@@ -177,22 +153,18 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
   };
 
-  // Updated per-exercise calculation (intent-aware)
   const calculateCalories = () => {
     if (!newExercise.exerciseName && newExercise.exerciseType !== 'cardio') {
       setCurrentCalories(0);
       return 0;
     }
-
     const entry = {
       exerciseName: newExercise.exerciseName || newExercise.exerciseType,
       sets: newExercise.sets,
       reps: newExercise.reps,
-      // if user entered separate times, helper will combine; otherwise tempo string is fine
       tempo: `${newExercise.concentricTime || 2}-1-${newExercise.eccentricTime || 2}`,
       weight: newExercise.weight
     };
-
     const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
     const total = calcExerciseCaloriesHybrid(
       entry,
@@ -275,12 +247,20 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(arr);
   };
 
+  // ✅ Updated sauna burn formula (no new files)
   const handleSaveSauna = () => {
     if (saunaTime.trim()) {
       const t = parseFloat(saunaTime) || 0;
       const tmp = parseFloat(saunaTemp) || 180;
-      const uw = parseFloat(userData.weight) || 150;
-      const saunaCals = t * (tmp - 150) * 0.1 * (uw / 150);
+      const uw = parseFloat(userData?.weight) || 150;
+
+      // temperature-scaled MET model
+      const weightKg = uw * 0.45359237;
+      let met = 1.5 + (tmp - 160) * 0.02;
+      met = Math.min(Math.max(met, 1.3), 2.5);
+      const kcalPerMin = (met * 3.5 * weightKg) / 200;
+      const saunaCals = kcalPerMin * t;
+
       setCumulativeExercises(exs => [
         ...exs.filter(e => e.exerciseType !== 'Sauna'),
         { exerciseType: 'Sauna', exerciseName: 'Sauna Session', calories: saunaCals }
@@ -316,7 +296,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     onWorkoutLogged(total);
     updateStreak();
 
-    // ✅ Cloud write-through (if logged in)
     try {
       if (user?.id) {
         const nowISO = new Date().toISOString();
@@ -354,7 +333,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  // ✅ Use the improved hybrid calc for AI-accepted workouts too (intent-aware)
   const handleAcceptSuggested = workout => {
     const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
     const enriched = workout.exercises.map(ex => {
@@ -362,7 +340,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         exerciseName: ex.exerciseName || ex.name || ex.exercise,
         sets: ex.sets || 3,
         reps: ex.reps || '8-12',
-        tempo: ex.tempo, // if AI provided; helper will fallback to intent defaults otherwise
+        tempo: ex.tempo,
         weight: ex.weight || 0
       };
       return {
@@ -385,10 +363,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(enriched);
   };
 
-  // ---- PRO GATE: Suggest Workout (AI) button ----
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
-      // client-side free cap
       if (!isProUser()) {
         const used = getAICount();
         if (used >= 3) {
@@ -396,27 +372,23 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           return;
         }
       }
-
-      // ✅ Server probe — if the gateway returns 402, show upgrade
       try {
         const trainingIntent = localStorage.getItem('training_intent') || 'general';
-        const fitnessGoal    = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
-        const equipmentList  = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
-
+        const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+        const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
         const resp = await fetch('/api/ai/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             feature: 'workout',
-            user_id: user?.id || null,    // null → server will gate
+            user_id: user?.id || null,
             goal: fitnessGoal,
             focus: localStorage.getItem('last_focus') || 'upper',
             equipment: equipmentList,
             constraints: { training_intent: trainingIntent },
-            count: 1 // probe only; the card fetches a full pack
+            count: 1
           })
         });
-
         if (resp.status === 402) {
           setShowUpgrade(true);
           return;
@@ -424,7 +396,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       } catch (e) {
         console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
       }
-
       if (!isProUser()) incAICount();
       setShowSuggestCard(true);
       return;
@@ -432,6 +403,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setShowSuggestCard(false);
   };
 
+  // --- UI rendering ---
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
@@ -485,6 +457,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           shareText={shareText}
           shareUrl={window.location.href}
         />
+
+        {/* Help dialogs (restored full) */}
         <Dialog
           open={showBackHelp}
           onClose={() =>
@@ -679,7 +653,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         shareUrl={window.location.href}
       />
 
-      {/* Paywall modal shown after free cap */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
