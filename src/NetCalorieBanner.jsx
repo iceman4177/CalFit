@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Paper, Typography, Chip } from '@mui/material';
+import { Paper, Typography, Chip, Box } from '@mui/material';
 import { getLocalDayKey } from './utils/dates';
 
 function readLocalDailyTotals() {
   const dayKey = getLocalDayKey();
-  // Local-authoritative sources
   const meals = JSON.parse(localStorage.getItem('mealHistory') || '{}');
   const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '{}');
 
@@ -32,17 +31,45 @@ export default function NetCalorieBanner() {
 
   const net = eaten - burned;
   const isSurplus = net > 0;
+  const label =
+    net > 0 ? 'Surplus' : net < 0 ? 'Deficit' : 'Even';
+  const color =
+    net > 0 ? 'error' : net < 0 ? 'success' : 'default';
 
   return (
-    <Paper elevation={2} className="p-4 mb-4">
-      <Typography variant="h6" align="center">Today’s Net Calories</Typography>
-      <div className="flex items-center justify-center gap-2 mt-1">
-        <Typography variant="h5">{net}</Typography>
-        <Chip label={isSurplus ? 'Surplus' : net < 0 ? 'Deficit' : 'Even'} color={isSurplus ? 'error' : net < 0 ? 'success' : 'default'} />
-      </div>
-      <Typography align="center" variant="body2" className="mt-1">
-        Eaten: {eaten} • Burned: {burned}
-      </Typography>
-    </Paper>
+    <Box display="flex" justifyContent="center" mb={4}>
+      <Paper
+        elevation={3}
+        sx={{
+          textAlign: 'center',
+          width: '100%',
+          maxWidth: 480,
+          p: 3,
+          borderRadius: 3,
+        }}
+      >
+        <Typography variant="h6" gutterBottom>
+          Today’s Net Calories
+        </Typography>
+        <Box
+          display="flex"
+          justifyContent="center"
+          alignItems="center"
+          gap={1}
+          mt={1}
+        >
+          <Typography variant="h4" fontWeight="bold">
+            {net}
+          </Typography>
+          <Chip label={label} color={color} size="medium" />
+        </Box>
+        <Typography
+          variant="body2"
+          sx={{ mt: 1, color: 'text.secondary' }}
+        >
+          Eaten: {eaten} • Burned: {burned}
+        </Typography>
+      </Paper>
+    </Box>
   );
 }
