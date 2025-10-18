@@ -61,8 +61,12 @@ export default function MealTracker({ onMealUpdate }) {
 
   const { user } = useAuth();
 
-  const todayUS  = new Date().toLocaleDateString('en-US');
-  const todayISO = new Date().toISOString().slice(0,10);
+  // 🔒 Single source of "today": local US string + local-midnight ISO (prevents UTC drift)
+  const now = new Date();
+  const todayUS  = now.toLocaleDateString('en-US');                 // e.g., 10/17/2025 (LOCAL)
+  const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+                    .toISOString().slice(0,10);                     // YYYY-MM-DD at LOCAL midnight
+
   const stored   = JSON.parse(localStorage.getItem('userData')||'{}');
   const goalType = stored.goalType  || 'maintain';
 
