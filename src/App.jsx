@@ -375,6 +375,8 @@ export default function App() {
 
   const showTryPro = !(isProActive || localPro);
 
+  const currentStreak = Number(userData?.currentStreak || JSON.parse(localStorage.getItem('userData') || '{}')?.currentStreak || 0);
+
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
       <PageTracker />
@@ -399,6 +401,8 @@ export default function App() {
           markAmbassadorShown();
           setAmbassadorOpen(false);
         }}
+        user={authUser}
+        streak={currentStreak}
       />
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
