@@ -1,41 +1,72 @@
 // src/CalorieSummary.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Paper, Typography, Box, Card, CardContent, Chip, Divider } from '@mui/material';
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
 
-function iso(d=new Date()){ return new Date(d).toISOString().slice(0,10); }
+const iso = () => new Date().toISOString().slice(0,10);
+const us  = () => new Date().toLocaleDateString('en-US');
+
+function readLocal() {
+  const today = us();
+  try {
+    const wh = JSON.parse(localStorage.getItem('workoutHistory')||'[]');
+    const mh = JSON.parse(localStorage.getItem('mealHistory')||'[]');
+    const burned = wh.filter(w=>w.date===today).reduce((s,w)=>s+(w.totalCalories||0),0);
+    const meals  = mh.find(m=>m.date===today);
+    const eaten  = meals ? (meals.meals||[]).reduce((s,m)=>s+(m.calories||0),0) : 0;
+    return { burned, eaten };
+  } catch { return { burned:0, eaten:0 }; }
+}
 
 export default function CalorieSummary() {
   const { user } = useAuth();
   const [burned,setBurned]     = useState(0);
   const [consumed,setConsumed] = useState(0);
 
-  const local = useMemo(()=>{
-    const today = new Date().toLocaleDateString('en-US');
-    const wh = JSON.parse(localStorage.getItem('workoutHistory')||'[]');
-    const mh = JSON.parse(localStorage.getItem('mealHistory')||'[]');
-    const burned = wh.filter(w=>w.date===today).reduce((s,w)=>s+(w.totalCalories||0),0);
-    const meals = mh.find(m=>m.date===today);
-    const eaten = meals ? (meals.meals||[]).reduce((s,m)=>s+(m.calories||0),0) : 0;
-    return {burned,eaten};
-  },[]);
+  const recompute = useCallback(async () => {
+    // Local snapshot (instant)
+    const { burned: bLocal, eaten: cLocal } = readLocal();
+    setBurned(Math.round(bLocal || 0));
+    setConsumed(Math.round(cLocal || 0));
 
-  useEffect(()=>{
-    (async()=>{
-      if (!user){ setBurned(local.burned); setConsumed(local.eaten); return; }
-      try{
-        const today = iso();
-        const rows = await getDailyMetricsRange(user.id,today,today);
-        const r = rows[0]||{};
-        setBurned(r.cals_burned||0);
-        setConsumed(r.cals_eaten||0);
-      }catch(err){
-        console.error('[CalorieSummary] fallback',err);
-        setBurned(local.burned); setConsumed(local.eaten);
+    // Cloud snapshot (authoritative when signed in)
+    if (!user) return;
+    try {
+      const rows = await getDailyMetricsRange(user.id, iso(), iso());
+      const r = rows?.[0] || {};
+      setBurned(Math.round(r.cals_burned || 0));
+      setConsumed(Math.round(r.cals_eaten || 0));
+    } catch (err) {
+      console.error('[CalorieSummary] Supabase fetch failed; using local snapshot', err);
+    }
+  }, [user]);
+
+  useEffect(() => { recompute(); }, [recompute]);
+
+  useEffect(() => {
+    const onKick = () => recompute();
+    const onStorage = (e) => {
+      if (!e || !e.key || ['mealHistory','workoutHistory','dailyMetricsCache','consumedToday'].includes(e.key)) {
+        recompute();
       }
-    })();
-  },[user,local]);
+    };
+    const onVisOrFocus = () => recompute();
+
+    window.addEventListener('slimcal:consumed:update', onKick);
+    window.addEventListener('slimcal:burned:update',   onKick);
+    window.addEventListener('storage',                 onStorage);
+    document.addEventListener('visibilitychange',      onVisOrFocus);
+    window.addEventListener('focus',                   onVisOrFocus);
+
+    return () => {
+      window.removeEventListener('slimcal:consumed:update', onKick);
+      window.removeEventListener('slimcal:burned:update',   onKick);
+      window.removeEventListener('storage',                 onStorage);
+      document.removeEventListener('visibilitychange',      onVisOrFocus);
+      window.removeEventListener('focus',                   onVisOrFocus);
+    };
+  }, [recompute]);
 
   const net = consumed - burned;
 
@@ -65,7 +96,6 @@ export default function CalorieSummary() {
         </Box>
       </Paper>
 
-      {/* Persona + Protein Targets (relatable add-on, no new files) */}
       <Card variant="outlined" sx={{ mt:2, borderRadius:2 }}>
         <CardContent>
           <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between', mb:1 }}>
