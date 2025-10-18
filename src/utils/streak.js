@@ -3,16 +3,27 @@
 /**
  * Local-day streak tracker stored under localStorage.userData
  * Keys used:
- *  - userData.lastLogDate   (string, local-day)
- *  - userData.currentStreak (number)
+ *  - userData.lastLogDate       (string, local-day "YYYY-MM-DD")
+ *  - userData.currentStreak     (number)
+ *  - userData.bestStreak        (number)   // optional quality-of-life metric
  *  - userData.ambassadorPrompted (boolean-like "1")
  *
  * Emits:
- *  - 'slimcal:streak:update' on any change
+ *  - 'slimcal:streak:update' (Event) on any change
+ *  - 'slimcal:ambassador:ready' (CustomEvent) once when threshold reached and not yet prompted
+ *
+ * Public API (unchanged):
+ *  - updateStreak(): number
+ *  - getStreak(): number
+ *  - getLastLogDate(): string|null
+ *  - shouldShowAmbassadorOnce(threshold=30): boolean
+ *  - markAmbassadorShown(): void
  */
 
-const LOCALE = 'en-US';
-const EVENT_NAME = 'slimcal:streak:update';
+// ----------------------------- internals ------------------------------------
+
+const EVENT_STREAK = 'slimcal:streak:update';
+const EVENT_AMBASSADOR = 'slimcal:ambassador:ready';
 
 function getUserData() {
   try {
@@ -23,56 +34,120 @@ function getUserData() {
 }
 function setUserData(ud) {
   localStorage.setItem('userData', JSON.stringify(ud));
+  try {
+    window.dispatchEvent(new Event(EVENT_STREAK));
+  } catch {
+    /* no-op */
+  }
 }
 
-function localDay(d = new Date()) {
-  // Keep consistent with your existing storage format
-  return d.toLocaleDateString(LOCALE);
+// Build a local "YYYY-MM-DD" key (stable; matches the rest of the app)
+function localDayKey(date = new Date()) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate()); // local midnight safe
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-function isYesterdayString(lastStr) {
-  const y = new Date();
-  y.setDate(y.getDate() - 1);
-  return lastStr === localDay(y);
+// Parse either ISO ("YYYY-MM-DD") or legacy "M/D/YYYY" into a Date at local midnight
+function parseLocalDayString(s) {
+  if (!s || typeof s !== 'string') return null;
+  if (s.includes('-')) {
+    // ISO path
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+  }
+  if (s.includes('/')) {
+    // Legacy "M/D/YYYY"
+    const [m, d, y] = s.split('/').map(Number);
+    return new Date(y || 0, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+  }
+  return null;
 }
+
+function daysBetweenLocal(aStr, bStr) {
+  const a = parseLocalDayString(aStr);
+  const b = parseLocalDayString(bStr);
+  if (!a || !b) return null;
+  const ms = b.getTime() - a.getTime();
+  return Math.round(ms / 86400000); // 24*60*60*1000
+}
+
+// Ensure we store ISO keys going forward; migrate if needed.
+function normalizeLastLogDate(ud) {
+  const s = ud.lastLogDate;
+  if (!s) return ud;
+  if (s.includes('-')) return ud; // already ISO
+
+  const dt = parseLocalDayString(s);
+  if (!dt) return ud;
+
+  const iso = localDayKey(dt);
+  if (iso !== s) {
+    ud.lastLogDate = iso;
+    setUserData(ud);
+  }
+  return ud;
+}
+
+// Optionally emit ambassador "ready" once (harmless if ignored)
+function maybeEmitAmbassadorReady(current) {
+  try {
+    if (current >= 30) {
+      const ud = getUserData();
+      if (ud.ambassadorPrompted !== '1') {
+        const evt = new CustomEvent(EVENT_AMBASSADOR, { detail: { current } });
+        window.dispatchEvent(evt);
+      }
+    }
+  } catch {
+    /* no-op */
+  }
+}
+
+// ----------------------------- public API ------------------------------------
 
 /**
  * updateStreak()
- * - Checks userData.lastLogDate vs today (local day)
+ * - Compares userData.lastLogDate (ISO) vs today (ISO local)
  * - Increments on consecutive day, keeps same if already logged today, resets to 1 if gap >= 2 days
- * - Persists back to userData
+ * - Persists back to userData (also maintains bestStreak)
  * - Dispatches 'slimcal:streak:update'
  * - Returns the updated streak count
  */
 export function updateStreak() {
-  const todayStr = localDay();
-  const ud = getUserData();
+  const todayStr = localDayKey(); // ISO local key
+  let ud = getUserData();
+  ud = normalizeLastLogDate(ud); // migrate legacy format if present
+
   const last = ud.lastLogDate;
   let newStreak = 1;
 
   if (last) {
     if (last === todayStr) {
       // Already logged today → no change
-      newStreak = ud.currentStreak || 1;
-    } else if (isYesterdayString(last)) {
-      // Consecutive day
-      newStreak = (ud.currentStreak || 0) + 1;
+      newStreak = Number(ud.currentStreak || 1);
     } else {
-      // Missed ≥ 1 full day → reset to 1
-      newStreak = 1;
+      const gap = daysBetweenLocal(last, todayStr);
+      if (gap === 1) {
+        newStreak = Number(ud.currentStreak || 0) + 1; // consecutive
+      } else if (gap > 1) {
+        newStreak = 1; // missed ≥ 1 full day
+      } else {
+        // gap can be 0 (should have matched above) or negative (clock moved back); keep safe
+        newStreak = Math.max(1, Number(ud.currentStreak || 1));
+      }
     }
   }
 
   ud.lastLogDate = todayStr;
   ud.currentStreak = newStreak;
+  ud.bestStreak = Math.max(Number(ud.bestStreak || 0), newStreak);
   setUserData(ud);
 
-  // Notify any listeners (e.g., Ambassador controller, badges)
-  try {
-    window.dispatchEvent(new Event(EVENT_NAME));
-  } catch {
-    /* no-op in non-browser contexts */
-  }
+  // Optionally let the app open AmbassadorModal automatically if desired
+  maybeEmitAmbassadorReady(newStreak);
 
   return newStreak;
 }
@@ -89,7 +164,7 @@ export function getStreak() {
 
 /**
  * getLastLogDate()
- * - Returns lastLogDate string (local day) or null
+ * - Returns lastLogDate string (ISO local "YYYY-MM-DD") or null
  */
 export function getLastLogDate() {
   const ud = getUserData();
@@ -109,13 +184,10 @@ export function shouldShowAmbassadorOnce(threshold = 30) {
 
 /**
  * markAmbassadorShown()
- * - Sets ambassadorPrompted flag
+ * - Sets ambassadorPrompted flag and emits streak update for any listeners
  */
 export function markAmbassadorShown() {
   const ud = getUserData();
   ud.ambassadorPrompted = '1';
   setUserData(ud);
-  try {
-    window.dispatchEvent(new Event(EVENT_NAME));
-  } catch {}
 }

@@ -65,6 +65,12 @@ function formatExerciseLine(ex) {
   return `${name} — ${vol}${wt} — ${kcals} cals`;
 }
 
+// ---- Local-day ISO helper (local midnight; avoids UTC off-by-one) ----
+function localDayISO(d = new Date()) {
+  const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return ld.toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
@@ -296,6 +302,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     onWorkoutLogged(total);
     updateStreak();
 
+    // notify local-first listeners (NetCalorieBanner, CalorieSummary, History)
+    try {
+      window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+        detail: { date: localDayISO(), burned: total }
+      }));
+    } catch {}
+
     try {
       if (user?.id) {
         const nowISO = new Date().toISOString();
@@ -312,8 +325,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             volume: (parseInt(s.reps, 10) || 0) * (parseInt(s.sets, 10) || 0),
           }))
         );
-        const day = new Date().toISOString().slice(0,10);
-        await upsertDailyMetrics(user.id, day, total || 0, 0);
+        const dayIso = localDayISO();
+        await upsertDailyMetrics(user.id, dayIso, total || 0, 0);
       }
     } catch (err) {
       console.error('[WorkoutPage] cloud save failed', err);
