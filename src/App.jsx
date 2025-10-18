@@ -67,6 +67,9 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
+// ✅ Streak helpers (single source of truth)
+import { shouldShowAmbassadorOnce, markAmbassadorShown } from './utils/streak';
+
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -210,12 +213,22 @@ export default function App() {
       history.replace('/edit-info');
     }
 
-    const streak = parseInt(localStorage.getItem('streakCount') || '0', 10);
-    if (streak >= 30 && !localStorage.getItem('hasSeenAmbassadorInvite')) {
+    // ✅ Ambassador trigger (initial check on load)
+    if (shouldShowAmbassadorOnce(30)) {
       setAmbassadorOpen(true);
-      localStorage.setItem('hasSeenAmbassadorInvite', 'true');
     }
   }, [isProActive, location.pathname, history]);
+
+  // ✅ Ambassador trigger (live) — listen to streak updates
+  useEffect(() => {
+    function onStreakUpdate() {
+      if (shouldShowAmbassadorOnce(30)) {
+        setAmbassadorOpen(true);
+      }
+    }
+    window.addEventListener('slimcal:streak:update', onStreakUpdate);
+    return () => window.removeEventListener('slimcal:streak:update', onStreakUpdate);
+  }, []);
 
   // Handle OAuth callback
   useEffect(() => {
@@ -379,7 +392,14 @@ export default function App() {
         </DialogActions>
       </Dialog>
 
-      <AmbassadorModal open={ambassadorOpen} onClose={() => setAmbassadorOpen(false)} />
+      <AmbassadorModal
+        open={ambassadorOpen}
+        onClose={() => {
+          // ✅ One-time flag so it never shows again unless user resets it
+          markAmbassadorShown();
+          setAmbassadorOpen(false);
+        }}
+      />
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
         <Typography variant="h2" color="primary">Slimcal.ai</Typography>

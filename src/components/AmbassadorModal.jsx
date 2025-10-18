@@ -1,5 +1,4 @@
 // src/components/AmbassadorModal.jsx
-
 import React from 'react';
 import {
   Dialog,
