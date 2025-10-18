@@ -1,103 +1,97 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Paper, Typography, Table, TableHead, TableRow, TableCell, TableBody, Chip, Box } from '@mui/material';
-import { getLocalDayKey, dayKeyFromTimestampLocal, parseDayKeyToLocalDate, sortDayKeysDesc } from './utils/dates';
 
-// Optional: if you fetch cloud rows elsewhere, pass them in; this file stays LOCAL-FIRST.
-async function fetchCloudWindowIfAny() {
-  // No-op placeholder; keep your existing Supabase fetch if you have one.
-  // Return an array like: [{ created_at: '2025-10-17T02:11:00Z', type: 'meal'|'workout', calories: 300 }, ...]
-  return [];
-}
+const todayUS = () => new Date().toLocaleDateString('en-US');
 
 function buildLocalIndex() {
-  const meals = JSON.parse(localStorage.getItem('mealHistory') || '{}');
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '{}');
-  const byDay = {};
+  try {
+    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');      // [{date, meals:[]}]
+    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');   // [{date, totalCalories}]
+    const byDate = {};
 
-  // Local meals
-  for (const [dayKey, val] of Object.entries(meals)) {
-    const eaten = Number(val?.totalCalories || 0);
-    if (!byDay[dayKey]) byDay[dayKey] = { eaten: 0, burned: 0 };
-    byDay[dayKey].eaten += eaten;
-  }
-  // Local workouts
-  for (const [dayKey, val] of Object.entries(workouts)) {
-    const burned = Number(val?.totalCalories || 0);
-    if (!byDay[dayKey]) byDay[dayKey] = { eaten: 0, burned: 0 };
-    byDay[dayKey].burned += burned;
-  }
-
-  return byDay;
-}
-
-function mergeCloudIntoLocal(localIndex, cloudRows) {
-  // LOCAL WINS: only fill days missing locally; never overwrite an existing local day
-  const merged = { ...localIndex };
-  for (const row of cloudRows || []) {
-    const dayKey = dayKeyFromTimestampLocal(row.created_at);
-    if (!merged[dayKey]) merged[dayKey] = { eaten: 0, burned: 0 };
-    if (row.type === 'meal' && !localIndex[dayKey]) {
-      merged[dayKey].eaten += Number(row.calories || 0);
-    } else if (row.type === 'workout' && !localIndex[dayKey]) {
-      merged[dayKey].burned += Number(row.calories || 0);
+    // Meals → eaten
+    for (const entry of mh) {
+      const date = entry?.date;
+      if (!date) continue;
+      const eaten = (entry.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0);
+      if (!byDate[date]) byDate[date] = { eaten: 0, burned: 0 };
+      byDate[date].eaten += eaten;
     }
+
+    // Workouts → burned
+    for (const w of wh) {
+      const date = w?.date;
+      if (!date) continue;
+      const burned = Number(w.totalCalories) || 0;
+      if (!byDate[date]) byDate[date] = { eaten: 0, burned: 0 };
+      byDate[date].burned += burned;
+    }
+
+    return byDate;
+  } catch {
+    return {};
   }
-  return merged;
 }
 
 export default function CalorieHistory() {
   const [index, setIndex] = useState({});
-  const [daysTracked, setDaysTracked] = useState(0);
+
+  const rebuild = () => setIndex(buildLocalIndex());
+
+  useEffect(() => {
+    rebuild();
+    const kick = () => rebuild();
+    const onStorage = e => {
+      if (!e || !e.key || ['mealHistory', 'workoutHistory'].includes(e.key)) kick();
+    };
+    const onVisOrFocus = () => kick();
+
+    window.addEventListener('slimcal:consumed:update', kick);
+    window.addEventListener('slimcal:burned:update', kick);
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisOrFocus);
+    window.addEventListener('focus', onVisOrFocus);
+    return () => {
+      window.removeEventListener('slimcal:consumed:update', kick);
+      window.removeEventListener('slimcal:burned:update', kick);
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisOrFocus);
+      window.removeEventListener('focus', onVisOrFocus);
+    };
+  }, []);
+
+  const rows = useMemo(() => {
+    const keys = Object.keys(index).sort((a, b) => {
+      // sort by actual date (MM/DD/YYYY), newest first
+      const [am, ad, ay] = a.split('/').map(Number);
+      const [bm, bd, by] = b.split('/').map(Number);
+      const adt = new Date(ay, am - 1, ad).getTime();
+      const bdt = new Date(by, bm - 1, bd).getTime();
+      return bdt - adt;
+    });
+    return keys.map(k => {
+      const eaten = Number(index[k]?.eaten || 0);
+      const burned = Number(index[k]?.burned || 0);
+      const net = eaten - burned;
+      return { date: k, eaten, burned, net };
+    });
+  }, [index]);
+
+  // Streak: consecutive days with any activity, counting back from today
   const [streak, setStreak] = useState(0);
-
-  const rebuild = async () => {
-    const localIdx = buildLocalIndex();
-    const cloud = await fetchCloudWindowIfAny(); // keep your existing call if you have it
-    const merged = mergeCloudIntoLocal(localIdx, cloud);
-    setIndex(merged);
-
-    // metrics
-    const keys = Object.keys(merged).sort(sortDayKeysDesc);
-    setDaysTracked(keys.length);
-
-    // streak: count back from today while days have any activity
+  useEffect(() => {
     let s = 0;
-    const todayKey = getLocalDayKey();
-    let cursor = parseDayKeyToLocalDate(todayKey);
+    let cursor = new Date();
+    // walk backward until a day has zero activity
     while (true) {
-      const key = getLocalDayKey(cursor);
-      if (merged[key] && (merged[key].eaten > 0 || merged[key].burned > 0)) {
+      const key = cursor.toLocaleDateString('en-US');
+      const has = index[key] && ((Number(index[key].eaten) || 0) > 0 || (Number(index[key].burned) || 0) > 0);
+      if (has) {
         s += 1;
         cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() - 1);
       } else break;
     }
     setStreak(s);
-  };
-
-  useEffect(() => {
-    rebuild();
-    const onUpdate = () => rebuild();
-    window.addEventListener('slimcal:consumed:update', onUpdate);
-    window.addEventListener('slimcal:burned:update', onUpdate);
-    window.addEventListener('storage', onUpdate);
-    window.addEventListener('focus', onUpdate);
-    return () => {
-      window.removeEventListener('slimcal:consumed:update', onUpdate);
-      window.removeEventListener('slimcal:burned:update', onUpdate);
-      window.removeEventListener('storage', onUpdate);
-      window.removeEventListener('focus', onUpdate);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const rows = useMemo(() => {
-    const keys = Object.keys(index).sort(sortDayKeysDesc);
-    return keys.map((k) => {
-      const eaten = Number(index[k]?.eaten || 0);
-      const burned = Number(index[k]?.burned || 0);
-      const net = eaten - burned;
-      return { dayKey: k, eaten, burned, net };
-    });
   }, [index]);
 
   const deficitDays = rows.filter(r => r.net < 0).length;
@@ -106,15 +100,15 @@ export default function CalorieHistory() {
 
   return (
     <Box className="mb-6">
-      <Typography variant="h4" className="mb-3">Calorie History</Typography>
+      <Typography variant="h4" sx={{ mb: 2 }}>Calorie History</Typography>
 
-      <Paper className="p-3 mb-3">
-        <div className="flex gap-6 flex-wrap">
-          <Typography>Days tracked: <strong>{daysTracked}</strong></Typography>
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          <Typography>Days tracked: <strong>{rows.length}</strong></Typography>
           <Typography>Deficit days: <strong>{deficitDays}</strong> ({rows.length ? Math.round(deficitDays / rows.length * 100) : 0}%)</Typography>
           <Typography>7-day avg net: <strong>{avg7}</strong></Typography>
           <Typography>Current streak: <strong>{streak}</strong> {streak === 1 ? 'day' : 'days'}</Typography>
-        </div>
+        </Box>
       </Paper>
 
       <Paper>
@@ -128,20 +122,19 @@ export default function CalorieHistory() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {rows.map(({ dayKey, eaten, burned, net }) => {
-              const d = parseDayKeyToLocalDate(dayKey).toLocaleDateString();
+            {rows.map(({ date, eaten, burned, net }) => {
               const badge = net > 0 ? 'Surplus' : net < 0 ? 'Deficit' : 'Even';
               const color = net > 0 ? 'warning' : net < 0 ? 'success' : 'default';
               return (
-                <TableRow key={dayKey}>
-                  <TableCell>{d}</TableCell>
+                <TableRow key={date}>
+                  <TableCell>{date}</TableCell>
                   <TableCell>{burned}</TableCell>
                   <TableCell>{eaten}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <span>{net}</span>
                       <Chip label={badge} color={color} size="small" />
-                    </div>
+                    </Box>
                   </TableCell>
                 </TableRow>
               );
