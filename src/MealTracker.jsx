@@ -1,9 +1,11 @@
+// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Typography, Box, TextField,
   Button, List, ListItem, ListItemText,
-  Divider, Autocomplete, Alert
+  Divider, Autocomplete, Alert, IconButton, Tooltip
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 import foodData from './foodData.json';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak } from './utils/streak';
@@ -29,14 +31,7 @@ const incMealAICount = () =>
 
 // Lightweight POST for entitlement probe
 async function probeEntitlement(payload) {
-  // Try unified first with generous keys
-  const base = {
-    feature: 'meal',
-    type: 'meal',
-    mode: 'meal',
-    ...payload,
-    count: 1
-  };
+  const base = { feature: 'meal', type: 'meal', mode: 'meal', ...payload, count: 1 };
 
   try {
     let resp = await fetch('/api/ai/generate', {
@@ -46,7 +41,6 @@ async function probeEntitlement(payload) {
     });
     if (resp.status === 402) return { gated: true };
     if (resp.ok) return { gated: false };
-    // try legacy if 400/404
     if (resp.status === 400 || resp.status === 404) {
       resp = await fetch('/api/ai/meal-suggestion', {
         method: 'POST',
@@ -58,7 +52,6 @@ async function probeEntitlement(payload) {
     }
     return { gated: !resp.ok };
   } catch {
-    // Network failure: do not falsely gate; allow UI and let MealSuggestion handle fallback
     return { gated: false };
   }
 }
@@ -94,11 +87,15 @@ export default function MealTracker({ onMealUpdate }) {
     onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
   },[onMealUpdate,today]);
 
-  const save = meals => {
+  const persistToday = (meals) => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
       .filter(e=>e.date!==today);
     rest.push({ date:today, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
+  };
+
+  const save = (meals) => {
+    persistToday(meals);
     onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
   };
 
@@ -132,6 +129,14 @@ export default function MealTracker({ onMealUpdate }) {
     }
   };
 
+  // 🆕 Delete a single meal by index (local-first + instant UI update)
+  const handleDeleteMeal = (index) => {
+    const updatedMeals = mealLog.filter((_, i) => i !== index);
+    setMealLog(updatedMeals);
+    save(updatedMeals);
+    // (Optional) cloud deletion could be added later if meals are stored itemized in DB
+  };
+
   const handleClear = () => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
       .filter(e=>e.date!==today);
@@ -140,19 +145,13 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   // ---- PRO GATE: Suggest a Meal (AI) ----
-  // Keep your local 3/day fallback, but prefer server gating via /api/ai/generate
   const handleAIMealSuggestClick = useCallback(async () => {
     if (!showSuggest) {
-      // quick client fallback
       if (!isProUser()) {
         const used = getMealAICount();
-        if (used >= 3) {
-          setShowUpgrade(true);
-          return;
-        }
+        if (used >= 3) { setShowUpgrade(true); return; }
       }
 
-      // ping the gateway once to see if server wants to gate (returns 402)
       try {
         const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
         const trainingIntent   = localStorage.getItem('training_intent') || 'general';
@@ -160,7 +159,7 @@ export default function MealTracker({ onMealUpdate }) {
         const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
 
         const probePayload = {
-          user_id: user?.id || null, // null triggers 402/login/upgrade path server-side
+          user_id: user?.id || null,
           goal: goalType || 'maintenance',
           constraints: {
             diet_preference: dietPreference,
@@ -171,13 +170,8 @@ export default function MealTracker({ onMealUpdate }) {
         };
 
         const { gated } = await probeEntitlement(probePayload);
-        if (gated) {
-          setShowUpgrade(true);
-          return;
-        }
-        // ok to show the UI; MealSuggestion will do the real fetch
+        if (gated) { setShowUpgrade(true); return; }
       } catch (e) {
-        // if gateway unreachable, fall back to old behavior
         console.warn('[MealTracker] gateway probe failed, showing local suggestions UI', e);
       }
 
@@ -253,14 +247,23 @@ export default function MealTracker({ onMealUpdate }) {
         ? <Typography>No meals added yet.</Typography>
         : (
           <List>
-            {mealLog.map((m,i)=>
-              <Box key={i}>
-                <ListItem>
+            {mealLog.map((m,i)=>(
+              <Box key={`${m.name}-${i}`}>
+                <ListItem
+                  secondaryAction={
+                    <Tooltip title="Delete this meal">
+                      <IconButton edge="end" aria-label="delete meal"
+                        onClick={()=>handleDeleteMeal(i)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  }
+                >
                   <ListItemText primary={m.name} secondary={`${m.calories||0} cals`} />
                 </ListItem>
-                <Divider/>
+                <Divider />
               </Box>
-            )}
+            ))}
           </List>
         )}
 
