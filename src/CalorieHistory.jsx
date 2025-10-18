@@ -1,5 +1,5 @@
 // src/CalorieHistory.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Box, Container, Divider, Typography, Table, TableBody, TableCell,
   TableHead, TableRow, Paper, CircularProgress, Chip, Stack, Tooltip
@@ -7,75 +7,63 @@ import {
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
 
+const usToday  = () => new Date().toLocaleDateString('en-US');
+const isoToday = () => new Date().toISOString().slice(0,10);
+
 function toIsoDay(d) {
-  try {
-    return new Date(d).toISOString().slice(0,10);
-  } catch { return d; }
+  try { return new Date(d).toISOString().slice(0,10); }
+  catch { return d; }
 }
 
-function getLastNDaysIso(n = 30) {
-  const today = new Date();
-  const from  = new Date(today.getTime() - (n-1)*864e5);
-  return { from: toIsoDay(from), to: toIsoDay(today) };
-}
-
-// Build a daily index from localStorage as a fallback
-function buildLocalDailyIndex() {
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); // [{date, totalCalories}]
-  const mealsArr = JSON.parse(localStorage.getItem('mealHistory')    || '[]'); // [{date, meals:[{calories}]}]
-
-  const idx = new Map(); // day -> { cals_burned, cals_eaten }
-  for (const w of workouts) {
-    const day = w.date;
-    const rec = idx.get(day) || { cals_burned:0, cals_eaten:0 };
-    rec.cals_burned += (w.totalCalories || 0);
-    idx.set(day, rec);
-  }
-  for (const d of mealsArr) {
-    const day = d.date;
-    const rec = idx.get(day) || { cals_burned:0, cals_eaten:0 };
-    const eaten = (d.meals || []).reduce((s,m) => s + (m.calories || 0), 0);
-    rec.cals_eaten += eaten;
-    idx.set(day, rec);
-  }
-  // normalize into array of { day(YYYY-MM-DD), cals_burned, cals_eaten, net_cals }
-  const out = [];
-  for (const [dayUS, rec] of idx.entries()) {
-    const iso = toIsoDay(dayUS); // local was stored as en-US; convert to ISO if possible
-    out.push({
-      day: iso,
-      cals_burned: rec.cals_burned,
-      cals_eaten: rec.cals_eaten,
-      net_cals: rec.cals_eaten - rec.cals_burned,
-    });
-  }
-  // sort desc (newest first)
-  out.sort((a,b) => (a.day < b.day ? 1 : -1));
-  return out;
-}
-
-// ------- tiny helpers for insights -------
 function sortDesc(rows) {
   return [...rows].sort((a,b) => (a.day < b.day ? 1 : -1));
 }
 function rollingAvg(arr, n) {
   if (!arr.length) return 0;
-  const slice = arr.slice(0, n); // rows already newest-first
-  const sum = slice.reduce((s,x)=> s + (x ?? 0), 0);
+  const slice = arr.slice(0, n);
+  const sum = slice.reduce((s,x)=> s + (Number(x) || 0), 0);
   return sum / (slice.length || 1);
 }
 function calcStreak(rows) {
-  // rows newest-first; count consecutive days from today going back with any entry present
   const days = new Set(rows.map(r => r.day));
   let streak = 0;
   const today = new Date();
   for (let i = 0; i < 365; i++) {
     const d = new Date(today.getTime() - i*864e5);
     const iso = d.toISOString().slice(0,10);
-    if (days.has(iso)) streak++;
-    else break;
+    if (days.has(iso)) streak++; else break;
   }
   return streak;
+}
+
+// Build a daily index from localStorage (always fresh)
+function buildLocalDailyIndex() {
+  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); // [{date, totalCalories}]
+  const mealsArr = JSON.parse(localStorage.getItem('mealHistory')    || '[]'); // [{date, meals:[{calories}]}]
+
+  const idx = new Map(); // day(US) -> { cals_burned, cals_eaten }
+  for (const w of workouts) {
+    const dayUS = w.date;
+    const rec = idx.get(dayUS) || { cals_burned:0, cals_eaten:0 };
+    rec.cals_burned += Number(w.totalCalories) || 0;
+    idx.set(dayUS, rec);
+  }
+  for (const d of mealsArr) {
+    const dayUS = d.date;
+    const rec = idx.get(dayUS) || { cals_burned:0, cals_eaten:0 };
+    const eaten = (d.meals || []).reduce((s,m) => s + (Number(m.calories) || 0), 0);
+    rec.cals_eaten += eaten;
+    idx.set(dayUS, rec);
+  }
+
+  const out = [];
+  for (const [dayUS, rec] of idx.entries()) {
+    const iso = toIsoDay(dayUS);
+    const burned  = Number(rec.cals_burned) || 0;
+    const eaten   = Number(rec.cals_eaten)  || 0;
+    out.push({ day: iso, cals_burned: burned, cals_eaten: eaten, net_cals: eaten - burned });
+  }
+  return sortDesc(out);
 }
 
 export default function CalorieHistory() {
@@ -83,39 +71,68 @@ export default function CalorieHistory() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows]       = useState([]);
 
-  const localRows = useMemo(() => buildLocalDailyIndex(), []);
+  const recompute = useCallback(async () => {
+    const localRows = buildLocalDailyIndex();
 
-  // persona chips (relatable, persistent)
-  const trainingIntent = (localStorage.getItem('training_intent') || 'general').replace('_',' ');
-  const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
+    // If not signed in, local is canonical.
+    if (!user) { setRows(localRows); return; }
 
+    setLoading(true);
+    try {
+      // pull last 30 days from cloud
+      const todayIso = isoToday();
+      const from = new Date(Date.now() - 29*864e5).toISOString().slice(0,10);
+      const cloud = await getDailyMetricsRange(user.id, from, todayIso);
+
+      // normalize cloud
+      const cloudRows = Array.isArray(cloud) ? cloud.map(r => ({
+        day: r.day || r.date || todayIso,
+        cals_burned: Number(r.cals_burned) || 0,
+        cals_eaten:  Number(r.cals_eaten)  || 0,
+        net_cals:    (r.net_cals != null ? Number(r.net_cals) : (Number(r.cals_eaten)||0) - (Number(r.cals_burned)||0))
+      })) : [];
+
+      // Merge: local wins for today (and any day where local has data)
+      const mergedMap = new Map(cloudRows.map(r => [r.day, r]));
+      for (const lr of localRows) {
+        // If local day has any data, prefer it over cloud (prevents stale overwrites)
+        if ((lr.cals_burned || lr.cals_eaten) > 0) mergedMap.set(lr.day, lr);
+      }
+
+      setRows(sortDesc([...mergedMap.values()]));
+    } catch (err) {
+      console.error('[CalorieHistory] fetch failed, falling back to local', err);
+      setRows(buildLocalDailyIndex());
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  // initial + user change
+  useEffect(() => { recompute(); }, [recompute]);
+
+  // listen for local edits and tab changes
   useEffect(() => {
-    let ignore = false;
-    (async () => {
-      if (!user) {
-        setRows(localRows);
-        return;
-      }
-      setLoading(true);
-      try {
-        const { from, to } = getLastNDaysIso(30);
-        const data = await getDailyMetricsRange(user.id, from, to);
-        const normalized = Array.isArray(data) ? data.map(r => ({
-          day: r.day || r.date || toIsoDay(r.day || new Date()),
-          cals_burned: r.cals_burned ?? 0,
-          cals_eaten:  r.cals_eaten  ?? 0,
-          net_cals:    (r.net_cals != null ? r.net_cals : (r.cals_eaten ?? 0) - (r.cals_burned ?? 0))
-        })) : [];
-        if (!ignore) setRows(sortDesc(normalized));
-      } catch (err) {
-        console.error('[CalorieHistory] fetch failed, falling back to local', err);
-        if (!ignore) setRows(localRows);
-      } finally {
-        if (!ignore) setLoading(false);
-      }
-    })();
-    return () => { ignore = true; };
-  }, [user, localRows]);
+    const kick = () => recompute();
+    const onStorage = (e) => {
+      if (!e || !e.key || ['mealHistory','workoutHistory'].includes(e.key)) recompute();
+    };
+    const onVisOrFocus = () => recompute();
+
+    window.addEventListener('slimcal:consumed:update', kick);
+    window.addEventListener('slimcal:burned:update',   kick);
+    window.addEventListener('storage',                 onStorage);
+    document.addEventListener('visibilitychange',      onVisOrFocus);
+    window.addEventListener('focus',                   onVisOrFocus);
+
+    return () => {
+      window.removeEventListener('slimcal:consumed:update', kick);
+      window.removeEventListener('slimcal:burned:update',   kick);
+      window.removeEventListener('storage',                 onStorage);
+      document.removeEventListener('visibilitychange',      onVisOrFocus);
+      window.removeEventListener('focus',                   onVisOrFocus);
+    };
+  }, [recompute]);
 
   // ---- insights (newest-first expected) ----
   const daysTracked = rows.length;
@@ -123,6 +140,10 @@ export default function CalorieHistory() {
   const deficitPct  = daysTracked ? Math.round((deficitDays / daysTracked) * 100) : 0;
   const avgNet7     = Math.round(rollingAvg(rows.map(r => r.net_cals ?? ((r.cals_eaten||0)-(r.cals_burned||0))), 7));
   const streak      = calcStreak(rows);
+
+  // persona chips (relatable, persistent)
+  const trainingIntent = (localStorage.getItem('training_intent') || 'general').replace('_',' ');
+  const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
 
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
@@ -174,22 +195,14 @@ export default function CalorieHistory() {
                 return (
                   <TableRow key={i}>
                     <TableCell>
-                      {(() => {
-                        try { return new Date(r.day).toLocaleDateString('en-US'); }
-                        catch { return r.day; }
-                      })()}
+                      {(() => { try { return new Date(r.day).toLocaleDateString('en-US'); } catch { return r.day; } })()}
                     </TableCell>
                     <TableCell align="right">{Math.round(r.cals_burned || 0)}</TableCell>
                     <TableCell align="right">{Math.round(r.cals_eaten  || 0)}</TableCell>
                     <TableCell align="right">
                       <Box sx={{ display:'inline-flex', alignItems:'center', gap:1 }}>
                         {Math.round(net)}
-                        <Chip
-                          size="small"
-                          label={label}
-                          color={net >= 0 ? 'warning' : 'success'}
-                          variant="outlined"
-                        />
+                        <Chip size="small" label={label} color={net >= 0 ? 'warning' : 'success'} variant="outlined" />
                       </Box>
                     </TableCell>
                   </TableRow>
