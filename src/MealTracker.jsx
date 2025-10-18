@@ -1,3 +1,4 @@
+// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Typography, Box, TextField,
