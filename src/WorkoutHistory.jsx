@@ -28,6 +28,16 @@ function calcCaloriesFromSets(sets) {
 }
 
 function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+// ⬇️ NEW: date-only formatter to avoid “12:00 AM” midnight artifact
+function formatDateOnly(iso) {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch { return iso; }
+}
 function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; } }
 
 // --- Local matching helpers --------------------------------------------------
@@ -200,6 +210,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
   }
 
   function openShareFor(row) {
+    // Keep full timestamp for the share text; list view shows date-only
     const date = formatDateTime(row.started_at);
     const total = Number(row.total_calories) || 0;
     const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(2)} calories burned! #SlimcalAI`;
@@ -229,7 +240,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
                 <ListItemText
                   primary={
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="h6">{formatDateTime(w.started_at)}</Typography>
+                      {/* ⬇️ date-only display to avoid midnight artifact */}
+                      <Typography variant="h6">{formatDateOnly(w.started_at)}</Typography>
                       <Typography variant="body2" color="text.secondary">
                         {(Number(w.total_calories) || 0).toFixed(2)} cals
                       </Typography>
@@ -240,8 +252,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                       {(w.sets || []).length > 0 ? (
                         w.sets.map((s, i) => (
                           <Typography key={i} variant="body2">
-                            • {s.exercise_name} {s.reps ? `× ${s.reps}` : ''}
-                            {s.weight ? ` @ ${s.weight}` : ''}
+                            • {s.exercise_name} {s.reps ? `× ${s.reps}` : ''}{s.weight ? ` @ ${s.weight}` : ''}
                           </Typography>
                         ))
                       ) : (
@@ -268,7 +279,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
         onClose={() => setShareOpen(false)}
         shareText={shareText}
         shareUrl={window.location.href}
-        // NEW: pass exact row data so modal doesn't use an old session
+        // Pass exact row data so modal doesn't use an old session
         exercises={shareExercises}
         totalCalories={shareTotal}
       />
