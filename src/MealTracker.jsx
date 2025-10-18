@@ -12,40 +12,32 @@ import { updateStreak } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
 
-// ✅ NEW: auth + db
+// ✅ auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
 
-// ---- Pro gating helpers (kept as a client-side fallback) ----
+// ---- Pro gating helpers (client fallback) ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
   return !!ud.isPremium;
 };
 
-const getMealAICount = () =>
-  parseInt(localStorage.getItem('aiMealCount') || '0', 10);
+const getMealAICount = () => parseInt(localStorage.getItem('aiMealCount') || '0', 10);
+const incMealAICount = () => localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
-const incMealAICount = () =>
-  localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
-
-// Lightweight POST for entitlement probe
+// Entitlement probe
 async function probeEntitlement(payload) {
   const base = { feature: 'meal', type: 'meal', mode: 'meal', ...payload, count: 1 };
-
   try {
     let resp = await fetch('/api/ai/generate', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(base)
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(base)
     });
     if (resp.status === 402) return { gated: true };
     if (resp.ok) return { gated: false };
     if (resp.status === 400 || resp.status === 404) {
       resp = await fetch('/api/ai/meal-suggestion', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(base)
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(base)
       });
       if (resp.status === 402) return { gated: true };
       return { gated: !resp.ok };
@@ -54,6 +46,15 @@ async function probeEntitlement(payload) {
   } catch {
     return { gated: false };
   }
+}
+
+// 🔗 Helper: read today's burned kcal from local first (history) for completeness
+function getBurnedTodayLocal(dateUS) {
+  try {
+    const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const entry = all.find(e => e.date === dateUS);
+    return entry?.totalCalories || 0;
+  } catch { return 0; }
 }
 
 export default function MealTracker({ onMealUpdate }) {
@@ -69,34 +70,58 @@ export default function MealTracker({ onMealUpdate }) {
   const [showSuggest, setShowSuggest]     = useState(false);
   const [showUpgrade, setShowUpgrade]     = useState(false);
 
-  // ✅ who is signed in (if any)
   const { user } = useAuth();
 
-  const today       = new Date().toLocaleDateString('en-US');
-  const stored      = JSON.parse(localStorage.getItem('userData')||'{}');
-  const dailyGoal   = stored.dailyGoal || 0;
-  const goalType    = stored.goalType  || 'maintain';
-  const recentMeals = mealLog.map(m=>m.name);
+  const todayUS    = new Date().toLocaleDateString('en-US'); // e.g., 10/17/2025
+  const todayISO   = new Date().toISOString().slice(0,10);   // YYYY-MM-DD
+  const stored     = JSON.parse(localStorage.getItem('userData')||'{}');
+  const goalType   = stored.goalType  || 'maintain';
 
-  // Load today’s meals
+  // Load today’s meals (local-first)
   useEffect(()=>{
     const all = JSON.parse(localStorage.getItem('mealHistory')||'[]');
-    const todayLog = all.find(e=>e.date===today);
+    const todayLog = all.find(e=>e.date===todayUS);
     const meals = todayLog?todayLog.meals:[];
     setMealLog(meals);
     onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
-  },[onMealUpdate,today]);
+  },[onMealUpdate,todayUS]);
 
   const persistToday = (meals) => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
-      .filter(e=>e.date!==today);
-    rest.push({ date:today, meals });
+      .filter(e=>e.date!==todayUS);
+    rest.push({ date:todayUS, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
+  };
+
+  // 🧠 Single source of truth updater for banner/summary/cloud
+  const syncDailyMetrics = async (consumedTotal) => {
+    // local cache that NetCalorieBanner/CalorieSummary can read
+    const burned = getBurnedTodayLocal(todayUS);
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
+    cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
+    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+    localStorage.setItem('consumedToday', String(consumedTotal)); // legacy/fallback key
+
+    // nudge listeners (if any) for live updates without reload
+    try {
+      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: consumedTotal }}));
+    } catch {}
+
+    // cloud upsert (authoritative on refresh/load)
+    try {
+      if (user?.id) {
+        await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
+      }
+    } catch (err) {
+      console.error('[MealTracker] upsertDailyMetrics failed', err);
+    }
   };
 
   const save = (meals) => {
     persistToday(meals);
-    onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
+    const total = meals.reduce((s,m)=>s+(m.calories||0),0);
+    onMealUpdate(total);
+    syncDailyMetrics(total);
   };
 
   const handleAdd = async () => {
@@ -106,10 +131,12 @@ export default function MealTracker({ onMealUpdate }) {
     }
     const nm = { name:foodInput.trim(), calories:c };
     const upd = [...mealLog,nm];
-    setMealLog(upd); save(upd); updateStreak();
+    setMealLog(upd);
+    save(upd);
+    updateStreak();
     setFoodInput(''); setCalories(''); setSelectedFood(null);
 
-    // ✅ Cloud write-through (if logged in)
+    // (Optional) itemized cloud save; not required for banner sync
     try {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
@@ -121,27 +148,26 @@ export default function MealTracker({ onMealUpdate }) {
           food_name: nm.name, qty: 1, unit: 'serving',
           calories: nm.calories, protein: null, carbs: null, fat: null,
         }]);
-        const day = eatenISO.slice(0,10);
-        await upsertDailyMetrics(user.id, day, 0, nm.calories || 0);
       }
     } catch (err) {
       console.error('[MealTracker] cloud save failed', err);
     }
   };
 
-  // 🆕 Delete a single meal by index (local-first + instant UI update)
+  // 🆕 Delete a single meal by index (local-first + metrics sync)
   const handleDeleteMeal = (index) => {
     const updatedMeals = mealLog.filter((_, i) => i !== index);
     setMealLog(updatedMeals);
     save(updatedMeals);
-    // (Optional) cloud deletion could be added later if meals are stored itemized in DB
   };
 
   const handleClear = () => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
-      .filter(e=>e.date!==today);
+      .filter(e=>e.date!==todayUS);
     localStorage.setItem('mealHistory', JSON.stringify(rest));
-    setMealLog([]); onMealUpdate(0);
+    setMealLog([]);
+    onMealUpdate(0);
+    syncDailyMetrics(0);
   };
 
   // ---- PRO GATE: Suggest a Meal (AI) ----
@@ -151,7 +177,6 @@ export default function MealTracker({ onMealUpdate }) {
         const used = getMealAICount();
         if (used >= 3) { setShowUpgrade(true); return; }
       }
-
       try {
         const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
         const trainingIntent   = localStorage.getItem('training_intent') || 'general';
@@ -241,37 +266,36 @@ export default function MealTracker({ onMealUpdate }) {
       )}
 
       <Typography variant="h6" gutterBottom sx={{mt:4}}>
-        Meals Logged Today ({today})
+        Meals Logged Today ({todayUS})
       </Typography>
-      {mealLog.length===0
-        ? <Typography>No meals added yet.</Typography>
-        : (
-          <List>
-            {mealLog.map((m,i)=>(
-              <Box key={`${m.name}-${i}`}>
-                <ListItem
-                  secondaryAction={
-                    <Tooltip title="Delete this meal">
-                      <IconButton edge="end" aria-label="delete meal"
-                        onClick={()=>handleDeleteMeal(i)}>
-                        <DeleteIcon />
-                      </IconButton>
-                    </Tooltip>
-                  }
-                >
-                  <ListItemText primary={m.name} secondary={`${m.calories||0} cals`} />
-                </ListItem>
-                <Divider />
-              </Box>
-            ))}
-          </List>
-        )}
+
+      {mealLog.length===0 ? (
+        <Typography>No meals added yet.</Typography>
+      ) : (
+        <List>
+          {mealLog.map((m,i)=>(
+            <Box key={`${m.name}-${i}`}>
+              <ListItem
+                secondaryAction={
+                  <Tooltip title="Delete this meal">
+                    <IconButton edge="end" aria-label="delete meal" onClick={()=>handleDeleteMeal(i)}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </Tooltip>
+                }
+              >
+                <ListItemText primary={m.name} secondary={`${m.calories||0} cals`} />
+              </ListItem>
+              <Divider />
+            </Box>
+          ))}
+        </List>
+      )}
 
       <Typography variant="h6" align="right" sx={{mt:3}}>
         Total Calories: {total}
       </Typography>
 
-      {/* Paywall modal */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
