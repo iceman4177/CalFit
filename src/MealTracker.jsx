@@ -1,4 +1,3 @@
-// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Typography, Box, TextField,
@@ -12,48 +11,38 @@ import { updateStreak } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
 
-// ✅ auth + db
+// auth + db (history/backup; NOT used for today’s banner math)
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
 
-// ---- Pro gating helpers (client fallback) ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
   return !!ud.isPremium;
 };
-
 const getMealAICount = () => parseInt(localStorage.getItem('aiMealCount') || '0', 10);
 const incMealAICount = () => localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
-// Entitlement probe
 async function probeEntitlement(payload) {
   const base = { feature: 'meal', type: 'meal', mode: 'meal', ...payload, count: 1 };
   try {
-    let resp = await fetch('/api/ai/generate', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(base)
-    });
-    if (resp.status === 402) return { gated: true };
-    if (resp.ok) return { gated: false };
+    let resp = await fetch('/api/ai/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(base) });
+    if (resp.status === 402) return { gated:true };
+    if (resp.ok) return { gated:false };
     if (resp.status === 400 || resp.status === 404) {
-      resp = await fetch('/api/ai/meal-suggestion', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(base)
-      });
-      if (resp.status === 402) return { gated: true };
+      resp = await fetch('/api/ai/meal-suggestion', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(base) });
+      if (resp.status === 402) return { gated:true };
       return { gated: !resp.ok };
     }
     return { gated: !resp.ok };
-  } catch {
-    return { gated: false };
-  }
+  } catch { return { gated:false }; }
 }
 
-// 🔗 Helper: read today's burned kcal from local first (history) for completeness
 function getBurnedTodayLocal(dateUS) {
   try {
     const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const entry = all.find(e => e.date === dateUS);
-    return entry?.totalCalories || 0;
+    return Number(entry?.totalCalories) || 0;
   } catch { return 0; }
 }
 
@@ -63,55 +52,56 @@ export default function MealTracker({ onMealUpdate }) {
   const [AddTip,   triggerAddTip]   = useFirstTimeTip('tip_add',   'Tap to add this meal.');
   const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
-  const [foodInput, setFoodInput]         = useState('');
-  const [selectedFood, setSelectedFood]   = useState(null);
-  const [calories, setCalories]           = useState('');
-  const [mealLog, setMealLog]             = useState([]);
-  const [showSuggest, setShowSuggest]     = useState(false);
-  const [showUpgrade, setShowUpgrade]     = useState(false);
+  const [foodInput, setFoodInput]       = useState('');
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [calories, setCalories]         = useState('');
+  const [mealLog, setMealLog]           = useState([]);
+  const [showSuggest, setShowSuggest]   = useState(false);
+  const [showUpgrade, setShowUpgrade]   = useState(false);
 
   const { user } = useAuth();
 
-  const todayUS    = new Date().toLocaleDateString('en-US'); // e.g., 10/17/2025
-  const todayISO   = new Date().toISOString().slice(0,10);   // YYYY-MM-DD
-  const stored     = JSON.parse(localStorage.getItem('userData')||'{}');
-  const goalType   = stored.goalType  || 'maintain';
+  const todayUS  = new Date().toLocaleDateString('en-US');
+  const todayISO = new Date().toISOString().slice(0,10);
+  const stored   = JSON.parse(localStorage.getItem('userData')||'{}');
+  const goalType = stored.goalType  || 'maintain';
 
   // Load today’s meals (local-first)
   useEffect(()=>{
     const all = JSON.parse(localStorage.getItem('mealHistory')||'[]');
     const todayLog = all.find(e=>e.date===todayUS);
-    const meals = todayLog?todayLog.meals:[];
+    const meals = todayLog ? (todayLog.meals || []) : [];
     setMealLog(meals);
-    onMealUpdate(meals.reduce((s,m)=>s+(m.calories||0),0));
+    const total = meals.reduce((s,m)=> s + (Number(m.calories)||0), 0);
+    onMealUpdate?.(total);
   },[onMealUpdate,todayUS]);
 
   const persistToday = (meals) => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
-      .filter(e=>e.date!==todayUS);
+    const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]').filter(e=>e.date!==todayUS);
     rest.push({ date:todayUS, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
   };
 
-  // 🧠 Single source of truth updater for banner/summary/cloud
+  const emitConsumed = (total) => {
+    try {
+      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', {
+        detail: { date: todayISO, consumed: total }
+      }));
+    } catch {}
+  };
+
   const syncDailyMetrics = async (consumedTotal) => {
-    // local cache that NetCalorieBanner/CalorieSummary can read
+    // optional cache for other components (not required anymore)
     const burned = getBurnedTodayLocal(todayUS);
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
     cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-    localStorage.setItem('consumedToday', String(consumedTotal)); // legacy/fallback key
+    localStorage.setItem('consumedToday', String(consumedTotal));
+    emitConsumed(consumedTotal);
 
-    // nudge listeners (if any) for live updates without reload
+    // cloud upsert for history/backup
     try {
-      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: consumedTotal }}));
-    } catch {}
-
-    // cloud upsert (authoritative on refresh/load)
-    try {
-      if (user?.id) {
-        await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
-      }
+      if (user?.id) await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
     } catch (err) {
       console.error('[MealTracker] upsertDailyMetrics failed', err);
     }
@@ -119,24 +109,28 @@ export default function MealTracker({ onMealUpdate }) {
 
   const save = (meals) => {
     persistToday(meals);
-    const total = meals.reduce((s,m)=>s+(m.calories||0),0);
-    onMealUpdate(total);
+    const total = meals.reduce((s,m)=> s + (Number(m.calories)||0), 0);
+    onMealUpdate?.(total);
     syncDailyMetrics(total);
   };
 
   const handleAdd = async () => {
-    const c = parseInt(calories,10);
+    const c = Number.parseInt(calories,10);
     if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
-      return alert('Enter a valid food & calories.');
+      alert('Enter a valid food & calories.');
+      return;
     }
-    const nm = { name:foodInput.trim(), calories:c };
-    const upd = [...mealLog,nm];
-    setMealLog(upd);
-    save(upd);
+    const nm = { name: foodInput.trim(), calories: c };
+
+    setMealLog(prev => {
+      const upd = [...prev, nm];
+      save(upd);
+      return upd;
+    });
     updateStreak();
     setFoodInput(''); setCalories(''); setSelectedFood(null);
 
-    // (Optional) itemized cloud save; not required for banner sync
+    // optional: itemized cloud save
     try {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
@@ -154,35 +148,30 @@ export default function MealTracker({ onMealUpdate }) {
     }
   };
 
-  // 🆕 Delete a single meal by index (local-first + metrics sync)
   const handleDeleteMeal = (index) => {
-    const updatedMeals = mealLog.filter((_, i) => i !== index);
-    setMealLog(updatedMeals);
-    save(updatedMeals);
+    setMealLog(prev => {
+      const updatedMeals = prev.filter((_, i) => i !== index);
+      save(updatedMeals);
+      return updatedMeals;
+    });
   };
 
   const handleClear = () => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
-      .filter(e=>e.date!==todayUS);
+    const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]').filter(e=>e.date!==todayUS);
     localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]);
-    onMealUpdate(0);
+    onMealUpdate?.(0);
     syncDailyMetrics(0);
   };
 
-  // ---- PRO GATE: Suggest a Meal (AI) ----
   const handleAIMealSuggestClick = useCallback(async () => {
     if (!showSuggest) {
-      if (!isProUser()) {
-        const used = getMealAICount();
-        if (used >= 3) { setShowUpgrade(true); return; }
-      }
+      if (!isProUser() && getMealAICount() >= 3) { setShowUpgrade(true); return; }
       try {
-        const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
-        const trainingIntent   = localStorage.getItem('training_intent') || 'general';
-        const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
-        const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
-
+        const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
+        const trainingIntent = localStorage.getItem('training_intent') || 'general';
+        const proteinMealG   = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
+        const calorieBias    = parseInt(localStorage.getItem('calorie_bias') || '0',10);
         const probePayload = {
           user_id: user?.id || null,
           goal: goalType || 'maintenance',
@@ -193,13 +182,9 @@ export default function MealTracker({ onMealUpdate }) {
             calorie_bias: calorieBias || undefined,
           }
         };
-
         const { gated } = await probeEntitlement(probePayload);
         if (gated) { setShowUpgrade(true); return; }
-      } catch (e) {
-        console.warn('[MealTracker] gateway probe failed, showing local suggestions UI', e);
-      }
-
+      } catch (e) { console.warn('[MealTracker] gateway probe failed', e); }
       if (!isProUser()) incMealAICount();
       setShowSuggest(true);
       return;
@@ -207,7 +192,7 @@ export default function MealTracker({ onMealUpdate }) {
     setShowSuggest(false);
   }, [showSuggest, user?.id, goalType]);
 
-  const total = mealLog.reduce((s,m)=>s+(m.calories||0),0);
+  const total = mealLog.reduce((s,m)=> s + (Number(m.calories)||0), 0);
 
   return (
     <Container maxWidth="sm" sx={{py:4}}>
@@ -255,11 +240,13 @@ export default function MealTracker({ onMealUpdate }) {
         <MealSuggestion
           consumedCalories={total}
           onAddMeal={m=>{
-            const safeCalories = Number.isFinite(m.calories) ? m.calories : 0;
-            const nm={ name:m.name, calories:safeCalories };
-            const upd=[...mealLog,nm];
-            setMealLog(upd);
-            save(upd);
+            const safeCalories = Number.isFinite(m.calories) ? Number(m.calories) : 0;
+            const nm = { name:m.name, calories:safeCalories };
+            setMealLog(prev => {
+              const upd = [...prev, nm];
+              save(upd);
+              return upd;
+            });
             updateStreak();
           }}
         />
@@ -284,7 +271,7 @@ export default function MealTracker({ onMealUpdate }) {
                   </Tooltip>
                 }
               >
-                <ListItemText primary={m.name} secondary={`${m.calories||0} cals`} />
+                <ListItemText primary={m.name} secondary={`${Number(m.calories)||0} cals`} />
               </ListItem>
               <Divider />
             </Box>
