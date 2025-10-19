@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -71,7 +72,8 @@ import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
   getStreak,
-  updateStreak
+  updateStreak,
+  hydrateStreakOnStartup,        // <-- NEW: safe init (no increments)
 } from './utils/streak';
 
 const routeTips = {
@@ -206,7 +208,12 @@ export default function App() {
     setUserDataState(next);
   };
 
+  // ✅ Streak state (keeps StreakBanner/Ambassador in sync in real-time)
+  const [streak, setStreak] = useState(() => getStreak());
+
+  // ✅ BOOT: hydrate streak shape safely (no increments), preload userData, refresh calories, initial modal check
   useEffect(() => {
+    hydrateStreakOnStartup();           // <--- new safe init (prevents undefined banners)
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     const normalized = { ...saved, isPremium: isProActive };
     setUserDataState(normalized);
@@ -217,27 +224,33 @@ export default function App() {
       history.replace('/edit-info');
     }
 
-    // ✅ Initialize ONLY if streak has never been set
-try {
-const ud = JSON.parse(localStorage.getItem('userData') || '{}');
-if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
-} catch {}
-
-    // ✅ Ambassador trigger (initial check on load)
+    // Ambassador trigger (initial check) after hydration
     if (shouldShowAmbassadorOnce(30)) {
       setAmbassadorOpen(true);
     }
+
+    // Initialize live streak value after hydration
+    setStreak(getStreak());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProActive, location.pathname, history]);
 
-  // ✅ Ambassador trigger (live) — listen to streak updates
+  // ✅ Live streak updates → update local streak state + gate modal
   useEffect(() => {
-    function onStreakUpdate() {
+    const onStreakUpdate = () => {
+      setStreak(getStreak());
       if (shouldShowAmbassadorOnce(30)) {
         setAmbassadorOpen(true);
       }
-    }
+    };
     window.addEventListener('slimcal:streak:update', onStreakUpdate);
     return () => window.removeEventListener('slimcal:streak:update', onStreakUpdate);
+  }, []);
+
+  // ✅ Optional: respond to ambassador-ready event directly
+  useEffect(() => {
+    const onAmbassadorReady = () => setAmbassadorOpen(true);
+    window.addEventListener('slimcal:ambassador:ready', onAmbassadorReady);
+    return () => window.removeEventListener('slimcal:ambassador:ready', onAmbassadorReady);
   }, []);
 
   // Handle OAuth callback
@@ -385,9 +398,6 @@ if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
 
   const showTryPro = !(isProActive || localPro);
 
-  // Single source of truth for current streak
-  const currentStreak = getStreak();
-
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
       <PageTracker />
@@ -413,7 +423,7 @@ if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
           setAmbassadorOpen(false);
         }}
         user={authUser}
-        streak={currentStreak}
+        streak={streak}
       />
 
       <Box sx={{ textAlign: 'center', mb: 2 }}>
@@ -461,8 +471,8 @@ if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
       </Box>
 
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-      {/* Pass streak explicitly so banner shows the same number as the modal gate */}
-      <StreakBanner streak={currentStreak} />
+      {/* Pass live streak so banner matches modal gate */}
+      <StreakBanner streak={streak} />
       <SocialProofBanner />
       {navBar}
 
@@ -477,6 +487,7 @@ if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
             const next = { ...prev, ...data, isPremium: isProActive || localPro };
             localStorage.setItem('userData', JSON.stringify(next));
             setUserDataState(next);
+            // After first-time setup, return home
             history.push('/');
           }} />
         }/>
