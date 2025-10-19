@@ -118,6 +118,52 @@ async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
   }
 }
 
+// --- NEW: identity sender ---------------------------------------------
+function parseUtm(search) {
+  const params = new URLSearchParams(search || '');
+  return {
+    utm_source: params.get('utm_source'),
+    utm_medium: params.get('utm_medium'),
+    utm_campaign: params.get('utm_campaign'),
+  };
+}
+
+async function sendIdentity({
+  user,
+  path,
+  isProActive,
+  planStatus
+}) {
+  try {
+    const clientId = getOrCreateClientId();
+    const { utm_source, utm_medium, utm_campaign } = parseUtm(window.location.search);
+    const payload = {
+      user_id: user?.id || null,
+      email: user?.email || null,
+      full_name: user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? null,
+      client_id: clientId,
+      last_path: path || '/',
+      is_pro: !!isProActive,
+      plan_status: planStatus || null,
+      source: 'web',
+      utm_source,
+      utm_medium,
+      utm_campaign,
+      referrer: document.referrer || null,
+      user_agent: navigator.userAgent || null,
+    };
+
+    await fetch('/api/identify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    console.error('[identify] failed', err);
+  }
+}
+// ----------------------------------------------------------------------
+
 export default function App() {
   const history      = useHistory();
   const location     = useLocation();
@@ -391,6 +437,33 @@ export default function App() {
   }, []);
 
   const showTryPro = !(isProActive || localPro);
+
+  // --- NEW: call /api/identify on auth/route/plan changes + heartbeat ---
+  const lastIdentRef = useRef({ path: null, ts: 0 });
+  useEffect(() => {
+    if (!authUser) return;
+    const now = Date.now();
+    const path = location.pathname || '/';
+
+    // Throttle duplicate calls (e.g., rapid route changes)
+    const tooSoon = (now - lastIdentRef.current.ts) < 2000 && lastIdentRef.current.path === path;
+    if (!tooSoon) {
+      sendIdentity({ user: authUser, path, isProActive, planStatus: status });
+      lastIdentRef.current = { path, ts: now };
+    }
+  }, [authUser?.id, location.pathname, isProActive, status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!authUser) return;
+    const onFocus = () => sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
+    window.addEventListener('focus', onFocus);
+    const iv = setInterval(onFocus, 60_000); // heartbeat every 60s
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(iv);
+    };
+  }, [authUser?.id, location.pathname, isProActive, status]);
+  // ----------------------------------------------------------------------
 
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
