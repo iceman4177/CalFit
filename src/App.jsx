@@ -69,6 +69,9 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
+// 🔗 NEW: attach offline sync listeners (Step 1 plumbing)
+import { attachSyncListeners } from './lib/sync';
+
 // Streak helpers
 import {
   shouldShowAmbassadorOnce,
@@ -310,6 +313,11 @@ export default function App() {
     });
 
     return () => sub?.subscription?.unsubscribe?.();
+  }, []);
+
+  // 🔗 NEW: attach offline sync listeners once on mount
+  useEffect(() => {
+    attachSyncListeners();
   }, []);
 
   useEffect(() => {
