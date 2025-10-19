@@ -293,26 +293,8 @@ export default function App() {
     return () => window.removeEventListener('slimcal:ambassador:ready', onAmbassadorReady);
   }, []);
 
-  // Handle OAuth callback
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const hasCode = url.searchParams.get('code');
-    const hash = window.location.hash || '';
-    const hasHashTokens = /access_token=|refresh_token=/.test(hash);
-    if (!hasCode && !hasHashTokens) return;
-
-    (async () => {
-      try {
-        if (hasCode) {
-          await supabase.auth.exchangeCodeForSession(window.location.href);
-        } else {
-          await new Promise(r => setTimeout(r, 100));
-        }
-      } finally {
-        window.history.replaceState({}, '', `${url.origin}${url.pathname}`);
-      }
-    })();
-  }, []);
+  // ❌ REMOVED: Global OAuth code exchange in App.jsx (handled solely by /auth/callback)
+  // This prevents race conditions where App clears the URL or runs exchange twice.
 
   // Auto-checkout
   useEffect(() => {
@@ -438,7 +420,7 @@ export default function App() {
 
   const showTryPro = !(isProActive || localPro);
 
-  // --- NEW: call /api/identify on auth/route/plan changes + heartbeat ---
+  // --- call /api/identify on auth/route/plan changes + heartbeat ---
   const lastIdentRef = useRef({ path: null, ts: 0 });
   useEffect(() => {
     if (!authUser) return;
