@@ -159,9 +159,17 @@ async function sendIdentity({ user, path, isProActive, planStatus }) {
 }
 // -----------------------------------------------------------------------
 
-// ---- NEW: user heartbeat -> /api/users/heartbeat ----------------------
+// ---- user heartbeat -> /api/users/heartbeat ----------------------------
 const HEARTBEAT_KEY = 'slimcal:lastHeartbeatTs';
+const LAST_HB_EMAIL_KEY = 'slimcal:lastHeartbeatEmail';
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
+function rememberHeartbeatEmail(email) {
+  if (email) localStorage.setItem(LAST_HB_EMAIL_KEY, email);
+}
+function lastHeartbeatEmail() {
+  return localStorage.getItem(LAST_HB_EMAIL_KEY) || '';
+}
 
 async function sendHeartbeat({ id, email, provider, display_name, last_client }) {
   try {
@@ -190,7 +198,10 @@ async function heartbeatNow(session) {
   const last_client = 'web:slimcal-ai';
 
   const res = await sendHeartbeat({ id, email, provider, display_name, last_client });
-  if (res?.ok) localStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
+  if (res?.ok) {
+    localStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
+    rememberHeartbeatEmail(email); // <-- track which account we captured
+  }
 }
 // -----------------------------------------------------------------------
 
@@ -216,11 +227,23 @@ export default function App() {
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ?? null);
-      // Heartbeat immediately on auth state change if throttled window allows
+    // FORCE heartbeat on new login or account switch (no throttle).
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const user = session?.user ?? null;
+      setAuthUser(user);
+
+      const email = user?.email || '';
+      if (email) {
+        const prev = lastHeartbeatEmail();
+        if (prev !== email) {
+          await heartbeatNow(session);   // unthrottled first ping for this account
+          return;
+        }
+      }
+
+      // Same account: respect 12h throttle
       if (session && shouldHeartbeat()) {
-        heartbeatNow(session);
+        await heartbeatNow(session);
       }
     });
 
@@ -360,16 +383,24 @@ export default function App() {
   }, [authUser?.id, location.pathname, isProActive, status]);
   // ----------------------------------------------------------------------
 
-  // ---- NEW: user heartbeat calls (12h throttle + on focus) --------------
+  // ---- user heartbeat calls (initial + visibility, with switch handling) -
   useEffect(() => {
     let visHandler;
 
     (async () => {
-      // initial heartbeat on mount if we already have a session and throttle allows
       const { data } = await supabase.auth.getSession();
       const session = data?.session || null;
-      if (session && shouldHeartbeat()) {
-        await heartbeatNow(session);
+
+      if (session?.user?.email) {
+        const email = session.user.email;
+        const prev  = lastHeartbeatEmail();
+
+        // If no record for this email yet, force an immediate ping (no throttle).
+        if (email && prev !== email) {
+          await heartbeatNow(session);
+        } else if (shouldHeartbeat()) {
+          await heartbeatNow(session);
+        }
       }
     })();
 
@@ -377,7 +408,10 @@ export default function App() {
       if (document.visibilityState !== 'visible') return;
       const { data } = await supabase.auth.getSession();
       const session = data?.session || null;
-      if (session && shouldHeartbeat()) {
+      if (!session?.user?.email) return;
+
+      // For visibility-triggered pings, respect the 12h throttle
+      if (shouldHeartbeat()) {
         await heartbeatNow(session);
       }
     };
