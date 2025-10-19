@@ -159,6 +159,41 @@ async function sendIdentity({ user, path, isProActive, planStatus }) {
 }
 // -----------------------------------------------------------------------
 
+// ---- NEW: user heartbeat -> /api/users/heartbeat ----------------------
+const HEARTBEAT_KEY = 'slimcal:lastHeartbeatTs';
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
+async function sendHeartbeat({ id, email, provider, display_name, last_client }) {
+  try {
+    const res = await fetch('/api/users/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, email, provider, display_name, last_client }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function shouldHeartbeat() {
+  const last = Number(localStorage.getItem(HEARTBEAT_KEY) || 0);
+  return Date.now() - last > TWELVE_HOURS_MS;
+}
+
+async function heartbeatNow(session) {
+  if (!session?.user?.email) return;
+  const id = session.user.id;
+  const email = session.user.email;
+  const provider = session.user.app_metadata?.provider || 'unknown';
+  const display_name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || '';
+  const last_client = 'web:slimcal-ai';
+
+  const res = await sendHeartbeat({ id, email, provider, display_name, last_client });
+  if (res?.ok) localStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
+}
+// -----------------------------------------------------------------------
+
 export default function App() {
   const history      = useHistory();
   const location     = useLocation();
@@ -183,6 +218,10 @@ export default function App() {
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthUser(session?.user ?? null);
+      // Heartbeat immediately on auth state change if throttled window allows
+      if (session && shouldHeartbeat()) {
+        heartbeatNow(session);
+      }
     });
 
     return () => sub?.subscription?.unsubscribe?.();
@@ -290,7 +329,7 @@ export default function App() {
 
   // ✅ OAuth code exchange happens ONLY in /auth/callback (not here).
 
-  // --- call /api/identify on auth/route/plan changes + heartbeat ---
+  // --- call /api/identify on auth/route/plan changes + existing 60s focus poll ---
   const lastIdentRef = useRef({ path: null, ts: 0 });
   useEffect(() => {
     if (!authUser) return;
@@ -313,12 +352,41 @@ export default function App() {
     const onFocus = () =>
       sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
     window.addEventListener('focus', onFocus);
-    const iv = setInterval(onFocus, 60_000); // heartbeat every 60s
+    const iv = setInterval(onFocus, 60_000); // heartbeat-like identify every 60s (kept as-is)
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(iv);
     };
   }, [authUser?.id, location.pathname, isProActive, status]);
+  // ----------------------------------------------------------------------
+
+  // ---- NEW: user heartbeat calls (12h throttle + on focus) --------------
+  useEffect(() => {
+    let visHandler;
+
+    (async () => {
+      // initial heartbeat on mount if we already have a session and throttle allows
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session || null;
+      if (session && shouldHeartbeat()) {
+        await heartbeatNow(session);
+      }
+    })();
+
+    visHandler = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session || null;
+      if (session && shouldHeartbeat()) {
+        await heartbeatNow(session);
+      }
+    };
+
+    document.addEventListener('visibilitychange', visHandler);
+    return () => {
+      document.removeEventListener('visibilitychange', visHandler);
+    };
+  }, []);
   // ----------------------------------------------------------------------
 
   function refreshCalories() {

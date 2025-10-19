@@ -1,7 +1,6 @@
 // /api/identify.js
 import { createClient } from '@supabase/supabase-js';
 
-// Force Node runtime in Vercel
 export const config = { runtime: 'nodejs' };
 
 export default async function handler(req, res) {
@@ -10,27 +9,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Accept either Vercel/Next or generic env names
     const URL =
       process.env.NEXT_PUBLIC_SUPABASE_URL ||
       process.env.SUPABASE_URL;
-
     const SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!URL || !SRK) {
-      return res
-        .status(500)
-        .json({ ok: false, error: 'Missing Supabase env vars' });
+      return res.status(500).json({ ok: false, error: 'Missing Supabase env vars' });
     }
 
-    const supabase = createClient(URL, SRK, { auth: { persistSession: false } });
+    const admin = createClient(URL, SRK, { auth: { persistSession: false } });
 
-    // Parse body safely
-    const body =
-      typeof req.body === 'string'
-        ? JSON.parse(req.body || '{}')
-        : (req.body || {});
-
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const {
       user_id = null,          // Supabase auth user id
       email = null,
@@ -48,14 +38,10 @@ export default async function handler(req, res) {
     } = body;
 
     if (!user_id && !email) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'Missing user_id or email' });
+      return res.status(400).json({ ok: false, error: 'Missing user_id or email' });
     }
 
     const now = new Date().toISOString();
-
-    // Common fields; map auth user id -> "id" column
     const base = {
       email,
       full_name,
@@ -72,35 +58,30 @@ export default async function handler(req, res) {
       user_agent,
     };
 
-    let up;
-    if (user_id) {
-      // Primary path: upsert by id (auth.users.id)
-      up = await supabase
+    // Try modern schema: primary key "id" (uuid) = auth.users.id
+    let up = await admin
+      .from('app_users')
+      .upsert(user_id ? { id: user_id, ...base } : { ...base }, { onConflict: user_id ? 'id' : 'email' })
+      .select()
+      .single();
+
+    // If the column "id" does not exist, retry using legacy "user_id"
+    if (up.error && up.error.code === '42703') {
+      up = await admin
         .from('app_users')
-        .upsert({ id: user_id, ...base }, { onConflict: 'id' })
-        .select()
-        .single();
-    } else {
-      // Fallback: upsert by email (require a unique index on email)
-      up = await supabase
-        .from('app_users')
-        .upsert({ ...base }, { onConflict: 'email' })
+        .upsert(user_id ? { user_id, ...base } : { ...base }, { onConflict: user_id ? 'user_id' : 'email' })
         .select()
         .single();
     }
 
     if (up.error) {
       console.error('[identify] upsert error:', up.error);
-      return res
-        .status(500)
-        .json({ ok: false, error: up.error.message, code: up.error.code });
+      return res.status(500).json({ ok: false, error: up.error.message, code: up.error.code });
     }
 
     return res.status(200).json({ ok: true, user: up.data });
   } catch (e) {
     console.error('[identify] exception:', e);
-    return res
-      .status(500)
-      .json({ ok: false, error: e?.message || 'Unexpected error' });
+    return res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
 }
