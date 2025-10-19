@@ -20,7 +20,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Fab
+  Fab,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -200,8 +202,70 @@ async function heartbeatNow(session) {
   const res = await sendHeartbeat({ id, email, provider, display_name, last_client });
   if (res?.ok) {
     localStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
-    rememberHeartbeatEmail(email); // <-- track which account we captured
+    rememberHeartbeatEmail(email);
   }
+}
+// -----------------------------------------------------------------------
+
+// ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
+
+// Ensure locally saved workouts/meals have stable identifiers & timestamps.
+function normalizeLocalData() {
+  const clientId = getOrCreateClientId();
+
+  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const whNorm = wh.map(w => ({
+    ...w,
+    clientId: w.clientId || clientId,
+    localId: w.localId || `w_${clientId}_${w.createdAt ? Date.parse(w.createdAt) : Date.now()}`,
+    createdAt: w.createdAt || new Date().toISOString(),
+    uploaded: typeof w.uploaded === 'boolean' ? w.uploaded : false,
+  }));
+  localStorage.setItem('workoutHistory', JSON.stringify(whNorm));
+
+  const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+  const mhNorm = mh.map(day => ({
+    ...day,
+    clientId: day.clientId || clientId,
+    localId: day.localId || `m_${clientId}_${day.date || Date.now()}`,
+    createdAt: day.createdAt || new Date().toISOString(),
+    uploaded: typeof day.uploaded === 'boolean' ? day.uploaded : false,
+  }));
+  localStorage.setItem('mealHistory', JSON.stringify(mhNorm));
+}
+
+// Collapse duplicate workouts (same date|name|kcal) keeping newest by createdAt.
+function dedupLocalWorkouts() {
+  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  if (!Array.isArray(wh) || wh.length === 0) return;
+
+  const map = new Map();
+  for (const w of wh) {
+    const kcal = Math.round(Number(w.totalCalories) || 0);
+    const key = [w.date, w.name, kcal].join('|');
+    const prev = map.get(key);
+    if (!prev || new Date(w.createdAt || 0) > new Date(prev.createdAt || 0)) {
+      map.set(key, w);
+    }
+  }
+  const dedup = Array.from(map.values());
+  if (dedup.length !== wh.length) {
+    localStorage.setItem('workoutHistory', JSON.stringify(dedup));
+  }
+}
+
+// Recompute banners/totals after any local mutation.
+function recomputeTodayBanners(setBurned, setConsumed) {
+  const today = new Date().toLocaleDateString('en-US');
+  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+  const todayRec = meals.find(m => m.date === today);
+
+  setBurned(
+    workouts.filter(w => w.date === today)
+            .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
+  );
+  setConsumed(todayRec ? todayRec.meals.reduce((s,m) => s + (Number(m.calories) || 0), 0) : 0);
 }
 // -----------------------------------------------------------------------
 
@@ -236,12 +300,10 @@ export default function App() {
       if (email) {
         const prev = lastHeartbeatEmail();
         if (prev !== email) {
-          await heartbeatNow(session);   // unthrottled first ping for this account
+          await heartbeatNow(session);
           return;
         }
       }
-
-      // Same account: respect 12h throttle
       if (session && shouldHeartbeat()) {
         await heartbeatNow(session);
       }
@@ -395,7 +457,6 @@ export default function App() {
         const email = session.user.email;
         const prev  = lastHeartbeatEmail();
 
-        // If no record for this email yet, force an immediate ping (no throttle).
         if (email && prev !== email) {
           await heartbeatNow(session);
         } else if (shouldHeartbeat()) {
@@ -410,7 +471,6 @@ export default function App() {
       const session = data?.session || null;
       if (!session?.user?.email) return;
 
-      // For visibility-triggered pings, respect the 12h throttle
       if (shouldHeartbeat()) {
         await heartbeatNow(session);
       }
@@ -423,6 +483,35 @@ export default function App() {
   }, []);
   // ----------------------------------------------------------------------
 
+  // ---- LOCAL-FIRST OFFLINE EXPERIENCE -----------------------------------
+  // Normalize + de-dup local data on mount and on visibility/online.
+  useEffect(() => {
+    const run = () => {
+      normalizeLocalData();
+      dedupLocalWorkouts();
+      recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
+    };
+    run();
+
+    const onVis = () => { if (document.visibilityState === 'visible') run(); };
+    const onOnline = () => { run(); setNetSnack({ open: true, type: 'online' }); };
+    const onOffline = () => setNetSnack({ open: true, type: 'offline' });
+
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  // Small network status snackbar
+  const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
+  const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
+  // ----------------------------------------------------------------------
+
   function refreshCalories() {
     const today    = new Date().toLocaleDateString('en-US');
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
@@ -431,10 +520,10 @@ export default function App() {
 
     setBurnedCalories(
       workouts.filter(w => w.date === today)
-              .reduce((sum,w) => sum + w.totalCalories, 0)
+              .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
     );
     setConsumedCalories(
-      todayRec ? todayRec.meals.reduce((sum,m) => sum + m.calories, 0) : 0
+      todayRec ? todayRec.meals.reduce((sum,m) => sum + (Number(m.calories) || 0), 0) : 0
     );
   }
 
@@ -598,8 +687,12 @@ export default function App() {
               const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
               const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
               const todayRec = meals.find(m => m.date === today);
-              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
-              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
+              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+
+              // Normalize & de-dup after a new log (handles offline multi-clicks)
+              normalizeLocalData();
+              dedupLocalWorkouts();
 
               // Streak also updates inside WorkoutPage on Log Workout; keeping this is okay if you prefer redundancy:
               updateStreak();
@@ -614,8 +707,11 @@ export default function App() {
               const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
               const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
               const todayRec = meals.find(m => m.date === today);
-              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
-              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
+              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+
+              // Normalize meals in case they were added offline
+              normalizeLocalData();
             }}
           />
         }/>
@@ -648,6 +744,13 @@ export default function App() {
         defaultPlan={upgradeDefaults.plan}
         autoCheckoutOnOpen={upgradeDefaults.autopay}
       />
+
+      {/* Online/Offline snackbars */}
+      <Snackbar open={netSnack.open} autoHideDuration={2800} onClose={closeNetSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
+        {netSnack.type === 'online'
+          ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
+          : <Alert onClose={closeNetSnack} severity="warning" variant="filled">You’re offline. Entries are saved locally.</Alert>}
+      </Snackbar>
     </Container>
   );
 }
