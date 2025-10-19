@@ -118,7 +118,7 @@ async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
   }
 }
 
-// --- NEW: identity sender ---------------------------------------------
+// ---- identity capture -> /api/identify --------------------------------
 function parseUtm(search) {
   const params = new URLSearchParams(search || '');
   return {
@@ -128,19 +128,15 @@ function parseUtm(search) {
   };
 }
 
-async function sendIdentity({
-  user,
-  path,
-  isProActive,
-  planStatus
-}) {
+async function sendIdentity({ user, path, isProActive, planStatus }) {
   try {
+    if (!user) return;
     const clientId = getOrCreateClientId();
     const { utm_source, utm_medium, utm_campaign } = parseUtm(window.location.search);
     const payload = {
-      user_id: user?.id || null,
-      email: user?.email || null,
-      full_name: user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? null,
+      user_id: user.id,
+      email: user.email || null,
+      full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
       client_id: clientId,
       last_path: path || '/',
       is_pro: !!isProActive,
@@ -152,17 +148,16 @@ async function sendIdentity({
       referrer: document.referrer || null,
       user_agent: navigator.userAgent || null,
     };
-
     await fetch('/api/identify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
   } catch (err) {
     console.error('[identify] failed', err);
   }
 }
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------
 
 export default function App() {
   const history      = useHistory();
@@ -293,58 +288,38 @@ export default function App() {
     return () => window.removeEventListener('slimcal:ambassador:ready', onAmbassadorReady);
   }, []);
 
-  // ❌ REMOVED: Global OAuth code exchange in App.jsx (handled solely by /auth/callback)
-  // This prevents race conditions where App clears the URL or runs exchange twice.
+  // ✅ OAuth code exchange happens ONLY in /auth/callback (not here).
 
-  // Auto-checkout
+  // --- call /api/identify on auth/route/plan changes + heartbeat ---
+  const lastIdentRef = useRef({ path: null, ts: 0 });
   useEffect(() => {
-    if (isProActive || autoRunRef.current) return;
+    if (!authUser) return;
+    const now = Date.now();
+    const path = location.pathname || '/';
 
-    const raw = localStorage.getItem('upgradeIntent');
-    if (!raw) return;
+    // Throttle duplicate calls (e.g., rapid route changes)
+    const tooSoon =
+      (now - lastIdentRef.current.ts) < 2000 &&
+      lastIdentRef.current.path === path;
 
-    let intent = {};
-    try { intent = JSON.parse(raw) || {}; } catch { intent = {}; }
+    if (!tooSoon) {
+      sendIdentity({ user: authUser, path, isProActive, planStatus: status });
+      lastIdentRef.current = { path, ts: now };
+    }
+  }, [authUser?.id, location.pathname, isProActive, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const desiredPlan = intent.plan === 'annual' ? 'annual' : 'monthly';
-    const autopay = Boolean(intent.autopay);
-
-    setUpgradeDefaults({ plan: desiredPlan, autopay });
-    setUpgradeOpen(true);
-
-    if (!autopay) return;
-
-    autoRunRef.current = true;
-    (async () => {
-      const supaUser = await waitForSupabaseUser(10000, 250);
-      if (!supaUser) return;
-
-      try {
-        const clientId = getOrCreateClientId();
-
-        const resp = await fetch('/api/create-checkout-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: supaUser.id,
-            email: supaUser.email || null,
-            period: desiredPlan,
-            client_reference_id: clientId,
-            success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
-            cancel_path: `/`,
-          }),
-        });
-
-        const json = await resp.json().catch(() => ({}));
-        if (!resp.ok || !json?.url) return;
-        window.location.assign(json.url);
-      } catch (err) {
-        console.error('[AutoCheckout] error', err);
-      } finally {
-        localStorage.removeItem('upgradeIntent');
-      }
-    })();
-  }, [isProActive]);
+  useEffect(() => {
+    if (!authUser) return;
+    const onFocus = () =>
+      sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
+    window.addEventListener('focus', onFocus);
+    const iv = setInterval(onFocus, 60_000); // heartbeat every 60s
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(iv);
+    };
+  }, [authUser?.id, location.pathname, isProActive, status]);
+  // ----------------------------------------------------------------------
 
   function refreshCalories() {
     const today    = new Date().toLocaleDateString('en-US');
@@ -419,33 +394,6 @@ export default function App() {
   }, []);
 
   const showTryPro = !(isProActive || localPro);
-
-  // --- call /api/identify on auth/route/plan changes + heartbeat ---
-  const lastIdentRef = useRef({ path: null, ts: 0 });
-  useEffect(() => {
-    if (!authUser) return;
-    const now = Date.now();
-    const path = location.pathname || '/';
-
-    // Throttle duplicate calls (e.g., rapid route changes)
-    const tooSoon = (now - lastIdentRef.current.ts) < 2000 && lastIdentRef.current.path === path;
-    if (!tooSoon) {
-      sendIdentity({ user: authUser, path, isProActive, planStatus: status });
-      lastIdentRef.current = { path, ts: now };
-    }
-  }, [authUser?.id, location.pathname, isProActive, status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!authUser) return;
-    const onFocus = () => sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
-    window.addEventListener('focus', onFocus);
-    const iv = setInterval(onFocus, 60_000); // heartbeat every 60s
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      clearInterval(iv);
-    };
-  }, [authUser?.id, location.pathname, isProActive, status]);
-  // ----------------------------------------------------------------------
 
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
