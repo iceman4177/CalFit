@@ -27,8 +27,10 @@ import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
-import { saveWorkout, upsertDailyMetrics } from './lib/db';
 import { calcExerciseCaloriesHybrid } from './analytics';
+
+// ⬇️ NEW: local-first wrappers (idempotent, queued sync)
+import { saveWorkoutLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 
 // ---- Paywall helpers ----
 const isProUser = () => {
@@ -314,7 +316,15 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const todayStr = now.toLocaleDateString('en-US');
 
     const newSession = {
+      // idempotent fields (client_id will be ensured by wrapper)
       id: crypto?.randomUUID?.() || `w_${Date.now()}`,
+      clientId,
+      localId: `w_${clientId}_${Date.now()}`,
+      createdAt: now.toISOString(),
+      uploaded: false,
+
+      // domain fields
+      user_id: user?.id || null,
       date: todayStr,
       name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
       totalCalories: total,
@@ -325,51 +335,42 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         weight: ex.weight || null,
         calories: ex.calories
       })),
-      clientId,
-      localId: `w_${clientId}_${Date.now()}`,
-      uploaded: false,
-      createdAt: now.toISOString()
     };
 
-    // Save locally (works offline)
-    const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    existing.push(newSession);
-    localStorage.setItem('workoutHistory', JSON.stringify(existing));
+    // ✅ Local-first + queued cloud upsert
+    await saveWorkoutLocalFirst(newSession);
 
     // Update banners & streak locally
-    onWorkoutLogged(total);
+    if (typeof onWorkoutLogged === 'function') onWorkoutLogged(total);
     updateStreak();
+
+    // Recompute today's consumed/burned and upsert daily metrics (local-first)
+    const todayKey = localDayISO();
+    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const burnedToday = workouts
+      .filter(w => w.date === todayStr)
+      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
+
+    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayMealRec = meals.find(m => m.date === todayStr);
+    const consumedToday = todayMealRec
+      ? todayMealRec.meals.reduce((s, m) => s + (Number(m.calories) || 0), 0)
+      : 0;
+
+    await upsertDailyMetricsLocalFirst({
+      user_id: user?.id || null,
+      date_key: todayKey,
+      consumed: consumedToday,
+      burned: burnedToday,
+      net: consumedToday - burnedToday
+    });
 
     // notify local-first listeners (NetCalorieBanner, CalorieSummary, History)
     try {
       window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
-        detail: { date: localDayISO(), burned: total }
+        detail: { date: todayKey, burned: burnedToday }
       }));
     } catch {}
-
-    // Best-effort cloud save (no change from your previous logic)
-    try {
-      if (user?.id) {
-        const nowISO = new Date().toISOString();
-        await saveWorkout(
-          user.id,
-          { started_at: nowISO, ended_at: nowISO, goal: null, notes: null },
-          (newSession.exercises || []).map(s => ({
-            exercise_name: s.name,
-            equipment: null,
-            muscle_group: null,
-            weight: s.weight || null,
-            reps: s.reps || null,
-            tempo: null,
-            volume: (parseInt(s.reps, 10) || 0) * (parseInt(s.sets, 10) || 0),
-          }))
-        );
-        const dayIso = localDayISO();
-        await upsertDailyMetrics(user.id, dayIso, total || 0, 0);
-      }
-    } catch (err) {
-      console.error('[WorkoutPage] cloud save failed', err);
-    }
 
     history.push('/history');
   };
