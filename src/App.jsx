@@ -217,8 +217,11 @@ export default function App() {
       history.replace('/edit-info');
     }
 
-    // ✅ Ensure streak keys exist / bump if crossing local day on first open
-    try { updateStreak(); } catch {}
+    // ✅ Initialize ONLY if streak has never been set
+try {
+const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+if (!ud.lastLogDate || ud.currentStreak == null) updateStreak();
+} catch {}
 
     // ✅ Ambassador trigger (initial check on load)
     if (shouldShowAmbassadorOnce(30)) {
