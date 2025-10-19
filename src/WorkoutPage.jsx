@@ -71,6 +71,16 @@ function localDayISO(d = new Date()) {
   return ld.toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
+// ---- Stable client id for local entries ----
+function getOrCreateClientId() {
+  let cid = localStorage.getItem('clientId');
+  if (!cid) {
+    cid = crypto?.randomUUID?.() || String(Date.now());
+    localStorage.setItem('clientId', cid);
+  }
+  return cid;
+}
+
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
@@ -283,10 +293,30 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTemp('180');
   };
 
+  // 🔧 UPDATED: local-first save with exact totals + stable IDs
   const handleFinish = async () => {
-    const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
+    // If user has a partially filled exercise, add it before finalize
+    if (
+      (newExercise.exerciseType === 'cardio' && parseFloat(newExercise.manualCalories) > 0) ||
+      (newExercise.exerciseName &&
+        parseFloat(newExercise.weight) > 0 &&
+        parseInt(newExercise.reps, 10) > 0)
+    ) {
+      handleAddExercise();
+    }
+
+    // Compute precise total locally (offline-safe)
+    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
+    const total = Math.round(totalRaw * 100) / 100;
+
+    const clientId = getOrCreateClientId();
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-US');
+
     const newSession = {
-      date: new Date().toLocaleDateString('en-US'),
+      id: crypto?.randomUUID?.() || `w_${Date.now()}`,
+      date: todayStr,
+      name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
       totalCalories: total,
       exercises: cumulativeExercises.map(ex => ({
         name: ex.exerciseName,
@@ -294,11 +324,19 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         reps: ex.reps,
         weight: ex.weight || null,
         calories: ex.calories
-      }))
+      })),
+      clientId,
+      localId: `w_${clientId}_${Date.now()}`,
+      uploaded: false,
+      createdAt: now.toISOString()
     };
+
+    // Save locally (works offline)
     const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     existing.push(newSession);
     localStorage.setItem('workoutHistory', JSON.stringify(existing));
+
+    // Update banners & streak locally
     onWorkoutLogged(total);
     updateStreak();
 
@@ -309,6 +347,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       }));
     } catch {}
 
+    // Best-effort cloud save (no change from your previous logic)
     try {
       if (user?.id) {
         const nowISO = new Date().toISOString();
