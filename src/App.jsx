@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -68,7 +67,12 @@ import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
 // ✅ Streak helpers (single source of truth)
-import { shouldShowAmbassadorOnce, markAmbassadorShown } from './utils/streak';
+import {
+  shouldShowAmbassadorOnce,
+  markAmbassadorShown,
+  getStreak,
+  updateStreak
+} from './utils/streak';
 
 const routeTips = {
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
@@ -107,7 +111,7 @@ async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
     const { data, error } = await supabase.auth.getUser();
     if (data?.user && !error) return data.user;
     if (Date.now() - start > maxMs) return null;
-    // eslint-disable-next-line no-await-in-loop
+    // eslint-disable-next-line no-await-loops/no-await-in-loop
     await new Promise(r => setTimeout(r, stepMs));
   }
 }
@@ -212,6 +216,9 @@ export default function App() {
     if (!saved.age && location.pathname === '/') {
       history.replace('/edit-info');
     }
+
+    // ✅ Ensure streak keys exist / bump if crossing local day on first open
+    try { updateStreak(); } catch {}
 
     // ✅ Ambassador trigger (initial check on load)
     if (shouldShowAmbassadorOnce(30)) {
@@ -375,7 +382,8 @@ export default function App() {
 
   const showTryPro = !(isProActive || localPro);
 
-  const currentStreak = Number(userData?.currentStreak || JSON.parse(localStorage.getItem('userData') || '{}')?.currentStreak || 0);
+  // Single source of truth for current streak
+  const currentStreak = getStreak();
 
   return (
     <Container maxWidth="md" sx={{ py:4 }}>
@@ -450,7 +458,8 @@ export default function App() {
       </Box>
 
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-      <StreakBanner />
+      {/* Pass streak explicitly so banner shows the same number as the modal gate */}
+      <StreakBanner streak={currentStreak} />
       <SocialProofBanner />
       {navBar}
 
@@ -460,13 +469,46 @@ export default function App() {
         <Route path="/pro-success" component={ProSuccess} />
 
         <Route path="/edit-info" render={() =>
-          <HealthDataForm setUserData={data => { const prev = JSON.parse(localStorage.getItem('userData') || '{}'); const next = { ...prev, ...data, isPremium: isProActive || localPro }; localStorage.setItem('userData', JSON.stringify(next)); setUserDataState(next); history.push('/'); }} />
+          <HealthDataForm setUserData={data => {
+            const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+            const next = { ...prev, ...data, isPremium: isProActive || localPro };
+            localStorage.setItem('userData', JSON.stringify(next));
+            setUserDataState(next);
+            history.push('/');
+          }} />
         }/>
         <Route path="/workout" render={() =>
-          <WorkoutPage userData={userData} onWorkoutLogged={() => { const today = new Date().toLocaleDateString('en-US'); const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]'); const todayRec = meals.find(m => m.date === today); setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0)); setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0); }} />
+          <WorkoutPage
+            userData={userData}
+            onWorkoutLogged={() => {
+              // Recompute banners
+              const today = new Date().toLocaleDateString('en-US');
+              const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+              const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+              const todayRec = meals.find(m => m.date === today);
+              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
+              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
+
+              // ✅ Increment/maintain streak and emit 'slimcal:streak:update'
+              updateStreak();
+            }}
+          />
         }/>
         <Route path="/meals" render={() =>
-          <MealTracker onMealUpdate={() => { const today = new Date().toLocaleDateString('en-US'); const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]'); const todayRec = meals.find(m => m.date === today); setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0)); setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0); }} />
+          <MealTracker
+            onMealUpdate={() => {
+              // Recompute banners
+              const today = new Date().toLocaleDateString('en-US');
+              const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+              const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+              const todayRec = meals.find(m => m.date === today);
+              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
+              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
+
+              // ✅ Increment/maintain streak and emit 'slimcal:streak:update'
+              updateStreak();
+            }}
+          />
         }/>
         <Route path="/history" component={WorkoutHistory} />
         <Route path="/dashboard" component={ProgressDashboard} />

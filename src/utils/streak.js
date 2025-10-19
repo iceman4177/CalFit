@@ -1,5 +1,3 @@
-// src/utils/streak.js
-
 /**
  * Local-day streak tracker stored under localStorage.userData
  * Keys used:
@@ -12,7 +10,7 @@
  *  - 'slimcal:streak:update' (Event) on any change
  *  - 'slimcal:ambassador:ready' (CustomEvent) once when threshold reached and not yet prompted
  *
- * Public API (unchanged):
+ * Public API:
  *  - updateStreak(): number
  *  - getStreak(): number
  *  - getLastLogDate(): string|null
