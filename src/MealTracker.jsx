@@ -8,7 +8,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import foodData from './foodData.json';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
-import { updateStreak } from './utils/streak';
+import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
 
@@ -70,6 +70,11 @@ export default function MealTracker({ onMealUpdate }) {
 
   const stored   = JSON.parse(localStorage.getItem('userData')||'{}');
   const goalType = stored.goalType  || 'maintain';
+
+  // ✅ Ensure streak fields are always defined on mount (avoids "undefined" in banners)
+  useEffect(() => {
+    hydrateStreakOnStartup();
+  }, []);
 
   // Load today’s meals (local-first)
   useEffect(()=>{

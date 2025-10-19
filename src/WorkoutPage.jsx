@@ -471,7 +471,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           shareUrl={window.location.href}
         />
 
-        {/* Help dialogs (restored full) */}
+        {/* Help dialogs */}
         <Dialog
           open={showBackHelp}
           onClose={() =>
