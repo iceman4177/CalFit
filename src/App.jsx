@@ -67,13 +67,13 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
-// ✅ Streak helpers (single source of truth)
+// Streak helpers
 import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
   getStreak,
   updateStreak,
-  hydrateStreakOnStartup,        // <-- NEW: safe init (no increments)
+  hydrateStreakOnStartup,
 } from './utils/streak';
 
 const routeTips = {
@@ -126,7 +126,7 @@ export default function App() {
 
   useReferral();
 
-  // Track auth state for Login/Sign Out UI
+  // Auth state
   const [authUser, setAuthUser] = useState(null);
   useEffect(() => {
     let mounted = true;
@@ -208,12 +208,12 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // ✅ Streak state (keeps StreakBanner/Ambassador in sync in real-time)
+  // Streak state for banner + modal
   const [streak, setStreak] = useState(() => getStreak());
 
-  // ✅ BOOT: hydrate streak shape safely (no increments), preload userData, refresh calories, initial modal check
+  // Boot: hydrate streak safely (no increments), preload userData, refresh calories
   useEffect(() => {
-    hydrateStreakOnStartup();           // <--- new safe init (prevents undefined banners)
+    hydrateStreakOnStartup();
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
     const normalized = { ...saved, isPremium: isProActive };
     setUserDataState(normalized);
@@ -224,17 +224,11 @@ export default function App() {
       history.replace('/edit-info');
     }
 
-    // Ambassador trigger (initial check) after hydration
-    if (shouldShowAmbassadorOnce(30)) {
-      setAmbassadorOpen(true);
-    }
-
     // Initialize live streak value after hydration
     setStreak(getStreak());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProActive, location.pathname, history]);
 
-  // ✅ Live streak updates → update local streak state + gate modal
+  // Live: respond to streak updates (from real actions)
   useEffect(() => {
     const onStreakUpdate = () => {
       setStreak(getStreak());
@@ -246,7 +240,7 @@ export default function App() {
     return () => window.removeEventListener('slimcal:streak:update', onStreakUpdate);
   }, []);
 
-  // ✅ Optional: respond to ambassador-ready event directly
+  // Optional: react to explicit ambassador:ready events
   useEffect(() => {
     const onAmbassadorReady = () => setAmbassadorOpen(true);
     window.addEventListener('slimcal:ambassador:ready', onAmbassadorReady);
@@ -418,7 +412,7 @@ export default function App() {
       <AmbassadorModal
         open={ambassadorOpen}
         onClose={() => {
-          // ✅ One-time flag so it never shows again unless user resets it
+          // One-time flag so it never shows again unless user resets it
           markAmbassadorShown();
           setAmbassadorOpen(false);
         }}
@@ -443,7 +437,7 @@ export default function App() {
               })
             }
           >
-            Login
+            LOGIN
           </Button>
         )}
 
@@ -471,7 +465,7 @@ export default function App() {
       </Box>
 
       <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-      {/* Pass live streak so banner matches modal gate */}
+      {/* Pass live streak explicitly so banner shows the same number as the modal gate */}
       <StreakBanner streak={streak} />
       <SocialProofBanner />
       {navBar}
@@ -487,7 +481,6 @@ export default function App() {
             const next = { ...prev, ...data, isPremium: isProActive || localPro };
             localStorage.setItem('userData', JSON.stringify(next));
             setUserDataState(next);
-            // After first-time setup, return home
             history.push('/');
           }} />
         }/>
@@ -503,7 +496,7 @@ export default function App() {
               setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
               setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
 
-              // ✅ Increment/maintain streak and emit 'slimcal:streak:update'
+              // Streak also updates inside WorkoutPage on Log Workout; keeping this is okay if you prefer redundancy:
               updateStreak();
             }}
           />
@@ -511,16 +504,13 @@ export default function App() {
         <Route path="/meals" render={() =>
           <MealTracker
             onMealUpdate={() => {
-              // Recompute banners
+              // Recompute banners only (no streak update on mount)
               const today = new Date().toLocaleDateString('en-US');
               const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
               const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
               const todayRec = meals.find(m => m.date === today);
               setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+w.totalCalories,0));
               setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+m.calories,0) : 0);
-
-              // ✅ Increment/maintain streak and emit 'slimcal:streak:update'
-              updateStreak();
             }}
           />
         }/>
