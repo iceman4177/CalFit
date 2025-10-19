@@ -1,9 +1,28 @@
 // src/lib/sync.js
-import { v4 as uuidv4 } from 'uuid';
+// Offline sync engine: pending queue + auto-flush with idempotent upserts.
+// This version uses native crypto.randomUUID() to avoid external deps.
+
 import { isOnline } from '../utils/network';
-import { supabaseClient } from '../context/SupabaseClient'; // adjust if file name differs
+import { supabase } from '../lib/supabaseClient'; // matches your existing import style
 
 const PENDING_KEY = 'pendingOps';
+
+// ---------- small utils ----------
+function uuidv4() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback (RFC4122-ish) for older browsers
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
 
 // ---------- queue helpers ----------
 function readQueue() {
@@ -27,28 +46,28 @@ export function enqueue(op) {
 
 // ---------- processors ----------
 async function upsertWorkout(op) {
-  const row = { ...op.payload, client_updated_at: new Date().toISOString() };
-  const { error } = await supabaseClient.from('workouts').upsert(row, { onConflict: 'client_id' });
+  const row = { ...op.payload, client_updated_at: nowIso() };
+  const { error } = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
   if (error) throw error;
 }
 
 async function deleteWorkout(op) {
   const { client_id } = op.payload || {};
   if (!client_id) return;
-  const { error } = await supabaseClient.from('workouts').delete().eq('client_id', client_id);
+  const { error } = await supabase.from('workouts').delete().eq('client_id', client_id);
   if (error) throw error;
 }
 
 async function upsertDailyMetrics(op) {
-  const row = { ...op.payload, client_updated_at: new Date().toISOString(), local_authoritative: true };
-  const { error } = await supabaseClient.from('daily_metrics').upsert(row, { onConflict: 'user_id,date_key' });
+  const row = { ...op.payload, client_updated_at: nowIso(), local_authoritative: true };
+  const { error } = await supabase.from('daily_metrics').upsert(row, { onConflict: 'user_id,date_key' });
   if (error) throw error;
 }
 
 async function processItem(op) {
   switch (op.type) {
-    case 'workout.upsert': return upsertWorkout(op);
-    case 'workout.delete': return deleteWorkout(op);
+    case 'workout.upsert':       return upsertWorkout(op);
+    case 'workout.delete':       return deleteWorkout(op);
     case 'daily_metrics.upsert': return upsertDailyMetrics(op);
     default: return;
   }
@@ -96,6 +115,7 @@ export function attachSyncListeners() {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') tryFlush();
     });
+    // initial attempt
     tryFlush();
   }
 }
