@@ -33,7 +33,12 @@ const endpointSecret = useLive
   ? process.env.STRIPE_WEBHOOK_SECRET_LIVE
   : process.env.STRIPE_WEBHOOK_SECRET;
 
-// --- utils for DB writes ---
+// --- helpers ---------------------------------------------------------------
+function toIso(sec) {
+  return sec ? new Date(sec * 1000).toISOString() : null;
+}
+
+// --- utils for DB writes ---------------------------------------------------
 async function upsertUser(user_id, email) {
   if (!user_id) return;
   try {
@@ -43,10 +48,6 @@ async function upsertUser(user_id, email) {
   } catch (e) {
     console.warn("[wh] app_users upsert warn:", e?.message || e);
   }
-}
-
-function toIso(sec) {
-  return sec ? new Date(sec * 1000).toISOString() : null;
 }
 
 async function upsertSubscription({ user_id, sub }) {
@@ -71,6 +72,35 @@ async function upsertSubscription({ user_id, sub }) {
     onConflict: "subscription_id",
     ignoreDuplicates: false,
   });
+
+  // --- also mark user as Pro if active or trialing ---
+  if (user_id && sub.status && ["active", "trialing"].includes(sub.status)) {
+    try {
+      await supabaseAdmin
+        .from("app_users")
+        .update({
+          is_pro: true,
+          trial_start: toIso(sub.trial_start),
+          trial_end: toIso(sub.trial_end),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user_id);
+    } catch (e) {
+      console.warn("[wh] could not update is_pro:", e?.message || e);
+    }
+  }
+
+  // --- if canceled, mark is_pro = false ---
+  if (user_id && sub.status === "canceled") {
+    try {
+      await supabaseAdmin
+        .from("app_users")
+        .update({ is_pro: false, updated_at: new Date().toISOString() })
+        .eq("user_id", user_id);
+    } catch (e) {
+      console.warn("[wh] could not revoke is_pro:", e?.message || e);
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -85,7 +115,10 @@ export default async function handler(req, res) {
     const sig = req.headers["stripe-signature"];
     event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
   } catch (err) {
-    console.error(`[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`, err?.message);
+    console.error(
+      `[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`,
+      err?.message
+    );
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -125,7 +158,9 @@ export default async function handler(req, res) {
             customer: sub.customer,
             limit: 10,
           });
-          user_id = list.data.map((s) => s.metadata?.app_user_id || s.metadata?.user_id).find(Boolean) || null;
+          user_id = list.data
+            .map((s) => s.metadata?.app_user_id || s.metadata?.user_id)
+            .find(Boolean);
         }
 
         await upsertUser(user_id, sub?.customer_email || null);
@@ -136,7 +171,6 @@ export default async function handler(req, res) {
       case "invoice.paid":
       case "invoice.payment_failed":
       case "customer.subscription.trial_will_end":
-        // Observability only
         console.log(`[wh:${useLive ? "LIVE" : "TEST"}] ${event.type} observed.`);
         break;
 
@@ -148,7 +182,9 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error(`[wh:${useLive ? "LIVE" : "TEST"}] handler error:`, err);
-    // Always respond 200 to prevent retries
-    return res.status(200).json({ received: true, note: "handled with warnings" });
+    // Always respond 200 to prevent Stripe retries
+    return res
+      .status(200)
+      .json({ received: true, note: "handled with warnings" });
   }
 }
