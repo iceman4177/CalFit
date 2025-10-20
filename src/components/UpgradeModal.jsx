@@ -1,3 +1,4 @@
+// src/components/UpgradeModal.jsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -12,6 +13,25 @@ function getOrCreateClientId() {
     localStorage.setItem("clientId", cid);
   }
   return cid;
+}
+
+function rememberIntent() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("intent", "upgrade");
+    window.history.replaceState({}, "", url.toString());
+    sessionStorage.setItem("intent", "upgrade");
+  } catch {}
+}
+function clearIntent() {
+  try {
+    sessionStorage.removeItem("intent");
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("intent") === "upgrade") {
+      url.searchParams.delete("intent");
+      window.history.replaceState({}, "", url.toString());
+    }
+  } catch {}
 }
 
 export default function UpgradeModal({
@@ -57,17 +77,13 @@ export default function UpgradeModal({
   useEffect(() => {
     if (!open || pollingRef.current) return;
     pollingRef.current = true;
-
     let stopped = false;
     const start = Date.now();
 
     (async function poll() {
       while (!stopped && Date.now() - start < 8000) {
         const { data } = await supabase.auth.getUser();
-        if (data?.user) {
-          setUser(data.user);
-          break;
-        }
+        if (data?.user) { setUser(data.user); break; }
         await new Promise((r) => setTimeout(r, 300));
       }
       pollingRef.current = false;
@@ -76,15 +92,32 @@ export default function UpgradeModal({
     return () => { stopped = true; };
   }, [open]);
 
+  // AUTO-CONTINUE: if user is present and intent=upgrade exists, jump straight to checkout
+  useEffect(() => {
+    if (!open || !user || loading) return;
+    try {
+      const url = new URL(window.location.href);
+      const qp = url.searchParams.get("intent");
+      const ss = sessionStorage.getItem("intent");
+      const intent = qp || ss;
+      if (intent === "upgrade") {
+        (async () => { await handleCheckout(true); })();
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, user, loading, plan]);
+
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      // Save intent so App.jsx can auto-continue post-auth
-      localStorage.setItem("upgradeIntent", JSON.stringify({ plan, autopay: true }));
-      const redirectUrl = `${window.location.origin}/auth/callback`; // dedicated handler
+      rememberIntent(); // <- persist intent BEFORE redirect
+      // Also persist current plan so we don't lose it
+      sessionStorage.setItem("upgradePlan", plan);
+
+      const redirectUrl = `${window.location.origin}${window.location.pathname}?intent=upgrade`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: redirectUrl },
+        options: { redirectTo: redirectUrl, queryParams: { prompt: "select_account" } },
       });
       if (error) throw error;
     } catch (e) {
@@ -92,7 +125,7 @@ export default function UpgradeModal({
     }
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (fromAuto = false) => {
     setLoading(true);
     setApiError("");
     try {
@@ -100,14 +133,19 @@ export default function UpgradeModal({
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error("Please sign in to start your trial.");
 
+      // restore plan if we came back from auth
+      const savedPlan = sessionStorage.getItem("upgradePlan");
+      const effectivePlan = savedPlan || plan;
+      if (savedPlan) setPlan(savedPlan);
+
       const clientId = getOrCreateClientId();
-      const resp = await fetch("/api/create-checkout-session", {   // 👈 fixed path
+      const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: data.user.id,
           email: data.user.email || null,
-          period: plan,                         // server decides price_id
+          period: effectivePlan,                  // server decides price_id
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
@@ -116,11 +154,16 @@ export default function UpgradeModal({
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok || !json?.url) throw new Error(json?.error || "Checkout session failed");
+      clearIntent();
+      sessionStorage.removeItem("upgradePlan");
       window.location.assign(json.url);
     } catch (err) {
       console.error("[UpgradeModal] checkout error:", err);
       setApiError(err.message || "Something went wrong.");
       setLoading(false);
+      if (fromAuto) {
+        // If auto-continue failed (e.g., network), keep the modal open for manual retry.
+      }
     }
   };
 
@@ -163,7 +206,7 @@ export default function UpgradeModal({
           </Typography>
         )}
 
-        {/* Pre-auth: ONLY the Google sign-in button (as requested) */}
+        {/* Pre-auth: ONLY the Google sign-in button */}
         {!user && (
           <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 1 }}>
             <Button variant="contained" onClick={signInWithGoogle}>
@@ -177,11 +220,7 @@ export default function UpgradeModal({
         {user ? (
           <>
             <Button onClick={onClose} disabled={loading}>Maybe later</Button>
-            <Button
-              onClick={handleCheckout}
-              variant="contained"
-              disabled={loading}
-            >
+            <Button onClick={() => handleCheckout(false)} variant="contained" disabled={loading}>
               {loading ? "Redirecting…" : "Start Free Trial"}
             </Button>
           </>
