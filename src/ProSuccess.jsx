@@ -15,21 +15,29 @@ import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { supabase } from "./lib/supabaseClient";
 
-// Read query params once
+// ⬇️ Add this import (you created this earlier)
+//    If you placed it somewhere else, update the import path accordingly.
+import CancelProButton from "./components/CancelProButton.jsx";
+
+// Read query params once (client-only)
 function useQuery() {
-  return useMemo(() => new URLSearchParams(window.location.search), []);
+  return useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), []);
 }
 
 export default function ProSuccess() {
   const q = useQuery();
   const sessionId = q.get("session_id") || undefined; // Stripe injects this via success_url
-  const cid = q.get("cid") || undefined;              // your clientId (optional)
+  const cid = q.get("cid") || undefined;              // optional client ref
   const dev = q.get("dev") === "1";
 
-  const [phase, setPhase] = useState("checking"); // "checking" | "active" | "waiting" | "error"
+  // "checking" | "active" | "waiting" | "error"
+  const [phase, setPhase] = useState("checking");
   const [message, setMessage] = useState("");
+  const [subscriptionId, setSubscriptionId] = useState(null);
+  const [statusLine, setStatusLine] = useState("");
 
-  // 1) Fire-and-forget: use the Checkout session_id to finalize server state ASAP
+  // 1) Fire-and-forget session finalization on backend (no user impact if it fails;
+  //    webhook + polling still confirm entitlement).
   useEffect(() => {
     if (!sessionId) return;
     let aborted = false;
@@ -40,16 +48,16 @@ export default function ProSuccess() {
           headers: { "Cache-Control": "no-cache" },
         });
       } catch {
-        // webhook/polling will still recover
+        // ignore; webhook & polling will still recover
       }
       if (!aborted) {
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 450));
       }
     })();
     return () => { aborted = true; };
   }, [sessionId]);
 
-  // 2) Poll server truth (via your secure API that reads Supabase/Postgres)
+  // 2) Poll server truth (Supabase-backed) until isPro flips true, or timeout.
   useEffect(() => {
     let cancelled = false;
 
@@ -64,20 +72,36 @@ export default function ProSuccess() {
         }
 
         const start = Date.now();
-        const maxMs = 30000;
+        const maxMs = 30000; // 30s overall
         const step = 1200;
 
-        await new Promise((r) => setTimeout(r, 1200));
+        // brief wait to allow webhook → DB write path to run
+        await new Promise((r) => setTimeout(r, 900));
 
         while (!cancelled && Date.now() - start < maxMs) {
           const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(user.id)}`, {
             headers: { "Cache-Control": "no-cache" },
           });
-          const json = await res.json().catch(() => ({}));
 
-          if (res.ok && json?.isPro) {
+          let json = {};
+          try { json = await res.json(); } catch {}
+
+          // Older builds might not include subscription_id; try separate endpoint when needed.
+          if (json?.subscription_id) setSubscriptionId(json.subscription_id);
+          if (json?.status) setStatusLine(json.status);
+
+          if (res.ok && (json?.isPro || json?.is_pro)) {
             setPhase("active");
             setMessage("Your Pro access is active. Enjoy!");
+            // Try to get subscription details for the Cancel button
+            if (!json?.subscription_id) {
+              try {
+                const r2 = await fetch("/api/me/subscription", { headers: { "Cache-Control": "no-cache" } });
+                const j2 = await r2.json().catch(() => ({}));
+                if (j2?.subscription_id) setSubscriptionId(j2.subscription_id);
+                if (j2?.status) setStatusLine(j2.status);
+              } catch {}
+            }
             return;
           }
 
@@ -104,7 +128,7 @@ export default function ProSuccess() {
     return () => { cancelled = true; };
   }, []);
 
-  // 3) When active, flip local flags so the UI (header CTA) updates immediately
+  // 3) When active, flip local flags so the UI updates immediately (header CTA, etc.)
   useEffect(() => {
     if (phase !== "active") return;
     try {
@@ -113,9 +137,7 @@ export default function ProSuccess() {
       if (!ud.isPremium) {
         localStorage.setItem("userData", JSON.stringify({ ...ud, isPremium: true }));
       }
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [phase]);
 
   const go = (path) => () => { window.location.href = path; };
@@ -131,9 +153,11 @@ export default function ProSuccess() {
                 <Typography variant="h4" align="center" gutterBottom>
                   {dev ? "Pro Activated (Dev) 🎉" : "You’re Pro! 🎉"}
                 </Typography>
+
                 <Typography variant="body1" align="center" sx={{ opacity: 0.9 }}>
                   {message}
                 </Typography>
+
                 {(cid || sessionId) && (
                   <Typography variant="caption" sx={{ mt: 1, opacity: 0.6 }}>
                     {cid ? `Ref: ${cid}${dev ? " (dev)" : ""}` : ""}
@@ -141,6 +165,26 @@ export default function ProSuccess() {
                     {sessionId ? `session ${sessionId}` : ""}
                   </Typography>
                 )}
+
+                {/* Status line & cancel control */}
+                <Box sx={{ mt: 2 }}>
+                  {statusLine ? (
+                    <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                      Subscription status: {statusLine}
+                    </Typography>
+                  ) : null}
+                </Box>
+
+                <Box sx={{ mt: 2 }}>
+                  {subscriptionId ? (
+                    <CancelProButton subscriptionId={subscriptionId} />
+                  ) : (
+                    <Typography variant="caption" sx={{ opacity: 0.6 }}>
+                      (Subscription details syncing… refresh if you don’t see the cancel option.)
+                    </Typography>
+                  )}
+                </Box>
+
                 <Box sx={{ mt: 3 }}>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="center">
                     <Button variant="contained" onClick={go("/")}>
