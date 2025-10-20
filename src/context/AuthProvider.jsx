@@ -1,6 +1,7 @@
 // src/context/AuthProvider.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import useBootstrapSync from '../hooks/useBootstrapSync';
 
 const AuthCtx = createContext(null);
 
@@ -29,6 +30,9 @@ export function AuthProvider({ children }) {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // 🔹 One-time bootstrap + quiet queue flush on sign-in
+  useBootstrapSync(user);
 
   const value = useMemo(() => ({
     session, user, loading,

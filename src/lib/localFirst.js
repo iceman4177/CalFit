@@ -1,5 +1,5 @@
 // src/lib/localFirst.js
-// Local-first wrappers for workouts and daily metrics.
+// Local-first wrappers for workouts, meals, and daily metrics.
 // Ensures idempotent client_id and queues failed cloud writes for later sync.
 
 import { ensureClientId, enqueue } from './sync';
@@ -69,6 +69,42 @@ export async function deleteWorkoutLocalFirst(client_id) {
     return { ok: true, queued: false };
   } catch (err) {
     enqueue({ type: 'workout.delete', payload: { client_id } });
+    return { ok: true, queued: true, error: err };
+  }
+}
+
+// ---------- MEALS ----------
+export async function saveMealLocalFirst(meal) {
+  // meal fields expected: { eaten_at, title, total_calories, ... }
+  ensureClientId(meal);
+  if (!meal.eaten_at) meal.eaten_at = new Date().toISOString();
+
+  // Local structure: [{ date: 'YYYY-MM-DD', meals: [...] }]
+  const dayKey = (meal.__day) || new Date(meal.eaten_at).toISOString().slice(0,10);
+  const days = readLS('mealHistory', []);
+  let day = days.find(d => d.date === dayKey);
+  if (!day) { day = { date: dayKey, meals: [] }; days.push(day); }
+
+  const idx = day.meals.findIndex(m => m.client_id === meal.client_id);
+  const compact = { client_id: meal.client_id, name: meal.title, calories: Number(meal.total_calories || 0) || 0 };
+  if (idx >= 0) day.meals[idx] = compact; else day.meals.push(compact);
+  writeLS('mealHistory', days);
+
+  if (!isOnline()) {
+    enqueue({ type: 'meal.upsert', payload: { ...meal, __day: dayKey } });
+    return { ok: true, queued: true, localOnly: true };
+  }
+
+  try {
+    const row = { ...meal, client_updated_at: new Date().toISOString() };
+    const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' });
+    if (error) {
+      enqueue({ type: 'meal.upsert', payload: { ...meal, __day: dayKey } });
+      return { ok: true, queued: true, error };
+    }
+    return { ok: true, queued: false };
+  } catch (err) {
+    enqueue({ type: 'meal.upsert', payload: { ...meal, __day: dayKey } });
     return { ok: true, queued: true, error: err };
   }
 }

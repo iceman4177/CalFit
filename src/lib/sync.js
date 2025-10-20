@@ -1,6 +1,5 @@
 // src/lib/sync.js
 // Offline sync engine: pending queue + auto-flush with idempotent upserts.
-// This version uses native crypto.randomUUID() to avoid external deps.
 
 import { isOnline } from '../utils/network';
 import { supabase } from '../lib/supabaseClient'; // matches your existing import style
@@ -8,21 +7,7 @@ import { supabase } from '../lib/supabaseClient'; // matches your existing impor
 const PENDING_KEY = 'pendingOps';
 
 // ---------- small utils ----------
-function uuidv4() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  // Fallback (RFC4122-ish) for older browsers
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
+function nowIso() { return new Date().toISOString(); }
 
 // ---------- queue helpers ----------
 function readQueue() {
@@ -34,13 +19,24 @@ function writeQueue(q) {
 
 // ---------- public helpers ----------
 export function ensureClientId(obj) {
-  if (!obj.client_id) obj.client_id = uuidv4();
+  if (obj?.client_id) return obj;
+  // prefer native randomUUID if available
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    obj.client_id = crypto.randomUUID();
+  } else {
+    obj.client_id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
   return obj;
 }
 
 export function enqueue(op) {
   const q = readQueue();
-  q.push({ id: uuidv4(), ts: Date.now(), retry_count: 0, ...op });
+  q.push({ id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random()),
+           ts: Date.now(), retry_count: 0, ...op });
   writeQueue(q);
 }
 
@@ -64,11 +60,18 @@ async function upsertDailyMetrics(op) {
   if (error) throw error;
 }
 
+async function upsertMeal(op) {
+  const row = { ...op.payload, client_updated_at: nowIso() };
+  const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' });
+  if (error) throw error;
+}
+
 async function processItem(op) {
   switch (op.type) {
     case 'workout.upsert':       return upsertWorkout(op);
     case 'workout.delete':       return deleteWorkout(op);
     case 'daily_metrics.upsert': return upsertDailyMetrics(op);
+    case 'meal.upsert':          return upsertMeal(op);
     default: return;
   }
 }
@@ -81,7 +84,6 @@ export async function flushPending({ maxTries = 1 } = {}) {
   const q = readQueue();
   if (!q.length) return { ok: true, flushed: 0 };
 
-  console.log('[Sync] flush start, items:', q.length);
   const remain = [];
   let flushed = 0;
 
@@ -94,12 +96,12 @@ export async function flushPending({ maxTries = 1 } = {}) {
     } catch (err) {
       const backoff = Math.min(30000, 1000 * Math.pow(2, item.retry_count || 0));
       remain.push({ ...item, retry_count: (item.retry_count || 0) + 1, next_after: Date.now() + backoff });
-      console.warn('[Sync] item failed', item.type, item.id, err?.message);
+      // Quiet: no user-facing spam
+      // console.warn('[Sync] item failed', item.type, item.id, err?.message);
     }
   }
 
   writeQueue(remain);
-  console.log('[Sync] flush done. ok:', flushed, 'failed:', remain.length);
 
   if (maxTries > 1 && remain.length) {
     await sleep(1200);
