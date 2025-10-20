@@ -37,25 +37,37 @@ function coerceCustomerId(val) {
   return null;
 }
 
+// -----------------------------------------------------------------------------
+// Main handler (now live/test aware)
+// -----------------------------------------------------------------------------
 export default async function handler(req, res) {
   const {
+    NODE_ENV,
     STRIPE_SECRET_KEY,
     STRIPE_PRICE_ID_MONTHLY,
     STRIPE_PRICE_ID_ANNUAL,
+    STRIPE_SECRET_KEY_LIVE,
+    STRIPE_PRICE_ID_MONTHLY_LIVE,
+    STRIPE_PRICE_ID_ANNUAL_LIVE,
     STRIPE_TRIAL_DAYS,
     APP_BASE_URL = "https://slimcal.ai",
     ALLOWED_ORIGIN = "https://slimcal.ai",
   } = process.env;
 
   setCors(res, ALLOWED_ORIGIN);
-
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
+    // ------------------ Determine which keys to use --------------------------
+    const useLive = NODE_ENV === "production" && STRIPE_SECRET_KEY_LIVE;
+    const secretKey = useLive ? STRIPE_SECRET_KEY_LIVE : STRIPE_SECRET_KEY;
+    const priceMonthly = useLive ? STRIPE_PRICE_ID_MONTHLY_LIVE : STRIPE_PRICE_ID_MONTHLY;
+    const priceAnnual  = useLive ? STRIPE_PRICE_ID_ANNUAL_LIVE  : STRIPE_PRICE_ID_ANNUAL;
+
     const { default: Stripe } = await import("stripe");
-    if (!STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY (server env)");
-    const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+    if (!secretKey) throw new Error("Missing Stripe secret key (check env)");
+    const stripe = new Stripe(secretKey, { apiVersion: "2023-10-16" });
 
     const body = await readJson(req);
     const {
@@ -71,21 +83,18 @@ export default async function handler(req, res) {
       throw new Error("period must be 'monthly' or 'annual'");
     }
 
-    const priceId = period === "annual" ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
-    if (!priceId) throw new Error(`Server missing price for period='${period}' (check STRIPE_PRICE_ID_*)`);
+    const priceId = period === "annual" ? priceAnnual : priceMonthly;
+    if (!priceId) throw new Error(`Missing price for period='${period}' (${useLive ? "LIVE" : "TEST"})`);
 
-    // Try to import Supabase admin; continue if unavailable
+    // ---------- Supabase customer mapping (same logic, unchanged) ----------
     let supabaseAdmin = null;
     try {
       const mod = await import("./_lib/supabaseAdmin.js");
       supabaseAdmin = mod.supabaseAdmin || null;
     } catch {}
 
-    // ---------- Ensure or create Stripe customer (and persist mapping) ----------
     let stripeCustomerId = null;
-
     if (supabaseAdmin) {
-      // Read newest mapping (duplicates safe)
       const { data: rows, error: selectErr } = await supabaseAdmin
         .from("app_stripe_customers")
         .select("customer_id, updated_at, user_id")
@@ -93,10 +102,7 @@ export default async function handler(req, res) {
         .order("updated_at", { ascending: false })
         .limit(1);
       if (selectErr) throw selectErr;
-
       stripeCustomerId = coerceCustomerId(rows?.[0]?.customer_id);
-
-      // Best-effort clean-up: if the newest row is JSON, rewrite it to just the ID
       if (rows?.[0]?.customer_id && rows[0].customer_id !== stripeCustomerId) {
         try {
           await supabaseAdmin
@@ -134,6 +140,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // ---------- Create checkout session ----------
     const successUrl = absUrl(
       success_path.includes("session_id")
         ? success_path
@@ -145,16 +152,17 @@ export default async function handler(req, res) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: stripeCustomerId,               // always a plain "cus_..." here
+      customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
       client_reference_id: user_id,
-      metadata: { user_id, period },
+      metadata: { user_id, period, env: useLive ? "live" : "test" },
       ...(trialDays > 0 ? { subscription_data: { trial_period_days: trialDays } } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,
     });
 
+    console.log(`[checkout:${useLive ? "LIVE" : "TEST"}] session ${session.id} created for ${email || user_id}`);
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (err) {
     console.error("[checkout] error", err);

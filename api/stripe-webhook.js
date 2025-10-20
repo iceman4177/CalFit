@@ -18,8 +18,20 @@ async function readRawBody(req) {
   });
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+// -----------------------------------------------------------------------------
+// Live/Test key selection
+// -----------------------------------------------------------------------------
+const useLive =
+  process.env.NODE_ENV === "production" && process.env.STRIPE_SECRET_KEY_LIVE;
+
+const stripe = new Stripe(
+  useLive ? process.env.STRIPE_SECRET_KEY_LIVE : process.env.STRIPE_SECRET_KEY,
+  { apiVersion: "2023-10-16" }
+);
+
+const endpointSecret = useLive
+  ? process.env.STRIPE_WEBHOOK_SECRET_LIVE
+  : process.env.STRIPE_WEBHOOK_SECRET;
 
 // --- utils for DB writes ---
 async function upsertUser(user_id, email) {
@@ -51,6 +63,8 @@ async function upsertSubscription({ user_id, sub }) {
     canceled_at: toIso(sub.canceled_at),
     trial_start: toIso(sub.trial_start),
     trial_end: toIso(sub.trial_end),
+    updated_at: new Date().toISOString(),
+    env: useLive ? "live" : "test",
   };
 
   await supabaseAdmin.from("app_subscriptions").upsert(payload, {
@@ -59,7 +73,9 @@ async function upsertSubscription({ user_id, sub }) {
   });
 }
 
-// --- main handler ---
+// -----------------------------------------------------------------------------
+// Main handler
+// -----------------------------------------------------------------------------
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -69,7 +85,7 @@ export default async function handler(req, res) {
     const sig = req.headers["stripe-signature"];
     event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
   } catch (err) {
-    console.error("[wh] ❌ Signature verification failed:", err?.message);
+    console.error(`[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`, err?.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -78,7 +94,10 @@ export default async function handler(req, res) {
       case "checkout.session.completed": {
         const session = event.data.object;
         const user_id =
-          session?.metadata?.app_user_id || session?.client_reference_id || null;
+          session?.metadata?.app_user_id ||
+          session?.metadata?.user_id ||
+          session?.client_reference_id ||
+          null;
         const email =
           session?.customer_details?.email || session?.metadata?.email || null;
 
@@ -96,16 +115,17 @@ export default async function handler(req, res) {
       case "customer.subscription.deleted": {
         const sub = event.data.object;
 
-        // 1) from metadata
-        let user_id = sub.metadata?.app_user_id || null;
+        // 1) metadata
+        let user_id =
+          sub.metadata?.app_user_id || sub.metadata?.user_id || null;
 
-        // 2) fallback: scan customer's subs for one with metadata
+        // 2) fallback: query subscriptions for same customer
         if (!user_id && sub.customer) {
           const list = await stripe.subscriptions.list({
             customer: sub.customer,
             limit: 10,
           });
-          user_id = list.data.map((s) => s.metadata?.app_user_id).find(Boolean) || null;
+          user_id = list.data.map((s) => s.metadata?.app_user_id || s.metadata?.user_id).find(Boolean) || null;
         }
 
         await upsertUser(user_id, sub?.customer_email || null);
@@ -116,17 +136,19 @@ export default async function handler(req, res) {
       case "invoice.paid":
       case "invoice.payment_failed":
       case "customer.subscription.trial_will_end":
-        // Observability only; no entitlement changes needed
+        // Observability only
+        console.log(`[wh:${useLive ? "LIVE" : "TEST"}] ${event.type} observed.`);
         break;
 
       default:
+        console.log(`[wh:${useLive ? "LIVE" : "TEST"}] Ignored event`, event.type);
         break;
     }
 
-    // Always return 200 so Stripe doesn’t retry endlessly
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error("[wh] handler error:", err);
+    console.error(`[wh:${useLive ? "LIVE" : "TEST"}] handler error:`, err);
+    // Always respond 200 to prevent retries
     return res.status(200).json({ received: true, note: "handled with warnings" });
   }
 }
