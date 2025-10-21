@@ -96,7 +96,6 @@ async function upsertWorkout(op) {
     total_calories,
     goal: p.goal ?? null,
     notes: p.notes ?? null,
-    client_updated_at: nowIso(),
   };
 
   const res = await supabase
@@ -147,7 +146,13 @@ async function upsertDailyMetrics(op) {
 
 async function upsertMeal(op) {
   const p = op.payload || {};
-  const row = { ...p, client_updated_at: nowIso() };
+  const row = {
+    client_id: p.client_id,
+    user_id: p.user_id ?? null,
+    eaten_at: p.eaten_at,
+    title: p.title ?? null,
+    total_calories: Number(p.total_calories) || 0,
+  };
   const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' }).select().maybeSingle();
   if (error) throw error;
 }
@@ -182,7 +187,6 @@ export async function flushPending({ maxTries = 1 } = {}) {
     } catch (err) {
       const backoff = Math.min(30000, 1000 * Math.pow(2, item.retry_count || 0));
       remain.push({ ...item, retry_count: (item.retry_count || 0) + 1, next_after: Date.now() + backoff });
-      // console.warn('[Sync] fail', item.type, err?.message || err);
     }
   }
 

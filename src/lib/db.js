@@ -78,7 +78,7 @@ export async function saveWorkout(userId, workout, sets = []) {
   }
 
   if (sets?.length) {
-    const rows = sets.map((s, idx) => ({
+    const rows = sets.map((s) => ({
       workout_id: w.id,
       user_id: userId,
       exercise_name: s.exercise_name,
@@ -88,7 +88,6 @@ export async function saveWorkout(userId, workout, sets = []) {
       reps: s.reps ?? null,
       tempo: s.tempo ?? null,
       volume: s.volume ?? null,
-      idx: s.idx ?? idx,
     }));
     const { error: setErr } = await supabase.from('workout_sets').insert(rows);
     if (setErr) throw setErr;
@@ -234,12 +233,12 @@ export async function getWorkouts(userId, { limit = 100 } = {}) {
 }
 
 export async function getWorkoutSetsFor(workoutId, userId) {
+  // Safe variant: do not reference 'idx' column (not guaranteed to exist)
   const { data, error } = await supabase
     .from('workout_sets')
-    .select('exercise_name, reps, weight, tempo, volume, created_at, idx')
+    .select('exercise_name, reps, weight, tempo, volume, created_at')
     .eq('workout_id', workoutId)
     .eq('user_id', userId)
-    .order('idx', { ascending: true })
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];

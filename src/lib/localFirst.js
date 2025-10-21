@@ -71,7 +71,7 @@ export async function saveWorkoutLocalFirst(workout) {
   }
 
   try {
-    // Ensure DB-required fields
+    // Ensure DB-required fields (no extra columns)
     const row = {
       user_id: workout.user_id ?? null,
       client_id: workout.client_id,
@@ -80,7 +80,6 @@ export async function saveWorkoutLocalFirst(workout) {
       total_calories: localRow.total_calories,
       goal: workout.goal ?? null,
       notes: workout.notes ?? null,
-      client_updated_at: new Date().toISOString(),
     };
 
     if (!row.user_id) return { ok: true, queued: false, anon: true }; // not signed in
@@ -146,7 +145,14 @@ export async function saveMealLocalFirst(meal) {
   }
 
   try {
-    const row = { ...meal, client_updated_at: new Date().toISOString() };
+    // Minimal schema-safe row (no extra columns)
+    const row = {
+      client_id: meal.client_id,
+      user_id: meal.user_id ?? null,
+      eaten_at: meal.eaten_at,
+      title: meal.title ?? null,
+      total_calories: Number(meal.total_calories) || 0,
+    };
     const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' });
     if (error) {
       enqueue({ type: 'meal.upsert', payload: { ...meal, __day: dayKey } });
