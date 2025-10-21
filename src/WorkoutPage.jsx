@@ -77,7 +77,9 @@ function localDayISO(d = new Date()) {
 function getOrCreateClientId() {
   let cid = localStorage.getItem('clientId');
   if (!cid) {
-    cid = crypto?.randomUUID?.() || String(Date.now());
+    cid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : String(Date.now());
     localStorage.setItem('clientId', cid);
   }
   return cid;
@@ -295,7 +297,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTemp('180');
   };
 
-  // 🔧 UPDATED: local-first save with exact totals + stable IDs
+  // 🔧 UPDATED: local-first save with exact totals + stable IDs and correct daily_metrics keys
   const handleFinish = async () => {
     // If user has a partially filled exercise, add it before finalize
     if (
@@ -313,21 +315,30 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
     const clientId = getOrCreateClientId();
     const now = new Date();
-    const todayStr = now.toLocaleDateString('en-US');
+    const startedAt = now.toISOString();
+    const endedAt = startedAt;
+    const todayLocalIso = localDayISO(now);               // "YYYY-MM-DD" for DB (local_day)
+    const todayDisplay = now.toLocaleDateString('en-US'); // for local history display
 
     const newSession = {
-      // idempotent fields (client_id will be ensured by wrapper)
-      id: crypto?.randomUUID?.() || `w_${Date.now()}`,
-      clientId,
+      // idempotent fields for cloud sync
+      client_id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `w_${Date.now()}`,
+      user_id: user?.id || null,
+
+      // required workout fields for DB
+      started_at: startedAt,
+      ended_at: endedAt,
+      total_calories: total,
+
+      // optional local-first metadata (kept for your history UI)
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `wf_${Date.now()}`,
       localId: `w_${clientId}_${Date.now()}`,
-      createdAt: now.toISOString(),
+      createdAt: startedAt,
       uploaded: false,
 
-      // domain fields
-      user_id: user?.id || null,
-      date: todayStr,
+      // domain display fields (local storage history)
+      date: todayDisplay,
       name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
-      totalCalories: total,
       exercises: cumulativeExercises.map(ex => ({
         name: ex.exerciseName,
         sets: ex.sets,
@@ -337,7 +348,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       })),
     };
 
-    // ✅ Local-first + queued cloud upsert
+    // ✅ Local-first + queued cloud upsert (your wrapper will map to Supabase)
     await saveWorkoutLocalFirst(newSession);
 
     // Update banners & streak locally
@@ -345,30 +356,30 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     updateStreak();
 
     // Recompute today's consumed/burned and upsert daily metrics (local-first)
-    const todayKey = localDayISO();
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const burnedToday = workouts
-      .filter(w => w.date === todayStr)
-      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
+      .filter(w => w.date === todayDisplay)
+      .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
 
     const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayMealRec = meals.find(m => m.date === todayStr);
+    const todayMealRec = meals.find(m => m.date === todayDisplay);
     const consumedToday = todayMealRec
       ? todayMealRec.meals.reduce((s, m) => s + (Number(m.calories) || 0), 0)
       : 0;
 
+    // ⬅️ KEY FIX: use correct column names that match your DB & on_conflict index
     await upsertDailyMetricsLocalFirst({
       user_id: user?.id || null,
-      date_key: todayKey,
-      consumed: consumedToday,
-      burned: burnedToday,
-      net: consumedToday - burnedToday
+      local_day: todayLocalIso,                         // was date_key → causes 400
+      calories_eaten: consumedToday,                    // prefer new schema names
+      calories_burned: burnedToday,
+      net_calories: consumedToday - burnedToday
     });
 
     // notify local-first listeners (NetCalorieBanner, CalorieSummary, History)
     try {
       window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
-        detail: { date: todayKey, burned: burnedToday }
+        detail: { date: todayLocalIso, burned: burnedToday }
       }));
     } catch {}
 
