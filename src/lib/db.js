@@ -45,11 +45,10 @@ export async function saveWorkout(userId, workout, sets = []) {
   if (!userId) throw new Error('saveWorkout: missing userId');
   if (!workout?.started_at) throw new Error('saveWorkout: missing started_at');
 
-  // Build row with optional client_id for idempotency
   const wRow = {
     user_id: userId,
-    client_id: workout.client_id ?? null, // optional but recommended (UUID)
-    started_at: workout.started_at,       // ISO timestamp (NOT NULL in schema)
+    client_id: workout.client_id ?? null,
+    started_at: workout.started_at,
     ended_at: workout.ended_at ?? null,
     goal: workout.goal ?? null,
     notes: workout.notes ?? null,
@@ -59,7 +58,6 @@ export async function saveWorkout(userId, workout, sets = []) {
   let w, upsertErr;
 
   if (wRow.client_id) {
-    // Preferred: idempotent upsert by client_id
     const res = await supabase
       .from('workouts')
       .upsert(wRow, { onConflict: 'client_id' })
@@ -69,7 +67,6 @@ export async function saveWorkout(userId, workout, sets = []) {
     w = res.data;
   }
 
-  // If no client_id or upsert failed due to missing UNIQUE, fall back safely.
   if (!w || upsertErr) {
     const { data, error } = await supabase
       .from('workouts')
@@ -91,7 +88,7 @@ export async function saveWorkout(userId, workout, sets = []) {
       reps: s.reps ?? null,
       tempo: s.tempo ?? null,
       volume: s.volume ?? null,
-      idx: s.idx ?? idx, // preserve order if provided
+      idx: s.idx ?? idx,
     }));
     const { error: setErr } = await supabase.from('workout_sets').insert(rows);
     if (setErr) throw setErr;
@@ -102,9 +99,6 @@ export async function saveWorkout(userId, workout, sets = []) {
 
 // -----------------------------------------------------------------------------
 // Daily metrics (atomic upsert via RPC) + direct upsert helper
-//   - You already use bump_daily_metrics(p_user_id uuid, p_day date, p_burn numeric, p_eaten numeric)
-//   - Keep RPC for additive bumps (delta-based).
-//   - Provide a row-level upsert for absolute totals when needed.
 // -----------------------------------------------------------------------------
 export async function upsertDailyMetrics(userId, day, deltaBurned = 0, deltaEaten = 0) {
   if (!userId) return;
@@ -129,7 +123,6 @@ export async function upsertDailyTotals(userId, day, patch = {}) {
   if (!userId) throw new Error('upsertDailyTotals: missing userId');
   const isoDay = toIsoDay(day);
 
-  // Prefer new column names if your schema has them; otherwise fall back.
   const rowNew = {
     user_id: userId,
     local_day: isoDay,
@@ -145,7 +138,6 @@ export async function upsertDailyTotals(userId, day, patch = {}) {
     .select()
     .maybeSingle();
 
-  // If the above fails due to legacy columns, try legacy mapping:
   if (error && /column .* does not exist/i.test(error.message || '')) {
     const rowLegacy = {
       user_id: userId,
@@ -207,7 +199,27 @@ export async function saveMeal(userId, meal, items = []) {
 }
 
 // -----------------------------------------------------------------------------
-// Readers (for pages pulling from Supabase)
+// Meals (read)  ✅ restored export to fix build
+// -----------------------------------------------------------------------------
+export async function getMeals(userId, { from, to, limit = 500 } = {}) {
+  if (!userId) return [];
+  let q = supabase
+    .from('meals')
+    .select('id, eaten_at, title, total_calories')
+    .eq('user_id', userId)
+    .order('eaten_at', { ascending: false })
+    .limit(limit);
+
+  if (from) q = q.gte('eaten_at', from);
+  if (to)   q = q.lte('eaten_at', to);
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+// -----------------------------------------------------------------------------
+// Readers (workouts + metrics)
 // -----------------------------------------------------------------------------
 export async function getWorkouts(userId, { limit = 100 } = {}) {
   if (!userId) return [];
@@ -240,7 +252,7 @@ export async function getWorkoutSetsFor(workoutId, userId) {
 export async function getDailyMetricsRange(userId, from, to) {
   if (!userId) return [];
 
-  // Try new column names first
+  // Prefer new naming
   let q = supabase
     .from('daily_metrics')
     .select('local_day, calories_burned, calories_eaten, net_calories')
