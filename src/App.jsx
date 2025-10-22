@@ -72,6 +72,10 @@ import { supabase }        from './lib/supabaseClient';
 // 🔗 NEW: attach offline sync listeners (Step 1 plumbing)
 import { attachSyncListeners } from './lib/sync';
 
+// 🔗 NEW (UI): Header & BottomNav
+import Header from './components/Header';
+import BottomNav from './components/BottomNav';
+
 // Streak helpers
 import {
   shouldShowAmbassadorOnce,
@@ -450,7 +454,7 @@ export default function App() {
       window.removeEventListener('focus', onFocus);
       clearInterval(iv);
     };
-  }, [authUser?.id, location.pathname, isProActive, status]);
+  }, [authUser?.id, location.pathname, isProActive, status ]);
   // ----------------------------------------------------------------------
 
   // ---- user heartbeat calls (initial + visibility, with switch handling) -
@@ -595,170 +599,181 @@ export default function App() {
   const showTryPro = !(isProActive || localPro);
 
   return (
-    <Container maxWidth="md" sx={{ py:4 }}>
-      <PageTracker />
-      {message && <PageTip />}
+    <>
+      {/* NEW: Top header (logo + nav) */}
+      <Header />
 
-      <Dialog open={promptOpen} onClose={handleClosePrompt}>
-        <DialogTitle>Meal Reminder</DialogTitle>
-        <DialogContent>
-          {missedMeals.map(meal => (
-            <Typography key={meal}>🍽 Don’t forget to log your <strong>{meal}</strong>!</Typography>
-          ))}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleGoToMeals}>Ok</Button>
-        </DialogActions>
-      </Dialog>
+      <Container maxWidth="md" sx={{ py:4 }}>
+        <PageTracker />
+        {message && <PageTip />}
 
-      <AmbassadorModal
-        open={ambassadorOpen}
-        onClose={() => {
-          // One-time flag so it never shows again unless user resets it
-          markAmbassadorShown();
-          setAmbassadorOpen(false);
-        }}
-        user={authUser}
-        streak={streak}
-      />
+        <Dialog open={promptOpen} onClose={handleClosePrompt}>
+          <DialogTitle>Meal Reminder</DialogTitle>
+          <DialogContent>
+            {missedMeals.map(meal => (
+              <Typography key={meal}>🍽 Don’t forget to log your <strong>{meal}</strong>!</Typography>
+            ))}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleGoToMeals}>Ok</Button>
+          </DialogActions>
+        </Dialog>
 
-      <Box sx={{ textAlign: 'center', mb: 2 }}>
-        <Typography variant="h2" color="primary">Slimcal.ai</Typography>
-        <Typography variant="body1" color="textSecondary">
-          Track your workouts, meals, and calories all in one place.
-        </Typography>
+        <AmbassadorModal
+          open={ambassadorOpen}
+          onClose={() => {
+            // One-time flag so it never shows again unless user resets it
+            markAmbassadorShown();
+            setAmbassadorOpen(false);
+          }}
+          user={authUser}
+          streak={streak}
+        />
 
-        {!authUser && (
-          <Button
-            variant="contained"
-            sx={{ mt: 2, mr: 1 }}
-            onClick={() =>
-              supabase.auth.signInWithOAuth({
-                provider: 'google',
-                options: { redirectTo: `${window.location.origin}/auth/callback` },
-              })
-            }
-          >
-            LOGIN
-          </Button>
-        )}
-
-        {showTryPro && (
-          <Button
-            variant="contained"
-            sx={{ mt: 2 }}
-            onClick={() => setUpgradeOpen(true)}
-          >
-            TRY PRO FREE
-          </Button>
-        )}
-
-        {authUser && (
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            Signed in as {authUser.email}{' '}
-            <Button
-              size="small"
-              onClick={async () => { await supabase.auth.signOut(); }}
-            >
-              SIGN OUT
-            </Button>
+        <Box sx={{ textAlign: 'center', mb: 2 }}>
+          <Typography variant="h2" color="primary">Slimcal.ai</Typography>
+          <Typography variant="body1" color="textSecondary">
+            Track your workouts, meals, and calories all in one place.
           </Typography>
-        )}
-      </Box>
 
-      <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-      {/* Pass live streak explicitly so banner shows the same number as the modal gate */}
-      <StreakBanner streak={streak} />
-      <SocialProofBanner />
-      {navBar}
+          {!authUser && (
+            <Button
+              variant="contained"
+              sx={{ mt: 2, mr: 1 }}
+              onClick={() =>
+                supabase.auth.signInWithOAuth({
+                  provider: 'google',
+                  options: { redirectTo: `${window.location.origin}/auth/callback` },
+                })
+              }
+            >
+              LOGIN
+            </Button>
+          )}
 
-      <Switch>
-        <Route path="/auth/callback" component={AuthCallback} />
-        <Route path="/pro" component={ProLandingPage} />
-        <Route path="/pro-success" component={ProSuccess} />
+          {showTryPro && (
+            <Button
+              variant="contained"
+              sx={{ mt: 2 }}
+              onClick={() => setUpgradeOpen(true)}
+            >
+              TRY PRO FREE
+            </Button>
+          )}
 
-        <Route path="/edit-info" render={() =>
-          <HealthDataForm setUserData={data => {
-            const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-            const next = { ...prev, ...data, isPremium: isProActive || localPro };
-            localStorage.setItem('userData', JSON.stringify(next));
-            setUserDataState(next);
-            history.push('/');
-          }} />
-        }/>
-        <Route path="/workout" render={() =>
-          <WorkoutPage
-            userData={userData}
-            onWorkoutLogged={() => {
-              // Recompute banners
-              const today = new Date().toLocaleDateString('en-US');
-              const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-              const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-              const todayRec = meals.find(m => m.date === today);
-              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+          {authUser && (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Signed in as {authUser.email}{' '}
+              <Button
+                size="small"
+                onClick={async () => { await supabase.auth.signOut(); }}
+              >
+                SIGN OUT
+              </Button>
+            </Typography>
+          )}
+        </Box>
 
-              // Normalize & de-dup after a new log (handles offline multi-clicks)
-              normalizeLocalData();
-              dedupLocalWorkouts();
+        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
+        {/* Pass live streak explicitly so banner shows the same number as the modal gate */}
+        <StreakBanner streak={streak} />
+        <SocialProofBanner />
+        {navBar}
 
-              // Streak also updates inside WorkoutPage on Log Workout; keeping this is okay if you prefer redundancy:
-              updateStreak();
-            }}
-          />
-        }/>
-        <Route path="/meals" render={() =>
-          <MealTracker
-            onMealUpdate={() => {
-              // Recompute banners only (no streak update on mount)
-              const today = new Date().toLocaleDateString('en-US');
-              const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-              const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-              const todayRec = meals.find(m => m.date === today);
-              setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-              setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+        <Switch>
+          <Route path="/auth/callback" component={AuthCallback} />
+          <Route path="/pro" component={ProLandingPage} />
+          <Route path="/pro-success" component={ProSuccess} />
 
-              // Normalize meals in case they were added offline
-              normalizeLocalData();
-            }}
-          />
-        }/>
-        <Route path="/history" component={WorkoutHistory} />
-        <Route path="/dashboard" component={ProgressDashboard} />
-        <Route path="/achievements" component={Achievements} />
-        <Route path="/calorie-log"  component={CalorieHistory} />
-        <Route path="/summary"      component={CalorieSummary} />
-        <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive || localPro }} />} />
-        <Route path="/waitlist"     component={WaitlistSignup} />
-        <Route path="/preferences"  component={AlertPreferences} />
-        <Route exact path="/"       render={() => null} />
-      </Switch>
+          <Route path="/edit-info" render={() =>
+            <HealthDataForm setUserData={data => {
+              const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+              const next = { ...prev, ...data, isPremium: isProActive || localPro };
+              localStorage.setItem('userData', JSON.stringify(next));
+              setUserDataState(next);
+              history.push('/');
+            }} />
+          }/>
+          <Route path="/workout" render={() =>
+            <WorkoutPage
+              userData={userData}
+              onWorkoutLogged={() => {
+                // Recompute banners
+                const today = new Date().toLocaleDateString('en-US');
+                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                const todayRec = meals.find(m => m.date === today);
+                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Invite Friends</DialogTitle>
-        <DialogContent><ReferralDashboard /></DialogContent>
-        <DialogActions><Button onClick={() => setInviteOpen(false)}>Close</Button></DialogActions>
-      </Dialog>
+                // Normalize & de-dup after a new log (handles offline multi-clicks)
+                normalizeLocalData();
+                dedupLocalWorkouts();
 
-      <Fab color="primary" onClick={() => setInviteOpen(true)} sx={{ position:'fixed', bottom:16, right:16 }}>
-        <CampaignIcon />
-      </Fab>
+                // Streak also updates inside WorkoutPage on Log Workout; keeping this is okay if you prefer redundancy:
+                updateStreak();
+              }}
+            />
+          }/>
+          <Route path="/meals" render={() =>
+            <MealTracker
+              onMealUpdate={() => {
+                // Recompute banners only (no streak update on mount)
+                const today = new Date().toLocaleDateString('en-US');
+                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                const todayRec = meals.find(m => m.date === today);
+                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-      <UpgradeModal
-        open={upgradeOpen}
-        onClose={() => setUpgradeOpen(false)}
-        title="Start your 7-Day Free Pro Trial"
-        description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
-        defaultPlan={upgradeDefaults.plan}
-        autoCheckoutOnOpen={upgradeDefaults.autopay}
-      />
+                // Normalize meals in case they were added offline
+                normalizeLocalData();
+              }}
+            />
+          }/>
+          <Route path="/history" component={WorkoutHistory} />
+          <Route path="/dashboard" component={ProgressDashboard} />
+          <Route path="/achievements" component={Achievements} />
+          <Route path="/calorie-log"  component={CalorieHistory} />
+          <Route path="/summary"      component={CalorieSummary} />
+          <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive || localPro }} />} />
+          <Route path="/waitlist"     component={WaitlistSignup} />
+          <Route path="/preferences"  component={AlertPreferences} />
+          <Route exact path="/"       render={() => null} />
+        </Switch>
 
-      {/* Online/Offline snackbars */}
-      <Snackbar open={netSnack.open} autoHideDuration={2800} onClose={closeNetSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
-        {netSnack.type === 'online'
-          ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
-          : <Alert onClose={closeNetSnack} severity="warning" variant="filled">You’re offline. Entries are saved locally.</Alert>}
-      </Snackbar>
-    </Container>
+        <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Invite Friends</DialogTitle>
+          <DialogContent><ReferralDashboard /></DialogContent>
+          <DialogActions><Button onClick={() => setInviteOpen(false)}>Close</Button></DialogActions>
+        </Dialog>
+
+        <Fab color="primary" onClick={() => setInviteOpen(true)} sx={{ position:'fixed', bottom:16, right:16 }}>
+          <CampaignIcon />
+        </Fab>
+
+        <UpgradeModal
+          open={upgradeOpen}
+          onClose={() => setUpgradeOpen(false)}
+          title="Start your 7-Day Free Pro Trial"
+          description="Unlimited AI recaps, custom goals, meal suggestions & more—on us!"
+          defaultPlan={upgradeDefaults.plan}
+          autoCheckoutOnOpen={upgradeDefaults.autopay}
+        />
+
+        {/* Online/Offline snackbars */}
+        <Snackbar open={netSnack.open} autoHideDuration={2800} onClose={closeNetSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
+          {netSnack.type === 'online'
+            ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
+            : <Alert onClose={closeNetSnack} severity="warning" variant="filled">You’re offline. Entries are saved locally.</Alert>}
+        </Snackbar>
+      </Container>
+
+      {/* NEW: Spacer so BottomNav doesn’t cover content on phones */}
+      <Box sx={{ height: { xs: 80, md: 0 } }} />
+
+      {/* NEW: Mobile bottom navigation */}
+      <BottomNav />
+    </>
   );
 }
