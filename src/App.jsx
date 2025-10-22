@@ -76,6 +76,9 @@ import { attachSyncListeners } from './lib/sync';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
+// 🔗 NEW: Billing portal opener (uses /api/portal you already have)
+import { openBillingPortal } from './lib/billing';
+
 // Streak helpers
 import {
   shouldShowAmbassadorOnce,
@@ -431,7 +434,7 @@ export default function App() {
   useEffect(() => {
     if (!authUser) return;
     const now = Date.now();
-    const path = location.pathname || '/';
+       const path = location.pathname || '/';
 
     // Throttle duplicate calls (e.g., rapid route changes)
     const tooSoon =
@@ -598,10 +601,27 @@ export default function App() {
 
   const showTryPro = !(isProActive || localPro);
 
+  // 🔗 NEW: Global listeners so other components can trigger Upgrade/Sign-in
+  useEffect(() => {
+    const openUpgradeHandler = () => setUpgradeOpen(true);
+    const openSigninHandler = () => {
+      supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      });
+    };
+    window.addEventListener('slimcal:open-upgrade', openUpgradeHandler);
+    window.addEventListener('slimcal:open-signin', openSigninHandler);
+    return () => {
+      window.removeEventListener('slimcal:open-upgrade', openUpgradeHandler);
+      window.removeEventListener('slimcal:open-signin', openSigninHandler);
+    };
+  }, []);
+
   return (
     <>
-      {/* NEW: Top header (logo + nav) */}
-      <Header />
+      {/* Header can optionally use logoSrc if it supports it; otherwise ignored */}
+      <Header logoSrc="/slimcal-logo.svg" />
 
       <Container maxWidth="md" sx={{ py:4 }}>
         <PageTracker />
@@ -658,6 +678,17 @@ export default function App() {
               onClick={() => setUpgradeOpen(true)}
             >
               TRY PRO FREE
+            </Button>
+          )}
+
+          {/* NEW: show Manage Billing when Pro/trial is active */}
+          {(isProActive || localPro) && authUser && (
+            <Button
+              variant="outlined"
+              sx={{ mt: 2, ml: 1 }}
+              onClick={openBillingPortal}
+            >
+              Manage Billing
             </Button>
           )}
 
