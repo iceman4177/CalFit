@@ -22,14 +22,13 @@ import {
   DialogActions,
   Fab,
   Snackbar,
-  Alert
+  Alert,
+  Badge,
 } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
-import HistoryIcon       from '@mui/icons-material/History';
-import DashboardIcon     from '@mui/icons-material/Dashboard';
 import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
 import ListIcon          from '@mui/icons-material/List';
 import AssessmentIcon    from '@mui/icons-material/Assessment';
@@ -69,14 +68,11 @@ import { logPageView }   from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
-// 🔗 NEW: attach offline sync listeners (Step 1 plumbing)
 import { attachSyncListeners } from './lib/sync';
 
-// 🔗 NEW (UI): Header & BottomNav
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
-// Streak helpers
 import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
@@ -122,12 +118,10 @@ async function waitForSupabaseUser(maxMs = 10000, stepMs = 250) {
     const { data, error } = await supabase.auth.getUser();
     if (data?.user && !error) return data.user;
     if (Date.now() - start > maxMs) return null;
-    // eslint-disable-next-line no-await-loops/no-await-in-loop
     await new Promise(r => setTimeout(r, stepMs));
   }
 }
 
-// ---- identity capture -> /api/identify --------------------------------
 function parseUtm(search) {
   const params = new URLSearchParams(search || '');
   return {
@@ -166,9 +160,7 @@ async function sendIdentity({ user, path, isProActive, planStatus }) {
     console.error('[identify] failed', err);
   }
 }
-// -----------------------------------------------------------------------
 
-// ---- user heartbeat -> /api/users/heartbeat ----------------------------
 const HEARTBEAT_KEY = 'slimcal:lastHeartbeatTs';
 const LAST_HB_EMAIL_KEY = 'slimcal:lastHeartbeatEmail';
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -212,7 +204,6 @@ async function heartbeatNow(session) {
     rememberHeartbeatEmail(email);
   }
 }
-// -----------------------------------------------------------------------
 
 // ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
 function normalizeLocalData() {
@@ -319,7 +310,6 @@ export default function App() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // 🔗 Attach offline sync listeners once
   useEffect(() => {
     attachSyncListeners();
   }, []);
@@ -530,6 +520,17 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
+  // ===== AI Recap hint state (pulsing "AI" badge) =====
+  const [showRecapHint, setShowRecapHint] = useState(() => {
+    try { return localStorage.getItem('slimcal:recapHintSeen') !== '1'; } catch { return true; }
+  });
+  useEffect(() => {
+    if (location.pathname === '/recap' && showRecapHint) {
+      try { localStorage.setItem('slimcal:recapHintSeen', '1'); } catch {}
+      setShowRecapHint(false);
+    }
+  }, [location.pathname, showRecapHint]);
+
   // === Quick Actions (AI forward) ===
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
@@ -544,12 +545,49 @@ export default function App() {
             MEALS
           </Button>
         </Tooltip>
-        {/* NEW: put AI Daily Recap up front */}
+
+        {/* AI Daily Recap front and center with pulsing 'AI' badge until first visit */}
         <Tooltip title="AI Daily Recap">
-          <Button component={NavLink} to="/recap" variant="outlined" startIcon={<ChatIcon />}>
-            RECAP
-          </Button>
+          <span>
+            <Badge
+              invisible={!showRecapHint}
+              badgeContent="AI"
+              color="primary"
+              overlap="rectangular"
+              sx={{
+                '& .MuiBadge-badge': {
+                  fontWeight: 800,
+                  borderRadius: '10px',
+                  height: 18,
+                  minWidth: 22,
+                  px: 0.5,
+                  animation: 'sl-pulse 1.4s ease-in-out infinite',
+                },
+                '@keyframes sl-pulse': {
+                  '0%':   { transform: 'scale(1)' },
+                  '50%':  { transform: 'scale(1.12)' },
+                  '100%': { transform: 'scale(1)' },
+                },
+              }}
+            >
+              <Button
+                component={NavLink}
+                to="/recap"
+                variant="outlined"
+                startIcon={<ChatIcon />}
+                onClick={() => {
+                  if (showRecapHint) {
+                    try { localStorage.setItem('slimcal:recapHintSeen', '1'); } catch {}
+                    setShowRecapHint(false);
+                  }
+                }}
+              >
+                RECAP
+              </Button>
+            </Badge>
+          </span>
         </Tooltip>
+
         <Tooltip title="Invite Friends">
           <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
             INVITE
@@ -664,16 +702,10 @@ export default function App() {
 
           {!authUser && (
             <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2 }}>
-              <Button
-                variant="contained"
-                onClick={() => startOAuth(false)}
-              >
+              <Button variant="contained" onClick={() => startOAuth(false)}>
                 LOGIN
               </Button>
-              <Button
-                variant="outlined"
-                onClick={() => startOAuth(true)}
-              >
+              <Button variant="outlined" onClick={() => startOAuth(true)}>
                 TRY PRO FREE
               </Button>
             </Stack>
@@ -689,15 +721,10 @@ export default function App() {
             </Button>
           )}
 
-          {/* Pro/Trial: no hero CTA (header shows Manage Billing) */}
-
           {authUser && (
             <Typography variant="body2" sx={{ mt: 1 }}>
               Signed in as {authUser.email}{' '}
-              <Button
-                size="small"
-                onClick={async () => { await supabase.auth.signOut(); }}
-              >
+              <Button size="small" onClick={async () => { await supabase.auth.signOut(); }}>
                 SIGN OUT
               </Button>
             </Typography>
@@ -791,7 +818,6 @@ export default function App() {
         </Snackbar>
       </Container>
 
-      {/* Spacer so BottomNav doesn’t cover content on phones */}
       <Box sx={{ height: { xs: 80, md: 0 } }} />
       <BottomNav />
     </>
