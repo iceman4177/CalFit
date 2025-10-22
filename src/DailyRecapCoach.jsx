@@ -1,6 +1,16 @@
 // src/DailyRecapCoach.jsx
 import React, { useState, useEffect, useMemo } from "react";
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Typography,
+  Card,
+  CardContent,
+  Stack,
+  Divider,
+  Chip,
+} from "@mui/material";
 import UpgradeModal from "./components/UpgradeModal";
 import { useUserData } from "./UserDataContext";
 import { useAuth } from "./context/AuthProvider.jsx";
@@ -49,7 +59,7 @@ function buildLocalContext() {
   const todayWorkouts = wh.filter((w) => w.date === todayUS);
   const workouts = [];
   for (const w of todayWorkouts) {
-    for (const ex of w.exercises || []) {
+    for (const ex of (w.exercises || [])) {
       workouts.push({
         exercise_name: ex.name,
         reps: ex.reps || 0,
@@ -64,7 +74,7 @@ function buildLocalContext() {
     mealsRec?.meals?.map((m) => ({
       title: m.name || "Meal",
       total_calories: m.calories || 0,
-      items: [], // local doesn't store items; optional
+      items: [],
     })) || [];
 
   const burned = todayWorkouts.reduce((s, w) => s + (w.totalCalories || 0), 0);
@@ -74,7 +84,7 @@ function buildLocalContext() {
 }
 
 // -----------------------------------------------------------------------------
-
+// Component
 export default function DailyRecapCoach() {
   const { isPremium } = useUserData();
   const { user } = useAuth();
@@ -93,7 +103,7 @@ export default function DailyRecapCoach() {
   // Load today’s count on mount
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    if (stored.date === todayUS) setCount(stored.count);
+    if (stored.date === todayUS) setCount(stored.count || 0);
     else setCount(0);
   }, [todayUS]);
 
@@ -132,18 +142,16 @@ export default function DailyRecapCoach() {
       for (const w of todays) {
         const sets = await getWorkoutSetsFor(w.id, user.id);
         const kcal = calcCaloriesFromSets(sets);
-        // represent as per-set lines so the coach can see details
         if (Array.isArray(sets) && sets.length > 0) {
           for (const s of sets) {
             workouts.push({
               exercise_name: s.exercise_name,
               reps: s.reps || 0,
               weight: s.weight || 0,
-              calories: kcal, // same estimate per workout; simple but effective for recap tone
+              calories: kcal, // simple estimate per workout
             });
           }
         } else {
-          // no sets captured → still include workout-level estimate
           workouts.push({
             exercise_name: "Workout session",
             reps: 0,
@@ -156,7 +164,7 @@ export default function DailyRecapCoach() {
       console.warn("[DailyRecapCoach] workouts fetch failed, continuing", e);
     }
 
-    // 3) Today’s meals (summary level; items optional)
+    // 3) Today’s meals (summary level)
     const meals = [];
     try {
       const mealsAll = await getMeals(user.id, {
@@ -168,7 +176,7 @@ export default function DailyRecapCoach() {
         meals.push({
           title: m.title || "Meal",
           total_calories: Math.round(m.total_calories || 0),
-          items: [], // if you later add a reader for meal_items, fill this in
+          items: [],
         });
       }
     } catch (e) {
@@ -230,7 +238,7 @@ export default function DailyRecapCoach() {
             { role: "system", content: "You are a friendly, practical fitness coach." },
             { role: "user", content: userContent },
           ],
-          context: ctx, // 🔥 new: pass structured context for the API to append
+          context: ctx, // also pass structured context for the API to append if needed
         }),
       });
 
@@ -251,25 +259,113 @@ export default function DailyRecapCoach() {
     }
   };
 
+  // ---- Derived UI bits -------------------------------------------------------
+  const isPro = !!isPremium;
+
+  const FreeUsageBanner = !isPro ? (
+    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+      Free recaps used today: <strong>{count}</strong>/3
+    </Typography>
+  ) : null;
+
+  // Inline upsell card for non-Pro users (non-blocking)
+  const UpsellCard = !isPro ? (
+    <Card
+      elevation={0}
+      sx={{
+        mb: 2.5,
+        border: "1px solid rgba(2,6,23,0.08)",
+        background: "linear-gradient(180deg, #ffffff, #fbfdff)",
+        borderRadius: 2,
+      }}
+    >
+      <CardContent>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
+            <Typography
+              variant="subtitle1"
+              sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}
+            >
+              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Get saved recaps, smarter suggestions, and deeper insights powered by Slimcal AI.
+            </Typography>
+          </Box>
+
+          <Stack direction="row" spacing={1} justifyContent={{ xs: "center", sm: "flex-end" }}>
+            <Button
+              variant="contained"
+              sx={{ fontWeight: 800 }}
+              onClick={async () => {
+                // If signed out → ask app to start OAuth; if signed in → show Upgrade modal.
+                if (!user) {
+                  window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
+                } else {
+                  setModalOpen(true);
+                }
+              }}
+            >
+              Start Free Trial
+            </Button>
+          </Stack>
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems="center"
+          justifyContent={{ xs: "center", sm: "flex-start" }}
+        >
+          <Feature text="Save & revisit AI recaps" />
+          <Feature text="Custom goals & suggestions" />
+          <Feature text="Priority improvements & support" />
+        </Stack>
+      </CardContent>
+    </Card>
+  ) : null;
+
   return (
-    <Box sx={{ p: 2, textAlign: "center" }}>
-      <Button variant="contained" onClick={handleGetRecap} disabled={loading}>
-        {loading ? <CircularProgress size={24} /> : "Get Daily Recap"}
-      </Button>
+    <Box sx={{ p: 2, maxWidth: 800, mx: "auto" }}>
+      {UpsellCard}
 
-      {error && (
-        <Typography color="error" sx={{ mt: 2 }}>
-          {error}
-        </Typography>
-      )}
+      <Box sx={{ textAlign: "center" }}>
+        <Button variant="contained" onClick={handleGetRecap} disabled={loading}>
+          {loading ? <CircularProgress size={24} /> : "Get Daily Recap"}
+        </Button>
 
-      {recap && (
-        <Typography sx={{ mt: 3, whiteSpace: "pre-wrap" }}>
-          {recap}
-        </Typography>
-      )}
+        {FreeUsageBanner}
+
+        {error && (
+          <Typography color="error" sx={{ mt: 2 }}>
+            {error}
+          </Typography>
+        )}
+
+        {recap && (
+          <Typography sx={{ mt: 3, whiteSpace: "pre-wrap", textAlign: "left" }}>
+            {recap}
+          </Typography>
+        )}
+      </Box>
 
       <UpgradeModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </Box>
+  );
+}
+
+function Feature({ text }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Chip label="✓" size="small" variant="outlined" />
+      <Typography variant="caption">{text}</Typography>
+    </Stack>
   );
 }

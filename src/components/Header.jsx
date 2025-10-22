@@ -36,7 +36,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   };
 
   const handleTryPro = () => {
-    // App.jsx listens for this and opens <UpgradeModal /> (trial/checkout)
     window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
   };
 
@@ -87,7 +86,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
         {/* Primary nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
-            {/* Treat "/" as active for Dashboard */}
             <NavLink
               to="/dashboard"
               exact
@@ -100,16 +98,18 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             <NavLink to="/meals"   style={linkStyle} activeStyle={activeStyle}>Meals</NavLink>
             <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>Workout</NavLink>
 
-            {/* NEW: Recap up in the header */}
+            {/* Recap in header with a tooltip on the AI chip */}
             <NavLink to="/recap" style={linkStyle} activeStyle={activeStyle}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 Recap
-                <Chip
-                  label="AI"
-                  size="small"
-                  color="primary"
-                  sx={{ height: 18, borderRadius: '8px', fontWeight: 800 }}
-                />
+                <Tooltip title="AI Daily Recap">
+                  <Chip
+                    label="AI"
+                    size="small"
+                    color="primary"
+                    sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
+                  />
+                </Tooltip>
               </span>
             </NavLink>
 
