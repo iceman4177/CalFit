@@ -1,6 +1,6 @@
 // src/components/Header.jsx
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -26,7 +26,6 @@ function isProLocal() {
 export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   const { isProActive } = useEntitlements();
   const pro = isProActive || isProLocal();
-  const location = useLocation();
 
   const openSignIn = () => {
     supabase.auth.signInWithOAuth({
@@ -35,11 +34,13 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
     });
   };
 
-  const openUpgrade = () => {
+  const handleTryPro = () => {
+    // App.jsx listens for this and opens <UpgradeModal /> (trial/checkout)
     window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
   };
 
-  const openPortal = async () => {
+  const handleManageBilling = async () => {
+    // Stripe Customer Portal (manage/cancel payment methods, invoices, etc.)
     await openBillingPortal();
   };
 
@@ -50,21 +51,14 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
     padding: '6px 10px',
     borderRadius: 10,
   };
-
-  const activeStyle = {
-    ...linkStyle,
-    background: 'rgba(37, 99, 235, 0.08)',
-  };
+  const activeStyle = { ...linkStyle, background: 'rgba(37, 99, 235, 0.08)' };
 
   return (
-    <AppBar
-      position="sticky"
-      elevation={0}
-      color="transparent"
+    <AppBar position="sticky" elevation={0} color="transparent"
       sx={{ backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(0,0,0,0.06)' }}
     >
       <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto' }}>
-        {/* Left: Brand */}
+        {/* Brand */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2 }}>
           <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
             <img
@@ -79,10 +73,10 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
           </a>
         </Box>
 
-        {/* Center: Nav */}
+        {/* Primary nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5}>
-            {/* Dashboard: treat "/" as active too */}
+            {/* Treat "/" as active for Dashboard */}
             <NavLink
               to="/dashboard"
               exact
@@ -92,25 +86,18 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             >
               Dashboard
             </NavLink>
-
-            <NavLink to="/meals" style={linkStyle} activeStyle={activeStyle}>
-              Meals
-            </NavLink>
-            <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>
-              Workout
-            </NavLink>
-            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
-              History
-            </NavLink>
+            <NavLink to="/meals"   style={linkStyle} activeStyle={activeStyle}>Meals</NavLink>
+            <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>Workout</NavLink>
+            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>History</NavLink>
           </Stack>
         </Box>
 
-        {/* Right: Plan action + quick sign-in */}
+        {/* Plan action + quick sign-in */}
         <Stack direction="row" spacing={1} alignItems="center">
           {pro ? (
             <Button
               variant="outlined"
-              onClick={openPortal}
+              onClick={handleManageBilling}
               sx={{ borderRadius: 10, textTransform: 'none', fontWeight: 700 }}
             >
               Manage Billing
@@ -119,10 +106,10 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             <Button
               variant="contained"
               color="error"
-              onClick={openUpgrade}
+              onClick={handleTryPro}
               sx={{ borderRadius: 10, textTransform: 'none', fontWeight: 800 }}
             >
-              Upgrade
+              Try Pro Free
             </Button>
           )}
 

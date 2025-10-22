@@ -28,8 +28,6 @@ import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
-import HistoryIcon       from '@mui/icons-material/History';
-import DashboardIcon     from '@mui/icons-material/Dashboard';
 import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
 import ListIcon          from '@mui/icons-material/List';
 import AssessmentIcon    from '@mui/icons-material/Assessment';
@@ -548,16 +546,30 @@ export default function App() {
           </Button>
         </Tooltip>
       </Stack>
+
+      {/* De-duplicated "More" menu — no Dashboard/History here */}
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
-        <MenuItem component={NavLink} to="/history"      onClick={closeMore}><HistoryIcon fontSize="small"/> History</MenuItem>
-        <MenuItem component={NavLink} to="/dashboard"    onClick={closeMore}><DashboardIcon fontSize="small"/> Dashboard</MenuItem>
-        <MenuItem component={NavLink} to="/achievements" onClick={closeMore}><EmojiEventsIcon fontSize="small"/> Achievements</MenuItem>
-        <MenuItem component={NavLink} to="/calorie-log"  onClick={closeMore}><ListIcon fontSize="small"/> Calorie Log</MenuItem>
-        <MenuItem component={NavLink} to="/summary"      onClick={closeMore}><AssessmentIcon fontSize="small"/> Summary</MenuItem>
-        <MenuItem component={NavLink} to="/recap"        onClick={closeMore}><ChatIcon fontSize="small"/> Daily Recap</MenuItem>
-        <MenuItem component={NavLink} to="/waitlist"     onClick={closeMore}><InfoIcon fontSize="small"/> Waitlist</MenuItem>
-        <MenuItem component={NavLink} to="/preferences"  onClick={closeMore}><InfoIcon fontSize="small"/> Preferences</MenuItem>
-        <MenuItem component={NavLink} to="/edit-info"    onClick={closeMore}><InfoIcon fontSize="small"/> Edit Info</MenuItem>
+        <MenuItem component={NavLink} to="/achievements" onClick={closeMore}>
+          <EmojiEventsIcon fontSize="small"/> Achievements
+        </MenuItem>
+        <MenuItem component={NavLink} to="/calorie-log" onClick={closeMore}>
+          <ListIcon fontSize="small"/> Calorie Log
+        </MenuItem>
+        <MenuItem component={NavLink} to="/summary" onClick={closeMore}>
+          <AssessmentIcon fontSize="small"/> Summary
+        </MenuItem>
+        <MenuItem component={NavLink} to="/recap" onClick={closeMore}>
+          <ChatIcon fontSize="small"/> Daily Recap
+        </MenuItem>
+        <MenuItem component={NavLink} to="/waitlist" onClick={closeMore}>
+          <InfoIcon fontSize="small"/> Waitlist
+        </MenuItem>
+        <MenuItem component={NavLink} to="/preferences" onClick={closeMore}>
+          <InfoIcon fontSize="small"/> Preferences
+        </MenuItem>
+        <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
+          <InfoIcon fontSize="small"/> Edit Info
+        </MenuItem>
       </Menu>
     </Box>
   );
