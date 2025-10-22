@@ -28,6 +28,8 @@ import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
+import HistoryIcon       from '@mui/icons-material/History';
+import DashboardIcon     from '@mui/icons-material/Dashboard';
 import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
 import ListIcon          from '@mui/icons-material/List';
 import AssessmentIcon    from '@mui/icons-material/Assessment';
@@ -274,7 +276,6 @@ export default function App() {
   const history      = useHistory();
   const location     = useLocation();
   const promptedRef  = useRef(false);
-  const autoRunRef   = useRef(false);
 
   useReferral();
 
@@ -296,6 +297,12 @@ export default function App() {
       const user = session?.user ?? null;
       setAuthUser(user);
 
+      // Auto-open Upgrade after OAuth if we set the flag pre-login
+      if (user && localStorage.getItem('slimcal:openUpgradeAfterLogin') === '1') {
+        localStorage.removeItem('slimcal:openUpgradeAfterLogin');
+        window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
+      }
+
       const email = user?.email || '';
       if (email) {
         const prev = lastHeartbeatEmail();
@@ -312,6 +319,7 @@ export default function App() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
+  // 🔗 Attach offline sync listeners once
   useEffect(() => {
     attachSyncListeners();
   }, []);
@@ -522,6 +530,7 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
+  // === Quick Actions (AI forward) ===
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
@@ -533,6 +542,12 @@ export default function App() {
         <Tooltip title="Log Meal">
           <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             MEALS
+          </Button>
+        </Tooltip>
+        {/* NEW: put AI Daily Recap up front */}
+        <Tooltip title="AI Daily Recap">
+          <Button component={NavLink} to="/recap" variant="outlined" startIcon={<ChatIcon />}>
+            RECAP
           </Button>
         </Tooltip>
         <Tooltip title="Invite Friends">
@@ -547,7 +562,7 @@ export default function App() {
         </Tooltip>
       </Stack>
 
-      {/* De-duplicated "More" menu — no Dashboard/History here */}
+      {/* De-duplicated "More" menu — removed Dashboard/History/Recap */}
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
         <MenuItem component={NavLink} to="/achievements" onClick={closeMore}>
           <EmojiEventsIcon fontSize="small"/> Achievements
@@ -557,9 +572,6 @@ export default function App() {
         </MenuItem>
         <MenuItem component={NavLink} to="/summary" onClick={closeMore}>
           <AssessmentIcon fontSize="small"/> Summary
-        </MenuItem>
-        <MenuItem component={NavLink} to="/recap" onClick={closeMore}>
-          <ChatIcon fontSize="small"/> Daily Recap
         </MenuItem>
         <MenuItem component={NavLink} to="/waitlist" onClick={closeMore}>
           <InfoIcon fontSize="small"/> Waitlist
@@ -603,6 +615,17 @@ export default function App() {
     };
   }, []);
 
+  // Helpers for CTA behavior
+  const startOAuth = (withUpgradeFlag = false) => {
+    if (withUpgradeFlag) {
+      localStorage.setItem('slimcal:openUpgradeAfterLogin', '1');
+    }
+    supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+  };
+
   return (
     <>
       <Header logoSrc="/slimcal-logo.svg" />
@@ -640,21 +663,23 @@ export default function App() {
           </Typography>
 
           {!authUser && (
-            <Button
-              variant="contained"
-              sx={{ mt: 2, mr: 1 }}
-              onClick={() =>
-                supabase.auth.signInWithOAuth({
-                  provider: 'google',
-                  options: { redirectTo: `${window.location.origin}/auth/callback` },
-                })
-              }
-            >
-              LOGIN
-            </Button>
+            <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2 }}>
+              <Button
+                variant="contained"
+                onClick={() => startOAuth(false)}
+              >
+                LOGIN
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => startOAuth(true)}
+              >
+                TRY PRO FREE
+              </Button>
+            </Stack>
           )}
 
-          {showTryPro && (
+          {authUser && showTryPro && (
             <Button
               variant="contained"
               sx={{ mt: 2 }}
@@ -663,6 +688,8 @@ export default function App() {
               TRY PRO FREE
             </Button>
           )}
+
+          {/* Pro/Trial: no hero CTA (header shows Manage Billing) */}
 
           {authUser && (
             <Typography variant="body2" sx={{ mt: 1 }}>
@@ -764,6 +791,7 @@ export default function App() {
         </Snackbar>
       </Container>
 
+      {/* Spacer so BottomNav doesn’t cover content on phones */}
       <Box sx={{ height: { xs: 80, md: 0 } }} />
       <BottomNav />
     </>
