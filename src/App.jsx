@@ -76,9 +76,6 @@ import { attachSyncListeners } from './lib/sync';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
-// 🔗 NEW: Billing portal opener (uses /api/portal you already have)
-import { openBillingPortal } from './lib/billing';
-
 // Streak helpers
 import {
   shouldShowAmbassadorOnce,
@@ -218,8 +215,6 @@ async function heartbeatNow(session) {
 // -----------------------------------------------------------------------
 
 // ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
-
-// Ensure locally saved workouts/meals have stable identifiers & timestamps.
 function normalizeLocalData() {
   const clientId = getOrCreateClientId();
 
@@ -244,7 +239,6 @@ function normalizeLocalData() {
   localStorage.setItem('mealHistory', JSON.stringify(mhNorm));
 }
 
-// Collapse duplicate workouts (same date|name|kcal) keeping newest by createdAt.
 function dedupLocalWorkouts() {
   const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
   if (!Array.isArray(wh) || wh.length === 0) return;
@@ -264,7 +258,6 @@ function dedupLocalWorkouts() {
   }
 }
 
-// Recompute banners/totals after any local mutation.
 function recomputeTodayBanners(setBurned, setConsumed) {
   const today = new Date().toLocaleDateString('en-US');
   const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
@@ -301,7 +294,6 @@ export default function App() {
       }
     })();
 
-    // FORCE heartbeat on new login or account switch (no throttle).
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const user = session?.user ?? null;
       setAuthUser(user);
@@ -322,7 +314,6 @@ export default function App() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // 🔗 NEW: attach offline sync listeners once on mount
   useEffect(() => {
     attachSyncListeners();
   }, []);
@@ -388,10 +379,8 @@ export default function App() {
     setUserDataState(next);
   };
 
-  // Streak state for banner + modal
   const [streak, setStreak] = useState(() => getStreak());
 
-  // Boot: hydrate streak safely (no increments), preload userData, refresh calories
   useEffect(() => {
     hydrateStreakOnStartup();
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -404,11 +393,9 @@ export default function App() {
       history.replace('/edit-info');
     }
 
-    // Initialize live streak value after hydration
     setStreak(getStreak());
   }, [isProActive, location.pathname, history]);
 
-  // Live: respond to streak updates (from real actions)
   useEffect(() => {
     const onStreakUpdate = () => {
       setStreak(getStreak());
@@ -420,23 +407,18 @@ export default function App() {
     return () => window.removeEventListener('slimcal:streak:update', onStreakUpdate);
   }, []);
 
-  // Optional: react to explicit ambassador:ready events
   useEffect(() => {
     const onAmbassadorReady = () => setAmbassadorOpen(true);
     window.addEventListener('slimcal:ambassador:ready', onAmbassadorReady);
     return () => window.removeEventListener('slimcal:ambassador:ready', onAmbassadorReady);
   }, []);
 
-  // ✅ OAuth code exchange happens ONLY in /auth/callback (not here).
-
-  // --- call /api/identify on auth/route/plan changes + existing 60s focus poll ---
   const lastIdentRef = useRef({ path: null, ts: 0 });
   useEffect(() => {
     if (!authUser) return;
     const now = Date.now();
-       const path = location.pathname || '/';
+    const path = location.pathname || '/';
 
-    // Throttle duplicate calls (e.g., rapid route changes)
     const tooSoon =
       (now - lastIdentRef.current.ts) < 2000 &&
       lastIdentRef.current.path === path;
@@ -452,15 +434,13 @@ export default function App() {
     const onFocus = () =>
       sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
     window.addEventListener('focus', onFocus);
-    const iv = setInterval(onFocus, 60_000); // heartbeat-like identify every 60s (kept as-is)
+    const iv = setInterval(onFocus, 60_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(iv);
     };
   }, [authUser?.id, location.pathname, isProActive, status ]);
-  // ----------------------------------------------------------------------
 
-  // ---- user heartbeat calls (initial + visibility, with switch handling) -
   useEffect(() => {
     let visHandler;
 
@@ -496,10 +476,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', visHandler);
     };
   }, []);
-  // ----------------------------------------------------------------------
 
-  // ---- LOCAL-FIRST OFFLINE EXPERIENCE -----------------------------------
-  // Normalize + de-dup local data on mount and on visibility/online.
   useEffect(() => {
     const run = () => {
       normalizeLocalData();
@@ -522,10 +499,8 @@ export default function App() {
     };
   }, []);
 
-  // Small network status snackbar
   const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
   const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
-  // ----------------------------------------------------------------------
 
   function refreshCalories() {
     const today    = new Date().toLocaleDateString('en-US');
@@ -589,7 +564,6 @@ export default function App() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
 
-  // Local pro flag for immediate UI after /pro-success
   const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
   useEffect(() => {
     const onStorage = (e) => {
@@ -601,7 +575,6 @@ export default function App() {
 
   const showTryPro = !(isProActive || localPro);
 
-  // 🔗 NEW: Global listeners so other components can trigger Upgrade/Sign-in
   useEffect(() => {
     const openUpgradeHandler = () => setUpgradeOpen(true);
     const openSigninHandler = () => {
@@ -620,7 +593,6 @@ export default function App() {
 
   return (
     <>
-      {/* Header can optionally use logoSrc if it supports it; otherwise ignored */}
       <Header logoSrc="/slimcal-logo.svg" />
 
       <Container maxWidth="md" sx={{ py:4 }}>
@@ -642,7 +614,6 @@ export default function App() {
         <AmbassadorModal
           open={ambassadorOpen}
           onClose={() => {
-            // One-time flag so it never shows again unless user resets it
             markAmbassadorShown();
             setAmbassadorOpen(false);
           }}
@@ -681,17 +652,6 @@ export default function App() {
             </Button>
           )}
 
-          {/* NEW: show Manage Billing when Pro/trial is active */}
-          {(isProActive || localPro) && authUser && (
-            <Button
-              variant="outlined"
-              sx={{ mt: 2, ml: 1 }}
-              onClick={openBillingPortal}
-            >
-              Manage Billing
-            </Button>
-          )}
-
           {authUser && (
             <Typography variant="body2" sx={{ mt: 1 }}>
               Signed in as {authUser.email}{' '}
@@ -706,7 +666,6 @@ export default function App() {
         </Box>
 
         <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-        {/* Pass live streak explicitly so banner shows the same number as the modal gate */}
         <StreakBanner streak={streak} />
         <SocialProofBanner />
         {navBar}
@@ -729,7 +688,6 @@ export default function App() {
             <WorkoutPage
               userData={userData}
               onWorkoutLogged={() => {
-                // Recompute banners
                 const today = new Date().toLocaleDateString('en-US');
                 const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
                 const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
@@ -737,11 +695,8 @@ export default function App() {
                 setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
                 setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                // Normalize & de-dup after a new log (handles offline multi-clicks)
                 normalizeLocalData();
                 dedupLocalWorkouts();
-
-                // Streak also updates inside WorkoutPage on Log Workout; keeping this is okay if you prefer redundancy:
                 updateStreak();
               }}
             />
@@ -749,7 +704,6 @@ export default function App() {
           <Route path="/meals" render={() =>
             <MealTracker
               onMealUpdate={() => {
-                // Recompute banners only (no streak update on mount)
                 const today = new Date().toLocaleDateString('en-US');
                 const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
                 const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
@@ -757,7 +711,6 @@ export default function App() {
                 setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
                 setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                // Normalize meals in case they were added offline
                 normalizeLocalData();
               }}
             />
@@ -792,7 +745,6 @@ export default function App() {
           autoCheckoutOnOpen={upgradeDefaults.autopay}
         />
 
-        {/* Online/Offline snackbars */}
         <Snackbar open={netSnack.open} autoHideDuration={2800} onClose={closeNetSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
           {netSnack.type === 'online'
             ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
@@ -800,10 +752,7 @@ export default function App() {
         </Snackbar>
       </Container>
 
-      {/* NEW: Spacer so BottomNav doesn’t cover content on phones */}
       <Box sx={{ height: { xs: 80, md: 0 } }} />
-
-      {/* NEW: Mobile bottom navigation */}
       <BottomNav />
     </>
   );
