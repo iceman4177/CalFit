@@ -1,4 +1,4 @@
-// api/entitlements.js
+// /api/entitlements.js
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
 function allowCors(res) {
@@ -7,13 +7,14 @@ function allowCors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 }
 
-const DEFAULT_PAYLOAD = {
+const DEFAULT = {
   isPro: false,
   status: "none",
   trialEnd: null,
   currentPeriodEnd: null,
   cancelAtPeriodEnd: null,
   customerId: null,
+  priceId: null,
 };
 
 export default async function handler(req, res) {
@@ -21,66 +22,81 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  const email = (req.query.email || "").trim().toLowerCase();
-  const customerId = (req.query.customer || "").trim();
-
-  if (!email && !customerId) {
-    return res.status(400).json({ error: "Provide email or customer" });
-  }
+  const email      = (req.query.email     || "").trim().toLowerCase();
+  const customerId = (req.query.customer  || "").trim();
+  const userIdIn   = (req.query.user_id   || "").trim();
 
   try {
-    // 1) Find customer row by customerId OR email
-    let cust = null;
-    if (customerId) {
-      const { data, error } = await supabaseAdmin
+    // --- 1) Resolve user_id in a robust order ----------------------------
+    let user_id = userIdIn || null;
+
+    // If not provided, try by Stripe customer mapping
+    if (!user_id && customerId) {
+      const { data: custRow, error: custErr } = await supabaseAdmin
         .from("app_stripe_customers")
-        .select("*")
+        .select("user_id, customer_id")
         .eq("customer_id", customerId)
-        .limit(1);
-      if (error) throw error;
-      cust = (data && data[0]) || null;
-    } else {
-      const { data, error } = await supabaseAdmin
-        .from("app_stripe_customers")
-        .select("*")
+        .maybeSingle();
+      if (custErr) throw custErr;
+      user_id = custRow?.user_id || null;
+    }
+
+    // If still unknown, try via app_users by email (best-effort)
+    if (!user_id && email) {
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from("app_users")
+        .select("user_id")
         .eq("email", email)
-        .order("updated_at", { ascending: false })
-        .limit(1);
-      if (error) throw error;
-      cust = (data && data[0]) || null;
+        .maybeSingle();
+      if (userErr) throw userErr;
+      user_id = userRow?.user_id || null;
     }
 
-    if (!cust) return res.json(DEFAULT_PAYLOAD);
+    if (!user_id) {
+      // No mapping found → return safe default
+      return res.status(200).json(DEFAULT);
+    }
 
-    // 2) Latest subscription by customer_id
-    const { data: subs, error: subErr } = await supabaseAdmin
+    // --- 2) Read entitlements from the view (freshest row per user) ------
+    const { data: ent, error: entErr } = await supabaseAdmin
+      .from("v_user_entitlements")
+      .select(
+        "status, is_pro_active, trial_end, current_period_end, cancel_at_period_end"
+      )
+      .eq("user_id", user_id)
+      .maybeSingle();
+
+    if (entErr) {
+      // Fail closed (free)
+      console.warn("[entitlements] view read error", entErr.message);
+      return res.status(200).json(DEFAULT);
+    }
+
+    // --- 3) Optional enrich: price & stripe_customer_id for UI hooks -----
+    const { data: subRow, error: subErr } = await supabaseAdmin
       .from("app_subscriptions")
-      .select("*")
-      .eq("customer_id", cust.customer_id)
+      .select("price_id, stripe_customer_id")
+      .eq("user_id", user_id)
       .order("updated_at", { ascending: false })
-      .limit(1);
-    if (subErr) throw subErr;
-
-    const sub = (subs && subs[0]) || null;
-    if (!sub) {
-      return res.json({ ...DEFAULT_PAYLOAD, customerId: cust.customer_id });
+      .limit(1)
+      .maybeSingle();
+    if (subErr) {
+      console.warn("[entitlements] subs read warn:", subErr.message);
     }
 
-    const status = sub.status;
-    const isPro =
-      status === "active" || status === "trialing" || status === "past_due";
-    return res.json({
-      isPro,
-      status,
-      trialEnd: sub.trial_end,
-      currentPeriodEnd: sub.current_period_end,
-      cancelAtPeriodEnd: sub.cancel_at_period_end,
-      customerId: cust.customer_id,
-      priceId: sub.price_id,
-    });
+    const payload = {
+      isPro: !!ent?.is_pro_active,
+      status: ent?.status || "none",
+      trialEnd: ent?.trial_end || null,
+      currentPeriodEnd: ent?.current_period_end || null,
+      cancelAtPeriodEnd: ent?.cancel_at_period_end ?? null,
+      customerId: subRow?.stripe_customer_id || customerId || null,
+      priceId: subRow?.price_id || null,
+    };
+
+    return res.status(200).json(payload);
   } catch (err) {
     console.error("/api/entitlements error", err);
-    // Fail closed (free) so app stays usable even if API hiccups
-    return res.status(200).json(DEFAULT_PAYLOAD);
+    return res.status(200).json(DEFAULT); // fail closed (free)
   }
 }
