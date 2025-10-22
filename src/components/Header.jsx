@@ -36,12 +36,11 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   };
 
   const openUpgrade = () => {
-    // App.jsx listens for this and opens <UpgradeModal />
     window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
   };
 
   const openPortal = async () => {
-    await openBillingPortal(); // uses /api/portal
+    await openBillingPortal();
   };
 
   const linkStyle = {
@@ -58,11 +57,11 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   };
 
   return (
-    <AppBar position="sticky" elevation={0} color="transparent"
-      sx={{
-        backdropFilter: 'blur(8px)',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-      }}
+    <AppBar
+      position="sticky"
+      elevation={0}
+      color="transparent"
+      sx={{ backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(0,0,0,0.06)' }}
     >
       <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto' }}>
         {/* Left: Brand */}
@@ -83,22 +82,31 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
         {/* Center: Nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5}>
-            <NavLink to="/dashboard" exact
-              style={(_, { isActive }) => (isActive || location.pathname === '/'
-                ? activeStyle
-                : linkStyle)}
+            {/* Dashboard: treat "/" as active too */}
+            <NavLink
+              to="/dashboard"
+              exact
+              style={linkStyle}
+              activeStyle={activeStyle}
+              isActive={(match, loc) => loc.pathname === '/' || Boolean(match)}
             >
               Dashboard
             </NavLink>
-            <NavLink to="/meals" style={linkStyle} activeStyle={activeStyle}>Meals</NavLink>
-            <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>Workout</NavLink>
-            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>History</NavLink>
+
+            <NavLink to="/meals" style={linkStyle} activeStyle={activeStyle}>
+              Meals
+            </NavLink>
+            <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>
+              Workout
+            </NavLink>
+            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
+              History
+            </NavLink>
           </Stack>
         </Box>
 
-        {/* Right: Auth + Plan action */}
+        {/* Right: Plan action + quick sign-in */}
         <Stack direction="row" spacing={1} alignItems="center">
-          {/* Show either Upgrade OR Manage Billing */}
           {pro ? (
             <Button
               variant="outlined"
@@ -118,7 +126,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             </Button>
           )}
 
-          {/* Sign in/out is handled in the hero area; here we just expose quick sign-in */}
           <Tooltip title="Sign in with Google">
             <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
               <img
