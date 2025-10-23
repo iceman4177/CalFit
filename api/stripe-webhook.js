@@ -56,21 +56,33 @@ async function resolveUserIdFromCustomer(stripeCustomerId) {
   return data?.user_id ?? null;
 }
 
+// ✅ UPDATED: persist Stripe subscription/customer ids for clean admin views
 async function upsertSubscription({ user_id, sub }) {
   // pull common price fields
   const item = sub.items?.data?.[0];
   const price = item?.price;
 
   const payload = {
-    subscription_id: sub.id,                          // <-- MUST NOT be null
+    // Existing identifier you already use to dedupe (keep it):
+    subscription_id: sub.id, // onConflict uses this
+
+    // New normalized identifiers (text) for reporting/joins:
+    stripe_subscription_id: sub.id,               // "sub_..."
+    customer_id: sub.customer || null,            // "cus_..."
+    stripe_customer_id: sub.customer || null,     // keep legacy field too
+
+    // Relationships / status
     user_id,
-    stripe_customer_id: sub.customer || null,
     status: sub.status || null,
+
+    // Price details
     price_id: price?.id || null,
     price_nickname: price?.nickname || null,
     currency: price?.currency || null,
     interval: price?.recurring?.interval || null,
     amount: typeof price?.unit_amount === "number" ? price.unit_amount : null,
+
+    // Periods / dates
     started_at: toIso(sub.start_date),
     current_period_start: toIso(sub.current_period_start),
     current_period_end: toIso(sub.current_period_end),
@@ -78,19 +90,20 @@ async function upsertSubscription({ user_id, sub }) {
     canceled_at: toIso(sub.canceled_at),
     trial_start: toIso(sub.trial_start),
     trial_end: toIso(sub.trial_end),
+
+    // Metadata
     env: useLive ? "live" : "test",
     updated_at: new Date().toISOString(),
   };
 
-  // visibility
   console.log("[wh] upserting subscription", {
-    sub_id: payload.subscription_id,
+    sub_id: payload.stripe_subscription_id,
     status: payload.status,
     user_id: payload.user_id,
     cancel_at_period_end: payload.cancel_at_period_end,
   });
 
-  const { data, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("app_subscriptions")
     .upsert(payload, { onConflict: "subscription_id", ignoreDuplicates: false });
 
@@ -100,7 +113,7 @@ async function upsertSubscription({ user_id, sub }) {
     console.log("[wh] upsert app_subscriptions OK");
   }
 
-  // flip is_pro quickly (SQL trigger also keeps it correct)
+  // Flip is_pro quickly (keep your SQL trigger behavior too)
   if (user_id && sub.status && ["active", "trialing"].includes(sub.status)) {
     await supabaseAdmin
       .from("app_users")
@@ -132,7 +145,10 @@ export default async function handler(req, res) {
     const sig = req.headers["stripe-signature"];
     event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
   } catch (err) {
-    console.error(`[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`, err?.message);
+    console.error(
+      `[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`,
+      err?.message
+    );
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -140,6 +156,7 @@ export default async function handler(req, res) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;
+
         const user_id =
           session?.metadata?.app_user_id ||
           session?.metadata?.user_id ||
@@ -147,7 +164,10 @@ export default async function handler(req, res) {
           (await resolveUserIdFromCustomer(session?.customer)) ||
           null;
 
-        const email = session?.customer_details?.email || session?.metadata?.email || null;
+        const email =
+          session?.customer_details?.email ||
+          session?.metadata?.email ||
+          null;
 
         await upsertUser(user_id, email);
 
@@ -163,7 +183,7 @@ export default async function handler(req, res) {
       case "customer.subscription.deleted": {
         const sub = event.data.object;
 
-        // Prefer metadata, then local map
+        // Prefer metadata, then mapping via customer id
         let user_id =
           sub?.metadata?.app_user_id ||
           sub?.metadata?.user_id ||
