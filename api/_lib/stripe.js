@@ -1,4 +1,4 @@
-// api/_lib/stripe.js
+// /api/_lib/stripe.js
 import Stripe from "stripe";
 
 const key = process.env.STRIPE_SECRET_KEY;

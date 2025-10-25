@@ -1,4 +1,16 @@
 // /api/ai/generate.js
+//
+// Slimcal AI gateway with server-side free-pass + Pro/Trial bypass.
+// Behavior:
+// - Pro/Trial users: unlimited AI usage (bypass free-pass).
+// - Non-Pro users (signed-in or anonymous): up to 3 uses per FEATURE per DAY,
+//   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
+//   Supabase when possible; if the table/policy isn't present, we fall back to
+//   an in-memory counter to avoid breaking.
+//
+// Features supported: 'workout', 'meal', 'coach'.
+//
+
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
 
@@ -11,7 +23,7 @@ export const config = { api: { bodyParser: false } };
 // Vercel Node functions support maxDuration; keep it modest
 export const maxDuration = 10;
 
-// ---- utils ----
+// -------------------- BASIC UTILS --------------------
 async function readJson(req) {
   try {
     const bufs = [];
@@ -23,6 +35,22 @@ async function readJson(req) {
   }
 }
 
+function dayKeyUTC(date = new Date()) {
+  return date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+}
+
+function headerClientId(req) {
+  const cid = (req.headers["x-client-id"] || "").toString().trim();
+  if (cid) return cid.slice(0, 128);
+  // Fallback to IP if header not present
+  const ip = (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "0.0.0.0")
+    .toString()
+    .split(",")[0]
+    .trim();
+  return `ip:${ip}`;
+}
+
+// -------------------- ENTITLEMENTS --------------------
 async function isProActive(user_id) {
   if (!user_id) return false;
   const { data, error } = await supabaseAdmin
@@ -39,28 +67,104 @@ async function isProActive(user_id) {
   return active && (!data.current_period_end || data.current_period_end > now);
 }
 
-// very light per-IP daily quota for free users
-const freeMap = new Map(); // key -> { used, day }
-function freeKey(req) {
-  const ip = (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "0.0.0.0")
-    .toString()
-    .split(",")[0]
-    .trim();
-  return `fq_${ip}`;
+// -------------------- SERVER-SIDE FREE PASS --------------------
+// DB-backed (preferred) with in-memory fallback for resiliency.
+// Schema (recommended):
+//   create table if not exists public.ai_free_passes (
+//     client_id text not null,
+//     user_id uuid,
+//     feature text not null check (feature in ('meal','workout','coach')),
+//     day_key date not null default (current_date),
+//     uses integer not null default 0,
+//     primary key (client_id, feature, day_key)
+//   );
+//
+// If the table/policy isn't present, we gracefully fall back to in-memory.
+
+const FREE_LIMIT = 3;
+
+// In-memory fallback map: key => { used, day }
+const freeMem = new Map();
+function memKey(clientId, feature) {
+  return `m:${clientId}:${feature}`;
 }
-function allowFree(req, cap = 3) {
-  const key = freeKey(req);
-  const today = new Date().toISOString().slice(0, 10);
-  const rec = freeMap.get(key);
+
+function memAllow(clientId, feature) {
+  const key = memKey(clientId, feature);
+  const today = dayKeyUTC();
+  const rec = freeMem.get(key);
   if (!rec || rec.day !== today) {
-    freeMap.set(key, { used: 1, day: today });
-    return true;
+    freeMem.set(key, { used: 1, day: today });
+    return { allowed: true, remaining: FREE_LIMIT - 1 };
   }
-  if (rec.used < cap) {
+  if (rec.used < FREE_LIMIT) {
     rec.used += 1;
-    return true;
+    return { allowed: true, remaining: FREE_LIMIT - rec.used };
   }
-  return false;
+  return { allowed: false, remaining: 0 };
+}
+
+async function dbAllow(clientId, feature, userId) {
+  try {
+    // 1) Try to select existing record
+    const today = dayKeyUTC();
+    const { data, error } = await supabaseAdmin
+      .from("ai_free_passes")
+      .select("uses")
+      .eq("client_id", clientId)
+      .eq("feature", feature)
+      .eq("day_key", today)
+      .maybeSingle();
+
+    if (error && error.code !== "PGRST116") {
+      // Unexpected select error → fallback to memory
+      return memAllow(clientId, feature);
+    }
+
+    if (!data) {
+      // 2) Insert first use
+      const ins = await supabaseAdmin
+        .from("ai_free_passes")
+        .insert([{ client_id: clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
+        .select("uses")
+        .single();
+
+      if (ins.error) {
+        // If insert fails (e.g., RLS), fallback
+        return memAllow(clientId, feature);
+      }
+      return { allowed: true, remaining: FREE_LIMIT - 1 };
+    }
+
+    // 3) Row exists: increment if under cap
+    const currentUses = data.uses || 0;
+    if (currentUses >= FREE_LIMIT) {
+      return { allowed: false, remaining: 0 };
+    }
+
+    const upd = await supabaseAdmin
+      .from("ai_free_passes")
+      .update({ uses: currentUses + 1, user_id: userId || null })
+      .eq("client_id", clientId)
+      .eq("feature", feature)
+      .eq("day_key", today)
+      .select("uses")
+      .single();
+
+    if (upd.error) {
+      // If update fails (RLS), fallback to memory
+      return memAllow(clientId, feature);
+    }
+    const newUses = upd.data.uses || currentUses + 1;
+    return { allowed: true, remaining: Math.max(0, FREE_LIMIT - newUses) };
+  } catch {
+    return memAllow(clientId, feature);
+  }
+}
+
+async function allowFreeFeature({ req, feature, userId }) {
+  const clientId = headerClientId(req);
+  return dbAllow(clientId, feature, userId);
 }
 
 // -------------------- TIMEOUT HELPERS --------------------
@@ -544,7 +648,43 @@ Rules:
   return suggestions;
 }
 
-// ---- handler ----
+// -------------------- COACH --------------------
+function fallbackCoachSuggestions({ intent = "general" }, count = 3) {
+  const norm = normalizeIntent(intent);
+  const msgsByIntent = {
+    bodybuilder: [
+      "Progressive overload beats variety. Add 2.5–5 lb when you hit the top of your rep range.",
+      "Protein first: anchor each meal with 25–45 g.",
+      "Tiny surplus + consistency = visible size in 8–12 weeks."
+    ],
+    powerlifter: [
+      "Prioritize quality singles @ RPE 7–8 to practice technique under load.",
+      "Pull twice for every heavy squat week to keep your back strong.",
+      "Sleep is your legal PED—7.5+ hours."
+    ],
+    endurance: [
+      "Fuel long sessions with 30–60g carbs/hour. Your lifts will thank you.",
+      "Keep easy days easy to make hard days actually hard.",
+      "Protein target still matters: ~0.7–1.0 g/lb."
+    ],
+    yoga_pilates: [
+      "Breathe through transitions—exhale on exertion, inhale on stretch.",
+      "Pair mobility with light strength to cement range of motion.",
+      "Consistency and gentle progressions beat intensity spikes."
+    ],
+    general: [
+      "Small habits compound: walk 8–10k steps and lift 3x/week.",
+      "Track protein and total calories; let the rest be flexible.",
+      "Perfect is the enemy of done—just start the session."
+    ]
+  };
+  const pool = msgsByIntent[norm] || msgsByIntent.general;
+  return Array.from({ length: Math.max(1, Math.min(count, 5)) }, (_, i) => ({
+    message: pool[i % pool.length]
+  }));
+}
+
+// -------------------- MAIN HANDLER --------------------
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -553,31 +693,40 @@ export default async function handler(req, res) {
 
   const body = await readJson(req);
 
-  // Accept any of the three keys for mode selection
-  const modeKey = (body?.type || body?.mode || body?.feature || "workout");
-  const feature = String(modeKey).toLowerCase();
+  // Accept any of the keys for the feature:
+  //   feature | type | mode
+  const modeKey = (body?.feature || body?.type || body?.mode || "workout");
+  const feature = String(modeKey).toLowerCase(); // 'workout' | 'meal' | 'coach'
 
   const {
     user_id = null,
     constraints = {},
     count = 5,
+
     // workout
     goal = "maintenance",
     focus = "upper",
     equipment = ["dumbbell", "barbell", "machine", "bodyweight"],
+
     // meals
     diet = constraints?.diet_preference || "omnivore",
     proteinTargetG = constraints?.protein_target_daily_g || constraints?.protein_per_meal_g || 120,
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
-  // Gate: Pro or small free quota
+  // 1) Pro/Trial users bypass free-pass cap completely
   const pro = await isProActive(user_id);
-  if (!pro && !allowFree(req, 3)) {
-    res.status(402).json({ error: "Upgrade required" });
-    return;
+
+  // 2) If not Pro/Trial → check per-feature free-pass
+  if (!pro) {
+    const pass = await allowFreeFeature({ req, feature, userId: user_id });
+    if (!pass.allowed) {
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
+      return;
+    }
   }
 
+  // 3) Route by feature
   if (feature === "workout") {
     try {
       const intent = normalizeIntent(constraints?.training_intent || constraints?.intent || "general");
@@ -589,7 +738,6 @@ export default async function handler(req, res) {
       return;
     } catch (e) {
       console.error("[ai/generate] workout error:", e);
-      // Final guard: never 504 the client
       const fallback = fallbackWorkoutPack(
         { focus, goal, intent: normalizeIntent(constraints?.training_intent || "general") },
         Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
@@ -617,6 +765,21 @@ export default async function handler(req, res) {
         )
       );
       res.status(200).json({ suggestions: fallback });
+      return;
+    }
+  }
+
+  if (feature === "coach") {
+    try {
+      const intent = normalizeIntent(constraints?.training_intent || "general");
+      // If you later wire real LLM coaching, drop it here.
+      const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
+      res.status(200).json({ suggestions });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] coach error:", e);
+      const suggestions = fallbackCoachSuggestions({ intent: "general" }, 3);
+      res.status(200).json({ suggestions });
       return;
     }
   }

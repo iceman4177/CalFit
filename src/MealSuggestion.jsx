@@ -1,3 +1,4 @@
+// src/MealSuggestion.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
@@ -23,6 +24,20 @@ const isTrialActive = () => {
   const ts = parseInt(localStorage.getItem('trialEndTs') || '0', 10);
   return ts && Date.now() < ts;
 };
+
+// Stable per-device id to enable 3 free uses when signed-out
+function getClientId() {
+  try {
+    let cid = localStorage.getItem('clientId');
+    if (!cid) {
+      cid = (crypto?.randomUUID?.() || String(Date.now())).slice(0, 36);
+      localStorage.setItem('clientId', cid);
+    }
+    return cid;
+  } catch {
+    return 'anon';
+  }
+}
 
 const getMealAIRefreshCount = () => {
   const today = new Date().toLocaleDateString('en-US');
@@ -56,7 +71,11 @@ function withinSoftMacroRanges({ kcal, p, c, f }) {
 async function postJSON(url, payload) {
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Send stable client id so server can grant free attempts even when signed out
+      'X-Client-Id': getClientId()
+    },
     body: JSON.stringify(payload)
   });
   const text = await resp.text();
