@@ -13,6 +13,20 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 
+// ---- client id helper (per-device free passes) ----
+function getClientId() {
+  try {
+    let cid = localStorage.getItem('clientId');
+    if (!cid) {
+      cid = (crypto?.randomUUID?.() || String(Date.now())).slice(0, 36);
+      localStorage.setItem('clientId', cid);
+    }
+    return cid;
+  } catch {
+    return 'anon';
+  }
+}
+
 // Parse tempo like "2-1-2" -> { conc: '2', ecc: '2' }
 function parseTempo(s) {
   if (!s || typeof s !== 'string') return { conc: '2', ecc: '2' };
@@ -34,10 +48,10 @@ function toLocalWorkout(ai) {
     const { conc, ecc } = parseTempo(b?.tempo);
 
     return {
-      exerciseType: '',           // optional in your add flow
-      muscleGroup: '',            // optional; AI may omit
+      exerciseType: '',
+      muscleGroup: '',
       exerciseName: name,
-      weight: '',                 // user fills if needed
+      weight: '',
       sets,
       reps,
       concentricTime: conc,
@@ -45,10 +59,7 @@ function toLocalWorkout(ai) {
     };
   });
 
-  return {
-    name: title,
-    exercises: exs
-  };
+  return { name: title, exercises: exs };
 }
 
 export default function SuggestedWorkoutCard({ userData, onAccept }) {
@@ -70,12 +81,16 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       const equipmentList  = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
       const lastFocus      = localStorage.getItem('last_focus') || 'upper';
 
+      // optional: signed-in id if present in local supabase token
       const supaToken = JSON.parse(localStorage.getItem('supabase.auth.token') || 'null');
       const user_id   = supaToken?.user?.id || null;
 
       const resp = await fetch('/api/ai/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Id': getClientId(), // <-- ensures per-device free tries
+        },
         body: JSON.stringify({
           feature: 'workout',
           user_id,
@@ -88,16 +103,21 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       });
 
       if (resp.status === 402) {
+        // Hit daily free cap → open paywall, don't silently fail
         setShowUpgrade(true);
         setPack([]);
+        setLoading(false);
         return;
       }
 
       const raw = await resp.text();
-      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
-      const data = JSON.parse(raw);
+      if (!resp.ok) throw new Error(`Server responded ${resp.status} ${raw ? `- ${raw}` : ''}`);
 
-      const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : [];
+      const data = raw ? JSON.parse(raw) : {};
+      const suggestions = Array.isArray(data?.suggestions)
+        ? data.suggestions
+        : Array.isArray(data) ? data : [];
+
       if (!suggestions.length) throw new Error('No workout suggestions returned');
 
       setPack(suggestions);
@@ -147,7 +167,19 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
     );
   }
 
-  if (!current) return null;
+  // If we hit the cap and cleared pack, still mount the modal
+  if (!current) {
+    return (
+      <>
+        <UpgradeModal
+          open={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Slimcal Pro"
+          description="You’ve reached your free daily AI limit. Upgrade for unlimited personalized workouts."
+        />
+      </>
+    );
+  }
 
   const localWorkout = toLocalWorkout(current);
 
@@ -156,7 +188,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       <CardContent>
         <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <Typography variant="h5">Suggested Workout</Typography>
-          {/* quick context chips for relatability */}
           <Box sx={{ display:'flex', gap:1 }}>
             <Chip size="small" label={(localStorage.getItem('training_intent') || 'general').replace('_',' ')} />
             <Chip size="small" label={localStorage.getItem('last_focus') || 'upper'} />
@@ -187,7 +218,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
           </Button>
         </Box>
 
-        {/* Tiny coach notes for trust (no new files) */}
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           💡 Tuned for your intent. Bodybuilder → moderate reps & volume; Powerlifter → lower reps & longer rest; Yoga/Pilates → lighter strength + mobility emphasis.
         </Typography>
