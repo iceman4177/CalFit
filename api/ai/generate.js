@@ -52,7 +52,7 @@ function headerClientId(req) {
 
 // -------------------- ENTITLEMENTS --------------------
 async function isProActive(user_id) {
-  if (!user_id) return false;
+  if (!user_id || !supabaseAdmin) return false;
   const { data, error } = await supabaseAdmin
     .from("app_subscriptions")
     .select("status,current_period_end")
@@ -105,9 +105,11 @@ function memAllow(clientId, feature) {
 }
 
 async function dbAllow(clientId, feature, userId) {
+  if (!supabaseAdmin) return memAllow(clientId, feature);
   try {
-    // 1) Try to select existing record
     const today = dayKeyUTC();
+
+    // 1) Read existing
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
