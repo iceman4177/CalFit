@@ -50,6 +50,12 @@ function headerClientId(req) {
   return `ip:${ip}`;
 }
 
+// Prefer a user-scoped counter when logged in, otherwise device/IP
+function idKey(req, userId) {
+  if (userId) return `uid:${userId}`;
+  return headerClientId(req);
+}
+
 // -------------------- ENTITLEMENTS --------------------
 async function isProActive(user_id) {
   if (!user_id || !supabaseAdmin) return false;
@@ -165,7 +171,7 @@ async function dbAllow(clientId, feature, userId) {
 }
 
 async function allowFreeFeature({ req, feature, userId }) {
-  const clientId = headerClientId(req);
+  const clientId = idKey(req, userId); // <-- user gets their own bucket
   return dbAllow(clientId, feature, userId);
 }
 
