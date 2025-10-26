@@ -1,4 +1,3 @@
-// src/MealSuggestion.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
@@ -13,7 +12,7 @@ import {
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 
-// --- entitlement helpers for refresh-after-free ---
+// ---- entitlement helpers for refresh button ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -25,6 +24,7 @@ const isTrialActive = () => {
   return ts && Date.now() < ts;
 };
 
+// stable per-device id to count free uses
 function getClientId() {
   try {
     let cid = localStorage.getItem('clientId');
@@ -46,10 +46,7 @@ const getMealAIRefreshCount = () => {
     localStorage.setItem('aiMealRefreshCount', '0');
     return 0;
   }
-  return parseInt(
-    localStorage.getItem('aiMealRefreshCount') || '0',
-    10
-  );
+  return parseInt(localStorage.getItem('aiMealRefreshCount') || '0', 10);
 };
 
 const incMealAIRefreshCount = () => {
@@ -59,24 +56,19 @@ const incMealAIRefreshCount = () => {
   localStorage.setItem('aiMealRefreshCount', String(newCount));
 };
 
-// nutrition sanity helper
+// macro balance helper
 function withinSoftMacroRanges({ kcal, p, c, f }) {
   if (!kcal || kcal <= 0) return true;
-  const pK = (p || 0) * 4,
-    cK = (c || 0) * 4,
-    fK = (f || 0) * 9;
+  const pK = (p || 0) * 4;
+  const cK = (c || 0) * 4;
+  const fK = (f || 0) * 9;
   const tot = pK + cK + fK || 1;
   const carbPct = (cK / tot) * 100;
   const fatPct = (fK / tot) * 100;
-  return (
-    carbPct >= 35 &&
-    carbPct <= 70 &&
-    fatPct >= 15 &&
-    fatPct <= 40
-  );
+  return carbPct >= 35 && carbPct <= 70 && fatPct >= 15 && fatPct <= 40;
 }
 
-// fetch wrapper
+// POST helper
 async function postJSON(url, payload) {
   const resp = await fetch(url, {
     method: 'POST',
@@ -91,13 +83,11 @@ async function postJSON(url, payload) {
   let json = null;
   try {
     json = text ? JSON.parse(text) : null;
-  } catch {
-    /* noop */
-  }
+  } catch {}
   return { resp, json, raw: text };
 }
 
-// normalize server responses
+// normalize meal objects returned by server
 function coerceMeals(data) {
   if (!data) return [];
   const arr =
@@ -117,23 +107,18 @@ function coerceMeals(data) {
       m?.label ||
       'Suggested meal';
 
+    // pick calories from any of the known fields
     const kcal =
-      (Number.isFinite(+m?.calories)
-        ? +m.calories
-        : null) ??
+      (Number.isFinite(+m?.calories) ? +m.calories : null) ??
       (Number.isFinite(+m?.kcal) ? +m.kcal : null) ??
-      (Number.isFinite(+m?.energy_kcal)
-        ? +m.energy_kcal
-        : null) ??
+      (Number.isFinite(+m?.energy_kcal) ? +m.energy_kcal : null) ??
       (Number.isFinite(+m?.nutrition?.calories)
         ? +m.nutrition.calories
         : null) ??
       0;
 
     const p =
-      (Number.isFinite(+m?.protein_g)
-        ? +m.protein_g
-        : null) ??
+      (Number.isFinite(+m?.protein_g) ? +m.protein_g : null) ??
       (Number.isFinite(+m?.protein) ? +m.protein : null) ??
       (Number.isFinite(+m?.nutrition?.protein_g)
         ? +m.nutrition.protein_g
@@ -141,9 +126,7 @@ function coerceMeals(data) {
       (m?.macros?.p ?? 0);
 
     const c =
-      (Number.isFinite(+m?.carbs_g)
-        ? +m.carbs_g
-        : null) ??
+      (Number.isFinite(+m?.carbs_g) ? +m.carbs_g : null) ??
       (Number.isFinite(+m?.carbs) ? +m.carbs : null) ??
       (Number.isFinite(+m?.nutrition?.carbs_g)
         ? +m.nutrition.carbs_g
@@ -151,17 +134,14 @@ function coerceMeals(data) {
       (m?.macros?.c ?? 0);
 
     const f =
-      (Number.isFinite(+m?.fat_g)
-        ? +m.fat_g
-        : null) ??
+      (Number.isFinite(+m?.fat_g) ? +m.fat_g : null) ??
       (Number.isFinite(+m?.fat) ? +m.fat : null) ??
       (Number.isFinite(+m?.nutrition?.fat_g)
         ? +m.nutrition.fat_g
         : null) ??
       (m?.macros?.f ?? 0);
 
-    const prepMinutes =
-      m?.prepMinutes ?? m?.prep_min ?? null;
+    const prepMinutes = m?.prepMinutes ?? m?.prep_min ?? null;
 
     return {
       name,
@@ -172,15 +152,14 @@ function coerceMeals(data) {
   });
 }
 
-export default function MealSuggestion({
-  consumedCalories,
-  onAddMeal
-}) {
+export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const { user } = useAuth();
 
-  const stored = JSON.parse(
-    localStorage.getItem('userData') || '{}'
-  );
+  // snapshot consumed calories at mount so we don't keep re-fetching
+  const [baseConsumed] = useState(consumedCalories);
+
+  // pull diet / goals for personalization
+  const stored = JSON.parse(localStorage.getItem('userData') || '{}');
   const dailyGoal = stored.dailyGoal || 0;
   const goalType = stored.goalType || 'maintenance';
 
@@ -190,51 +169,36 @@ export default function MealSuggestion({
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // figure out Breakfast / Lunch / Snack / Dinner
+  // time-of-day label
   const hour = new Date().getHours();
   const period =
-    hour < 10
-      ? 'Breakfast'
-      : hour < 14
-      ? 'Lunch'
-      : hour < 17
-      ? 'Snack'
-      : 'Dinner';
+    hour < 10 ? 'Breakfast' : hour < 14 ? 'Lunch' : hour < 17 ? 'Snack' : 'Dinner';
 
-  // fetch suggestions from server
+  // fetch from server
   const fetchSuggestions = useCallback(async () => {
     setLoading(true);
     setErrMsg(null);
 
     try {
       const dietPreference =
-        localStorage.getItem('diet_preference') ||
-        'omnivore';
+        localStorage.getItem('diet_preference') || 'omnivore';
       const trainingIntent =
-        localStorage.getItem('training_intent') ||
-        'general';
+        localStorage.getItem('training_intent') || 'general';
       const proteinMealG = parseInt(
-        localStorage.getItem('protein_target_meal_g') ||
-          '0',
+        localStorage.getItem('protein_target_meal_g') || '0',
         10
       );
       const calorieBias = parseInt(
-        localStorage.getItem('calorie_bias') ||
-          '0',
+        localStorage.getItem('calorie_bias') || '0',
         10
       );
 
-      // rough target for this meal
+      // meal budget snapshot (based on calories already eaten when panel opened)
       const remaining = Math.max(
         0,
-        (dailyGoal || 0) +
-          (calorieBias || 0) -
-          (consumedCalories || 0)
+        (dailyGoal || 0) + (calorieBias || 0) - (baseConsumed || 0)
       );
-      const mealBudget = Math.max(
-        250,
-        Math.round(remaining / 3)
-      );
+      const mealBudget = Math.max(250, Math.round(remaining / 3));
 
       const basePayload = {
         feature: 'meal',
@@ -245,19 +209,15 @@ export default function MealSuggestion({
         constraints: {
           diet_preference: dietPreference,
           training_intent: trainingIntent,
-          protein_per_meal_g:
-            proteinMealG || undefined,
+          protein_per_meal_g: proteinMealG || undefined,
           calorie_bias: calorieBias || undefined,
           meal_budget_kcal: mealBudget
         },
         count: 5
       };
 
-      // try unified endpoint
-      let { resp, json, raw } = await postJSON(
-        '/api/ai/generate',
-        basePayload
-      );
+      // try main endpoint
+      let { resp, json, raw } = await postJSON('/api/ai/generate', basePayload);
 
       if (resp.status === 402) {
         setShowUpgrade(true);
@@ -266,15 +226,9 @@ export default function MealSuggestion({
         return;
       }
 
-      // fallback legacy if needed
-      if (
-        !resp.ok &&
-        (resp.status === 404 || resp.status === 400)
-      ) {
-        const fallback = await postJSON(
-          '/api/ai/meal-suggestion',
-          basePayload
-        );
+      // try legacy if needed
+      if (!resp.ok && (resp.status === 404 || resp.status === 400)) {
+        const fallback = await postJSON('/api/ai/meal-suggestion', basePayload);
         resp = fallback.resp;
         json = fallback.json;
         raw = fallback.raw;
@@ -282,19 +236,17 @@ export default function MealSuggestion({
 
       if (!resp.ok) {
         throw new Error(
-          `Server responded ${resp.status}${
-            raw ? ' - ' + raw : ''
-          }`
+          `Server responded ${resp.status}${raw ? ' - ' + raw : ''}`
         );
       }
 
       let meals = coerceMeals(json);
 
-      // annotate w/ "why" text and macro balance
+      // enrich each suggestion with "why"
       meals = meals.map(m => {
-        const p = m.macros?.p ?? 0,
-          c = m.macros?.c ?? 0,
-          f = m.macros?.f ?? 0;
+        const p = m.macros?.p ?? 0;
+        const c = m.macros?.c ?? 0;
+        const f = m.macros?.f ?? 0;
         const ok = withinSoftMacroRanges({
           kcal: m.calories,
           p,
@@ -308,12 +260,8 @@ export default function MealSuggestion({
               ? `Hits ~${proteinMealG}g protein/meal`
               : `Aim ~${proteinMealG}g protein/meal`
             : null,
-          ok
-            ? 'Balanced macros'
-            : 'Adjust carbs/fats to balance macros',
-          dietPreference
-            ? `Diet: ${dietPreference}`
-            : null
+          ok ? 'Balanced macros' : 'Adjust carbs/fats to balance macros',
+          dietPreference ? `Diet: ${dietPreference}` : null
         ]
           .filter(Boolean)
           .join(' • ');
@@ -328,26 +276,19 @@ export default function MealSuggestion({
       setSuggestions(meals);
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
-      setErrMsg(
-        'Couldn’t fetch meal suggestions. Please try again.'
-      );
+      setErrMsg('Couldn’t fetch meal suggestions. Please try again.');
       setSuggestions([]);
     } finally {
       setLoading(false);
     }
-  }, [
-    user?.id,
-    goalType,
-    dailyGoal,
-    consumedCalories
-  ]);
+  }, [user?.id, goalType, dailyGoal, baseConsumed]);
 
-  // initial + when refreshKey changes
+  // initial + when user taps Refresh
   useEffect(() => {
     fetchSuggestions();
   }, [fetchSuggestions, refreshKey]);
 
-  // handle clicking "Refresh"
+  // refresh button logic with 3 free/day
   const handleRefreshClick = () => {
     if (!isProUser() && !isTrialActive()) {
       const used = getMealAIRefreshCount();
@@ -360,63 +301,50 @@ export default function MealSuggestion({
     setRefreshKey(k => k + 1);
   };
 
-  // user logged one of the suggestions
+  // "Add & Log" on a single suggestion
   const handleLogAndRemove = idx => {
     const meal = suggestions[idx];
     if (!meal) return;
 
-    // tell parent to log it
+    // log up in parent
     onAddMeal?.({
       name: meal.name,
-      calories: Math.max(
-        0,
-        Number(meal.calories) || 0
-      )
+      calories: Math.max(0, Number(meal.calories) || 0)
     });
 
-    // remove JUST that meal from local list
-    setSuggestions(prev =>
-      prev.filter((_, i) => i !== idx)
-    );
+    // remove just that meal locally
+    setSuggestions(prev => prev.filter((_, i) => i !== idx));
   };
 
   // UI states
   if (loading) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 2 }}>
+      <Box sx={{ textAlign: 'center', mt: 3 }}>
         <CircularProgress />
-        <Typography sx={{ mt: 1 }}>
-          Thinking of meals…
-        </Typography>
+        <Typography sx={{ mt: 1 }}>Thinking of meals…</Typography>
       </Box>
     );
   }
 
   if (errMsg) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 2 }}>
-        <Typography
-          color="error"
-          sx={{ mb: 1 }}
-        >
+      <Box sx={{ textAlign: 'center', mt: 3 }}>
+        <Typography color="error" sx={{ mb: 1 }}>
           {errMsg}
         </Typography>
-        <Button onClick={handleRefreshClick}>
-          Retry
-        </Button>
+        <Button onClick={handleRefreshClick}>Retry</Button>
       </Box>
     );
   }
 
   if (!suggestions.length) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 2 }}>
+      <Box sx={{ textAlign: 'center', mt: 3 }}>
         <Typography sx={{ mb: 1 }}>
           No more ideas right now.
         </Typography>
-        <Button onClick={handleRefreshClick}>
-          Get New Ideas
-        </Button>
+        <Button onClick={handleRefreshClick}>Get New Ideas</Button>
+
         <UpgradeModal
           open={showUpgrade}
           onClose={() => setShowUpgrade(false)}
@@ -430,9 +358,15 @@ export default function MealSuggestion({
   return (
     <Box sx={{ mt: 3 }}>
       <Typography
-        variant="h6"
-        align="center"
-        gutterBottom
+        variant="subtitle2"
+        sx={{
+          textTransform: 'uppercase',
+          fontWeight: 600,
+          color: 'text.secondary',
+          textAlign: 'center',
+          letterSpacing: 0.4,
+          mb: 1
+        }}
       >
         {period} Ideas
       </Typography>
@@ -443,22 +377,26 @@ export default function MealSuggestion({
           sx={{
             p: 1,
             mb: 2,
-            maxWidth: 400,
-            mx: 'auto'
+            maxWidth: 420,
+            mx: 'auto',
+            borderRadius: 2,
+            border: '1px solid rgba(0,0,0,0.04)',
+            boxShadow:
+              '0 16px 40px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03)'
           }}
         >
-          <CardContent>
+          <CardContent sx={{ pb: 1 }}>
             <Box
               sx={{
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 mb: 1,
-                gap: 1,
-                justifyContent:
-                  'space-between'
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 1
               }}
             >
-              <Typography variant="subtitle1">
+              <Typography variant="subtitle1" fontWeight={600}>
                 {s.name}
               </Typography>
               <Chip label={period} size="small" />
@@ -468,42 +406,24 @@ export default function MealSuggestion({
               sx={{
                 display: 'flex',
                 gap: 2,
+                flexWrap: 'wrap',
                 mb: 1,
-                flexWrap: 'wrap'
+                fontSize: '0.9rem'
               }}
             >
               <Typography>
-                🔥{' '}
-                {Math.max(
-                  0,
-                  Number(s.calories) || 0
-                )}
+                🔥 {Math.max(0, Number(s.calories) || 0)}
               </Typography>
               {s.macros && (
                 <>
                   <Typography>
-                    🥩{' '}
-                    {Math.max(
-                      0,
-                      Number(s.macros.p) || 0
-                    )}
-                    g
+                    🥩 {Math.max(0, Number(s.macros.p) || 0)}g
                   </Typography>
                   <Typography>
-                    🌾{' '}
-                    {Math.max(
-                      0,
-                      Number(s.macros.c) || 0
-                    )}
-                    g
+                    🌾 {Math.max(0, Number(s.macros.c) || 0)}g
                   </Typography>
                   <Typography>
-                    🥑{' '}
-                    {Math.max(
-                      0,
-                      Number(s.macros.f) || 0
-                    )}
-                    g
+                    🥑 {Math.max(0, Number(s.macros.f) || 0)}g
                   </Typography>
                 </>
               )}
@@ -512,7 +432,8 @@ export default function MealSuggestion({
             {s._why && (
               <Typography
                 variant="body2"
-                color="textSecondary"
+                color="text.secondary"
+                sx={{ lineHeight: 1.4 }}
               >
                 💡 {s._why}
               </Typography>
@@ -521,7 +442,8 @@ export default function MealSuggestion({
             {s.prepMinutes != null && (
               <Typography
                 variant="body2"
-                color="textSecondary"
+                color="text.secondary"
+                sx={{ lineHeight: 1.4 }}
               >
                 ⏱ {s.prepMinutes} min prep
               </Typography>
@@ -530,18 +452,26 @@ export default function MealSuggestion({
 
           <CardActions
             sx={{
-              justifyContent:
-                'space-between'
+              justifyContent: 'space-between',
+              pt: 0,
+              px: 2,
+              pb: 2
             }}
           >
-            <Button onClick={handleRefreshClick}>
+            <Button
+              size="small"
+              variant="text"
+              onClick={handleRefreshClick}
+              sx={{ textTransform: 'none', fontWeight: 500 }}
+            >
               Refresh
             </Button>
+
             <Button
+              size="small"
               variant="contained"
-              onClick={() =>
-                handleLogAndRemove(idx)
-              }
+              sx={{ textTransform: 'none', fontWeight: 600 }}
+              onClick={() => handleLogAndRemove(idx)}
             >
               Add & Log
             </Button>
@@ -551,9 +481,7 @@ export default function MealSuggestion({
 
       <UpgradeModal
         open={showUpgrade}
-        onClose={() =>
-          setShowUpgrade(false)
-        }
+        onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
         description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
       />
