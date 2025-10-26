@@ -1,5 +1,5 @@
 // src/MealSuggestion.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -8,18 +8,12 @@ import {
   Button,
   Box,
   Chip,
-  CircularProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Stack
+  CircularProgress
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 
-// ---- Pro gating helpers (still used for refresh button fallback) ----
+// ---- Pro / trial gating helpers (client side soft cap) ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -31,7 +25,7 @@ const isTrialActive = () => {
   return ts && Date.now() < ts;
 };
 
-// Stable per-device id to enable 3 free uses when signed-out
+// stable per-device id for free usage (mainly used server side)
 function getClientId() {
   try {
     let cid = localStorage.getItem('clientId');
@@ -45,6 +39,7 @@ function getClientId() {
   }
 }
 
+// local per-day refresh limiter for non-Pro/non-trial
 const getMealAIRefreshCount = () => {
   const today = new Date().toLocaleDateString('en-US');
   const savedDate = localStorage.getItem('aiMealRefreshDate');
@@ -63,10 +58,12 @@ const incMealAIRefreshCount = () => {
   localStorage.setItem('aiMealRefreshCount', String(newCount));
 };
 
-// small inline helpers to avoid extra files
+// sanity helper: is macro balance sorta normal?
 function withinSoftMacroRanges({ kcal, p, c, f }) {
   if (!kcal || kcal <= 0) return true;
-  const pK = (p || 0) * 4, cK = (c || 0) * 4, fK = (f || 0) * 9;
+  const pK = (p || 0) * 4;
+  const cK = (c || 0) * 4;
+  const fK = (f || 0) * 9;
   const tot = pK + cK + fK || 1;
   const carbPct = (cK / tot) * 100;
   const fatPct  = (fK / tot) * 100;
@@ -79,8 +76,7 @@ async function postJSON(url, payload) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Send stable client id so server can grant free attempts even when signed out
-      'X-Client-Id': getClientId()
+      'X-Client-Id': getClientId(), // lets backend bucket anonymous users
     },
     body: JSON.stringify(payload)
   });
@@ -90,7 +86,7 @@ async function postJSON(url, payload) {
   return { resp, json, raw: text };
 }
 
-// Accept more server shapes, including nested nutrition fields
+// Accept multiple shapes from server and coerce to consistent {name, calories, macros{p,c,f}, prepMinutes}
 function coerceMeals(data) {
   if (!data) return [];
   const arr =
@@ -110,7 +106,6 @@ function coerceMeals(data) {
       m?.label ||
       'Suggested meal';
 
-    // calories from several possible keys
     const kcal =
       (Number.isFinite(+m?.calories) ? +m.calories : null) ??
       (Number.isFinite(+m?.kcal) ? +m.kcal : null) ??
@@ -118,7 +113,6 @@ function coerceMeals(data) {
       (Number.isFinite(+m?.nutrition?.calories) ? +m.nutrition.calories : null) ??
       0;
 
-    // macros from several shapes / names
     const p =
       (Number.isFinite(+m?.protein_g) ? +m.protein_g : null) ??
       (Number.isFinite(+m?.protein) ? +m.protein : null) ??
@@ -139,69 +133,36 @@ function coerceMeals(data) {
 
     const prepMinutes = m?.prepMinutes ?? m?.prep_min ?? null;
 
-    return { name, calories: kcal || 0, macros: { p: p || 0, c: c || 0, f: f || 0 }, prepMinutes };
+    return {
+      name,
+      calories: kcal || 0,
+      macros: { p: p || 0, c: c || 0, f: f || 0 },
+      prepMinutes,
+    };
   });
 }
 
-// --- Edit dialog to tweak suggestion before logging ---
-function EditSuggestionDialog({ open, onClose, initial, onSave }) {
-  const [name, setName] = useState('');
-  const [cal, setCal] = useState('');
-  const [p, setP] = useState('');
-  const [c, setC] = useState('');
-  const [f, setF] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      setName(initial?.name || '');
-      setCal(String(initial?.calories ?? ''));
-      setP(String(initial?.macros?.p ?? ''));
-      setC(String(initial?.macros?.c ?? ''));
-      setF(String(initial?.macros?.f ?? ''));
-    }
-  }, [open, initial]);
-
-  return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Edit before logging</DialogTitle>
-      <DialogContent>
-        <Stack spacing={1.5} sx={{ mt: 1 }}>
-          <TextField label="Name" fullWidth value={name} onChange={e=>setName(e.target.value)} />
-          <TextField label="Calories (kcal)" type="number" fullWidth value={cal} onChange={e=>setCal(e.target.value)} />
-          <Stack direction="row" spacing={1.5}>
-            <TextField label="Protein (g)" type="number" fullWidth value={p} onChange={e=>setP(e.target.value)} />
-            <TextField label="Carbs (g)" type="number" fullWidth value={c} onChange={e=>setC(e.target.value)} />
-            <TextField label="Fat (g)" type="number" fullWidth value={f} onChange={e=>setF(e.target.value)} />
-          </Stack>
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          onClick={()=>{
-            const payload = {
-              name: name.trim() || (initial?.name ?? 'Meal'),
-              calories: Math.max(0, parseInt(cal,10) || 0),
-              macros: {
-                p: Math.max(0, parseInt(p,10) || 0),
-                c: Math.max(0, parseInt(c,10) || 0),
-                f: Math.max(0, parseInt(f,10) || 0),
-              }
-            };
-            onSave?.(payload);
-          }}
-        >
-          Save & Log
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
+/**
+ * MealSuggestion
+ *
+ * Props:
+ * - consumedCalories: number (current total eaten today in parent)
+ * - onAddMeal: ({name, calories}) => void (parent logs it)
+ *
+ * Behavior:
+ * - Fetch meal ideas ONCE when mounted (or when user presses Refresh).
+ * - When user taps "Add & Log":
+ *    - call onAddMeal
+ *    - remove that single idea from local list
+ *    - DO NOT auto re-fetch / DO NOT burn another try
+ * - Refresh button:
+ *    - gated to 3/day for free users
+ *    - if over cap => Upgrade modal instead of silent 402.
+ */
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const { user } = useAuth();
 
+  // from user profile / localStorage
   const stored = JSON.parse(localStorage.getItem('userData') || '{}');
   const dailyGoal = stored.dailyGoal || 0;
   const goalType  = stored.goalType  || 'maintenance';
@@ -212,10 +173,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // edit dialog state
-  const [editOpen, setEditOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-
+  // which meal of the day? (Breakfast/Lunch/Snack/Dinner chip)
   const hour = new Date().getHours();
   const period =
     hour < 10 ? 'Breakfast' :
@@ -223,90 +181,119 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     hour < 17 ? 'Snack' :
     'Dinner';
 
-  const fetchSuggestions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      // personalization context saved by HealthDataForm
-      const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
-      const trainingIntent   = localStorage.getItem('training_intent') || 'general';
-      const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
-      const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
-
-      // derive a suggested budget for this meal based on remaining calories
-      const remaining  = Math.max(0, (dailyGoal || 0) + (calorieBias || 0) - (consumedCalories || 0));
-      const mealBudget = Math.max(250, Math.round(remaining / 3)); // soft heuristic
-
-      // Build payload tolerant to server expectations (feature/type/mode)
-      const basePayload = {
-        feature: 'meal',
-        type: 'meal',
-        mode: 'meal',
-        user_id: user?.id || null, // real auth id (fixes 402)
-        goal: goalType || 'maintenance',
-        constraints: {
-          diet_preference: dietPreference,
-          training_intent: trainingIntent,
-          protein_per_meal_g: proteinMealG || undefined,
-          calorie_bias: calorieBias || undefined,
-          meal_budget_kcal: mealBudget
-        },
-        count: 5
-      };
-
-      // Try unified endpoint first
-      let { resp, json, raw } = await postJSON('/api/ai/generate', basePayload);
-
-      if (resp.status === 402) {
-        setShowUpgrade(true);
-        setSuggestions([]);
-        setLoading(false);
-        return;
-      }
-
-      // If 404 or 400 from unified gateway, try legacy route
-      if (!resp.ok && (resp.status === 404 || resp.status === 400)) {
-        const fallback = await postJSON('/api/ai/meal-suggestion', basePayload);
-        resp = fallback.resp; json = fallback.json; raw = fallback.raw;
-      }
-
-      if (!resp.ok) {
-        throw new Error(`Server responded ${resp.status} ${raw ? `- ${raw}` : ''}`);
-      }
-
-      // Accept multiple shapes
-      let meals = coerceMeals(json);
-
-      // Add lightweight reasoning/why
-      meals = meals.map((m) => {
-        const p = m.macros?.p ?? 0, c = m.macros?.c ?? 0, f = m.macros?.f ?? 0;
-        const ok = withinSoftMacroRanges({ kcal: m.calories, p, c, f });
-        const why = [
-          proteinMealG ? (p >= proteinMealG - 3 ? `Hits ~${proteinMealG}g protein/meal` : `Aim ~${proteinMealG}g protein/meal`) : null,
-          ok ? 'Balanced macros' : 'Adjust carbs/fats to balance macros',
-          dietPreference ? `Diet: ${dietPreference}` : null
-        ].filter(Boolean).join(' • ');
-        return { ...m, _why: why };
-      });
-
-      if (!meals.length) throw new Error('No meal suggestions found');
-      setSuggestions(meals);
-    } catch (err) {
-      console.error('[MealSuggestion] fetch error', err);
-      setError('Couldn’t fetch meal suggestions. Please try again.');
-      setSuggestions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, goalType, dailyGoal, consumedCalories]);
-
+  // --- internal fetch logic ---
   useEffect(() => {
-    fetchSuggestions();
-  }, [fetchSuggestions, refreshKey]);
+    let cancelled = false;
 
-  const handleRetry = () => {
-    // client-side fallback limit for refreshes
+    async function fetchSuggestions() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const dietPreference   = localStorage.getItem('diet_preference') || 'omnivore';
+        const trainingIntent   = localStorage.getItem('training_intent') || 'general';
+        const proteinMealG     = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
+        const calorieBias      = parseInt(localStorage.getItem('calorie_bias') || '0',10);
+
+        // budget for this meal based on remaining calories
+        const remaining  = Math.max(
+          0,
+          (dailyGoal || 0) + (calorieBias || 0) - (consumedCalories || 0)
+        );
+        const mealBudget = Math.max(250, Math.round(remaining / 3)); // heuristic
+
+        const basePayload = {
+          feature: 'meal',
+          type: 'meal',
+          mode: 'meal',
+          user_id: user?.id || null, // real auth id (fixes 402 for logged-in Pro)
+          goal: goalType || 'maintenance',
+          constraints: {
+            diet_preference: dietPreference,
+            training_intent: trainingIntent,
+            protein_per_meal_g: proteinMealG || undefined,
+            calorie_bias: calorieBias || undefined,
+            meal_budget_kcal: mealBudget
+          },
+          count: 5
+        };
+
+        // Try unified endpoint first
+        let { resp, json, raw } = await postJSON('/api/ai/generate', basePayload);
+
+        if (resp.status === 402) {
+          // Hard paywall hit (limit_reached)
+          if (!cancelled) {
+            setShowUpgrade(true);
+            setSuggestions([]);
+            setLoading(false);
+          }
+          return;
+        }
+
+        // Fallback legacy endpoint only if generate returns 400/404
+        if (!resp.ok && (resp.status === 404 || resp.status === 400)) {
+          const fallback = await postJSON('/api/ai/meal-suggestion', basePayload);
+          resp = fallback.resp; json = fallback.json; raw = fallback.raw;
+        }
+
+        if (!resp.ok) {
+          throw new Error(`Server responded ${resp.status} ${raw ? `- ${raw}` : ''}`);
+        }
+
+        let meals = coerceMeals(json);
+
+        // annotate: why it's good
+        meals = meals.map((m) => {
+          const p = m.macros?.p ?? 0, c = m.macros?.c ?? 0, f = m.macros?.f ?? 0;
+          const ok = withinSoftMacroRanges({ kcal: m.calories, p, c, f });
+
+          const why = [
+            proteinMealG
+              ? (p >= proteinMealG - 3
+                  ? `Hits ~${proteinMealG}g protein/meal`
+                  : `Aim ~${proteinMealG}g protein/meal`)
+              : null,
+            ok ? 'Balanced macros' : 'Adjust carbs/fats to balance macros',
+            dietPreference ? `Diet: ${dietPreference}` : null
+          ].filter(Boolean).join(' • ');
+
+          return { ...m, _why: why };
+        });
+
+        if (!meals.length) {
+          throw new Error('No meal suggestions found');
+        }
+
+        if (!cancelled) {
+          setSuggestions(meals);
+        }
+      } catch (err) {
+        console.error('[MealSuggestion] fetch error', err);
+        if (!cancelled) {
+          setError('Couldn’t fetch meal suggestions. Please try again.');
+          setSuggestions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+    // ONLY rerun on manual refreshKey bump.
+    // We intentionally do NOT depend on consumedCalories here so that
+    // logging a meal doesn't auto-burn another AI call.
+  }, [refreshKey, user?.id, goalType, dailyGoal, consumedCalories]);
+
+  // --- user actions ---
+  function handleRefresh() {
+    // client-side limit for non-pro/non-trial
     if (!isProUser() && !isTrialActive()) {
       const used = getMealAIRefreshCount();
       if (used >= 3) {
@@ -316,15 +303,23 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       incMealAIRefreshCount();
     }
     setRefreshKey((k) => k + 1);
-  };
+  }
 
-  const openEdit = (s) => { setEditing(s); setEditOpen(true); };
-  const handleEditedSave = (payload) => {
-    // Keep compatibility with parent: log using name + calories
-    onAddMeal?.({ name: payload.name, calories: Math.max(0, Number(payload.calories) || 0) });
-    setEditOpen(false);
-  };
+  function handleAddAndLog(idx) {
+    const s = suggestions[idx];
+    if (!s) return;
 
+    // tell parent to log meal
+    onAddMeal({
+      name: s.name,
+      calories: Math.max(0, Number(s.calories) || 0)
+    });
+
+    // remove just that suggestion locally (no refetch)
+    setSuggestions((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // --- render states ---
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
@@ -338,12 +333,36 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
         <Typography color="error" sx={{ mb: 1 }}>{error}</Typography>
-        <Button onClick={handleRetry}>Retry</Button>
+        <Button onClick={handleRefresh}>Retry</Button>
+        <UpgradeModal
+          open={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Slimcal Pro"
+          description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
+        />
       </Box>
     );
   }
 
-  if (!suggestions.length) return null;
+  if (!suggestions.length) {
+    // after logging all cards, show a gentle nudge instead of silently vanishing
+    return (
+      <Box sx={{ textAlign: 'center', mt: 2 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          You’ve logged that idea.
+        </Typography>
+        <Button size="small" onClick={handleRefresh}>
+          Get more ideas
+        </Button>
+        <UpgradeModal
+          open={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Slimcal Pro"
+          description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ mt: 2 }}>
@@ -352,9 +371,17 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       </Typography>
 
       {suggestions.map((s, idx) => (
-        <Card key={idx} sx={{ p: 1, mb: 2, maxWidth: 400, mx: "auto" }}>
+        <Card key={`${s.name}-${idx}`} sx={{ p: 1, mb: 2, maxWidth: 400, mx: 'auto' }}>
           <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1, justifyContent: 'space-between' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                mb: 1,
+                gap: 1,
+                justifyContent: 'space-between'
+              }}
+            >
               <Typography variant="subtitle1">{s.name}</Typography>
               <Chip label={period} size="small" />
             </Box>
@@ -384,16 +411,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
           </CardContent>
 
           <CardActions sx={{ justifyContent: 'space-between' }}>
-            <Button onClick={handleRetry}>Refresh</Button>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button variant="text" onClick={() => openEdit(s)}>Edit</Button>
-              <Button
-                variant="contained"
-                onClick={() => onAddMeal({ name: s.name, calories: Math.max(0, Number(s.calories) || 0) })}
-              >
-                Add & Log
-              </Button>
-            </Box>
+            <Button onClick={handleRefresh}>Refresh</Button>
+            <Button
+              variant="contained"
+              onClick={() => handleAddAndLog(idx)}
+            >
+              Add &amp; Log
+            </Button>
           </CardActions>
         </Card>
       ))}
@@ -403,13 +427,6 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
         description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
-      />
-
-      <EditSuggestionDialog
-        open={editOpen}
-        onClose={()=>setEditOpen(false)}
-        initial={editing}
-        onSave={handleEditedSave}
       />
     </Box>
   );
