@@ -12,6 +12,27 @@ import {
   Chip
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
+import WorkoutTypePicker from './WorkoutTypePicker';
+
+// --- normalize split to server values ---
+function normalizeFocus(focus) {
+  const s = String(focus || '').toLowerCase().replace(/\s+/g, '_');
+  const map = {
+    upper_body: 'upper',
+    lower_body: 'lower',
+    full_body: 'full',
+    chest_and_back: 'chest_back',
+    shoulders_and_arms: 'shoulders_arms',
+    glutes_and_hamstrings: 'glutes_hamstrings',
+    quads_and_calves: 'quads_calves',
+    push_pull: 'push',
+    push_day: 'push',
+    pull_day: 'pull',
+    legs_day: 'legs',
+    conditioning: 'cardio'
+  };
+  return map[s] || s || 'upper';
+}
 
 // ---- client id helper (per-device free passes) ----
 function getClientId() {
@@ -69,21 +90,35 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
+  // derive intent/goal/split defaults
+  const trainingIntent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
+  const initialSplit = normalizeFocus(
+    localStorage.getItem('training_split') ||
+    localStorage.getItem('last_focus') ||
+    'upper'
+  );
+
+  const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
-  async function fetchAI() {
+  async function fetchAI(focusOverride) {
     setLoading(true);
     setErr(null);
 
     try {
-      const trainingIntent = localStorage.getItem('training_intent') || 'general';
-      const fitnessGoal    = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
-      const equipmentList  = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
-      const lastFocus      = localStorage.getItem('last_focus') || 'upper';
+      const intentLS      = localStorage.getItem('training_intent') || 'general';
+      const fitnessGoal   = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+      const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
+
+      const focus = normalizeFocus(focusOverride || split || 'upper');
 
       // optional: signed-in id if present in local supabase token
       const supaToken = JSON.parse(localStorage.getItem('supabase.auth.token') || 'null');
       const user_id   = supaToken?.user?.id || null;
+
+      // keep local prefs in sync for the rest of the app
+      localStorage.setItem('training_split', focus);
+      localStorage.setItem('last_focus', focus);
 
       const resp = await fetch('/api/ai/generate', {
         method: 'POST',
@@ -95,9 +130,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
           feature: 'workout',
           user_id,
           goal: fitnessGoal,
-          focus: lastFocus,
+          focus,
           equipment: equipmentList,
-          constraints: { training_intent: trainingIntent },
+          constraints: { training_intent: intentLS },
           count: 5
         })
       });
@@ -131,16 +166,21 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
     }
   }
 
-  // Fetch a pack on mount + when userData changes
+  // Fetch on mount and when userData changes
   useEffect(() => { fetchAI(); /* eslint-disable-next-line */ }, [userData]);
 
   const handleRefresh = () => {
     if (pack.length <= 1) {
-      // pull a new pack if we only have one/none
       fetchAI();
     } else {
       setIdx((i) => (i + 1) % pack.length);
     }
+  };
+
+  const onPickSplit = (v) => {
+    const focus = normalizeFocus(v);
+    setSplit(focus);
+    fetchAI(focus);
   };
 
   if (loading) {
@@ -149,7 +189,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
         <CardContent>
           <Typography variant="h6">Generating a plan…</Typography>
           <Typography variant="body2" color="text.secondary">
-            Personalizing based on your intent and equipment.
+            Personalizing based on your goal, intent, equipment, and split.
           </Typography>
         </CardContent>
       </Card>
@@ -161,7 +201,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       <Card sx={{ mb: 4 }}>
         <CardContent>
           <Typography variant="h6" color="error">{err}</Typography>
-          <Button variant="outlined" sx={{ mt: 1 }} onClick={fetchAI}>Try Again</Button>
+          <Button variant="outlined" sx={{ mt: 1 }} onClick={() => fetchAI()}>Try Again</Button>
         </CardContent>
       </Card>
     );
@@ -189,10 +229,17 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
         <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <Typography variant="h5">Suggested Workout</Typography>
           <Box sx={{ display:'flex', gap:1 }}>
-            <Chip size="small" label={(localStorage.getItem('training_intent') || 'general').replace('_',' ')} />
-            <Chip size="small" label={localStorage.getItem('last_focus') || 'upper'} />
+            <Chip size="small" label={(trainingIntent || 'general').replace('_',' ')} />
+            <Chip size="small" label={(split || 'upper').replace('_',' ')} />
           </Box>
         </Box>
+
+        {/* Goal-aware split picker */}
+        <WorkoutTypePicker
+          intent={trainingIntent}
+          value={split}
+          onChange={onPickSplit}
+        />
 
         <Typography variant="subtitle1" gutterBottom sx={{ mt: 1 }}>
           {localWorkout.name}
@@ -219,7 +266,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          💡 Tuned for your intent. Bodybuilder → moderate reps & volume; Powerlifter → lower reps & longer rest; Yoga/Pilates → lighter strength + mobility emphasis.
+          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_',' ')}</strong>) and today’s split (<strong>{(split || 'upper').replace('_',' ')}</strong>). Sets/reps are auto-biased to your style.
         </Typography>
       </CardContent>
 

@@ -220,6 +220,26 @@ const TITLE_BY_INTENT = {
   yoga_pilates: "Mobility-Centered Strength Flow",
 };
 
+// NEW: normalize focus names coming from the Health form/UI
+function normalizeFocus(focus) {
+  const s = String(focus || "").toLowerCase().replace(/\s+/g, "_");
+  const map = {
+    upper_body: "upper",
+    lower_body: "lower",
+    full_body: "full",
+    chest_and_back: "chest_back",
+    shoulders_and_arms: "shoulders_arms",
+    glutes_and_hamstrings: "glutes_hamstrings",
+    quads_and_calves: "quads_calves",
+    push_pull: "push",
+    push_day: "push",
+    pull_day: "pull",
+    legs_day: "legs",
+    conditioning: "cardio",
+  };
+  return map[s] || s || "upper";
+}
+
 function biasBlock(b, intent) {
   const copy = { ...b };
   const asRange = (lo, hi) => `${lo}-${hi}`;
@@ -253,6 +273,9 @@ function biasBlock(b, intent) {
 }
 
 function intentBank(focus, intent) {
+  const f = normalizeFocus(focus);
+
+  // Default groups used by several splits
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
@@ -276,8 +299,64 @@ function intentBank(focus, intent) {
       { exercise: "Push-Up" },
       { exercise: "Kettlebell Swing" },
     ],
+    chest_back: [
+      { exercise: "Barbell Bench Press" },
+      { exercise: "Chest-Supported Row" },
+      { exercise: "Incline Dumbbell Press" },
+      { exercise: "Lat Pulldown" },
+      { exercise: "Cable Fly" },
+    ],
+    shoulders_arms: [
+      { exercise: "Overhead Press" },
+      { exercise: "Lateral Raise" },
+      { exercise: "Face Pull" },
+      { exercise: "Cable Curl" },
+      { exercise: "Rope Triceps Extension" },
+    ],
+    legs: [
+      { exercise: "Back Squat" },
+      { exercise: "Romanian Deadlift" },
+      { exercise: "Leg Press" },
+      { exercise: "Walking Lunge" },
+      { exercise: "Calf Raise (Seated)" },
+    ],
+    glutes_hamstrings: [
+      { exercise: "Hip Thrust" },
+      { exercise: "Romanian Deadlift" },
+      { exercise: "Bulgarian Split Squat" },
+      { exercise: "Hamstring Curl" },
+      { exercise: "45° Back Extension" },
+    ],
+    quads_calves: [
+      { exercise: "Front Squat" },
+      { exercise: "Leg Press (Feet Low)" },
+      { exercise: "Leg Extension" },
+      { exercise: "Walking Lunge" },
+      { exercise: "Standing Calf Raise" },
+    ],
+    push: [
+      { exercise: "Barbell Bench Press" },
+      { exercise: "Overhead Press" },
+      { exercise: "Incline Dumbbell Press" },
+      { exercise: "Lateral Raise" },
+      { exercise: "Cable Triceps Pressdown" },
+    ],
+    pull: [
+      { exercise: "Weighted Pull-Up" },
+      { exercise: "Barbell Row" },
+      { exercise: "Seated Cable Row" },
+      { exercise: "Face Pull" },
+      { exercise: "Incline Dumbbell Curl" },
+    ],
+    cardio: [
+      { exercise: "Bike Intervals (Moderate)" },
+      { exercise: "Rowing Machine (steady)" },
+      { exercise: "Jump Rope" },
+      { exercise: "Incline Treadmill Walk" },
+    ],
   };
 
+  // Yoga/mobility substitutions
   const yogaMobility = {
     upper: [
       { exercise: "Scapular Push-Up" },
@@ -297,56 +376,115 @@ function intentBank(focus, intent) {
       { exercise: "Hollow Body Hold" },
       { exercise: "Cat-Cow + Thoracic Rotation" },
     ],
+    chest_back: [
+      { exercise: "Push-Up to Down-Dog Flow" },
+      { exercise: "Band Row" },
+      { exercise: "Prone Y-T-W" },
+      { exercise: "Child’s Pose Lat Stretch" },
+    ],
+    shoulders_arms: [
+      { exercise: "Pike Shoulder Taps" },
+      { exercise: "Band External Rotation" },
+      { exercise: "Thread-the-Needle Stretch" },
+      { exercise: "Triceps Stretch" },
+    ],
+    legs: [
+      { exercise: "Bodyweight Squat + Pause" },
+      { exercise: "Glute Bridge" },
+      { exercise: "Lunge with Rotation" },
+      { exercise: "Couch Stretch" },
+    ],
+    glutes_hamstrings: [
+      { exercise: "Single-Leg Glute Bridge" },
+      { exercise: "Good Morning (PVC/Band)" },
+      { exercise: "90/90 Hip Flow" },
+      { exercise: "Hamstring Stretch on Box" },
+    ],
+    quads_calves: [
+      { exercise: "Split Squat (Bodyweight)" },
+      { exercise: "Wall Calf Raise" },
+      { exercise: "Quad Stretch" },
+      { exercise: "Ankle Mobility Drills" },
+    ],
+    push: [
+      { exercise: "Incline Push-Up" },
+      { exercise: "Wall Slide" },
+      { exercise: "Serratus Punch" },
+      { exercise: "Doorway Pec Stretch" },
+    ],
+    pull: [
+      { exercise: "Band Pull-Apart" },
+      { exercise: "Inverted Row (Bodyweight)" },
+      { exercise: "Scapular Retraction Drill" },
+      { exercise: "Lat Stretch on Bench" },
+    ],
+    cardio: [
+      { exercise: "Jump Rope Intervals (Light)" },
+      { exercise: "Brisk Walk" },
+      { exercise: "Bike Easy Spin" },
+      { exercise: "Mobility Flow" },
+    ],
   };
 
-  const cardioSprinkles = [
-    { exercise: "Bike Intervals (Moderate)" },
-    { exercise: "Rowing Machine (steady)" },
-    { exercise: "Jump Rope" },
-  ];
+  // Endurance → add cardio sprinkle
+  const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
-  const f = base[focus] ? focus : "upper";
-  if (intent === "yoga_pilates") return yogaMobility[f];
-  if (intent === "endurance") return [...base[f], cardioSprinkles[0]];
-  if (intent === "powerlifter") {
-    if (f === "upper") return [
-      { exercise: "Barbell Bench Press" },
-      { exercise: "Weighted Pull-Up" },
-      { exercise: "Barbell Row" },
-      { exercise: "Overhead Press" },
-      { exercise: "Face Pull" },
-    ];
-    if (f === "lower") return [
-      { exercise: "Low-Bar Back Squat" },
-      { exercise: "Conventional Deadlift" },
-      { exercise: "Paused Squat" },
-      { exercise: "Hamstring Curl" },
-    ];
-    return [
-      { exercise: "Front Squat" },
-      { exercise: "Bench Press" },
-      { exercise: "Deadlift (technique sets)" },
-      { exercise: "Plank" },
-    ];
+  // Choose bank based on intent/focus
+  let bank;
+  const normIntent = normalizeIntent(intent);
+
+  if (normIntent === "yoga_pilates") {
+    bank = yogaMobility[f] || yogaMobility.full;
+  } else {
+    bank = base[f] || base.upper;
+    if (normIntent === "endurance" && f !== "cardio") {
+      bank = [...bank, cardioSprinkle];
+    }
+    if (normIntent === "powerlifter") {
+      if (f === "upper" || f === "push" || f === "pull" || f === "chest_back" || f === "shoulders_arms") {
+        bank = [
+          { exercise: "Barbell Bench Press" },
+          { exercise: "Weighted Pull-Up" },
+          { exercise: "Barbell Row" },
+          { exercise: "Overhead Press" },
+          { exercise: "Face Pull" },
+        ];
+      } else if (f === "lower" || f === "legs" || f === "glutes_hamstrings" || f === "quads_calves") {
+        bank = [
+          { exercise: "Low-Bar Back Squat" },
+          { exercise: "Conventional Deadlift" },
+          { exercise: "Paused Squat" },
+          { exercise: "Hamstring Curl" },
+        ];
+      } else if (f === "full" || f === "cardio") {
+        bank = [
+          { exercise: "Front Squat" },
+          { exercise: "Bench Press" },
+          { exercise: "Deadlift (technique sets)" },
+          { exercise: "Plank" },
+        ];
+      }
+    }
+    if (normIntent === "bodybuilder" && (f === "upper" || f === "push" || f === "chest_back" || f === "shoulders_arms")) {
+      bank = [
+        { exercise: "Incline Dumbbell Press" },
+        { exercise: "Chest Fly (Cable)" },
+        { exercise: "Lat Pulldown" },
+        { exercise: "Seated Row" },
+        { exercise: "Lateral Raise" },
+        { exercise: "Cable Curl" },
+        { exercise: "Rope Triceps Extension" },
+      ];
+    }
   }
-  if (intent === "bodybuilder" && f === "upper") {
-    return [
-      { exercise: "Incline Dumbbell Press" },
-      { exercise: "Chest Fly (Cable)" },
-      { exercise: "Lat Pulldown" },
-      { exercise: "Seated Row" },
-      { exercise: "Lateral Raise" },
-      { exercise: "Cable Curl" },
-      { exercise: "Rope Triceps Extension" },
-    ];
-  }
-  return base[f];
+
+  return bank;
 }
 
 function fallbackWorkoutPack({ focus = "upper", goal = "maintenance", intent = "general" }, count = 5) {
   const normIntent = normalizeIntent(intent);
   const base = intentBank(focus, normIntent);
-  const title = `${TITLE_BY_INTENT[normIntent] || TITLE_BY_INTENT.general} (${focus})`;
+  const title = `${TITLE_BY_INTENT[normIntent] || TITLE_BY_INTENT.general} (${normalizeFocus(focus) || "upper"})`;
 
   const out = [];
   for (let i = 0; i < Math.max(1, Math.min(count, 8)); i++) {
@@ -368,6 +506,7 @@ async function openAIWorkoutPack(payload, count = 5) {
   } = payload;
 
   const normIntent = normalizeIntent(intent);
+  const normFocus  = normalizeFocus(focus);
 
   const biasText = {
     bodybuilder: `Prioritize hypertrophy: 8–12 reps, moderate rest, include isolation accessories.`,
@@ -382,7 +521,7 @@ async function openAIWorkoutPack(payload, count = 5) {
 No prose, no markdown. Exercises must be common and safe. 4–6 exercises per suggestion.`;
 
   const usr = `Create ${count} workout options tailored to:
-- focus: ${focus}
+- split_focus: ${normFocus}
 - goal: ${goal}
 - training_intent: ${normIntent}
 - equipment: ${equipment.join(", ") || "bodyweight"}
@@ -392,7 +531,8 @@ Rules:
 - 4–6 exercises per option
 - reps can be a range string (e.g., "8-12")
 - include optional "tempo" like "2-1-2"
-- use only movements feasible with the allowed equipment`;
+- use only movements feasible with the allowed equipment
+- If split_focus is "cardio", favor conditioning intervals or steady-state options; otherwise emphasize resistance training for that split`;
 
   const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -412,10 +552,10 @@ Rules:
   try { json = JSON.parse(txt); } catch {}
   const suggestions = Array.isArray(json?.suggestions)
     ? json.suggestions
-    : fallbackWorkoutPack(payload, count);
+    : fallbackWorkoutPack({ ...payload, focus: normFocus }, count);
 
   const patched = suggestions.map(sug => ({
-    title: sug.title || `${TITLE_BY_INTENT[normIntent] || "Workout"} (${focus})`,
+    title: sug.title || `${TITLE_BY_INTENT[normIntent] || "Workout"} (${normFocus})`,
     blocks: (Array.isArray(sug.blocks) ? sug.blocks : []).map(b => biasBlock(b, normIntent))
   }));
   return patched;
