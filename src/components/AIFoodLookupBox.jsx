@@ -1,19 +1,12 @@
 // src/components/AIFoodLookupBox.jsx
 import React, { useState, useMemo } from "react";
 import {
-  Card,
-  CardContent,
-  CardActions,
-  TextField,
-  Button,
-  Typography,
-  Stack,
-  Chip,
-  Box
+  Card, CardContent, CardActions,
+  TextField, Button, Typography, Stack, Chip, Box
 } from "@mui/material";
 import UpgradeModal from "./UpgradeModal";
 
-// stable per-device id (same idea as workout/meal generators)
+// stable per-device id, same pattern we use elsewhere
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -29,49 +22,37 @@ function getClientId() {
 
 function getUserId() {
   try {
-    const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
+    const tok = JSON.parse(
+      localStorage.getItem("supabase.auth.token") || "null"
+    );
     return tok?.user?.id || null;
   } catch {
     return null;
   }
 }
 
-/**
- * Props:
- * - onAddFood({ name, calories, protein_g, carbs_g, fat_g })
- * - canUseLookup(): bool            // parent says if user can run lookup right now (credits / entitlement)
- * - registerLookupUse(): void       // parent burns one free credit after a successful lookup if needed
- * - onHitPaywall(): void            // parent opens Upgrade modal
- *
- * All 3 gating props are optional so the component won't explode if you render it without them.
- */
 export default function AIFoodLookupBox({
   onAddFood,
-  canUseLookup,
-  registerLookupUse,
-  onHitPaywall
+  canUseLookup,         // () => boolean
+  registerLookupUse,    // () => void
+  onHitPaywall          // () => void
 }) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
   const [quantity, setQuantity] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [resData, setResData] = useState(null);
   const [error, setError] = useState("");
-
-  // local-only modal as a fallback in case parent didn't pass onHitPaywall
-  const [showUpgradeLocal, setShowUpgradeLocal] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const userId = useMemo(() => getUserId(), []);
 
   async function handleLookup() {
-    // 1. local gate FIRST (cheap)
+    // local gate BEFORE hitting server:
     if (typeof canUseLookup === "function" && !canUseLookup()) {
-      if (typeof onHitPaywall === "function") {
-        onHitPaywall();
-      } else {
-        setShowUpgradeLocal(true);
-      }
+      // user is out of free tries today
+      if (typeof onHitPaywall === "function") onHitPaywall();
+      setShowUpgrade(true);
       return;
     }
 
@@ -84,7 +65,8 @@ export default function AIFoodLookupBox({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Client-Id": getClientId() // lets backend count anonymous tries
+          // let server bucket us by client/device if logged out
+          "X-Client-Id": getClientId()
         },
         body: JSON.stringify({
           user_id: userId,
@@ -94,33 +76,27 @@ export default function AIFoodLookupBox({
         })
       });
 
-      // 402 means backend says "upgrade"
       if (resp.status === 402) {
+        // server says "paywall"
+        if (typeof onHitPaywall === "function") onHitPaywall();
+        setShowUpgrade(true);
         setLoading(false);
-        if (typeof onHitPaywall === "function") {
-          onHitPaywall();
-        } else {
-          setShowUpgradeLocal(true);
-        }
         return;
       }
 
       const text = await resp.text();
-      if (!resp.ok) {
-        throw new Error(text || `HTTP ${resp.status}`);
-      }
+      if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
 
       const json = text ? JSON.parse(text) : null;
-      if (!json || json.calories == null || json.name == null) {
-        throw new Error("No nutrition returned");
-      }
+      if (!json || !json.calories) throw new Error("No nutrition returned");
 
-      // burn a credit now that we got a valid lookup
+      // success
+      setResData(json);
+
+      // burn a credit for free users
       if (typeof registerLookupUse === "function") {
         registerLookupUse();
       }
-
-      setResData(json);
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
       setError("Couldn’t fetch nutrition. Please refine the input and try again.");
@@ -140,12 +116,7 @@ export default function AIFoodLookupBox({
       carbs_g: Number(resData.carbs_g) || 0,
       fat_g: Number(resData.fat_g) || 0
     };
-
-    if (typeof onAddFood === "function") {
-      onAddFood(payload);
-    }
-
-    // reset UI
+    if (typeof onAddFood === "function") onAddFood(payload);
     setResData(null);
     setFood("");
     setBrand("");
@@ -158,9 +129,14 @@ export default function AIFoodLookupBox({
   return (
     <Card sx={{ mb: 2 }}>
       <CardContent>
-        <Typography variant="h6" gutterBottom sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          AI Food Lookup
-          <Chip size="small" color="primary" label="PRO" />
+        <Typography variant="h6" gutterBottom>
+          AI Food Lookup{" "}
+          <Chip
+            size="small"
+            color="primary"
+            label="BETA"
+            sx={{ ml: 1 }}
+          />
         </Typography>
 
         <Stack spacing={1.25}>
@@ -239,7 +215,10 @@ export default function AIFoodLookupBox({
                   color="text.secondary"
                   sx={{ mt: 0.5, display: "block" }}
                 >
-                  Confidence: {(resData.confidence * 100).toFixed(0)}%
+                  Confidence: {(
+                    resData.confidence * 100
+                  ).toFixed(0)}
+                  %
                 </Typography>
               )}
 
@@ -265,6 +244,7 @@ export default function AIFoodLookupBox({
         >
           {loading ? "Looking up..." : "Get Nutrition"}
         </Button>
+
         <Button
           variant="contained"
           onClick={handleLog}
@@ -274,14 +254,11 @@ export default function AIFoodLookupBox({
         </Button>
       </CardActions>
 
-      {/* Fallback upgrade modal
-         If parent provided onHitPaywall, that shows its own UpgradeModal.
-         This local one is just in case parent didn't. */}
       <UpgradeModal
-        open={showUpgradeLocal}
-        onClose={() => setShowUpgradeLocal(false)}
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
-        description="AI Food Lookup lets you log calories/macros instantly. Upgrade for unlimited lookups."
+        description="AI Food Lookup uses advanced nutrition reasoning. Upgrade for unlimited lookups."
       />
     </Card>
   );
