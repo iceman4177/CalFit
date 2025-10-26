@@ -19,7 +19,7 @@ import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
 
-// ---- entitlement helpers shared across features ----
+// ---------- entitlement helpers ----------
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -30,35 +30,31 @@ const isTrialActive = () => {
   return ts && Date.now() < ts;
 };
 
-// Meal suggestion usage counter (per day, free users)
+// meal AI suggestion counter (separate feature)
 const getMealAICount = () =>
   parseInt(localStorage.getItem('aiMealCount') || '0', 10);
 const incMealAICount = () =>
   localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
-// Food lookup usage counter (per day, free users)
-function todayKey() {
-  return new Date().toLocaleDateString('en-US'); // good enough for local gating
-}
-function getLookupAICount() {
-  const day = localStorage.getItem('aiLookupDay') || '';
-  const cnt = parseInt(localStorage.getItem('aiLookupCount') || '0', 10);
-  if (day !== todayKey()) {
-    // reset if new day
-    localStorage.setItem('aiLookupDay', todayKey());
-    localStorage.setItem('aiLookupCount', '0');
+// AI food lookup counter (3/day for free+anon)
+function getFoodLookupCount() {
+  const today = new Date().toLocaleDateString('en-US');
+  const savedDate = localStorage.getItem('aiFoodLookupDate');
+  if (savedDate !== today) {
+    localStorage.setItem('aiFoodLookupDate', today);
+    localStorage.setItem('aiFoodLookupCount', '0');
     return 0;
   }
-  return cnt;
+  return parseInt(localStorage.getItem('aiFoodLookupCount') || '0', 10);
 }
-function incLookupAICount() {
-  const day = todayKey();
-  const current = getLookupAICount();
-  localStorage.setItem('aiLookupDay', day);
-  localStorage.setItem('aiLookupCount', String(current + 1));
+function incFoodLookupCount() {
+  const today = new Date().toLocaleDateString('en-US');
+  localStorage.setItem('aiFoodLookupDate', today);
+  const newCount = getFoodLookupCount() + 1;
+  localStorage.setItem('aiFoodLookupCount', String(newCount));
 }
 
-// Ping AI meal endpoint just to see if user is gated (used for Suggest a Meal button)
+// quick probe used for AI meal suggestions (unchanged)
 async function probeEntitlement(payload) {
   const base = { feature: 'meal', type: 'meal', mode: 'meal', ...payload, count: 1 };
   try {
@@ -69,7 +65,6 @@ async function probeEntitlement(payload) {
     });
     if (resp.status === 402) return { gated:true };
     if (resp.ok) return { gated:false };
-
     if (resp.status === 400 || resp.status === 404) {
       resp = await fetch('/api/ai/meal-suggestion', {
         method:'POST',
@@ -79,13 +74,13 @@ async function probeEntitlement(payload) {
       if (resp.status === 402) return { gated:true };
       return { gated: !resp.ok };
     }
-
     return { gated: !resp.ok };
   } catch {
     return { gated:false };
   }
 }
 
+// today's burned calories (local)
 function getBurnedTodayLocal(dateUS) {
   try {
     const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
@@ -96,7 +91,7 @@ function getBurnedTodayLocal(dateUS) {
   }
 }
 
-// ------- calorie math helper for custom dialog -------
+// ------- Small helpers -------
 function kcalFromMacros(p=0,c=0,f=0) {
   const P = Number(p)||0, C = Number(c)||0, F = Number(f)||0;
   return Math.max(0, Math.round(P*4 + C*4 + F*9));
@@ -110,8 +105,8 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
   const [c, setC] = useState('');
   const [f, setF] = useState('');
 
-  useEffect(() => {
-    if (open) {
+  useEffect(()=>{
+    if(open){
       setName('');
       setCal('');
       setP('');
@@ -120,13 +115,9 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
     }
   }, [open]);
 
-  const effectiveCalories = useMemo(() => {
-    if (String(cal).trim() !== '') {
-      return Math.max(0, parseInt(cal,10)||0);
-    }
-    if (p || c || f) {
-      return kcalFromMacros(p,c,f);
-    }
+  const effectiveCalories = useMemo(()=>{
+    if (String(cal).trim() !== '') return Math.max(0, parseInt(cal,10)||0);
+    if (p || c || f) return kcalFromMacros(p,c,f);
     return 0;
   }, [cal,p,c,f]);
 
@@ -143,7 +134,6 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
             value={name}
             onChange={e=>setName(e.target.value)}
           />
-
           <TextField
             label="Calories (kcal)"
             type="number"
@@ -151,11 +141,9 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
             value={cal}
             onChange={e=>setCal(e.target.value)}
           />
-
           <Typography variant="caption" color="text.secondary">
-            Or enter macros (we’ll compute calories if the field above is blank)
+            Or enter macros (we’ll compute calories if the field above is left blank)
           </Typography>
-
           <Stack direction="row" spacing={1.5}>
             <TextField
               label="Protein (g)"
@@ -179,19 +167,17 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
               onChange={e=>setF(e.target.value)}
             />
           </Stack>
-
           <Typography variant="body2" color="text.secondary">
             Total calories: <strong>{effectiveCalories}</strong>
           </Typography>
         </Stack>
       </DialogContent>
-
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
           disabled={!canSave}
-          onClick={() => {
+          onClick={()=>{
             onConfirm?.({
               name: name.trim(),
               calories: effectiveCalories,
@@ -215,22 +201,26 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
 function BuildBowlDialog({ open, onClose, onConfirm }) {
   const [rows, setRows] = useState([{ name:'', calories:'' }]);
 
-  useEffect(() => {
-    if (open) {
+  useEffect(()=>{
+    if(open){
       setRows([{ name:'', calories:'' }]);
     }
   }, [open]);
 
-  const addRow = () => setRows(prev => [...prev, { name:'', calories:'' }]);
+  const addRow = () =>
+    setRows(prev=>[...prev, { name:'', calories:'' }]);
+
   const update = (i, key, val) =>
-    setRows(prev => prev.map((r,idx)=> idx===i ? {...r, [key]: val} : r));
+    setRows(prev=> prev.map((r,idx)=> idx===i ? {...r, [key]: val} : r));
+
   const remove = (i) =>
-    setRows(prev => prev.filter((_,idx)=> idx!==i));
+    setRows(prev=> prev.filter((_,idx)=> idx!==i));
 
   const total = useMemo(
-    () => rows.reduce((s,r)=> s + (parseInt(r.calories,10)||0), 0),
+    ()=> rows.reduce((s,r)=> s + (parseInt(r.calories,10)||0), 0),
     [rows]
   );
+
   const hasValid = rows.every(
     r => r.name.trim().length>0 && (parseInt(r.calories,10)||0) > 0
   );
@@ -242,9 +232,8 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         <Typography variant="body2" color="text.secondary" sx={{ mb:1 }}>
           Add each ingredient separately for accurate logging.
         </Typography>
-
         <Stack spacing={1.25} sx={{ mt: 1 }}>
-          {rows.map((r, i) => (
+          {rows.map((r, i)=>(
             <Stack key={i} direction="row" spacing={1}>
               <TextField
                 label={`Ingredient ${i+1}`}
@@ -268,21 +257,18 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
               </IconButton>
             </Stack>
           ))}
-
           <Button onClick={addRow}>Add Ingredient</Button>
-
           <Typography variant="body2" sx={{ mt:0.5 }}>
             Bowl total: <strong>{total}</strong> kcal
           </Typography>
         </Stack>
       </DialogContent>
-
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
           disabled={!hasValid || total<=0}
-          onClick={() => {
+          onClick={()=>{
             const pretty = rows
               .map(r=>r.name.trim())
               .filter(Boolean)
@@ -303,13 +289,11 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
 
 // ======================= Main Component =======================
 export default function MealTracker({ onMealUpdate }) {
-  // onboarding tooltips
   const [FoodTip,  triggerFoodTip]  = useFirstTimeTip('tip_food',  'Search or type a food name.');
   const [CalTip,   triggerCalTip]   = useFirstTimeTip('tip_cal',   'Enter calories.');
   const [AddTip,   triggerAddTip]   = useFirstTimeTip('tip_add',   'Tap to add this meal.');
   const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
-  // base state
   const [foodInput, setFoodInput]       = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
   const [calories, setCalories]         = useState('');
@@ -321,34 +305,34 @@ export default function MealTracker({ onMealUpdate }) {
   const [openCustom, setOpenCustom] = useState(false);
   const [openBowl, setOpenBowl]     = useState(false);
 
+  // local daily counter for AI Food Lookup
+  const [lookupCount, setLookupCount] = useState(() => getFoodLookupCount());
+
   const { user } = useAuth();
 
-  // canonical "today"
+  // 🔒 Single source of "today": local US string + local-midnight ISO
   const now = new Date();
   const todayUS  = now.toLocaleDateString('en-US');
   const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    .toISOString()
-    .slice(0,10);
+                    .toISOString().slice(0,10);
 
   const stored   = JSON.parse(localStorage.getItem('userData')||'{}');
   const goalType = stored.goalType  || 'maintain';
 
-  // init streak helpers etc
   useEffect(() => {
     hydrateStreakOnStartup();
   }, []);
 
-  // load today's meals
-  useEffect(() => {
+  // Load today’s meals (local-first)
+  useEffect(()=>{
     const all = JSON.parse(localStorage.getItem('mealHistory')||'[]');
     const todayLog = all.find(e=>e.date===todayUS);
     const meals = todayLog ? (todayLog.meals || []) : [];
     setMealLog(meals);
     const total = meals.reduce((s,m)=> s + (Number(m.calories)||0), 0);
     onMealUpdate?.(total);
-  }, [onMealUpdate,todayUS]);
+  },[onMealUpdate,todayUS]);
 
-  // local persistence
   const persistToday = (meals) => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
       .filter(e=>e.date!==todayUS);
@@ -356,7 +340,6 @@ export default function MealTracker({ onMealUpdate }) {
     localStorage.setItem('mealHistory', JSON.stringify(rest));
   };
 
-  // broadcast calories to rest of app
   const emitConsumed = (total) => {
     try {
       window.dispatchEvent(new CustomEvent('slimcal:consumed:update', {
@@ -365,10 +348,8 @@ export default function MealTracker({ onMealUpdate }) {
     } catch {}
   };
 
-  // sync local->dailyMetrics cache and supabase
   const syncDailyMetrics = async (consumedTotal) => {
     const burned = getBurnedTodayLocal(todayUS);
-
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
     cache[todayISO] = {
       burned,
@@ -380,15 +361,13 @@ export default function MealTracker({ onMealUpdate }) {
     emitConsumed(consumedTotal);
 
     try {
-      if (user?.id) {
+      if (user?.id)
         await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
-      }
     } catch (err) {
       console.error('[MealTracker] upsertDailyMetrics failed', err);
     }
   };
 
-  // save helper
   const save = (meals) => {
     persistToday(meals);
     const total = meals.reduce((s,m)=> s + (Number(m.calories)||0), 0);
@@ -396,13 +375,11 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(total);
   };
 
-  // log a single meal (used everywhere)
   const logOne = async ({ name, calories, macros }) => {
     const nm = {
       name,
       calories: Math.max(0, Number(calories)||0)
     };
-
     setMealLog(prev => {
       const upd = [...prev, nm];
       save(upd);
@@ -410,7 +387,7 @@ export default function MealTracker({ onMealUpdate }) {
     });
     updateStreak();
 
-    // cloud backup (optional)
+    // cloud save (optional)
     try {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
@@ -437,23 +414,18 @@ export default function MealTracker({ onMealUpdate }) {
     }
   };
 
-  // manual add
   const handleAdd = async () => {
     const c = Number.parseInt(calories,10);
     if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
       alert('Enter a valid food & calories.');
       return;
     }
-    await logOne({
-      name: foodInput.trim(),
-      calories: c
-    });
+    await logOne({ name: foodInput.trim(), calories: c });
     setFoodInput('');
     setCalories('');
     setSelectedFood(null);
   };
 
-  // delete single meal
   const handleDeleteMeal = (index) => {
     setMealLog(prev => {
       const updatedMeals = prev.filter((_, i) => i !== index);
@@ -462,7 +434,6 @@ export default function MealTracker({ onMealUpdate }) {
     });
   };
 
-  // clear all meals
   const handleClear = () => {
     const rest = JSON.parse(localStorage.getItem('mealHistory')||'[]')
       .filter(e=>e.date!==todayUS);
@@ -472,17 +443,16 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  // "Suggest a Meal (AI)" button handler
   const handleAIMealSuggestClick = useCallback(async () => {
     if (!showSuggest) {
-      // gate for free users
+      // gate: 3 free/day for non-pro non-trial
       if (!isProUser() && !isTrialActive() && getMealAICount() >= 3) {
         setShowUpgrade(true);
         return;
       }
 
       try {
-        // probe server just in case we've hit remote cap
+        // hit server to verify entitlement (403/402 check)
         const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
         const trainingIntent = localStorage.getItem('training_intent') || 'general';
         const proteinMealG   = parseInt(localStorage.getItem('protein_target_meal_g') || '0',10);
@@ -495,19 +465,15 @@ export default function MealTracker({ onMealUpdate }) {
             diet_preference: dietPreference,
             training_intent: trainingIntent,
             protein_per_meal_g: proteinMealG || undefined,
-            calorie_bias: calorieBias || undefined
+            calorie_bias: calorieBias || undefined,
           }
         };
         const { gated } = await probeEntitlement(probePayload);
-        if (gated) {
-          setShowUpgrade(true);
-          return;
-        }
+        if (gated) { setShowUpgrade(true); return; }
       } catch (e) {
         console.warn('[MealTracker] gateway probe failed', e);
       }
 
-      // count usage if they’re not pro/trial
       if (!isProUser() && !isTrialActive()) {
         incMealAICount();
       }
@@ -516,36 +482,38 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
-    // hide panel
     setShowSuggest(false);
   }, [showSuggest, user?.id, goalType]);
 
-  // running total
-  const total = mealLog.reduce((s,m)=> s + (Number(m.calories)||0), 0);
+  const total = mealLog.reduce(
+    (s,m)=> s + (Number(m.calories)||0),
+    0
+  );
 
-  // ------- autocomplete options with special actions -------
-  const actionRows = useMemo(() => [
+  // ------- augmented options in autocomplete -------
+  const actionRows = useMemo(()=>[
     { name: '➕ Custom Food (enter calories/macros)', action: 'open_custom_nutrition' },
     { name: '🍲 Build a Bowl (add ingredients individually)', action: 'open_bowl_builder' }
   ], []);
-  const options = useMemo(() => [...foodData, ...actionRows], [actionRows]);
+  const options = useMemo(()=> [...foodData, ...actionRows], [actionRows]);
 
-  // ------- gating helpers for AI Food Lookup box -------
+  // ===== AI Food Lookup gating (for AIFoodLookupBox) =====
+  // canUseLookup(): allow if pro/trial OR haven't hit 3 today
   const canUseLookup = useCallback(() => {
-    // pro or trial? unlimited
     if (isProUser() || isTrialActive()) return true;
-    // otherwise 3/day
-    return getLookupAICount() < 3;
-  }, []);
+    return lookupCount < 3;
+  }, [lookupCount]);
 
+  // registerLookupUse(): after a SUCCESSFUL lookup,
+  // burn a credit for free users and update state
   const registerLookupUse = useCallback(() => {
-    // only increment for non-pro/non-trial
-    if (!isProUser() && !isTrialActive()) {
-      incLookupAICount();
-    }
+    if (isProUser() || isTrialActive()) return;
+    incFoodLookupCount();
+    setLookupCount(getFoodLookupCount());
   }, []);
 
-  const handleLookupPaywall = useCallback(() => {
+  // onHitPaywall(): central upgrade modal
+  const onHitPaywall = useCallback(() => {
     setShowUpgrade(true);
   }, []);
 
@@ -554,10 +522,8 @@ export default function MealTracker({ onMealUpdate }) {
       <Typography variant="h4" align="center" gutterBottom>
         Meal Tracker
       </Typography>
-
       <FoodTip/><CalTip/><AddTip/><ClearTip/>
 
-      {/* ----- Manual quick entry row ----- */}
       <Box sx={{ mb:2 }}>
         <Autocomplete
           freeSolo
@@ -570,7 +536,6 @@ export default function MealTracker({ onMealUpdate }) {
               setSelectedFood(null);
               return;
             }
-            // special actions
             if (v.action === 'open_custom_nutrition') {
               setSelectedFood(null);
               setFoodInput('');
@@ -585,8 +550,6 @@ export default function MealTracker({ onMealUpdate }) {
               setOpenBowl(true);
               return;
             }
-
-            // normal food row
             setSelectedFood(v);
             setFoodInput(v.name);
             if (typeof v.calories !== 'undefined') {
@@ -621,7 +584,6 @@ export default function MealTracker({ onMealUpdate }) {
         )}
       </Box>
 
-      {/* ----- Actions row ----- */}
       <Box
         sx={{
           display:'flex',
@@ -633,7 +595,10 @@ export default function MealTracker({ onMealUpdate }) {
       >
         <Button
           variant="contained"
-          onClick={()=>{triggerAddTip();handleAdd();}}
+          onClick={()=>{
+            triggerAddTip();
+            handleAdd();
+          }}
         >
           Add Meal
         </Button>
@@ -641,7 +606,10 @@ export default function MealTracker({ onMealUpdate }) {
         <Button
           variant="outlined"
           color="error"
-          onClick={()=>{triggerClearTip();handleClear();}}
+          onClick={()=>{
+            triggerClearTip();
+            handleClear();
+          }}
         >
           Clear Meals
         </Button>
@@ -654,39 +622,31 @@ export default function MealTracker({ onMealUpdate }) {
         </Button>
       </Box>
 
-      {/* ----- AI Food Lookup (always visible) ----- */}
-      <Box sx={{ mb:3 }}>
-        <Typography
-          variant="subtitle2"
-          sx={{ fontWeight:600, mb:1, textAlign:'center' }}
-        >
-          AI Food Lookup (brand + quantity)
-        </Typography>
+      {/* AI Food Lookup box
+         - ALWAYS visible
+         - Free/trial/pro gating handled in props */}
+      <AIFoodLookupBox
+        canUseLookup={canUseLookup}
+        registerLookupUse={registerLookupUse}
+        onHitPaywall={onHitPaywall}
+        onAddFood={(payload)=>{
+          // payload: { name, calories, protein_g, carbs_g, fat_g }
+          logOne({
+            name: payload.name,
+            calories: payload.calories,
+            macros: {
+              protein_g: payload.protein_g,
+              carbs_g: payload.carbs_g,
+              fat_g: payload.fat_g
+            }
+          });
+        }}
+      />
 
-        <AIFoodLookupBox
-          onAddFood={(payload)=>{
-            // payload: { name, calories, protein_g, carbs_g, fat_g }
-            logOne({
-              name: payload.name,
-              calories: payload.calories,
-              macros: {
-                protein_g: payload.protein_g,
-                carbs_g:   payload.carbs_g,
-                fat_g:     payload.fat_g
-              }
-            });
-          }}
-          canUseLookup={canUseLookup}
-          registerLookupUse={registerLookupUse}
-          onHitPaywall={handleLookupPaywall}
-        />
-      </Box>
-
-      {/* ----- AI Meal Suggestions panel ----- */}
       {showSuggest && (
         <MealSuggestion
           consumedCalories={total}
-          onAddMeal={(m)=>{
+          onAddMeal={m=>{
             const safeCalories = Number.isFinite(m.calories)
               ? Number(m.calories)
               : 0;
@@ -701,7 +661,6 @@ export default function MealTracker({ onMealUpdate }) {
         />
       )}
 
-      {/* ----- Logged meals list ----- */}
       <Typography variant="h6" gutterBottom sx={{mt:4}}>
         Meals Logged Today ({todayUS})
       </Typography>
@@ -740,21 +699,19 @@ export default function MealTracker({ onMealUpdate }) {
         Total Calories: {total}
       </Typography>
 
-      {/* paywall modal shared by both Suggest a Meal and AI Lookup */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
-        description="Unlock unlimited AI food lookups, AI meal suggestions, AI workouts, and Daily Recap Coach."
+        description="Unlock unlimited AI food lookups, unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, and advanced insights."
       />
 
-      {/* Custom food + Bowl modals */}
+      {/* Modals for custom/manual logging */}
       <CustomNutritionDialog
         open={openCustom}
         onClose={()=>setOpenCustom(false)}
         onConfirm={(item)=> logOne(item)}
       />
-
       <BuildBowlDialog
         open={openBowl}
         onClose={()=>setOpenBowl(false)}
