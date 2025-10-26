@@ -1,9 +1,11 @@
 // src/MealTracker.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Container, Typography, Box, TextField,
   Button, List, ListItem, ListItemText,
-  Divider, Autocomplete, Alert, IconButton, Tooltip
+  Divider, Autocomplete, Alert, IconButton, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Stack
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import foodData from './foodData.json';
@@ -11,6 +13,7 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
+import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 
 // auth + db (history/backup; NOT used for today’s banner math)
 import { useAuth } from './context/AuthProvider.jsx';
@@ -47,6 +50,144 @@ function getBurnedTodayLocal(dateUS) {
   } catch { return 0; }
 }
 
+// ------- Small helpers -------
+function kcalFromMacros(p=0,c=0,f=0) {
+  const P = Number(p)||0, C = Number(c)||0, F = Number(f)||0;
+  return Math.max(0, Math.round(P*4 + C*4 + F*9));
+}
+
+// ======================= Custom Food Dialog =======================
+function CustomNutritionDialog({ open, onClose, onConfirm }) {
+  const [name, setName] = useState('');
+  const [cal, setCal] = useState('');
+  const [p, setP] = useState('');
+  const [c, setC] = useState('');
+  const [f, setF] = useState('');
+
+  useEffect(()=>{ if(open){ setName(''); setCal(''); setP(''); setC(''); setF(''); } }, [open]);
+
+  const effectiveCalories = useMemo(()=>{
+    if (String(cal).trim() !== '') return Math.max(0, parseInt(cal,10)||0);
+    if (p || c || f) return kcalFromMacros(p,c,f);
+    return 0;
+  }, [cal,p,c,f]);
+
+  const canSave = name.trim().length>0 && effectiveCalories>0;
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Custom Food (enter calories or macros)</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 1 }}>
+          <TextField label="Food name" fullWidth value={name} onChange={e=>setName(e.target.value)} />
+          <TextField label="Calories (kcal)" type="number" fullWidth value={cal} onChange={e=>setCal(e.target.value)} />
+          <Typography variant="caption" color="text.secondary">
+            Or enter macros (we’ll compute calories if the field above is left blank)
+          </Typography>
+          <Stack direction="row" spacing={1.5}>
+            <TextField label="Protein (g)" type="number" fullWidth value={p} onChange={e=>setP(e.target.value)} />
+            <TextField label="Carbs (g)" type="number" fullWidth value={c} onChange={e=>setC(e.target.value)} />
+            <TextField label="Fat (g)" type="number" fullWidth value={f} onChange={e=>setF(e.target.value)} />
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            Total calories: <strong>{effectiveCalories}</strong>
+          </Typography>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={!canSave}
+          onClick={()=>{
+            onConfirm?.({
+              name: name.trim(),
+              calories: effectiveCalories,
+              macros: {
+                protein_g: Number(p)||0,
+                carbs_g: Number(c)||0,
+                fat_g: Number(f)||0
+              }
+            });
+            onClose?.();
+          }}
+        >
+          Add
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ======================= Build-a-Bowl Dialog =======================
+function BuildBowlDialog({ open, onClose, onConfirm }) {
+  const [rows, setRows] = useState([{ name:'', calories:'' }]);
+
+  useEffect(()=>{ if(open){ setRows([{ name:'', calories:'' }]); } }, [open]);
+
+  const addRow = ()=> setRows(prev=>[...prev, { name:'', calories:'' }]);
+  const update = (i, key, val)=> setRows(prev=> prev.map((r,idx)=> idx===i ? {...r, [key]: val} : r));
+  const remove = (i)=> setRows(prev=> prev.filter((_,idx)=> idx!==i));
+
+  const total = useMemo(()=> rows.reduce((s,r)=> s + (parseInt(r.calories,10)||0), 0), [rows]);
+  const hasValid = rows.every(r => r.name.trim().length>0 && (parseInt(r.calories,10)||0) > 0);
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Build a Bowl (ingredient-by-ingredient)</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb:1 }}>
+          Add each ingredient separately for accurate logging.
+        </Typography>
+        <Stack spacing={1.25} sx={{ mt: 1 }}>
+          {rows.map((r, i)=>(
+            <Stack key={i} direction="row" spacing={1}>
+              <TextField
+                label={`Ingredient ${i+1}`}
+                value={r.name}
+                onChange={e=>update(i,'name',e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Calories"
+                type="number"
+                value={r.calories}
+                onChange={e=>update(i,'calories',e.target.value)}
+                sx={{ width: 160 }}
+              />
+              <IconButton aria-label="remove" onClick={()=>remove(i)} disabled={rows.length===1}>
+                <DeleteIcon/>
+              </IconButton>
+            </Stack>
+          ))}
+          <Button onClick={addRow}>Add Ingredient</Button>
+          <Typography variant="body2" sx={{ mt:0.5 }}>
+            Bowl total: <strong>{total}</strong> kcal
+          </Typography>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={!hasValid || total<=0}
+          onClick={()=>{
+            const pretty = rows.map(r=>r.name.trim()).filter(Boolean).join(', ');
+            onConfirm?.({
+              name: `Bowl: ${pretty}`,
+              calories: total
+            });
+            onClose?.();
+          }}
+        >
+          Add Bowl
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ======================= Main Component =======================
 export default function MealTracker({ onMealUpdate }) {
   const [FoodTip,  triggerFoodTip]  = useFirstTimeTip('tip_food',  'Search or type a food name.');
   const [CalTip,   triggerCalTip]   = useFirstTimeTip('tip_cal',   'Enter calories.');
@@ -60,18 +201,20 @@ export default function MealTracker({ onMealUpdate }) {
   const [showSuggest, setShowSuggest]   = useState(false);
   const [showUpgrade, setShowUpgrade]   = useState(false);
 
+  // dialogs
+  const [openCustom, setOpenCustom] = useState(false);
+  const [openBowl, setOpenBowl]     = useState(false);
+
   const { user } = useAuth();
 
   // 🔒 Single source of "today": local US string + local-midnight ISO (prevents UTC drift)
   const now = new Date();
-  const todayUS  = now.toLocaleDateString('en-US');                 // e.g., 10/17/2025 (LOCAL)
-  const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-                    .toISOString().slice(0,10);                     // YYYY-MM-DD at LOCAL midnight
+  const todayUS  = now.toLocaleDateString('en-US');
+  const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0,10);
 
   const stored   = JSON.parse(localStorage.getItem('userData')||'{}');
   const goalType = stored.goalType  || 'maintain';
 
-  // ✅ Ensure streak fields are always defined on mount (avoids "undefined" in banners)
   useEffect(() => {
     hydrateStreakOnStartup();
   }, []);
@@ -101,7 +244,6 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const syncDailyMetrics = async (consumedTotal) => {
-    // optional cache for other components (not required anymore)
     const burned = getBurnedTodayLocal(todayUS);
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
     cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
@@ -109,7 +251,6 @@ export default function MealTracker({ onMealUpdate }) {
     localStorage.setItem('consumedToday', String(consumedTotal));
     emitConsumed(consumedTotal);
 
-    // cloud upsert for history/backup
     try {
       if (user?.id) await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
     } catch (err) {
@@ -124,21 +265,14 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(total);
   };
 
-  const handleAdd = async () => {
-    const c = Number.parseInt(calories,10);
-    if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
-      alert('Enter a valid food & calories.');
-      return;
-    }
-    const nm = { name: foodInput.trim(), calories: c };
-
+  const logOne = async ({ name, calories, macros }) => {
+    const nm = { name, calories: Math.max(0, Number(calories)||0) };
     setMealLog(prev => {
       const upd = [...prev, nm];
       save(upd);
       return upd;
     });
     updateStreak();
-    setFoodInput(''); setCalories(''); setSelectedFood(null);
 
     // optional: itemized cloud save
     try {
@@ -150,12 +284,25 @@ export default function MealTracker({ onMealUpdate }) {
           total_calories: nm.calories,
         }, [{
           food_name: nm.name, qty: 1, unit: 'serving',
-          calories: nm.calories, protein: null, carbs: null, fat: null,
+          calories: nm.calories,
+          protein: macros?.protein_g ?? null,
+          carbs:   macros?.carbs_g ?? null,
+          fat:     macros?.fat_g ?? null,
         }]);
       }
     } catch (err) {
       console.error('[MealTracker] cloud save failed', err);
     }
+  };
+
+  const handleAdd = async () => {
+    const c = Number.parseInt(calories,10);
+    if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
+      alert('Enter a valid food & calories.');
+      return;
+    }
+    await logOne({ name: foodInput.trim(), calories: c });
+    setFoodInput(''); setCalories(''); setSelectedFood(null);
   };
 
   const handleDeleteMeal = (index) => {
@@ -204,6 +351,13 @@ export default function MealTracker({ onMealUpdate }) {
 
   const total = mealLog.reduce((s,m)=> s + (Number(m.calories)||0), 0);
 
+  // ------- augmented options with special actions -------
+  const actionRows = useMemo(()=>[
+    { name: '➕ Custom Food (enter calories/macros)', action: 'open_custom_nutrition' },
+    { name: '🍲 Build a Bowl (add ingredients individually)', action: 'open_bowl_builder' }
+  ], []);
+  const options = useMemo(()=> [...foodData, ...actionRows], [actionRows]);
+
   return (
     <Container maxWidth="sm" sx={{py:4}}>
       <Typography variant="h4" align="center" gutterBottom>Meal Tracker</Typography>
@@ -212,13 +366,28 @@ export default function MealTracker({ onMealUpdate }) {
       <Box sx={{ mb:2 }}>
         <Autocomplete
           freeSolo
-          options={foodData}
+          options={options}
           getOptionLabel={o=>o.name}
           value={selectedFood}
           inputValue={foodInput}
-          onChange={(_,v)=>{ setSelectedFood(v); if(v){ setFoodInput(v.name); setCalories(String(v.calories)); }}}
+          onChange={(_,v)=>{
+            if (!v) { setSelectedFood(null); return; }
+            if (v.action === 'open_custom_nutrition') {
+              setSelectedFood(null); setFoodInput(''); setCalories('');
+              setOpenCustom(true);
+              return;
+            }
+            if (v.action === 'open_bowl_builder') {
+              setSelectedFood(null); setFoodInput(''); setCalories('');
+              setOpenBowl(true);
+              return;
+            }
+            setSelectedFood(v);
+            setFoodInput(v.name);
+            if (typeof v.calories !== 'undefined') setCalories(String(v.calories));
+          }}
           onInputChange={(_,v)=>setFoodInput(v)}
-          renderInput={p=><TextField {...p} label="Food Name" fullWidth />}
+          renderInput={p=><TextField {...p} label="Food Name" fullWidth onFocus={triggerFoodTip} />}
         />
         <TextField
           label="Calories" type="number"
@@ -229,12 +398,12 @@ export default function MealTracker({ onMealUpdate }) {
         />
         {!selectedFood && foodInput.length>2 && (
           <Alert severity="info" sx={{mt:2}}>
-            Not found — enter calories manually.
+            Not found — enter calories manually or pick “Custom Food”.
           </Alert>
         )}
       </Box>
 
-      <Box sx={{ display:'flex', gap:2, mb:3, justifyContent:'center' }}>
+      <Box sx={{ display:'flex', gap:2, mb:2.5, justifyContent:'center', flexWrap:'wrap' }}>
         <Button variant="contained" onClick={()=>{triggerAddTip();handleAdd();}}>
           Add Meal
         </Button>
@@ -245,6 +414,24 @@ export default function MealTracker({ onMealUpdate }) {
           {showSuggest ? "Hide Suggestions" : "Suggest a Meal (AI)"}
         </Button>
       </Box>
+
+      {/* Pro-only: AI Food Lookup (brand + quantity) */}
+      {isProUser() && (
+        <AIFoodLookupBox
+          onAddFood={(payload)=>{
+            // payload: { name, calories, protein_g, carbs_g, fat_g }
+            logOne({
+              name: payload.name,
+              calories: payload.calories,
+              macros: {
+                protein_g: payload.protein_g,
+                carbs_g: payload.carbs_g,
+                fat_g: payload.fat_g
+              }
+            });
+          }}
+        />
+      )}
 
       {showSuggest && (
         <MealSuggestion
@@ -298,6 +485,18 @@ export default function MealTracker({ onMealUpdate }) {
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
         description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, and advanced insights."
+      />
+
+      {/* Modals */}
+      <CustomNutritionDialog
+        open={openCustom}
+        onClose={()=>setOpenCustom(false)}
+        onConfirm={(item)=> logOne(item)}
+      />
+      <BuildBowlDialog
+        open={openBowl}
+        onClose={()=>setOpenBowl(false)}
+        onConfirm={(item)=> logOne(item)}
       />
     </Container>
   );

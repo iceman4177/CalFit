@@ -8,7 +8,13 @@ import {
   Button,
   Box,
   Chip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Stack
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
@@ -137,6 +143,62 @@ function coerceMeals(data) {
   });
 }
 
+// --- Edit dialog to tweak suggestion before logging ---
+function EditSuggestionDialog({ open, onClose, initial, onSave }) {
+  const [name, setName] = useState('');
+  const [cal, setCal] = useState('');
+  const [p, setP] = useState('');
+  const [c, setC] = useState('');
+  const [f, setF] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setName(initial?.name || '');
+      setCal(String(initial?.calories ?? ''));
+      setP(String(initial?.macros?.p ?? ''));
+      setC(String(initial?.macros?.c ?? ''));
+      setF(String(initial?.macros?.f ?? ''));
+    }
+  }, [open, initial]);
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Edit before logging</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 1 }}>
+          <TextField label="Name" fullWidth value={name} onChange={e=>setName(e.target.value)} />
+          <TextField label="Calories (kcal)" type="number" fullWidth value={cal} onChange={e=>setCal(e.target.value)} />
+          <Stack direction="row" spacing={1.5}>
+            <TextField label="Protein (g)" type="number" fullWidth value={p} onChange={e=>setP(e.target.value)} />
+            <TextField label="Carbs (g)" type="number" fullWidth value={c} onChange={e=>setC(e.target.value)} />
+            <TextField label="Fat (g)" type="number" fullWidth value={f} onChange={e=>setF(e.target.value)} />
+          </Stack>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          onClick={()=>{
+            const payload = {
+              name: name.trim() || (initial?.name ?? 'Meal'),
+              calories: Math.max(0, parseInt(cal,10) || 0),
+              macros: {
+                p: Math.max(0, parseInt(p,10) || 0),
+                c: Math.max(0, parseInt(c,10) || 0),
+                f: Math.max(0, parseInt(f,10) || 0),
+              }
+            };
+            onSave?.(payload);
+          }}
+        >
+          Save & Log
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const { user } = useAuth();
 
@@ -149,6 +211,10 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
+
+  // edit dialog state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
 
   const hour = new Date().getHours();
   const period =
@@ -252,6 +318,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     setRefreshKey((k) => k + 1);
   };
 
+  const openEdit = (s) => { setEditing(s); setEditOpen(true); };
+  const handleEditedSave = (payload) => {
+    // Keep compatibility with parent: log using name + calories
+    onAddMeal?.({ name: payload.name, calories: Math.max(0, Number(payload.calories) || 0) });
+    setEditOpen(false);
+  };
+
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', mt: 2 }}>
@@ -312,12 +385,15 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
           <CardActions sx={{ justifyContent: 'space-between' }}>
             <Button onClick={handleRetry}>Refresh</Button>
-            <Button
-              variant="contained"
-              onClick={() => onAddMeal({ name: s.name, calories: Math.max(0, Number(s.calories) || 0) })}
-            >
-              Add & Log
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button variant="text" onClick={() => openEdit(s)}>Edit</Button>
+              <Button
+                variant="contained"
+                onClick={() => onAddMeal({ name: s.name, calories: Math.max(0, Number(s.calories) || 0) })}
+              >
+                Add & Log
+              </Button>
+            </Box>
           </CardActions>
         </Card>
       ))}
@@ -327,6 +403,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
         description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
+      />
+
+      <EditSuggestionDialog
+        open={editOpen}
+        onClose={()=>setEditOpen(false)}
+        initial={editing}
+        onSave={handleEditedSave}
       />
     </Box>
   );

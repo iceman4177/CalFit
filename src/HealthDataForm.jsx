@@ -9,7 +9,9 @@ import {
   Paper,
   Select,
   TextField,
-  Typography
+  Typography,
+  Checkbox,
+  ListItemText
 } from '@mui/material';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 
@@ -45,7 +47,7 @@ export default function HealthDataForm({ setUserData }) {
     'tip_goalType',
     'Select your fitness goal (bulking, cutting, or maintenance).'
   );
-  // NEW: tips for the added fields
+  // NEW: tips for added fields
   const [DietPrefTip, triggerDietPrefTip] = useFirstTimeTip(
     'tip_dietPreference',
     'Pick the diet style that best matches how you like to eat.'
@@ -60,6 +62,9 @@ export default function HealthDataForm({ setUserData }) {
   const [goalTypeOpen, setGoalTypeOpen] = useState(false);
   const [dietOpen, setDietOpen] = useState(false);
   const [trainingOpen, setTrainingOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [focusOpen, setFocusOpen] = useState(false);
+  const [equipOpen, setEquipOpen] = useState(false);
 
   // ---- Form state ----
   const [age, setAge] = useState('');
@@ -69,6 +74,7 @@ export default function HealthDataForm({ setUserData }) {
   const [activityLevel, setActivityLevel] = useState('');
   const [dailyGoal, setDailyGoal] = useState('');
   const [goalType, setGoalType] = useState('');
+
   // NEW fields
   const [dietPreference, setDietPreference] = useState(
     localStorage.getItem('diet_preference') || 'omnivore'
@@ -76,6 +82,20 @@ export default function HealthDataForm({ setUserData }) {
   const [trainingIntent, setTrainingIntent] = useState(
     localStorage.getItem('training_intent') || 'general'
   );
+  const [trainingSplit, setTrainingSplit] = useState(
+    localStorage.getItem('training_split') || 'full_body'
+  );
+  const [lastFocus, setLastFocus] = useState(
+    localStorage.getItem('last_focus') || 'upper'
+  );
+  const [equipment, setEquipment] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('equipment_list') || '[]');
+      return Array.isArray(saved) && saved.length ? saved : ['dumbbell', 'barbell', 'machine', 'bodyweight'];
+    } catch {
+      return ['dumbbell', 'barbell', 'machine', 'bodyweight'];
+    }
+  });
 
   // ---- Load any existing saved values ----
   useEffect(() => {
@@ -87,11 +107,8 @@ export default function HealthDataForm({ setUserData }) {
     if (saved.activityLevel) setActivityLevel(saved.activityLevel);
     if (saved.dailyGoal) setDailyGoal(saved.dailyGoal);
     if (saved.goalType) setGoalType(saved.goalType);
-    // keep previously saved diet/training intent if present
-    const dp = localStorage.getItem('diet_preference');
-    const ti = localStorage.getItem('training_intent');
-    if (dp) setDietPreference(dp);
-    if (ti) setTrainingIntent(ti);
+
+    // already initialized diet/trainingIntent from localStorage above
   }, []);
 
   // ---- Helpers (science-backed defaults kept simple) ----
@@ -123,7 +140,7 @@ export default function HealthDataForm({ setUserData }) {
     return 0; // maintenance
   };
 
-  // ---------- LIVE PREVIEW (no new files) ----------
+  // ---------- LIVE PREVIEW ----------
   const weightLbNum = Number(weight || '0');
   const weightKg = lbToKg(weightLbNum);
   const perLb = proteinPerLbByIntent(trainingIntent);
@@ -131,44 +148,25 @@ export default function HealthDataForm({ setUserData }) {
   const previewProteinMealG  = perMealProteinTarget(weightKg || 0);
 
   const proteinSourcesByDiet = {
-    vegan: [
-      'Tofu/Tempeh/Seitan',
-      'Lentils & beans',
-      'Edamame',
-      'Vegan protein powder'
-    ],
-    vegetarian: [
-      'Eggs/Greek yogurt',
-      'Cottage cheese',
-      'Lentils/beans',
-      'Whey/casein (if ok)'
-    ],
-    pescatarian: [
-      'Salmon/Tuna',
-      'Shrimp',
-      'Eggs/Greek yogurt',
-      'Whey/casein'
-    ],
-    keto: [
-      'Steak/Chicken/Salmon',
-      'Eggs/Cheese',
-      'Greek yogurt (low-carb)',
-      'Protein isolate'
-    ],
-    mediterranean: [
-      'Fish/Seafood',
-      'Greek yogurt/Feta',
-      'Lentils/Chickpeas',
-      'Chicken/Turkey'
-    ],
-    omnivore: [
-      'Chicken/Turkey/Lean beef',
-      'Eggs/Greek yogurt',
-      'Whey/Casein',
-      'Beans/Lentils'
-    ]
+    vegan: ['Tofu/Tempeh/Seitan','Lentils & beans','Edamame','Vegan protein powder'],
+    vegetarian: ['Eggs/Greek yogurt','Cottage cheese','Lentils/beans','Whey/casein (if ok)'],
+    pescatarian: ['Salmon/Tuna','Shrimp','Eggs/Greek yogurt','Whey/casein'],
+    keto: ['Steak/Chicken/Salmon','Eggs/Cheese','Greek yogurt (low-carb)','Protein isolate'],
+    mediterranean: ['Fish/Seafood','Greek yogurt/Feta','Lentils/Chickpeas','Chicken/Turkey'],
+    omnivore: ['Chicken/Turkey/Lean beef','Eggs/Greek yogurt','Whey/Casein','Beans/Lentils']
   };
   const sourceList = proteinSourcesByDiet[dietPreference] || proteinSourcesByDiet.omnivore;
+
+  // Equipment options
+  const EQUIP_OPTIONS = [
+    'bodyweight',
+    'dumbbell',
+    'barbell',
+    'kettlebell',
+    'machine',
+    'cable',
+    'bands'
+  ];
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -195,6 +193,9 @@ export default function HealthDataForm({ setUserData }) {
       // New personalization fields
       dietPreference,
       trainingIntent,
+      trainingSplit,
+      lastFocus,
+      equipment,
       proteinTargets: {
         daily_g: previewProteinDailyG,
         per_meal_g: previewProteinMealG
@@ -205,12 +206,18 @@ export default function HealthDataForm({ setUserData }) {
     // Persist for the rest of the app (meals/workouts/AI)
     localStorage.setItem('userData', JSON.stringify(enriched));
     localStorage.setItem('hasCompletedHealthData', 'true');
+
+    // Keys used by AI endpoints/components
     localStorage.setItem('diet_preference', dietPreference);
     localStorage.setItem('training_intent', trainingIntent);
+    localStorage.setItem('training_split', trainingSplit);
+    localStorage.setItem('last_focus', lastFocus);
+    localStorage.setItem('equipment_list', JSON.stringify(equipment));
+
     localStorage.setItem('protein_target_daily_g', String(previewProteinDailyG));
     localStorage.setItem('protein_target_meal_g', String(previewProteinMealG));
     localStorage.setItem('calorie_bias', String(calorieBias));
-    // Optional: keep a simple goal alias others already read
+    // Alias some components already read
     localStorage.setItem('fitness_goal', goalType);
 
     setUserData(enriched);
@@ -359,7 +366,7 @@ export default function HealthDataForm({ setUserData }) {
           </Box>
 
           {/* NEW: Training Intent */}
-          <Box sx={{ mb: 3 }}>
+          <Box sx={{ mb: 2 }}>
             <Select
               open={trainingOpen}
               onOpen={() => triggerTrainingIntentTip(() => setTrainingOpen(true))}
@@ -382,24 +389,101 @@ export default function HealthDataForm({ setUserData }) {
             </Select>
           </Box>
 
-          {/* LIVE PREVIEW CARD — relatable, no extra files */}
+          {/* NEW: Training Split */}
+          <Box sx={{ mb: 2 }}>
+            <Select
+              open={splitOpen}
+              onOpen={() => setSplitOpen(true)}
+              onClose={() => setSplitOpen(false)}
+              value={trainingSplit}
+              onChange={e => setTrainingSplit(e.target.value)}
+              fullWidth
+              displayEmpty
+              required
+            >
+              <MenuItem value="" disabled>
+                Select Training Split
+              </MenuItem>
+              <MenuItem value="full_body">Full Body</MenuItem>
+              <MenuItem value="upper_lower">Upper / Lower</MenuItem>
+              <MenuItem value="push_pull_legs">Push / Pull / Legs</MenuItem>
+              <MenuItem value="chest_back">Chest &amp; Back</MenuItem>
+              <MenuItem value="legs_only">Legs Only</MenuItem>
+              <MenuItem value="cardio_only">Cardio Day</MenuItem>
+              <MenuItem value="yoga_pilates">Yoga / Pilates</MenuItem>
+            </Select>
+          </Box>
+
+          {/* NEW: Preferred Focus (fallback) */}
+          <Box sx={{ mb: 2 }}>
+            <Select
+              open={focusOpen}
+              onOpen={() => setFocusOpen(true)}
+              onClose={() => setFocusOpen(false)}
+              value={lastFocus}
+              onChange={e => setLastFocus(e.target.value)}
+              fullWidth
+              displayEmpty
+              required
+            >
+              <MenuItem value="" disabled>
+                Preferred Focus (fallback)
+              </MenuItem>
+              <MenuItem value="upper">Upper</MenuItem>
+              <MenuItem value="lower">Lower</MenuItem>
+              <MenuItem value="full">Full Body</MenuItem>
+            </Select>
+          </Box>
+
+          {/* NEW: Equipment (multi-select) */}
+          <Box sx={{ mb: 3 }}>
+            <Select
+              multiple
+              open={equipOpen}
+              onOpen={() => setEquipOpen(true)}
+              onClose={() => setEquipOpen(false)}
+              value={equipment}
+              onChange={(e) => {
+                const value = e.target.value;
+                setEquipment(typeof value === 'string' ? value.split(',') : value);
+              }}
+              fullWidth
+              renderValue={(selected) => (selected || []).join(', ')}
+            >
+              {EQUIP_OPTIONS.map((opt) => (
+                <MenuItem key={opt} value={opt}>
+                  <Checkbox checked={equipment.indexOf(opt) > -1} />
+                  <ListItemText primary={opt.charAt(0).toUpperCase() + opt.slice(1)} />
+                </MenuItem>
+              ))}
+            </Select>
+            <Typography variant="caption" color="text.secondary">
+              Used by the AI workout to only choose feasible movements.
+            </Typography>
+          </Box>
+
+          {/* LIVE PREVIEW CARD — no extra files */}
           <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
             <Typography variant="h6" gutterBottom>
               Your Personalized Targets
             </Typography>
             <Typography variant="body2">
-              Training mode: <b>{trainingIntent.replace('_', ' ')}</b>{' '}
-              {goalType ? <>• Goal: <b>{goalType}</b></> : null}
+              Training mode: <b>{trainingIntent.replace('_', ' ')}</b> • Split:{' '}
+              <b>{trainingSplit.replaceAll('_', ' ')}</b>
+              {goalType ? <> • Goal: <b>{goalType}</b></> : null}
             </Typography>
             <Typography variant="body2" sx={{ mt: 1 }}>
-              Protein target: <b>{isFinite(previewProteinDailyG) ? previewProteinDailyG : 0} g/day</b> 
-              {' '}(~<b>{isFinite(previewProteinMealG) ? previewProteinMealG : 0} g/meal</b>)
+              Protein target: <b>{isFinite(previewProteinDailyG) ? previewProteinDailyG : 0} g/day</b>{' '}
+              (~<b>{isFinite(previewProteinMealG) ? previewProteinMealG : 0} g/meal</b>)
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Equipment: {equipment.join(', ')}
             </Typography>
             <Typography variant="body2" sx={{ mt: 1 }}>
               Suggested sources ({dietPreference}): {sourceList.join(' • ')}
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Tip: Bodybuilders often aim for ~1g protein/lb; endurance & yoga can run lighter.
+              Tip: Bodybuilders often aim for ~1g protein/lb; endurance &amp; yoga can run lighter.
             </Typography>
           </Paper>
 
