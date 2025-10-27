@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   CardContent,
@@ -7,7 +7,9 @@ import {
   Button,
   Box,
   Chip,
-  CircularProgress
+  CircularProgress,
+  Skeleton,
+  Stack
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
@@ -145,11 +147,45 @@ function coerceMeals(data) {
 
     return {
       name,
-      calories: kcal || 0,
-      macros: { p: p || 0, c: c || 0, f: f || 0 },
+      calories: Math.max(0, Math.round(kcal || 0)),
+      macros: { p: Math.max(0, Math.round(p || 0)), c: Math.max(0, Math.round(c || 0)), f: Math.max(0, Math.round(f || 0)) },
       prepMinutes
     };
   });
+}
+
+function SkeletonCard() {
+  return (
+    <Card
+      sx={{
+        p: 1,
+        mb: 2,
+        width: '100%',
+        maxWidth: 480,
+        mx: 'auto',
+        borderRadius: 2
+      }}
+    >
+      <CardContent sx={{ pb: 1 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+          <Skeleton variant="text" width="60%" height={24} />
+          <Skeleton variant="rounded" width={60} height={22} />
+        </Stack>
+        <Stack direction="row" spacing={2} sx={{ mb: 1 }}>
+          <Skeleton variant="text" width={60} />
+          <Skeleton variant="text" width={60} />
+          <Skeleton variant="text" width={60} />
+          <Skeleton variant="text" width={60} />
+        </Stack>
+        <Skeleton variant="text" width="90%" />
+        <Skeleton variant="text" width="50%" />
+      </CardContent>
+      <CardActions sx={{ justifyContent: 'space-between', pt: 0, px: 2, pb: 2 }}>
+        <Skeleton variant="rounded" width={80} height={32} />
+        <Skeleton variant="rounded" width={110} height={32} />
+      </CardActions>
+    </Card>
+  );
 }
 
 export default function MealSuggestion({ consumedCalories, onAddMeal }) {
@@ -168,6 +204,16 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [errMsg, setErrMsg] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
+
+  // computed: entitlement to interact (Pro or active trial). We still allow initial fetch (to tease),
+  // but we will blur/disable actions if not entitled and free refreshes are exhausted.
+  const proOrTrial = isProUser() || isTrialActive();
+  const freeRefreshesUsed = getMealAIRefreshCount();
+  const freeRefreshesLeft = Math.max(0, 3 - freeRefreshesUsed);
+  const lockInteractions = useMemo(
+    () => !proOrTrial && freeRefreshesLeft <= 0,
+    [proOrTrial, freeRefreshesLeft]
+  );
 
   // time-of-day label
   const hour = new Date().getHours();
@@ -220,6 +266,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       let { resp, json, raw } = await postJSON('/api/ai/generate', basePayload);
 
       if (resp.status === 402) {
+        // Gated immediately at fetch
         setShowUpgrade(true);
         setSuggestions([]);
         setLoading(false);
@@ -306,6 +353,12 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     const meal = suggestions[idx];
     if (!meal) return;
 
+    // if gated, show upgrade instead of logging
+    if (lockInteractions) {
+      setShowUpgrade(true);
+      return;
+    }
+
     // log up in parent
     onAddMeal?.({
       name: meal.name,
@@ -316,34 +369,54 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     setSuggestions(prev => prev.filter((_, i) => i !== idx));
   };
 
-  // UI states
+  // ---------- UI: Loading ----------
   if (loading) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 3 }}>
-        <CircularProgress />
-        <Typography sx={{ mt: 1 }}>Thinking of meals…</Typography>
+      <Box sx={{ mt: 3 }}>
+        <Typography
+          variant="subtitle2"
+          sx={{
+            textTransform: 'uppercase',
+            fontWeight: 600,
+            color: 'text.secondary',
+            textAlign: 'center',
+            letterSpacing: 0.4,
+            mb: 1
+          }}
+        >
+          Finding {period} ideas…
+        </Typography>
+        <SkeletonCard />
+        <SkeletonCard />
+        <SkeletonCard />
       </Box>
     );
   }
 
+  // ---------- UI: Error ----------
   if (errMsg) {
     return (
       <Box sx={{ textAlign: 'center', mt: 3 }}>
         <Typography color="error" sx={{ mb: 1 }}>
           {errMsg}
         </Typography>
-        <Button onClick={handleRefreshClick}>Retry</Button>
+        <Button onClick={handleRefreshClick} variant="contained" sx={{ textTransform: 'none', fontWeight: 600 }}>
+          Retry
+        </Button>
       </Box>
     );
   }
 
+  // ---------- UI: Empty ----------
   if (!suggestions.length) {
     return (
       <Box sx={{ textAlign: 'center', mt: 3 }}>
         <Typography sx={{ mb: 1 }}>
           No more ideas right now.
         </Typography>
-        <Button onClick={handleRefreshClick}>Get New Ideas</Button>
+        <Button onClick={handleRefreshClick} variant="contained" sx={{ textTransform: 'none', fontWeight: 600 }}>
+          Get New Ideas
+        </Button>
 
         <UpgradeModal
           open={showUpgrade}
@@ -355,8 +428,9 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     );
   }
 
+  // ---------- UI: Suggestions ----------
   return (
-    <Box sx={{ mt: 3 }}>
+    <Box sx={{ mt: 3, position: 'relative' }}>
       <Typography
         variant="subtitle2"
         sx={{
@@ -371,13 +445,50 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         {period} Ideas
       </Typography>
 
+      {/* Blur overlay when interactions are locked (non-Pro, no free refreshes left) */}
+      {lockInteractions && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 2,
+            backdropFilter: 'blur(3px)',
+            background:
+              'linear-gradient(to bottom, rgba(255,255,255,0.6), rgba(255,255,255,0.7))',
+            borderRadius: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            px: 2,
+            textAlign: 'center'
+          }}
+        >
+          <Box>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+              Unlock unlimited meal ideas
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              You’ve used today’s free AI refreshes. Start a 7-day trial of Slimcal Pro to continue.
+            </Typography>
+            <Button
+              variant="contained"
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+              onClick={() => setShowUpgrade(true)}
+            >
+              Start Free Trial
+            </Button>
+          </Box>
+        </Box>
+      )}
+
       {suggestions.map((s, idx) => (
         <Card
           key={idx}
           sx={{
             p: 1,
             mb: 2,
-            maxWidth: 420,
+            width: '100%',
+            maxWidth: 480,
             mx: 'auto',
             borderRadius: 2,
             border: '1px solid rgba(0,0,0,0.04)',
@@ -396,7 +507,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                 gap: 1
               }}
             >
-              <Typography variant="subtitle1" fontWeight={600}>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.25 }}>
                 {s.name}
               </Typography>
               <Chip label={period} size="small" />
@@ -408,24 +519,20 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                 gap: 2,
                 flexWrap: 'wrap',
                 mb: 1,
-                fontSize: '0.9rem'
+                fontSize: '0.92rem',
+                alignItems: 'center'
               }}
             >
-              <Typography>
-                🔥 {Math.max(0, Number(s.calories) || 0)}
-              </Typography>
+              <Typography>🔥 {Math.max(0, Number(s.calories) || 0)} kcal</Typography>
               {s.macros && (
                 <>
-                  <Typography>
-                    🥩 {Math.max(0, Number(s.macros.p) || 0)}g
-                  </Typography>
-                  <Typography>
-                    🌾 {Math.max(0, Number(s.macros.c) || 0)}g
-                  </Typography>
-                  <Typography>
-                    🥑 {Math.max(0, Number(s.macros.f) || 0)}g
-                  </Typography>
+                  <Typography>🥩 {Math.max(0, Number(s.macros.p) || 0)}g</Typography>
+                  <Typography>🌾 {Math.max(0, Number(s.macros.c) || 0)}g</Typography>
+                  <Typography>🥑 {Math.max(0, Number(s.macros.f) || 0)}g</Typography>
                 </>
+              )}
+              {typeof s.prepMinutes === 'number' && (
+                <Typography>⏱ {Math.max(0, Math.round(s.prepMinutes))} min</Typography>
               )}
             </Box>
 
@@ -436,16 +543,6 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                 sx={{ lineHeight: 1.4 }}
               >
                 💡 {s._why}
-              </Typography>
-            )}
-
-            {s.prepMinutes != null && (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ lineHeight: 1.4 }}
-              >
-                ⏱ {s.prepMinutes} min prep
               </Typography>
             )}
           </CardContent>
@@ -463,17 +560,24 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
               variant="text"
               onClick={handleRefreshClick}
               sx={{ textTransform: 'none', fontWeight: 500 }}
+              disabled={lockInteractions}
             >
               Refresh
+              {!proOrTrial && (
+                <Typography component="span" sx={{ ml: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
+                  {freeRefreshesLeft} left
+                </Typography>
+              )}
             </Button>
 
             <Button
               size="small"
               variant="contained"
-              sx={{ textTransform: 'none', fontWeight: 600 }}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
               onClick={() => handleLogAndRemove(idx)}
+              disabled={lockInteractions}
             >
-              Add & Log
+              Add &amp; Log
             </Button>
           </CardActions>
         </Card>

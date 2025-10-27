@@ -29,6 +29,9 @@ import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 
+// ⬇️ NEW: summary hero (auto-reads from localStorage)
+import WorkoutSummaryBar from './components/WorkoutSummaryBar';
+
 // ⬇️ NEW: local-first wrappers (idempotent, queued sync)
 import { saveWorkoutLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 
@@ -370,8 +373,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     // ⬅️ KEY FIX: use correct column names that match your DB & on_conflict index
     await upsertDailyMetricsLocalFirst({
       user_id: user?.id || null,
-      local_day: todayLocalIso,                         // was date_key → causes 400
-      calories_eaten: consumedToday,                    // prefer new schema names
+      local_day: todayLocalIso,
+      calories_eaten: consumedToday,
       calories_burned: burnedToday,
       net_calories: consumedToday - burnedToday
     });
@@ -475,46 +478,62 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     )} with Slimcal.ai: ${cumulativeExercises.length} items, ${total.toFixed(2)} cals! #SlimcalAI`;
 
     return (
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        <Typography variant="h2" align="center" gutterBottom>
+      <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
+        {/* Summary hero at top for screenshot appeal */}
+        <WorkoutSummaryBar />
+
+        <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
           Workout Summary
         </Typography>
-        <Divider sx={{ my: 3 }} />
+        <Divider sx={{ my: 2.5 }} />
+
         {cumulativeExercises.map((ex, idx) => (
-          <Box
+          <Card
             key={idx}
+            variant="outlined"
             sx={{
-              mb: 2,
-              p: 1,
-              border: '1px solid #eee',
-              borderRadius: 1,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
+              mb: 1.5,
+              borderRadius: 2,
+              border: '1px solid rgba(0,0,0,0.06)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
             }}
           >
-            <Typography variant="body1">
-              {formatExerciseLine(ex)}
-            </Typography>
-            <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
-              Remove
-            </Button>
-          </Box>
+            <CardContent
+              sx={{
+                py: 1.25,
+                px: 2,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 2
+              }}
+            >
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                {formatExerciseLine(ex)}
+              </Typography>
+              <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
+                Remove
+              </Button>
+            </CardContent>
+          </Card>
         ))}
-        <Typography variant="h5" align="center" sx={{ mt: 2 }}>
+
+        <Typography variant="h6" align="center" sx={{ mt: 2, fontWeight: 800 }}>
           Total Calories Burned: {total.toFixed(2)}
         </Typography>
-        <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
-          <Button variant="contained" onClick={handleNewWorkout}>
+
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center" sx={{ mt: 3 }}>
+          <Button variant="contained" onClick={handleNewWorkout} fullWidth>
             New Session
           </Button>
-          <Button variant="contained" onClick={handleShareWorkout}>
+          <Button variant="contained" onClick={handleShareWorkout} fullWidth>
             Share
           </Button>
-          <Button variant="contained" onClick={handleFinish}>
+          <Button variant="contained" onClick={handleFinish} fullWidth>
             Log Workout
           </Button>
         </Stack>
+
         <ShareWorkoutModal
           open={shareModalOpen}
           onClose={() => setShareModalOpen(false)}
@@ -592,11 +611,15 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Typography variant="h2" align="center" gutterBottom>
+    <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
+      {/* NEW: Summary hero for today at the top */}
+      <WorkoutSummaryBar />
+
+      <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
         Workout Tracker
       </Typography>
-      <Grid container spacing={4}>
+
+      <Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
           <Stack spacing={2}>
             <Button
@@ -606,26 +629,44 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             >
               Suggest a Workout (AI)
             </Button>
+
             {showSuggestCard && (
               <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
             )}
-            <Card variant="outlined">
+
+            <Card
+              variant="outlined"
+              sx={{
+                borderRadius: 2,
+                border: '1px solid rgba(0,0,0,0.06)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+              }}
+            >
               <CardContent>
                 <Button fullWidth variant="outlined" onClick={() => setShowTemplate(true)}>
                   Load Past Workout
                 </Button>
-                <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+                <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1.25 }}>
                   Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
                 </Typography>
               </CardContent>
             </Card>
           </Stack>
         </Grid>
+
         <Grid item xs={12} md={8}>
           <Stack spacing={3}>
             {cumulativeExercises.length > 0 && (
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="h6" gutterBottom>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                }}
+              >
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>
                   Current Session Logs
                 </Typography>
                 {cumulativeExercises.map((ex, idx) => (
@@ -635,10 +676,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                       mb: 1,
                       display: 'flex',
                       justifyContent: 'space-between',
-                      alignItems: 'center'
+                      alignItems: 'center',
+                      gap: 2
                     }}
                   >
-                    <Typography>
+                    <Typography sx={{ fontWeight: 600 }}>
                       {formatExerciseLine(ex)}
                     </Typography>
                     <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
@@ -648,7 +690,16 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                 ))}
               </Paper>
             )}
-            <Paper variant="outlined" sx={{ p: 2 }}>
+
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                border: '1px solid rgba(0,0,0,0.06)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+              }}
+            >
               <ExerciseForm
                 newExercise={newExercise}
                 setNewExercise={setNewExercise}
@@ -659,6 +710,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                 exerciseOptions={exerciseOptions}
               />
             </Paper>
+
             <Box textAlign="center">
               <Button
                 variant="contained"
@@ -667,8 +719,17 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                 {showSaunaSection ? 'Cancel Sauna Session' : 'Add Sauna Session'}
               </Button>
             </Box>
+
             {showSaunaSection && (
-              <Paper variant="outlined" sx={{ p: 2 }}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                }}
+              >
                 <SaunaForm
                   saunaTime={saunaTime}
                   saunaTemp={saunaTemp}

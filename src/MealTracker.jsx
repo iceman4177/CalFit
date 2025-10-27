@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Container,
   Typography,
@@ -334,6 +334,9 @@ export default function MealTracker({ onMealUpdate }) {
 
   const { user } = useAuth();
 
+  // smooth scroll target for suggestions on mobile
+  const suggestRef = useRef(null);
+
   // canonical "today"
   const now = new Date();
   const todayUS = now.toLocaleDateString('en-US'); // e.g. 10/26/2025
@@ -559,6 +562,13 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     setShowSuggest(true);
+
+    // mobile-first: scroll the suggestions into view
+    setTimeout(() => {
+      try {
+        suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }, 50);
   }, [showSuggest, user?.id, goalType]);
 
   const total = mealLog.reduce(
@@ -583,6 +593,79 @@ export default function MealTracker({ onMealUpdate }) {
       <CalTip />
       <AddTip />
       <ClearTip />
+
+      {/* ------------------- TOP ACTIONS (mobile-first hero row) ------------------- */}
+      <Card
+        sx={{
+          borderRadius: 3,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)',
+        }}
+      >
+        <CardContent sx={{ pb: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            Quick Actions
+          </Typography>
+
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{
+              width: '100%',
+              flexWrap: 'wrap',
+              rowGap: 1,
+            }}
+          >
+            <Button
+              onClick={() => setOpenCustom(true)}
+              startIcon={<AddCircleOutlineIcon />}
+              variant="outlined"
+              size="small"
+              sx={{
+                flexGrow: 1,
+                textTransform: 'none',
+                fontWeight: 600,
+                borderRadius: 999,
+                px: 2
+              }}
+            >
+              Custom Food
+            </Button>
+
+            <Button
+              onClick={() => setOpenBowl(true)}
+              startIcon={<RestaurantIcon />}
+              variant="outlined"
+              size="small"
+              sx={{
+                flexGrow: 1,
+                textTransform: 'none',
+                fontWeight: 600,
+                borderRadius: 999,
+                px: 2
+              }}
+            >
+              Build a Bowl
+            </Button>
+
+            <Button
+              onClick={handleToggleMealIdeas}
+              startIcon={<SmartToyOutlinedIcon />}
+              variant="contained"
+              size="small"
+              sx={{
+                flexGrow: 1,
+                textTransform: 'none',
+                fontWeight: 700,
+                borderRadius: 999,
+                px: 2,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
 
       {/* ------------------- CARD: MANUAL ENTRY ------------------- */}
       <Card
@@ -662,7 +745,7 @@ export default function MealTracker({ onMealUpdate }) {
             )}
           </Box>
 
-          {/* Shortcuts row */}
+          {/* Shortcuts row (keep for discoverability, smaller now) */}
           <Box
             sx={{
               display: 'flex',
@@ -745,6 +828,7 @@ export default function MealTracker({ onMealUpdate }) {
 
       {/* ------------------- CARD: AI ASSIST ------------------- */}
       <Card
+        ref={suggestRef}
         sx={{
           borderRadius: 3,
           boxShadow:
