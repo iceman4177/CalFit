@@ -1,6 +1,5 @@
-// src/components/WorkoutSummaryBar.jsx
 import React, { useEffect, useState, useCallback } from 'react';
-import { Paper, Typography, Chip, Stack, Box } from '@mui/material';
+import { Box, Paper, Typography, Chip, Stack } from '@mui/material';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const todayUS = () => new Date().toLocaleDateString('en-US');
@@ -9,40 +8,49 @@ function readLocal() {
   const d = todayUS();
   try {
     const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const todays = wh.filter(w => w.date === d);
-    const burned = todays.reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
-
-    // try to infer extra stats if present
-    const totalExercises = todays.reduce((s, w) => s + (Number(w.exerciseCount) || 0), 0);
-    const totalSets      = todays.reduce((s, w) => s + (Number(w.setCount) || 0), 0);
-    const minutes        = todays.reduce((s, w) => s + (Number(w.durationMin) || 0), 0);
-
-    return { burned, totalExercises, totalSets, minutes, sessions: todays.length };
+    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const burned = wh
+      .filter(w => w.date === d)
+      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
+    const meals = mh.find(m => m.date === d);
+    const consumed = meals
+      ? (meals.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)
+      : 0;
+    return { burned, consumed };
   } catch {
-    return { burned: 0, totalExercises: 0, totalSets: 0, minutes: 0, sessions: 0 };
+    return { burned: 0, consumed: 0 };
   }
 }
 
 export default function WorkoutSummaryBar() {
-  const [stats, setStats] = useState(readLocal());
+  const [burned, setBurned] = useState(0);
+  const [consumed, setConsumed] = useState(0);
 
-  const recompute = useCallback(() => setStats(readLocal()), []);
+  const recompute = useCallback(() => {
+    const { burned: b, consumed: c } = readLocal();
+    setBurned(Math.round(b || 0));
+    setConsumed(Math.round(c || 0));
+  }, []);
 
-  useEffect(() => { recompute(); }, [recompute]);
+  useEffect(() => {
+    recompute();
+  }, [recompute]);
 
   useEffect(() => {
     const kick = () => recompute();
-    const onStorage = (e) => {
-      if (!e || !e.key || e.key === 'workoutHistory') recompute();
+    const onStorage = e => {
+      if (!e || !e.key || ['mealHistory', 'workoutHistory'].includes(e.key)) recompute();
     };
     const onVisOrFocus = () => recompute();
 
+    window.addEventListener('slimcal:consumed:update', kick);
     window.addEventListener('slimcal:burned:update', kick);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisOrFocus);
     window.addEventListener('focus', onVisOrFocus);
 
     return () => {
+      window.removeEventListener('slimcal:consumed:update', kick);
       window.removeEventListener('slimcal:burned:update', kick);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisOrFocus);
@@ -50,31 +58,33 @@ export default function WorkoutSummaryBar() {
     };
   }, [recompute]);
 
-  const { burned, totalExercises, totalSets, minutes, sessions } = stats;
+  const net = (consumed || 0) - (burned || 0);
+  const status =
+    net > 0 ? { label: 'Surplus', color: 'error' } :
+    net < 0 ? { label: 'Deficit', color: 'success' } :
+              { label: 'Balanced', color: 'info' };
 
   return (
     <Paper
-      elevation={3}
+      elevation={0}
       sx={{
-        p: { xs: 2, sm: 3 },
-        mb: { xs: 3, sm: 4 },
+        p: { xs: 2.5, md: 3 },
+        mb: { xs: 3, md: 4 },
         borderRadius: 3,
         textAlign: 'center',
-        background: 'linear-gradient(180deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.06) 100%)',
-        backdropFilter: 'blur(2px)'
+        bgcolor: 'rgba(255,255,255,0.6)',
+        backdropFilter: 'blur(6px)',
+        border: '1px solid',
+        borderColor: 'rgba(0,0,0,0.06)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.04), inset 0 0 0 1px rgba(255,255,255,0.6)'
       }}
-      aria-label="Today's workout summary"
+      aria-label="Today's net calories summary"
     >
       <Typography
-        variant="subtitle2"
-        sx={{
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          color: 'text.secondary',
-          mb: 1
-        }}
+        variant="overline"
+        sx={{ letterSpacing: 0.6, opacity: 0.8 }}
       >
-        Today’s Workout
+        Today’s Net Calories
       </Typography>
 
       <Box
@@ -83,7 +93,7 @@ export default function WorkoutSummaryBar() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 1,
-          mb: { xs: 1.25, sm: 1.5 }
+          my: 0.5
         }}
       >
         <Typography
@@ -91,22 +101,23 @@ export default function WorkoutSummaryBar() {
           sx={{
             lineHeight: 1,
             fontWeight: 800,
-            fontSize: { xs: '2rem', sm: '2.4rem', md: '2.8rem' }
+            fontSize: { xs: '2.4rem', sm: '2.8rem', md: '3.2rem' }
           }}
         >
-          {nf0.format(burned)} kcal
+          {nf0.format(net)}
         </Typography>
+
         <Chip
-          label={sessions > 0 ? `${sessions} session${sessions > 1 ? 's' : ''}` : 'No session'}
-          color={sessions > 0 ? 'success' : 'default'}
+          label={status.label}
+          color={status.color}
           sx={{
-            color: sessions > 0 ? '#fff' : 'inherit',
+            color: '#fff',
             fontWeight: 700,
             borderRadius: 999,
             height: 28,
             '& .MuiChip-label': { px: 1.25, py: 0.25 }
           }}
-          aria-label={`Workout sessions today: ${sessions}`}
+          aria-label={`Calorie status: ${status.label}`}
         />
       </Box>
 
@@ -122,42 +133,31 @@ export default function WorkoutSummaryBar() {
           label={
             <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'baseline' }}>
               <Typography component="span" sx={{ fontWeight: 700 }}>
-                {nf0.format(totalExercises)}
+                {nf0.format(consumed || 0)}
               </Typography>
               <Typography component="span" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                exercises
+                eaten
               </Typography>
             </Box>
           }
           sx={{ borderRadius: 2 }}
+          aria-label={`Calories eaten: ${nf0.format(consumed || 0)}`}
         />
+
         <Chip
           variant="outlined"
           label={
             <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'baseline' }}>
               <Typography component="span" sx={{ fontWeight: 700 }}>
-                {nf0.format(totalSets)}
+                {nf0.format(burned || 0)}
               </Typography>
               <Typography component="span" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                sets
+                burned
               </Typography>
             </Box>
           }
           sx={{ borderRadius: 2 }}
-        />
-        <Chip
-          variant="outlined"
-          label={
-            <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'baseline' }}>
-              <Typography component="span" sx={{ fontWeight: 700 }}>
-                {nf0.format(minutes)}
-              </Typography>
-              <Typography component="span" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                min
-              </Typography>
-            </Box>
-          }
-          sx={{ borderRadius: 2 }}
+          aria-label={`Calories burned: ${nf0.format(burned || 0)}`}
         />
       </Stack>
     </Paper>
