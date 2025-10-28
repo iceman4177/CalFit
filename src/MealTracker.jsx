@@ -1,3 +1,4 @@
+// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Container,
@@ -21,9 +22,13 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Chip
+  Chip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RestaurantIcon from '@mui/icons-material/RamenDining';
@@ -511,13 +516,10 @@ export default function MealTracker({ onMealUpdate }) {
 
   // toggle meal ideas panel (+ entitlement check first time opening)
   const handleToggleMealIdeas = useCallback(async () => {
-    // if we're closing, just close
     if (showSuggest) {
       setShowSuggest(false);
       return;
     }
-
-    // opening for first time
     if (!isProUser() && getMealAICount() >= 3) {
       setShowUpgrade(true);
       return;
@@ -558,12 +560,11 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     if (!isProUser()) {
-      incMealAICount(); // consume one free "open suggestions" credit
+      incMealAICount();
     }
 
     setShowSuggest(true);
 
-    // mobile-first: scroll the suggestions into view
     setTimeout(() => {
       try {
         suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -576,7 +577,7 @@ export default function MealTracker({ onMealUpdate }) {
     0
   );
 
-  // Autocomplete ONLY shows real foods now
+  // Autocomplete shows real foods only
   const options = useMemo(() => foodData, []);
 
   return (
@@ -594,7 +595,7 @@ export default function MealTracker({ onMealUpdate }) {
       <AddTip />
       <ClearTip />
 
-      {/* ------------------- TOP ACTIONS (mobile-first hero row) ------------------- */}
+      {/* ------------------- HERO: Title + Single AI CTA ------------------- */}
       <Card
         sx={{
           borderRadius: 3,
@@ -602,64 +603,28 @@ export default function MealTracker({ onMealUpdate }) {
         }}
       >
         <CardContent sx={{ pb: 2 }}>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-            Quick Actions
-          </Typography>
-
           <Stack
-            direction="row"
-            spacing={1}
-            sx={{
-              width: '100%',
-              flexWrap: 'wrap',
-              rowGap: 1,
-            }}
+            direction={{ xs: 'column', sm: 'row' }}
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            justifyContent="space-between"
+            spacing={2}
           >
-            <Button
-              onClick={() => setOpenCustom(true)}
-              startIcon={<AddCircleOutlineIcon />}
-              variant="outlined"
-              size="small"
-              sx={{
-                flexGrow: 1,
-                textTransform: 'none',
-                fontWeight: 600,
-                borderRadius: 999,
-                px: 2
-              }}
-            >
-              Custom Food
-            </Button>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+                Meals
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Log foods and keep your net calories up to date.
+              </Typography>
+            </Box>
 
-            <Button
-              onClick={() => setOpenBowl(true)}
-              startIcon={<RestaurantIcon />}
-              variant="outlined"
-              size="small"
-              sx={{
-                flexGrow: 1,
-                textTransform: 'none',
-                fontWeight: 600,
-                borderRadius: 999,
-                px: 2
-              }}
-            >
-              Build a Bowl
-            </Button>
-
+            {/* ✅ Single AI entrypoint (no duplicates elsewhere) */}
             <Button
               onClick={handleToggleMealIdeas}
+              variant={showSuggest ? 'outlined' : 'contained'}
               startIcon={<SmartToyOutlinedIcon />}
-              variant="contained"
-              size="small"
-              sx={{
-                flexGrow: 1,
-                textTransform: 'none',
-                fontWeight: 700,
-                borderRadius: 999,
-                px: 2,
-                whiteSpace: 'nowrap'
-              }}
+              size="large"
+              sx={{ fontWeight: 700, borderRadius: 999 }}
             >
               {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
             </Button>
@@ -667,37 +632,41 @@ export default function MealTracker({ onMealUpdate }) {
         </CardContent>
       </Card>
 
-      {/* ------------------- CARD: MANUAL ENTRY ------------------- */}
-      <Card
-        sx={{
-          borderRadius: 3,
-          boxShadow:
-            '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
-        }}
-      >
-        <CardHeader
-          title={
-            <Box>
-              <Typography
-                variant="h6"
-                fontWeight={600}
-                sx={{ lineHeight: 1.3 }}
-              >
-                Manual Entry
-              </Typography>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ lineHeight: 1.4 }}
-              >
-                Quick log with calories you already know.
-              </Typography>
-            </Box>
-          }
-          sx={{ pb: 1 }}
-        />
+      {/* ------------------- ACCORDION: Quick Actions ------------------- */}
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography sx={{ fontWeight: 700 }}>Quick Actions</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+            <Button
+              onClick={() => setOpenCustom(true)}
+              startIcon={<AddCircleOutlineIcon />}
+              variant="outlined"
+              size="small"
+              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
+            >
+              Custom Food
+            </Button>
+            <Button
+              onClick={() => setOpenBowl(true)}
+              startIcon={<RestaurantIcon />}
+              variant="outlined"
+              size="small"
+              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
+            >
+              Build a Bowl
+            </Button>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
-        <CardContent sx={{ pt: 0 }}>
+      {/* ------------------- ACCORDION: Manual Entry (default open) ------------------- */}
+      <Accordion defaultExpanded disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
           {/* Food + Calories */}
           <Box sx={{ mb: 2 }}>
             <Autocomplete
@@ -740,54 +709,9 @@ export default function MealTracker({ onMealUpdate }) {
 
             {!selectedFood && foodInput.length > 2 && (
               <Alert severity="info" sx={{ mt: 2 }}>
-                Not found — enter calories manually or use a shortcut below.
+                Not found — enter calories manually or use Quick Actions.
               </Alert>
             )}
-          </Box>
-
-          {/* Shortcuts row (keep for discoverability, smaller now) */}
-          <Box
-            sx={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 2,
-              mb: 3,
-              alignItems: 'center'
-            }}
-          >
-            <Button
-              size="small"
-              startIcon={<AddCircleOutlineIcon />}
-              onClick={() => {
-                setOpenCustom(true);
-              }}
-              sx={{
-                textTransform: 'none',
-                minWidth: 0,
-                p: 0,
-                color: 'primary.main',
-                fontWeight: 500
-              }}
-            >
-              Custom Food
-            </Button>
-
-            <Button
-              size="small"
-              startIcon={<RestaurantIcon />}
-              onClick={() => {
-                setOpenBowl(true);
-              }}
-              sx={{
-                textTransform: 'none',
-                minWidth: 0,
-                p: 0,
-                color: 'primary.main',
-                fontWeight: 500
-              }}
-            >
-              Build a Bowl
-            </Button>
           </Box>
 
           {/* Action row */}
@@ -823,80 +747,19 @@ export default function MealTracker({ onMealUpdate }) {
               Clear Meals
             </Button>
           </Box>
-        </CardContent>
-      </Card>
+        </AccordionDetails>
+      </Accordion>
 
-      {/* ------------------- CARD: AI ASSIST ------------------- */}
-      <Card
-        ref={suggestRef}
-        sx={{
-          borderRadius: 3,
-          boxShadow:
-            '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
-        }}
-      >
-        <CardHeader
-          title={
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 0.5
-              }}
-            >
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-              >
-                <Typography variant="h6" fontWeight={600}>
-                  AI Assist
-                </Typography>
-                <Chip
-                  size="small"
-                  color="primary"
-                  label="BETA"
-                  sx={{ fontWeight: 500, height: 20 }}
-                />
-              </Box>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ lineHeight: 1.4 }}
-              >
-                Use AI to get nutrition facts fast, or let it suggest balanced
-                meals for you.
-              </Typography>
-            </Box>
-          }
-          action={
-            <Button
-              variant={showSuggest ? 'outlined' : 'contained'}
-              color="primary"
-              size="small"
-              startIcon={<SmartToyOutlinedIcon />}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                whiteSpace: 'nowrap'
-              }}
-              onClick={handleToggleMealIdeas}
-            >
-              {showSuggest ? 'Hide Meal Ideas' : 'Suggest Meal (AI)'}
-            </Button>
-          }
-          sx={{
-            pb: 1,
-            alignItems: { xs: 'flex-start', sm: 'center' }
-          }}
-        />
-
-        <CardContent sx={{ pt: 0 }}>
-          {/* AI Food Lookup (3 free/day for anon, unlimited for trial/pro) */}
+      {/* ------------------- ACCORDION: AI Assist (open) ------------------- */}
+      <Accordion defaultExpanded disableGutters ref={suggestRef}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontWeight: 700 }}>AI Assist</Typography>
+            <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 500, height: 20 }} />
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          {/* AI Food Lookup */}
           <AIFoodLookupBox
             onAddFood={payload => {
               // { name, calories, protein_g, carbs_g, fat_g }
@@ -912,87 +775,81 @@ export default function MealTracker({ onMealUpdate }) {
             }}
           />
 
-          {/* Meal suggestions panel (conditionally rendered) */}
+          {/* Meal suggestions panel (shown only when toggled from hero) */}
           {showSuggest && (
-            <MealSuggestion
-              consumedCalories={total}
-              onAddMeal={async meal => {
-                // meal = { name, calories }
-                const safeCalories = Number.isFinite(meal.calories)
-                  ? Number(meal.calories)
-                  : 0;
+            <Box sx={{ mt: 2 }}>
+              <MealSuggestion
+                consumedCalories={total}
+                onAddMeal={async meal => {
+                  const safeCalories = Number.isFinite(meal.calories)
+                    ? Number(meal.calories)
+                    : 0;
 
-                await logOne({
-                  name: meal.name,
-                  calories: safeCalories
-                });
-              }}
-            />
+                  await logOne({
+                    name: meal.name,
+                    calories: safeCalories
+                  });
+                }}
+              />
+            </Box>
           )}
-        </CardContent>
-      </Card>
+        </AccordionDetails>
+      </Accordion>
 
-      {/* ------------------- Logged Meals ------------------- */}
-      <Box>
-        <Typography
-          variant="h6"
-          gutterBottom
-          sx={{ fontWeight: 600, lineHeight: 1.3 }}
-        >
-          Meals Logged Today ({todayUS})
-        </Typography>
-
-        {mealLog.length === 0 ? (
-          <Typography color="text.secondary">
-            No meals added yet.
+      {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
+      <Accordion defaultExpanded disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography sx={{ fontWeight: 700 }}>
+            Meals Logged Today ({todayUS})
           </Typography>
-        ) : (
-          <List
-            sx={{
-              borderRadius: 2,
-              overflow: 'hidden',
-              border: '1px solid rgba(0,0,0,0.05)',
-              boxShadow:
-                '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
-            }}
-          >
-            {mealLog.map((m, i) => (
-              <Box key={`${m.name}-${i}`}>
-                <ListItem
-                  secondaryAction={
-                    <Tooltip title="Delete this meal">
-                      <IconButton
-                        edge="end"
-                        aria-label="delete meal"
-                        onClick={() => handleDeleteMeal(i)}
-                        size="small"
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  }
-                >
-                  <ListItemText
-                    primary={
-                      <Typography fontWeight={500}>{m.name}</Typography>
-                    }
-                    secondary={`${Number(m.calories) || 0} cals`}
-                  />
-                </ListItem>
-                {i < mealLog.length - 1 && <Divider />}
-              </Box>
-            ))}
-          </List>
-        )}
+        </AccordionSummary>
+        <AccordionDetails>
+          {mealLog.length === 0 ? (
+            <Typography color="text.secondary">No meals added yet.</Typography>
+          ) : (
+            <>
+              <List
+                sx={{
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  border: '1px solid rgba(0,0,0,0.05)',
+                  boxShadow:
+                    '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
+                }}
+              >
+                {mealLog.map((m, i) => (
+                  <Box key={`${m.name}-${i}`}>
+                    <ListItem
+                      secondaryAction={
+                        <Tooltip title="Delete this meal">
+                          <IconButton
+                            edge="end"
+                            aria-label="delete meal"
+                            onClick={() => handleDeleteMeal(i)}
+                            size="small"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      }
+                    >
+                      <ListItemText
+                        primary={<Typography fontWeight={500}>{m.name}</Typography>}
+                        secondary={`${Number(m.calories) || 0} cals`}
+                      />
+                    </ListItem>
+                    {i < mealLog.length - 1 && <Divider />}
+                  </Box>
+                ))}
+              </List>
 
-        <Typography
-          variant="h6"
-          align="right"
-          sx={{ mt: 2, fontWeight: 600 }}
-        >
-          Total Calories: {total}
-        </Typography>
-      </Box>
+              <Typography variant="h6" align="right" sx={{ mt: 2, fontWeight: 600 }}>
+                Total Calories: {total}
+              </Typography>
+            </>
+          )}
+        </AccordionDetails>
+      </Accordion>
 
       {/* Upgrade modal */}
       <UpgradeModal
