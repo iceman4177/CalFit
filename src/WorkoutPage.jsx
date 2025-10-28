@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/WorkoutPage.jsx
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Typography,
@@ -13,7 +14,8 @@ import {
   Card,
   CardContent,
   Paper,
-  Stack
+  Stack,
+  Chip
 } from '@mui/material';
 import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
@@ -28,10 +30,7 @@ import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 
-// ⬇️ NEW: summary hero (auto-reads from localStorage)
-import WorkoutSummaryBar from './components/WorkoutSummaryBar';
-
-// ⬇️ NEW: local-first wrappers (idempotent, queued sync)
+// ⬇️ local-first wrappers (idempotent, queued sync)
 import { saveWorkoutLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 
 // ---- Paywall helpers ----
@@ -299,7 +298,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTemp('180');
   };
 
-  // 🔧 UPDATED: local-first save with exact totals + stable IDs and correct daily_metrics keys
+  // 🔧 local-first save with exact totals + stable IDs and correct daily_metrics keys
   const handleFinish = async () => {
     // If user has a partially filled exercise, add it before finalize
     if (
@@ -332,13 +331,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       ended_at: endedAt,
       total_calories: total,
 
-      // optional local-first metadata (kept for your history UI)
+      // optional local-first metadata
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `wf_${Date.now()}`,
       localId: `w_${clientId}_${Date.now()}`,
       createdAt: startedAt,
       uploaded: false,
 
-      // domain display fields (local storage history)
+      // domain display fields
       date: todayDisplay,
       name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
       exercises: cumulativeExercises.map(ex => ({
@@ -350,14 +349,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       })),
     };
 
-    // ✅ Local-first + queued cloud upsert (your wrapper will map to Supabase)
     await saveWorkoutLocalFirst(newSession);
 
-    // Update banners & streak locally
     if (typeof onWorkoutLogged === 'function') onWorkoutLogged(total);
     updateStreak();
 
-    // Recompute today's consumed/burned and upsert daily metrics (local-first)
     const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const burnedToday = workouts
       .filter(w => w.date === todayDisplay)
@@ -369,7 +365,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       ? todayMealRec.meals.reduce((s, m) => s + (Number(m.calories) || 0), 0)
       : 0;
 
-    // ⬅️ KEY FIX: use correct column names that match your DB & on_conflict index
     await upsertDailyMetricsLocalFirst({
       user_id: user?.id || null,
       local_day: todayLocalIso,
@@ -378,7 +373,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       net_calories: consumedToday - burnedToday
     });
 
-    // notify local-first listeners (NetCalorieBanner, CalorieSummary, History)
     try {
       window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
         detail: { date: todayLocalIso, burned: burnedToday }
@@ -469,6 +463,17 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setShowSuggestCard(false);
   };
 
+  // ---- derived UI stats for a compact strip ----
+  const sessionTotals = useMemo(() => {
+    const total = cumulativeExercises.reduce((s, ex) => s + (Number(ex.calories) || 0), 0);
+    const sets = cumulativeExercises.reduce((s, ex) => s + (parseInt(ex.sets, 10) || 0), 0);
+    return {
+      kcal: Math.round(total),
+      exercises: cumulativeExercises.length,
+      sets
+    };
+  }, [cumulativeExercises]);
+
   // --- UI rendering ---
   if (currentStep === 3) {
     const total = cumulativeExercises.reduce((sum, ex) => sum + ex.calories, 0);
@@ -478,9 +483,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
     return (
       <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
-        {/* Summary hero at top for screenshot appeal */}
-        <WorkoutSummaryBar />
-
+        {/* (Removed duplicate Net Calories banner for a cleaner summary) */}
         <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
           Workout Summary
         </Typography>
@@ -491,15 +494,15 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             key={idx}
             variant="outlined"
             sx={{
-              mb: 1.5,
+              mb: 1.25,
               borderRadius: 2,
               border: '1px solid rgba(0,0,0,0.06)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+              boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
             }}
           >
             <CardContent
               sx={{
-                py: 1.25,
+                py: 1.1,
                 px: 2,
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -517,9 +520,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           </Card>
         ))}
 
-        <Typography variant="h6" align="center" sx={{ mt: 2, fontWeight: 800 }}>
-          Total Calories Burned: {total.toFixed(2)}
-        </Typography>
+        <Stack direction="row" spacing={1.25} justifyContent="center" sx={{ mt: 2 }}>
+          <Chip label={`Total: ${total.toFixed(0)} kcal`} color="primary" />
+          <Chip label={`${cumulativeExercises.length} exercises`} variant="outlined" />
+          <Chip label={`${sessionTotals.sets} sets`} variant="outlined" />
+        </Stack>
 
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center" sx={{ mt: 3 }}>
           <Button variant="contained" onClick={handleNewWorkout} fullWidth>
@@ -611,12 +616,27 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
-      {/* NEW: Summary hero for today at the top */}
-      <WorkoutSummaryBar />
+      {/* ⬇️ Removed WorkoutSummaryBar to avoid duplicate “Today’s Net Calories” hero.
+          NetCalorieBanner from the layout remains the single top banner. */}
 
       <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
         Workout Tracker
       </Typography>
+
+      {/* Slim session stats strip (non-blocky) */}
+      <Box
+        sx={{
+          mb: 2.5,
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 1,
+          flexWrap: 'wrap'
+        }}
+      >
+        <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700 }} />
+        <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} />
+        <Chip variant="outlined" label={`${sessionTotals.sets} sets`} />
+      </Box>
 
       <Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
@@ -625,6 +645,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
               variant="contained"
               fullWidth
               onClick={handleSuggestAIClick}
+              sx={{ fontWeight: 700 }}
             >
               Suggest a Workout (AI)
             </Button>
@@ -638,7 +659,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
               sx={{
                 borderRadius: 2,
                 border: '1px solid rgba(0,0,0,0.06)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
               }}
             >
               <CardContent>
@@ -662,7 +683,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                   p: 2,
                   borderRadius: 2,
                   border: '1px solid rgba(0,0,0,0.06)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
                 }}
               >
                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>
@@ -696,7 +717,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                 p: 2,
                 borderRadius: 2,
                 border: '1px solid rgba(0,0,0,0.06)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
               }}
             >
               <ExerciseForm
@@ -726,7 +747,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                   p: 2,
                   borderRadius: 2,
                   border: '1px solid rgba(0,0,0,0.06)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
                 }}
               >
                 <SaunaForm
