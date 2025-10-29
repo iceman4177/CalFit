@@ -4,7 +4,7 @@ import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
 export const config = { api: { bodyParser: false } };
 
-// --- raw body reader (required for Stripe signature verification) ---
+/* ----------------------------- raw body reader ---------------------------- */
 async function readRawBody(req) {
   return new Promise((resolve, reject) => {
     try {
@@ -18,11 +18,9 @@ async function readRawBody(req) {
   });
 }
 
-// -----------------------------------------------------------------------------
-// Live/Test key selection
-// -----------------------------------------------------------------------------
+/* --------------------------- env + stripe setup --------------------------- */
 const useLive =
-  process.env.NODE_ENV === "production" && process.env.STRIPE_SECRET_KEY_LIVE;
+  process.env.NODE_ENV === "production" && !!process.env.STRIPE_SECRET_KEY_LIVE;
 
 const stripe = new Stripe(
   useLive ? process.env.STRIPE_SECRET_KEY_LIVE : process.env.STRIPE_SECRET_KEY,
@@ -33,18 +31,29 @@ const endpointSecret = useLive
   ? process.env.STRIPE_WEBHOOK_SECRET_LIVE
   : process.env.STRIPE_WEBHOOK_SECRET;
 
-// --- helpers ---------------------------------------------------------------
-const toIso = (sec) => (sec ? new Date(sec * 1000).toISOString() : null);
+const ENV = useLive ? "LIVE" : "TEST";
 
-// --- utils for DB writes ---------------------------------------------------
+/* -------------------------------- helpers -------------------------------- */
+const toIso = (sec) => (sec ? new Date(sec * 1000).toISOString() : null);
+const nowIso = () => new Date().toISOString();
+
+/** Ensure app_users exists/updated */
 async function upsertUser(user_id, email) {
   if (!user_id) return;
   const { error } = await supabaseAdmin
     .from("app_users")
-    .upsert({ user_id, email: email ?? null }, { onConflict: "user_id" });
+    .upsert(
+      {
+        user_id,
+        email: email ?? null,
+        updated_at: nowIso(),
+      },
+      { onConflict: "user_id" }
+    );
   if (error) console.warn("[wh] app_users upsert warn:", error.message);
 }
 
+/** Map a Stripe customer to our user_id via app_stripe_customers */
 async function resolveUserIdFromCustomer(stripeCustomerId) {
   if (!stripeCustomerId) return null;
   const { data, error } = await supabaseAdmin
@@ -52,30 +61,32 @@ async function resolveUserIdFromCustomer(stripeCustomerId) {
     .select("user_id")
     .eq("customer_id", stripeCustomerId)
     .maybeSingle();
-  if (error) console.warn("[wh] resolve user_id from customer warn:", error.message);
+  if (error) console.warn("[wh] resolve user_id warn:", error.message);
   return data?.user_id ?? null;
 }
 
-// ✅ UPDATED: persist Stripe subscription/customer ids for clean admin views
+/** Normalize + persist subscriptions for clean admin views */
 async function upsertSubscription({ user_id, sub }) {
-  // pull common price fields
   const item = sub.items?.data?.[0];
   const price = item?.price;
 
   const payload = {
-    // Existing identifier you already use to dedupe (keep it):
-    subscription_id: sub.id, // onConflict uses this
+    // Primary key / conflict target
+    subscription_id: sub.id,
 
-    // New normalized identifiers (text) for reporting/joins:
-    stripe_subscription_id: sub.id,               // "sub_..."
-    customer_id: sub.customer || null,            // "cus_..."
-    stripe_customer_id: sub.customer || null,     // keep legacy field too
+    // Stripe identifiers
+    stripe_subscription_id: sub.id,
+    customer_id: sub.customer || null,
+    stripe_customer_id: sub.customer || null,
 
-    // Relationships / status
-    user_id,
+    // Relationship
+    user_id: user_id ?? null,
+
+    // Status
     status: sub.status || null,
+    cancel_at_period_end: !!sub.cancel_at_period_end,
 
-    // Price details
+    // Price info
     price_id: price?.id || null,
     price_nickname: price?.nickname || null,
     currency: price?.currency || null,
@@ -86,17 +97,16 @@ async function upsertSubscription({ user_id, sub }) {
     started_at: toIso(sub.start_date),
     current_period_start: toIso(sub.current_period_start),
     current_period_end: toIso(sub.current_period_end),
-    cancel_at_period_end: !!sub.cancel_at_period_end,
     canceled_at: toIso(sub.canceled_at),
     trial_start: toIso(sub.trial_start),
     trial_end: toIso(sub.trial_end),
 
-    // Metadata
-    env: useLive ? "live" : "test",
-    updated_at: new Date().toISOString(),
+    // Meta
+    env: ENV.toLowerCase(),
+    updated_at: nowIso(),
   };
 
-  console.log("[wh] upserting subscription", {
+  console.log(`[wh:${ENV}] upsert subscription`, {
     sub_id: payload.stripe_subscription_id,
     status: payload.status,
     user_id: payload.user_id,
@@ -113,29 +123,28 @@ async function upsertSubscription({ user_id, sub }) {
     console.log("[wh] upsert app_subscriptions OK");
   }
 
-  // Flip is_pro quickly (keep your SQL trigger behavior too)
-  if (user_id && sub.status && ["active", "trialing"].includes(sub.status)) {
-    await supabaseAdmin
-      .from("app_users")
-      .update({
-        is_pro: true,
-        trial_start: toIso(sub.trial_start),
-        trial_end: toIso(sub.trial_end),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", user_id);
-  }
-  if (user_id && sub.status === "canceled") {
-    await supabaseAdmin
-      .from("app_users")
-      .update({ is_pro: false, updated_at: new Date().toISOString() })
-      .eq("user_id", user_id);
+  // Opportunistic flip of is_pro (keep any DB-side triggers you have)
+  if (user_id) {
+    if (["active", "trialing", "past_due"].includes(sub.status)) {
+      await supabaseAdmin
+        .from("app_users")
+        .update({
+          is_pro: true,
+          trial_start: toIso(sub.trial_start),
+          trial_end: toIso(sub.trial_end),
+          updated_at: nowIso(),
+        })
+        .eq("user_id", user_id);
+    } else if (["canceled", "unpaid", "incomplete_expired"].includes(sub.status)) {
+      await supabaseAdmin
+        .from("app_users")
+        .update({ is_pro: false, updated_at: nowIso() })
+        .eq("user_id", user_id);
+    }
   }
 }
 
-// -----------------------------------------------------------------------------
-// Main handler
-// -----------------------------------------------------------------------------
+/* ------------------------------- main handler ---------------------------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -145,15 +154,13 @@ export default async function handler(req, res) {
     const sig = req.headers["stripe-signature"];
     event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
   } catch (err) {
-    console.error(
-      `[wh:${useLive ? "LIVE" : "TEST"}] ❌ Signature verification failed:`,
-      err?.message
-    );
+    console.error(`[wh:${ENV}] ❌ Signature verification failed:`, err?.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
     switch (event.type) {
+      /* -------------------- Checkout completed -------------------- */
       case "checkout.session.completed": {
         const session = event.data.object;
 
@@ -178,40 +185,53 @@ export default async function handler(req, res) {
         break;
       }
 
+      /* -------------------- Subscription lifecycle -------------------- */
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const sub = event.data.object;
 
-        // Prefer metadata, then mapping via customer id
-        let user_id =
+        const user_id =
           sub?.metadata?.app_user_id ||
           sub?.metadata?.user_id ||
           (await resolveUserIdFromCustomer(sub?.customer)) ||
           null;
 
-        // Best-effort email update
+        // Best-effort user email update when available
         await upsertUser(user_id, sub?.customer_email || null);
 
         await upsertSubscription({ user_id, sub });
         break;
       }
 
-      case "invoice.paid":
-      case "invoice.payment_failed":
-      case "customer.subscription.trial_will_end":
-        console.log(`[wh:${useLive ? "LIVE" : "TEST"}] ${event.type} observed.`);
+      /* -------------------- Invoice outcomes (optional) -------------------- */
+      case "invoice.payment_succeeded": {
+        const inv = event.data.object;
+        console.log(`[wh:${ENV}] invoice.payment_succeeded`, inv.id);
         break;
+      }
+      case "invoice.payment_failed": {
+        const inv = event.data.object;
+        console.warn(`[wh:${ENV}] invoice.payment_failed`, inv.id);
+        break;
+      }
+
+      case "customer.subscription.trial_will_end": {
+        const sub = event.data.object;
+        console.log(`[wh:${ENV}] trial_will_end for`, sub.id);
+        break;
+      }
 
       default:
-        console.log(`[wh:${useLive ? "LIVE" : "TEST"}] Ignored event`, event.type);
+        console.log(`[wh:${ENV}] Ignored event`, event.type);
         break;
     }
 
+    // Return 200 so Stripe considers the event delivered
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error(`[wh:${useLive ? "LIVE" : "TEST"}] handler error:`, err);
-    // Return 200 so Stripe doesn't retry forever (we log to inspect)
+    console.error(`[wh:${ENV}] handler error:`, err);
+    // Return 200 to avoid repeated retries if the failure is non-critical
     return res.status(200).json({ received: true, note: "handled with warnings" });
   }
 }
