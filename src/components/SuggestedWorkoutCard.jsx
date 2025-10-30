@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
+import { supabase } from '../context/supabaseClient'; // <-- ensure this path matches your project
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -46,6 +47,33 @@ function getClientId() {
   } catch {
     return 'anon';
   }
+}
+
+// --- auth headers (so backend can resolve entitlement and bypass limits) ---
+async function buildAuthHeaders() {
+  let token = null;
+  let userId = null;
+  let email = null;
+
+  try {
+    const [{ data: sessionData }, { data: userData }] = await Promise.all([
+      supabase.auth.getSession(),
+      supabase.auth.getUser()
+    ]);
+    token = sessionData?.session?.access_token || null;
+    userId = userData?.user?.id || null;
+    email  = userData?.user?.email || null;
+  } catch {
+    // ignore — will fall back to anonymous client id
+  }
+
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(userId ? { 'x-supabase-user-id': userId } : {}),
+    ...(email  ? { 'x-user-email': email } : {}),
+    'x-client-id': getClientId()
+  };
 }
 
 // Parse tempo like "2-1-2" -> { conc: '2', ecc: '2' }
@@ -112,23 +140,17 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
       const focus = normalizeFocus(focusOverride || split || 'upper');
 
-      // optional: signed-in id if present in local supabase token
-      const supaToken = JSON.parse(localStorage.getItem('supabase.auth.token') || 'null');
-      const user_id   = supaToken?.user?.id || null;
-
       // keep local prefs in sync for the rest of the app
       localStorage.setItem('training_split', focus);
       localStorage.setItem('last_focus', focus);
 
+      const headers = await buildAuthHeaders();
+
       const resp = await fetch('/api/ai/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Client-Id': getClientId(), // <-- ensures per-device free tries
-        },
+        headers,
         body: JSON.stringify({
           feature: 'workout',
-          user_id,
           goal: fitnessGoal,
           focus,
           equipment: equipmentList,
@@ -138,7 +160,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       });
 
       if (resp.status === 402) {
-        // Hit daily free cap → open paywall, don't silently fail
+        // Free cap hit (only happens if entitlement not resolved) → show paywall
         setShowUpgrade(true);
         setPack([]);
         setLoading(false);
