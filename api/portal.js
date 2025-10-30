@@ -10,6 +10,20 @@ function allowCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
 }
 
+function normalizeCustomerId(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (s.startsWith('{')) {
+    try {
+      const obj = JSON.parse(s);
+      return obj?.id || null;
+    } catch {
+      return null;
+    }
+  }
+  return s;
+}
+
 export default async function handler(req, res) {
   allowCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -27,9 +41,7 @@ export default async function handler(req, res) {
   const secretKey = useLive ? STRIPE_SECRET_KEY_LIVE : STRIPE_SECRET_KEY;
   const ENV = useLive ? 'LIVE' : 'TEST';
 
-  if (!secretKey) {
-    return res.status(500).json({ error: `[${ENV}] Missing Stripe secret key` });
-  }
+  if (!secretKey) return res.status(500).json({ error: `[${ENV}] Missing Stripe secret key` });
 
   const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' });
 
@@ -38,14 +50,11 @@ export default async function handler(req, res) {
     const email   = (req.body?.email    || '').trim().toLowerCase();
     const return_url = req.body?.return_url || STRIPE_PORTAL_RETURN_URL || APP_BASE_URL;
 
-    if (!user_id && !email) {
-      return res.status(400).json({ error: 'Missing user_id or email' });
-    }
+    if (!user_id && !email) return res.status(400).json({ error: 'Missing user_id or email' });
 
-    // ---------------- Resolve Stripe customer id robustly ----------------
+    // --- Resolve Stripe customer id (map -> subs -> by email) ---
     let customerId = null;
 
-    // 1) Mapping table by user_id
     if (user_id) {
       const { data: mapRow } = await supabaseAdmin
         .from('app_stripe_customers')
@@ -54,10 +63,9 @@ export default async function handler(req, res) {
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      customerId = mapRow?.customer_id || customerId;
+      customerId = normalizeCustomerId(mapRow?.customer_id) || customerId;
     }
 
-    // 2) Fallback: latest subscription row (stripe_customer_id)
     if (!customerId && user_id) {
       const { data: subRow } = await supabaseAdmin
         .from('app_subscriptions')
@@ -66,10 +74,9 @@ export default async function handler(req, res) {
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      customerId = subRow?.stripe_customer_id || customerId;
+      customerId = normalizeCustomerId(subRow?.stripe_customer_id) || customerId;
     }
 
-    // 3) Last-ditch: lookup mapping by email
     if (!customerId && email) {
       const { data: byEmail } = await supabaseAdmin
         .from('app_stripe_customers')
@@ -78,17 +85,14 @@ export default async function handler(req, res) {
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      customerId = byEmail?.customer_id || customerId;
+      customerId = normalizeCustomerId(byEmail?.customer_id) || customerId;
     }
 
-    if (!customerId) {
-      return res.status(404).json({ error: 'no_customer' });
-    }
+    if (!customerId) return res.status(404).json({ error: 'no_customer' });
 
-    // Validate that this customer exists in THIS Stripe environment
+    // Validate it exists in THIS Stripe environment
     await stripe.customers.retrieve(customerId);
 
-    // ---------------- Create Billing Portal session ---------------------
     const portal = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url,
