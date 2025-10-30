@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
-import { supabase } from '../context/supabaseClient'; // <-- ensure this path matches your project
+import { supabase } from '../lib/supabaseClient'; // <-- fixed path
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
