@@ -1,49 +1,87 @@
 // src/lib/ai.js
-import { supabase } from '../lib/supabaseClient';
 
-export async function callAIGenerate(payload = {}) {
-  // get Supabase session (works in normal + incognito)
-  const { data: { session } = {} } = await supabase.auth.getSession();
-  const user = session?.user || null;
-
-  // stable client id for free-pass accounting
-  let clientId = localStorage.getItem('clientId');
-  if (!clientId) {
-    clientId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`).toString();
-    localStorage.setItem('clientId', clientId);
+// Stable device/client id for per-device limits (anon users)
+export function getClientId() {
+  let cid = localStorage.getItem('clientId');
+  if (!cid) {
+    cid = (crypto?.randomUUID?.() || `cid_${Date.now()}`);
+    localStorage.setItem('clientId', cid);
   }
+  return cid;
+}
+
+// Try to read the Supabase session JWT from localStorage (works in incognito too)
+function getSupabaseJWTFromStorage() {
+  try {
+    const key = Object.keys(localStorage).find(
+      k => k.startsWith('sb-') && k.endsWith('-auth-token')
+    );
+    if (!key) return null;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+
+    const obj = JSON.parse(raw);
+    // Supabase stores either { access_token, user, ... } or { currentSession: { access_token, user } }
+    return (
+      obj?.access_token ||
+      obj?.currentSession?.access_token ||
+      obj?.session?.access_token ||
+      obj?.accessToken ||
+      null
+    );
+  } catch (e) {
+    return null;
+  }
+}
+
+function getSupabaseUserFromStorage() {
+  try {
+    const key = Object.keys(localStorage).find(
+      k => k.startsWith('sb-') && k.endsWith('-auth-token')
+    );
+    if (!key) return {};
+    const obj = JSON.parse(localStorage.getItem(key) || '{}');
+    const user =
+      obj?.user ||
+      obj?.currentSession?.user ||
+      obj?.session?.user ||
+      null;
+    return { id: user?.id || null, email: user?.email || null };
+  } catch {
+    return {};
+  }
+}
+
+// Main helper — ALWAYS sends Authorization + X-Client-Id (+ user/email when known)
+export async function callAIGenerate(payload) {
+  const token = getSupabaseJWTFromStorage();
+  const { id: uid, email } = getSupabaseUserFromStorage();
+  const clientId = getClientId();
 
   const headers = {
     'Content-Type': 'application/json',
     'X-Client-Id': clientId,
   };
-  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
-  if (user?.id) headers['X-User-Id'] = user.id;
-  if (user?.email) headers['X-User-Email'] = user.email;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (uid) headers['X-User-Id'] = uid;
+  if (email) headers['X-User-Email'] = email;
 
-  const res = await fetch('/api/ai/generate', {
+  const resp = await fetch('/api/ai/generate', {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      // body fallback identity for server-side resolution
-      user_id: user?.id ?? null,
-      email: user?.email ?? null,
-      ...payload,
-    }),
+    body: JSON.stringify(payload || {}),
   });
 
-  if (res.status === 402) {
-    const detail = await res.json().catch(() => ({}));
-    const err = new Error('Upgrade required');
+  if (resp.status === 402) {
+    const err = new Error('Payment Required');
     err.code = 402;
-    err.detail = detail;
     throw err;
   }
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const err = new Error(`AI generate failed: ${res.status} ${text}`);
-    err.code = res.status;
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const err = new Error(`AI gateway error: ${resp.status} ${text}`);
+    err.code = resp.status;
     throw err;
   }
-  return res.json();
+  return resp.json().catch(() => ({}));
 }

@@ -295,7 +295,7 @@ function biasBlock(b, intent) {
 }
 
 function intentBank(focus, intent) {
-  const focusKey = normalizeFocus(focus); // <— single declaration, no redeclare
+  const focusKey = normalizeFocus(focus);
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
