@@ -320,8 +320,54 @@ export default function App() {
     }
   }, []);
 
+  /* ---------------- Entitlements (context) ---------------- */
   const { isProActive, status } = useEntitlements();
   const trialActive = status === 'trialing';
+
+  /* --------------- Server-truth Pro check (debounce flash) --------------- */
+  const [proCheck, setProCheck] = useState({ loading: false, isPro: false, status: null });
+
+  useEffect(() => {
+    let abort = false;
+
+    const fetchPro = async () => {
+      if (!authUser?.id) {
+        if (!abort) {
+          setProCheck({ loading: false, isPro: false, status: null });
+          try { localStorage.setItem('isPro', 'false'); } catch {}
+        }
+        return;
+      }
+      if (!abort) setProCheck(s => ({ ...s, loading: true }));
+
+      try {
+        const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(authUser.id)}`, { credentials: 'same-origin' });
+        const json = await res.json().catch(() => ({}));
+        if (abort) return;
+
+        const active = !!(json?.isProActive ?? json?.isPro);
+        setProCheck({ loading: false, isPro: active, status: json?.status || null });
+
+        try { localStorage.setItem('isPro', active ? 'true' : 'false'); } catch {}
+      } catch (e) {
+        if (!abort) setProCheck(s => ({ ...s, loading: false }));
+      }
+    };
+
+    fetchPro();
+    const onFocus = () => fetchPro();
+    const iv = setInterval(fetchPro, 5 * 60 * 1000);
+
+    window.addEventListener('slimcal:pro:refresh', fetchPro);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      abort = true;
+      clearInterval(iv);
+      window.removeEventListener('slimcal:pro:refresh', fetchPro);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [authUser?.id]);
 
   const [userData, setUserDataState] = useState(null);
 
@@ -420,22 +466,22 @@ export default function App() {
       lastIdentRef.current.path === path;
 
     if (!tooSoon) {
-      sendIdentity({ user: authUser, path, isProActive, planStatus: status });
+      sendIdentity({ user: authUser, path, isProActive: proCheck.isPro || isProActive, planStatus: status });
       lastIdentRef.current = { path, ts: now };
     }
-  }, [authUser?.id, location.pathname, isProActive, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authUser?.id, location.pathname, isProActive, status, proCheck.isPro]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!authUser) return;
     const onFocus = () =>
-      sendIdentity({ user: authUser, path: location.pathname, isProActive, planStatus: status });
+      sendIdentity({ user: authUser, path: location.pathname, isProActive: proCheck.isPro || isProActive, planStatus: status });
     window.addEventListener('focus', onFocus);
     const iv = setInterval(onFocus, 60_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(iv);
     };
-  }, [authUser?.id, location.pathname, isProActive, status ]);
+  }, [authUser?.id, location.pathname, isProActive, status, proCheck.isPro ]);
 
   useEffect(() => {
     let visHandler;
@@ -635,7 +681,15 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  const showTryPro = !(isProActive || localPro);
+  // Hide CTA while checking server truth to prevent a flash after sign-in.
+  let showTryPro = true;
+  if (!authUser) {
+    showTryPro = true;
+  } else if (proCheck.loading) {
+    showTryPro = false; // suppress while loading status
+  } else {
+    showTryPro = !(proCheck.isPro || isProActive || localPro);
+  }
 
   useEffect(() => {
     const openUpgradeHandler = () => setUpgradeOpen(true);
@@ -744,7 +798,7 @@ export default function App() {
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
               const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-              const next = { ...prev, ...data, isPremium: isProActive || localPro };
+              const next = { ...prev, ...data, isPremium: (proCheck.isPro || isProActive || localPro) };
               localStorage.setItem('userData', JSON.stringify(next));
               setUserDataState(next);
               history.push('/');
@@ -786,7 +840,7 @@ export default function App() {
           <Route path="/achievements" component={Achievements} />
           <Route path="/calorie-log"  component={CalorieHistory} />
           <Route path="/summary"      component={CalorieSummary} />
-          <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: isProActive || localPro }} />} />
+          <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }} />} />
           <Route path="/waitlist"     component={WaitlistSignup} />
           <Route path="/preferences"  component={AlertPreferences} />
           <Route exact path="/"       render={() => null} />
