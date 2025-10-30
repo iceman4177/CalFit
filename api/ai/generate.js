@@ -57,20 +57,61 @@ function idKey(req, userId) {
 }
 
 // -------------------- ENTITLEMENTS --------------------
-async function isProActive(user_id) {
-  if (!user_id || !supabaseAdmin) return false;
-  const { data, error } = await supabaseAdmin
-    .from("app_subscriptions")
-    .select("status,current_period_end")
-    .eq("user_id", user_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+// Treat users as entitled if:
+// - status IN ('active','past_due') OR
+// - status='trialing' AND trial_end > now (EVEN IF cancel_at_period_end = true)
+const ENTITLED = new Set(["active", "past_due", "trialing"]);
+function nowSec() { return Math.floor(Date.now() / 1000); }
 
-  if (error || !data) return false;
-  const now = Math.floor(Date.now() / 1000);
-  const active = ["active", "trialing", "past_due"].includes(data.status);
-  return active && (!data.current_period_end || data.current_period_end > now);
+async function isEntitled(user_id) {
+  if (!user_id || !supabaseAdmin) return false;
+
+  // 1) Prefer the entitlement/view if present
+  try {
+    const { data: ent, error } = await supabaseAdmin
+      .from("v_user_entitlements")
+      .select("status, trial_end, cancel_at_period_end, current_period_end")
+      .eq("user_id", user_id)
+      .maybeSingle();
+
+    if (!error && ent) {
+      const status = String(ent.status || "").toLowerCase();
+      if (!ENTITLED.has(status)) return false;
+      if (status === "trialing") {
+        const te = ent.trial_end ? Math.floor(new Date(ent.trial_end).getTime() / 1000) : 0;
+        return te > nowSec(); // honor trial through end even if cancel_at_period_end = true
+      }
+      // active or past_due
+      return true;
+    }
+  } catch {
+    // fall through to fallback
+  }
+
+  // 2) Fallback: most recent app_subscriptions row
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("status, trial_end, current_period_end, cancel_at_period_end, updated_at")
+      .eq("user_id", user_id)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (error || !data?.length) return false;
+
+    const row = data[0];
+    const status = String(row.status || "").toLowerCase();
+    if (!ENTITLED.has(status)) return false;
+
+    if (status === "trialing") {
+      const te = row.trial_end ? Math.floor(new Date(row.trial_end).getTime() / 1000) : 0;
+      return te > nowSec();
+    }
+    // active or past_due (optionally check current_period_end if you want)
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // -------------------- SERVER-SIDE FREE PASS --------------------
@@ -862,8 +903,8 @@ export default async function handler(req, res) {
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
-  // 1) Pro/Trial users bypass free-pass cap completely
-  const pro = await isProActive(user_id);
+  // 1) Pro/Trial users bypass free-pass cap completely (honors trial until trial_end even if canceled)
+  const pro = await isEntitled(user_id);
 
   // 2) If not Pro/Trial → check per-feature free-pass
   if (!pro) {
