@@ -1,4 +1,4 @@
-// api/create-checkout-session.js
+// /api/create-checkout-session.js
 export const config = { api: { bodyParser: false } };
 
 /* ------------------------------- utils ---------------------------------- */
@@ -113,7 +113,6 @@ export default async function handler(req, res) {
         await stripe.customers.retrieve(stripeCustomerId);
         // ok—customer exists in THIS env
       } catch (e) {
-        // If it's a 404/invalid_request_error, it's likely a TEST id in LIVE (or deleted)
         const status = e?.statusCode || e?.status || 0;
         const type = e?.raw?.type;
         console.warn(`[checkout:${envLabel}] stale/missing customer ${stripeCustomerId} (${status}, ${type}). Will create a new one.`);
@@ -166,18 +165,20 @@ export default async function handler(req, res) {
 
     const sessionPayload = {
       mode: "subscription",
-      customer: stripeCustomerId,                // authoritative LIVE customer id
+      customer: stripeCustomerId,                // authoritative env-correct customer id
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
       client_reference_id: user_id,
-      metadata: { user_id, period, env: envLabel },
+      // ✅ ensure email comes through in both places Stripe exposes it
+      customer_email: email || undefined,
+      metadata: { user_id, email: email || null, period, env: envLabel },
       success_url: successUrl,
       cancel_url: cancelUrl,
     };
     if (trialDays > 0) {
       sessionPayload.subscription_data = {
         trial_period_days: trialDays,
-        metadata: { user_id, env: envLabel },
+        metadata: { user_id, email: email || null, env: envLabel },
       };
     }
 
