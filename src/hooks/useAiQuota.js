@@ -1,19 +1,37 @@
-import { useState, useEffect } from 'react';
-import { useUserData } from '../UserDataContext.jsx';
+// src/hooks/useAiQuota.js
+// Daily free-usage counter with automatic bypass for Pro/Trial users.
 
-export default function useAiQuota() {
-  // Pull in the user data we need
-  const { dailyGoal, goalType, recentMeals } = useUserData();
+import { useContext, useMemo } from 'react';
+import { EntitlementsContext } from '../context/EntitlementsContext.jsx';
 
-  const [quota, setQuota] = useState(0);
+const PREFIX = 'aiQuota:'; // e.g., aiQuota:coach:2025-10-30
 
-  useEffect(() => {
-    // Example: load today's AI usage count from localStorage
-    const todayKey = new Date().toLocaleDateString('en-US');
-    const stored   = JSON.parse(localStorage.getItem('recapUsage') || '{}');
-    const count    = stored.date === todayKey ? stored.count : 0;
-    setQuota(count);
-  }, []);
+function dayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-  return { dailyGoal, goalType, recentMeals, quota };
+/**
+ * @param {string} feature  'coach' | 'meal' | 'workout'
+ * @param {number} freePerDay default 3
+ */
+export default function useAiQuota(feature = 'coach', freePerDay = 3) {
+  const { isEntitled } = useContext(EntitlementsContext) || { isEntitled: false };
+  const key = `${PREFIX}${feature}:${dayKey()}`;
+
+  const value = useMemo(() => {
+    if (isEntitled) return { used: 0, remaining: Infinity, isCapped: false };
+    const used = parseInt(localStorage.getItem(key) || '0', 10);
+    const remaining = Math.max(0, freePerDay - used);
+    return { used, remaining, isCapped: remaining <= 0 };
+  }, [key, freePerDay, isEntitled]);
+
+  const inc = () => {
+    if (isEntitled) return;
+    const used = parseInt(localStorage.getItem(key) || '0', 10) + 1;
+    localStorage.setItem(key, String(used));
+  };
+
+  const resetToday = () => localStorage.removeItem(key);
+
+  return { ...value, inc, resetToday, isEntitled: !!isEntitled };
 }
