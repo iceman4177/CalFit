@@ -5,8 +5,7 @@
 // - Pro/Trial users: unlimited AI usage (bypass free-pass).
 // - Non-Pro users (signed-in or anonymous): up to 3 uses per FEATURE per DAY,
 //   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
-//   Supabase when possible; if the table/policy isn't present, we fall back to
-//   an in-memory counter to avoid breaking.
+//   Supabase when possible; fallback to in-memory counter if table/policy missing.
 //
 // Features supported: 'workout', 'meal', 'coach'.
 //
@@ -15,12 +14,10 @@ import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
 
 const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY /* , timeout: 6000 */ })
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-// Hard limit the function so Vercel doesn't 504 on us
 export const config = { api: { bodyParser: false } };
-// Vercel Node functions support maxDuration; keep it modest
 export const maxDuration = 10;
 
 // -------------------- BASIC UTILS --------------------
@@ -42,7 +39,6 @@ function dayKeyUTC(date = new Date()) {
 function headerClientId(req) {
   const cid = (req.headers["x-client-id"] || "").toString().trim();
   if (cid) return cid.slice(0, 128);
-  // Fallback to IP if header not present
   const ip = (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "0.0.0.0")
     .toString()
     .split(",")[0]
@@ -50,23 +46,56 @@ function headerClientId(req) {
   return `ip:${ip}`;
 }
 
-// Prefer a user-scoped counter when logged in, otherwise device/IP
 function idKey(req, userId) {
   if (userId) return `uid:${userId}`;
   return headerClientId(req);
 }
 
+function base64UrlDecode(str) {
+  try {
+    const b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 ? "====".slice(b64.length % 4) : "";
+    const txt = Buffer.from(b64 + pad, "base64").toString("utf8");
+    return JSON.parse(txt);
+  } catch {
+    return null;
+  }
+}
+
+function getUserIdFromHeaders(req) {
+  // 1) Explicit headers
+  const headerUid =
+    (req.headers["x-user-id"] || req.headers["x-supabase-user-id"] || "").toString().trim();
+  if (headerUid) return headerUid;
+
+  // 2) Supabase JWT in Authorization: Bearer <token>
+  const auth = (req.headers["authorization"] || "").toString().trim();
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7);
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = base64UrlDecode(parts[1]);
+      const sub = payload?.sub || payload?.user_id || payload?.uid;
+      if (sub) return String(sub);
+    }
+  }
+  return null;
+}
+
 // -------------------- ENTITLEMENTS --------------------
-// Treat users as entitled if:
-// - status IN ('active','past_due') OR
-// - status='trialing' AND trial_end > now (EVEN IF cancel_at_period_end = true)
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
 function nowSec() { return Math.floor(Date.now() / 1000); }
+
+function tsToSec(ts) {
+  if (!ts) return 0;
+  const n = typeof ts === "number" ? ts : Math.floor(new Date(ts).getTime() / 1000);
+  return Number.isFinite(n) ? n : 0;
+}
 
 async function isEntitled(user_id) {
   if (!user_id || !supabaseAdmin) return false;
 
-  // 1) Prefer the entitlement/view if present
+  // Prefer entitlement view if present
   try {
     const { data: ent, error } = await supabaseAdmin
       .from("v_user_entitlements")
@@ -76,19 +105,14 @@ async function isEntitled(user_id) {
 
     if (!error && ent) {
       const status = String(ent.status || "").toLowerCase();
-      if (!ENTITLED.has(status)) return false;
-      if (status === "trialing") {
-        const te = ent.trial_end ? Math.floor(new Date(ent.trial_end).getTime() / 1000) : 0;
-        return te > nowSec(); // honor trial through end even if cancel_at_period_end = true
-      }
-      // active or past_due
-      return true;
+      const trialEnd = tsToSec(ent.trial_end);
+      const entitledByStatus = ENTITLED.has(status);
+      const entitledByTrial = trialEnd > nowSec(); // honor trial through end even if canceled
+      return entitledByStatus || entitledByTrial;
     }
-  } catch {
-    // fall through to fallback
-  }
+  } catch { /* fall through */ }
 
-  // 2) Fallback: most recent app_subscriptions row
+  // Fallback: most recent app_subscriptions row
   try {
     const { data, error } = await supabaseAdmin
       .from("app_subscriptions")
@@ -98,46 +122,45 @@ async function isEntitled(user_id) {
       .limit(1);
 
     if (error || !data?.length) return false;
-
     const row = data[0];
     const status = String(row.status || "").toLowerCase();
-    if (!ENTITLED.has(status)) return false;
-
-    if (status === "trialing") {
-      const te = row.trial_end ? Math.floor(new Date(row.trial_end).getTime() / 1000) : 0;
-      return te > nowSec();
-    }
-    // active or past_due (optionally check current_period_end if you want)
-    return true;
+    const trialEnd = tsToSec(row.trial_end);
+    const entitledByStatus = ENTITLED.has(status);
+    const entitledByTrial = trialEnd > nowSec();
+    return entitledByStatus || entitledByTrial;
   } catch {
     return false;
   }
 }
 
-// -------------------- SERVER-SIDE FREE PASS --------------------
-// DB-backed (preferred) with in-memory fallback for resiliency.
-// Schema (recommended):
-//   create table if not exists public.ai_free_passes (
-//     client_id text not null,
-//     user_id uuid,
-//     feature text not null check (feature in ('meal','workout','coach')),
-//     day_key date not null default (current_date),
-//     uses integer not null default 0,
-//     primary key (client_id, feature, day_key)
-//   );
-//
-// If the table/policy isn't present, we gracefully fall back to in-memory.
+// Resolve user_id from headers OR body.user_id OR body.email -> app_users.id
+async function resolveUserId(req, { user_id, email }) {
+  const hdr = getUserIdFromHeaders(req);
+  if (hdr) return hdr;
 
-const FREE_LIMIT = 3;
+  if (user_id) return user_id;
 
-// In-memory fallback map: key => { used, day }
-const freeMem = new Map();
-function memKey(clientId, feature) {
-  return `m:${clientId}:${feature}`;
+  const e = (email || "").trim().toLowerCase();
+  if (!e) return null;
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("app_users")
+      .select("id")
+      .eq("email", e)
+      .maybeSingle();
+
+    if (!error && data?.id) return data.id;
+  } catch { /* ignore */ }
+  return null;
 }
 
+// -------------------- FREE PASS --------------------
+const FREE_LIMIT = 3;
+const freeMem = new Map();
+
 function memAllow(clientId, feature) {
-  const key = memKey(clientId, feature);
+  const key = `m:${clientId}:${feature}`;
   const today = dayKeyUTC();
   const rec = freeMem.get(key);
   if (!rec || rec.day !== today) {
@@ -156,7 +179,6 @@ async function dbAllow(clientId, feature, userId) {
   try {
     const today = dayKeyUTC();
 
-    // 1) Read existing
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
@@ -165,31 +187,21 @@ async function dbAllow(clientId, feature, userId) {
       .eq("day_key", today)
       .maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
-      // Unexpected select error → fallback to memory
-      return memAllow(clientId, feature);
-    }
+    if (error && error.code !== "PGRST116") return memAllow(clientId, feature);
 
     if (!data) {
-      // 2) Insert first use
       const ins = await supabaseAdmin
         .from("ai_free_passes")
         .insert([{ client_id: clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
         .select("uses")
         .single();
 
-      if (ins.error) {
-        // If insert fails (e.g., RLS), fallback
-        return memAllow(clientId, feature);
-      }
+      if (ins.error) return memAllow(clientId, feature);
       return { allowed: true, remaining: FREE_LIMIT - 1 };
     }
 
-    // 3) Row exists: increment if under cap
     const currentUses = data.uses || 0;
-    if (currentUses >= FREE_LIMIT) {
-      return { allowed: false, remaining: 0 };
-    }
+    if (currentUses >= FREE_LIMIT) return { allowed: false, remaining: 0 };
 
     const upd = await supabaseAdmin
       .from("ai_free_passes")
@@ -200,11 +212,8 @@ async function dbAllow(clientId, feature, userId) {
       .select("uses")
       .single();
 
-    if (upd.error) {
-      // If update fails (RLS), fallback to memory
-      return memAllow(clientId, feature);
-    }
-    const newUses = upd.data.uses || currentUses + 1;
+    if (upd.error) return memAllow(clientId, feature);
+    const newUses = upd.data?.uses ?? currentUses + 1;
     return { allowed: true, remaining: Math.max(0, FREE_LIMIT - newUses) };
   } catch {
     return memAllow(clientId, feature);
@@ -212,36 +221,23 @@ async function dbAllow(clientId, feature, userId) {
 }
 
 async function allowFreeFeature({ req, feature, userId }) {
-  const clientId = idKey(req, userId); // <-- user gets their own bucket
+  const clientId = idKey(req, userId);
   return dbAllow(clientId, feature, userId);
 }
 
-// -------------------- TIMEOUT HELPERS --------------------
+// -------------------- TIMEOUT --------------------
 const OPENAI_TIMEOUT_MS = 6000;
 function withTimeout(promise, ms, onTimeoutValue) {
   return new Promise((resolve) => {
     let settled = false;
     const t = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(onTimeoutValue);
-      }
+      if (!settled) { settled = true; resolve(onTimeoutValue); }
     }, ms);
-    promise
-      .then((v) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(t);
-          resolve(v);
-        }
-      })
-      .catch(() => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(t);
-          resolve(onTimeoutValue);
-        }
-      });
+    promise.then((v) => {
+      if (!settled) { settled = true; clearTimeout(t); resolve(v); }
+    }).catch(() => {
+      if (!settled) { settled = true; clearTimeout(t); resolve(onTimeoutValue); }
+    });
   });
 }
 
@@ -261,7 +257,6 @@ const TITLE_BY_INTENT = {
   yoga_pilates: "Mobility-Centered Strength Flow",
 };
 
-// NEW: normalize focus names coming from the Health form/UI
 function normalizeFocus(focus) {
   const s = String(focus || "").toLowerCase().replace(/\s+/g, "_");
   const map = {
@@ -286,37 +281,21 @@ function biasBlock(b, intent) {
   const asRange = (lo, hi) => `${lo}-${hi}`;
   switch (intent) {
     case "bodybuilder":
-      copy.sets = copy.sets ?? 4;
-      copy.reps = copy.reps ?? asRange(8, 12);
-      copy.tempo = copy.tempo || "2-1-2";
-      break;
+      copy.sets = copy.sets ?? 4; copy.reps = copy.reps ?? asRange(8, 12); copy.tempo = copy.tempo || "2-1-2"; break;
     case "powerlifter":
-      copy.sets = copy.sets ?? 5;
-      copy.reps = copy.reps ?? asRange(3, 5);
-      copy.tempo = copy.tempo || "1-1-2";
-      break;
+      copy.sets = copy.sets ?? 5; copy.reps = copy.reps ?? asRange(3, 5); copy.tempo = copy.tempo || "1-1-2"; break;
     case "endurance":
-      copy.sets = copy.sets ?? 3;
-      copy.reps = copy.reps ?? asRange(12, 20);
-      copy.tempo = copy.tempo || "2-1-2";
-      break;
+      copy.sets = copy.sets ?? 3; copy.reps = copy.reps ?? asRange(12, 20); copy.tempo = copy.tempo || "2-1-2"; break;
     case "yoga_pilates":
-      copy.sets = copy.sets ?? 3;
-      copy.reps = copy.reps ?? asRange(10, 15);
-      copy.tempo = copy.tempo || "2-1-2";
-      break;
+      copy.sets = copy.sets ?? 3; copy.reps = copy.reps ?? asRange(10, 15); copy.tempo = copy.tempo || "2-1-2"; break;
     default:
-      copy.sets = copy.sets ?? 3;
-      copy.reps = copy.reps ?? asRange(8, 12);
-      copy.tempo = copy.tempo || "2-1-2";
+      copy.sets = copy.sets ?? 3; copy.reps = copy.reps ?? asRange(8, 12); copy.tempo = copy.tempo || "2-1-2";
   }
   return copy;
 }
 
 function intentBank(focus, intent) {
-  const f = normalizeFocus(focus);
-
-  // Default groups used by several splits
+  const focusKey = normalizeFocus(focus); // <— single declaration, no redeclare
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
@@ -397,7 +376,6 @@ function intentBank(focus, intent) {
     ],
   };
 
-  // Yoga/mobility substitutions
   const yogaMobility = {
     upper: [
       { exercise: "Scapular Push-Up" },
@@ -467,22 +445,20 @@ function intentBank(focus, intent) {
     ],
   };
 
-  // Endurance → add cardio sprinkle
   const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
-  // Choose bank based on intent/focus
   let bank;
   const normIntent = normalizeIntent(intent);
 
   if (normIntent === "yoga_pilates") {
-    bank = yogaMobility[f] || yogaMobility.full;
+    bank = yogaMobility[focusKey] || yogaMobility.full;
   } else {
-    bank = base[f] || base.upper;
-    if (normIntent === "endurance" && f !== "cardio") {
+    bank = base[focusKey] || base.upper;
+    if (normIntent === "endurance" && focusKey !== "cardio") {
       bank = [...bank, cardioSprinkle];
     }
     if (normIntent === "powerlifter") {
-      if (f === "upper" || f === "push" || f === "pull" || f === "chest_back" || f === "shoulders_arms") {
+      if (["upper","push","pull","chest_back","shoulders_arms"].includes(focusKey)) {
         bank = [
           { exercise: "Barbell Bench Press" },
           { exercise: "Weighted Pull-Up" },
@@ -490,14 +466,14 @@ function intentBank(focus, intent) {
           { exercise: "Overhead Press" },
           { exercise: "Face Pull" },
         ];
-      } else if (f === "lower" || f === "legs" || f === "glutes_hamstrings" || f === "quads_calves") {
+      } else if (["lower","legs","glutes_hamstrings","quads_calves"].includes(focusKey)) {
         bank = [
           { exercise: "Low-Bar Back Squat" },
           { exercise: "Conventional Deadlift" },
           { exercise: "Paused Squat" },
           { exercise: "Hamstring Curl" },
         ];
-      } else if (f === "full" || f === "cardio") {
+      } else {
         bank = [
           { exercise: "Front Squat" },
           { exercise: "Bench Press" },
@@ -506,7 +482,7 @@ function intentBank(focus, intent) {
         ];
       }
     }
-    if (normIntent === "bodybuilder" && (f === "upper" || f === "push" || f === "chest_back" || f === "shoulders_arms")) {
+    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(focusKey)) {
       bank = [
         { exercise: "Incline Dumbbell Press" },
         { exercise: "Chest Fly (Cable)" },
@@ -584,7 +560,6 @@ Rules:
     temperature: 0.6
   });
 
-  // Enforce timeout → fallback pack
   const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
   if (!res) return fallbackWorkoutPack(payload, count);
 
@@ -739,9 +714,7 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
 }
 
 function flattenMealsToSuggestions(meals) {
-  // Accepts either AI format or fallback format, returns flat suggestions
   return (Array.isArray(meals) ? meals : []).map((m) => {
-    // totals or per-meal numeric fields
     const calories =
       Number(m.total_calories) || Number(m.calories) ||
       Number(m.kcal) || Number(m.energy_kcal) ||
@@ -765,7 +738,6 @@ function flattenMealsToSuggestions(meals) {
       protein_g: Math.max(0, protein_g || 0),
       carbs_g: Math.max(0, carbs_g || 0),
       fat_g: Math.max(0, fat_g || 0),
-      // keep optional fields if present
       prepMinutes: m.prepMinutes ?? m.prep_min ?? null
     };
   });
@@ -786,7 +758,6 @@ async function openAIMealPack(payload, count = 3) {
     general: `Balanced macro distribution.`
   }[normIntent];
 
-  // Ask the model for *flat* meal-level numbers to match the UI
   const sys = `You are a sports nutrition coach. Output ONLY valid JSON matching this schema:
 {"suggestions":[{"title":"...","calories":650,"protein_g":40,"carbs_g":60,"fat_g":20}]}
 - No prose or markdown.
@@ -822,13 +793,11 @@ Rules:
   try { json = JSON.parse(txt); } catch {}
   let suggestions = Array.isArray(json?.suggestions) ? json.suggestions : null;
 
-  // If the model ignored schema, fall back to old shape → flatten
   if (!suggestions) {
     const meals = Array.isArray(json?.meals) ? json.meals : fallbackMealPack(payload, count);
     suggestions = flattenMealsToSuggestions(meals);
   }
 
-  // Apply per-meal calorie bias if provided
   suggestions = suggestions.map(s => ({
     ...s,
     calories: Math.max(0, Number(s.calories || 0) + (Number(calorieBias) || 0))
@@ -881,14 +850,13 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
+  const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
 
-  // Accept any of the keys for the feature:
-  //   feature | type | mode
-  const modeKey = (body?.feature || body?.type || body?.mode || "workout");
-  const feature = String(modeKey).toLowerCase(); // 'workout' | 'meal' | 'coach'
+  // Resolve user id robustly (headers OR body.user_id OR body.email)
+  const email = (body?.email || "").trim().toLowerCase();
+  const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
 
   const {
-    user_id = null,
     constraints = {},
     count = 5,
 
@@ -903,12 +871,12 @@ export default async function handler(req, res) {
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
-  // 1) Pro/Trial users bypass free-pass cap completely (honors trial until trial_end even if canceled)
-  const pro = await isEntitled(user_id);
+  // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
+  const pro = await isEntitled(resolvedUserId);
 
-  // 2) If not Pro/Trial → check per-feature free-pass
+  // 2) If not Pro/Trial → per-feature free-pass
   if (!pro) {
-    const pass = await allowFreeFeature({ req, feature, userId: user_id });
+    const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
       res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
       return;
@@ -961,7 +929,6 @@ export default async function handler(req, res) {
   if (feature === "coach") {
     try {
       const intent = normalizeIntent(constraints?.training_intent || "general");
-      // If you later wire real LLM coaching, drop it here.
       const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
       res.status(200).json({ suggestions });
       return;
