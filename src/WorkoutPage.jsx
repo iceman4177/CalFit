@@ -29,6 +29,7 @@ import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
+import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
 // ⬇️ local-first wrappers (idempotent, queued sync)
 import { saveWorkoutLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
@@ -423,37 +424,34 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setCumulativeExercises(enriched);
   };
 
+  // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
-      if (!isProUser()) {
-        const used = getAICount();
-        if (used >= 3) {
-          setShowUpgrade(true);
-          return;
-        }
+      // Optional lightweight UI gate for non-pros; server remains source of truth
+      if (!isProUser() && getAICount() >= 3) {
+        // Let the server have a say once; if still gated it will 402
+        // fall through to probe rather than blocking immediately
       }
       try {
         const trainingIntent = localStorage.getItem('training_intent') || 'general';
         const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
         const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
-        const resp = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            feature: 'workout',
-            user_id: user?.id || null,
-            goal: fitnessGoal,
-            focus: localStorage.getItem('last_focus') || 'upper',
-            equipment: equipmentList,
-            constraints: { training_intent: trainingIntent },
-            count: 1
-          })
+
+        // Probe with count=1; if entitled this will always succeed (no 402)
+        await callAIGenerate({
+          feature: 'workout',
+          user_id: user?.id || null,
+          goal: fitnessGoal,
+          focus: localStorage.getItem('last_focus') || 'upper',
+          equipment: equipmentList,
+          constraints: { training_intent: trainingIntent },
+          count: 1
         });
-        if (resp.status === 402) {
+      } catch (e) {
+        if (e?.code === 402) {
           setShowUpgrade(true);
           return;
         }
-      } catch (e) {
         console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
       }
       if (!isProUser()) incAICount();
@@ -616,14 +614,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
-      {/* ⬇️ Removed WorkoutSummaryBar to avoid duplicate “Today’s Net Calories” hero.
-          NetCalorieBanner from the layout remains the single top banner. */}
-
       <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
         Workout Tracker
       </Typography>
 
-      {/* Slim session stats strip (non-blocky) */}
+      {/* Slim session stats strip */}
       <Box
         sx={{
           mb: 2.5,

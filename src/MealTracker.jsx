@@ -46,6 +46,7 @@ import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
+import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
 // ---------- Pro / gating helpers ----------
 const isProUser = () => {
@@ -59,38 +60,6 @@ const getMealAICount = () =>
 
 const incMealAICount = () =>
   localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
-
-async function probeEntitlement(payload) {
-  const base = {
-    feature: 'meal',
-    type: 'meal',
-    mode: 'meal',
-    ...payload,
-    count: 1
-  };
-  try {
-    let resp = await fetch('/api/ai/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(base)
-    });
-    if (resp.status === 402) return { gated: true };
-    if (resp.ok) return { gated: false };
-
-    if (resp.status === 400 || resp.status === 404) {
-      resp = await fetch('/api/ai/meal-suggestion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(base)
-      });
-      if (resp.status === 402) return { gated: true };
-      return { gated: !resp.ok };
-    }
-    return { gated: !resp.ok };
-  } catch {
-    return { gated: false };
-  }
-}
 
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
@@ -514,15 +483,16 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  // toggle meal ideas panel (+ entitlement check first time opening)
+  // toggle meal ideas panel — identity-aware probe to avoid false 402s
   const handleToggleMealIdeas = useCallback(async () => {
     if (showSuggest) {
       setShowSuggest(false);
       return;
     }
+
+    // Optional local pre-gate for non-pros; the server is still the authority
     if (!isProUser() && getMealAICount() >= 3) {
-      setShowUpgrade(true);
-      return;
+      // continue to server probe; if gated, it will 402
     }
 
     try {
@@ -539,23 +509,23 @@ export default function MealTracker({ onMealUpdate }) {
         10
       );
 
-      const probePayload = {
+      // Probe with count=1; entitled users (Pro/trial) will always pass
+      await callAIGenerate({
+        feature: 'meal',
         user_id: user?.id || null,
-        goal: goalType || 'maintenance',
         constraints: {
           diet_preference: dietPreference,
           training_intent: trainingIntent,
           protein_per_meal_g: proteinMealG || undefined,
           calorie_bias: calorieBias || undefined
-        }
-      };
-
-      const { gated } = await probeEntitlement(probePayload);
-      if (gated) {
+        },
+        count: 1
+      });
+    } catch (e) {
+      if (e?.code === 402) {
         setShowUpgrade(true);
         return;
       }
-    } catch (e) {
       console.warn('[MealTracker] gateway probe failed', e);
     }
 
@@ -570,7 +540,7 @@ export default function MealTracker({ onMealUpdate }) {
         suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } catch {}
     }, 50);
-  }, [showSuggest, user?.id, goalType]);
+  }, [showSuggest, user?.id]);
 
   const total = mealLog.reduce(
     (s, m) => s + (Number(m.calories) || 0),
