@@ -1,6 +1,6 @@
 // src/components/Header.jsx
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -26,6 +26,26 @@ function isProLocal() {
 
 export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   const { isProActive } = useEntitlements();
+  const location = useLocation();
+
+  // auth state (so we can decide whether to open OAuth first)
+  const [authUser, setAuthUser] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (mounted) setAuthUser(data?.user ?? null);
+      } catch {
+        if (mounted) setAuthUser(null);
+      }
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => sub?.subscription?.unsubscribe?.();
+  }, []);
+
   const pro = isProActive || isProLocal();
 
   const openSignIn = () => {
@@ -36,11 +56,32 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
   };
 
   const handleTryPro = () => {
+    if (!authUser) {
+      // open the upgrade modal automatically after OAuth completes
+      localStorage.setItem('slimcal:openUpgradeAfterLogin', '1');
+      openSignIn();
+      return;
+    }
     window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
   };
 
   const handleManageBilling = async () => {
-    await openBillingPortal();
+    // If user isn't signed in, sign in first
+    if (!authUser) {
+      openSignIn();
+      return;
+    }
+    // If somehow not pro, fall back to upgrade
+    if (!pro) {
+      window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
+      return;
+    }
+    // Open Stripe Billing Portal with a nice return path
+    await openBillingPortal({
+      return_url: `${window.location.origin}${location.pathname || '/'}`,
+      user_id: authUser.id,
+      email: authUser.email || null,
+    });
   };
 
   const linkStyle = {
@@ -98,7 +139,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             <NavLink to="/meals"   style={linkStyle} activeStyle={activeStyle}>Meals</NavLink>
             <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>Workout</NavLink>
 
-            {/* Recap in header with a tooltip on the AI chip */}
+            {/* Recap with AI chip */}
             <NavLink to="/recap" style={linkStyle} activeStyle={activeStyle}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 Recap
@@ -138,17 +179,20 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
             </Button>
           )}
 
-          <Tooltip title="Sign in with Google">
-            <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
-              <img
-                src="https://www.svgrepo.com/show/475656/google-color.svg"
-                alt="Sign in"
-                width={20}
-                height={20}
-                style={{ display: 'block' }}
-              />
-            </IconButton>
-          </Tooltip>
+          {/* Only show sign-in icon if logged out */}
+          {!authUser && (
+            <Tooltip title="Sign in with Google">
+              <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
+                <img
+                  src="https://www.svgrepo.com/show/475656/google-color.svg"
+                  alt="Sign in"
+                  width={20}
+                  height={20}
+                  style={{ display: 'block' }}
+                />
+              </IconButton>
+            </Tooltip>
+          )}
         </Stack>
       </Toolbar>
     </AppBar>
