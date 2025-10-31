@@ -12,8 +12,8 @@ import {
   Chip,
 } from "@mui/material";
 import UpgradeModal from "./components/UpgradeModal";
-import { useUserData } from "./UserDataContext";
 import { useAuth } from "./context/AuthProvider.jsx";
+import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
   getWorkouts,
   getWorkoutSetsFor,
@@ -22,7 +22,7 @@ import {
 } from "./lib/db";
 
 // ---- Helpers ----------------------------------------------------------------
-const SCALE = 0.1; // kcal per (lb * rep) proxy
+const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with your MET formula later
 
 function isoDay(d = new Date()) {
   try {
@@ -86,8 +86,13 @@ function buildLocalContext() {
 // -----------------------------------------------------------------------------
 // Component
 export default function DailyRecapCoach() {
-  const { isPremium } = useUserData(); // UI hint only; server is source of truth for gating
   const { user } = useAuth();
+  const ent = useEntitlements();
+
+  // True for active, trialing, or past_due (matches server logic)
+  const isPro =
+    !!ent?.isProActive ||
+    (typeof window !== "undefined" && localStorage.getItem("isPro") === "true");
 
   const [loading, setLoading] = useState(false);
   const [recap, setRecap] = useState("");
@@ -97,23 +102,49 @@ export default function DailyRecapCoach() {
 
   const todayUS = useMemo(() => usDay(), []);
   const todayISO = useMemo(() => isoDay(), []);
-
   const storageKey = `recapUsage`;
 
-  // Load today’s count on mount
+  // Load or reset today’s count on mount and whenever entitlement changes
   useEffect(() => {
+    if (isPro) {
+      // Pro/Trial: clear any client-side cap for today
+      try {
+        const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
+        if (stored.date === todayUS && stored.count) {
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({ date: todayUS, count: 0 })
+          );
+        }
+      } catch {}
+      setCount(0);
+      return;
+    }
+    // Free users: load today’s usage
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    if (stored.date === todayUS) setCount(stored.count || 0);
-    else setCount(0);
-  }, [todayUS]);
+    setCount(stored.date === todayUS ? stored.count || 0 : 0);
+  }, [isPro, todayUS]);
+
+  // Keep an eye on Pro refresh events (login/logout, billing changes)
+  useEffect(() => {
+    const onRefresh = () => {
+      // force a re-check by toggling state via localStorage read
+      if (localStorage.getItem("isPro") === "true") {
+        setCount(0);
+      }
+    };
+    window.addEventListener("slimcal:pro:refresh", onRefresh);
+    return () => window.removeEventListener("slimcal:pro:refresh", onRefresh);
+  }, []);
 
   const incrementCount = () => {
+    if (isPro) return 0; // never increment for Pro/Trial
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const newCount = stored.date === todayUS ? (stored.count || 0) + 1 : 1;
     localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: newCount }));
     setCount(newCount);
     return newCount;
-  };
+    };
 
   // Build the recap context (Supabase if signed in; otherwise local)
   async function buildContext() {
@@ -128,9 +159,8 @@ export default function DailyRecapCoach() {
     try {
       const dm = await getDailyMetricsRange(user.id, todayISO, todayISO);
       const row = dm?.[0];
-      // Note: your table uses local-first aliases; adjust if needed
-      burned = Math.round(row?.cals_burned || row?.calories_burned || 0);
-      consumed = Math.round(row?.cals_eaten || row?.calories_eaten || 0);
+      burned = Math.round(row?.cals_burned || 0);
+      consumed = Math.round(row?.cals_eaten || 0);
     } catch (e) {
       console.warn("[DailyRecapCoach] getDailyMetricsRange failed, continuing", e);
     }
@@ -188,12 +218,12 @@ export default function DailyRecapCoach() {
   }
 
   const handleGetRecap = async () => {
-    // Local UI limiter for free users; server is the real gate
-    if (!isPremium && count >= 3) {
+    // Non-Pro users are limited to 3/day
+    if (!isPro && count >= 3) {
       setModalOpen(true);
       return;
     }
-    if (!isPremium) incrementCount();
+    incrementCount();
 
     setLoading(true);
     setError("");
@@ -230,7 +260,7 @@ export default function DailyRecapCoach() {
               "\n\n"
             )}\n\nPlease give me a concise, upbeat recap and 2–3 actionable tips (training or nutrition).`;
 
-      // Call OpenAI proxy (your /api/openai)
+      // Call your OpenAI-backed API with structured context
       const res = await fetch("/api/openai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -260,8 +290,7 @@ export default function DailyRecapCoach() {
     }
   };
 
-  const isPro = !!isPremium;
-
+  // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
       Free recaps used today: <strong>{count}</strong>/3
