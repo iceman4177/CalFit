@@ -330,7 +330,7 @@ function biasBlock(b, intent) {
 }
 
 function intentBank(focus, intent) {
-  const focusKey = normalizeFocus(focus);
+  const fKey = normalizeFocus(focus); // <— single declaration
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
@@ -483,18 +483,17 @@ function intentBank(focus, intent) {
   const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
   let bank;
-  const focusKey = normalizeFocus(focus);
   const normIntent = normalizeIntent(intent);
 
   if (normIntent === "yoga_pilates") {
-    bank = yogaMobility[focusKey] || yogaMobility.full;
+    bank = yogaMobility[fKey] || yogaMobility.full;
   } else {
-    bank = base[focusKey] || base.upper;
-    if (normIntent === "endurance" && focusKey !== "cardio") {
+    bank = base[fKey] || base.upper;
+    if (normIntent === "endurance" && fKey !== "cardio") {
       bank = [...bank, cardioSprinkle];
     }
     if (normIntent === "powerlifter") {
-      if (["upper","push","pull","chest_back","shoulders_arms"].includes(focusKey)) {
+      if (["upper","push","pull","chest_back","shoulders_arms"].includes(fKey)) {
         bank = [
           { exercise: "Barbell Bench Press" },
           { exercise: "Weighted Pull-Up" },
@@ -502,7 +501,7 @@ function intentBank(focus, intent) {
           { exercise: "Overhead Press" },
           { exercise: "Face Pull" },
         ];
-      } else if (["lower","legs","glutes_hamstrings","quads_calves"].includes(focusKey)) {
+      } else if (["lower","legs","glutes_hamstrings","quads_calves"].includes(fKey)) {
         bank = [
           { exercise: "Low-Bar Back Squat" },
           { exercise: "Conventional Deadlift" },
@@ -518,7 +517,7 @@ function intentBank(focus, intent) {
         ];
       }
     }
-    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(focusKey)) {
+    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(fKey)) {
       bank = [
         { exercise: "Incline Dumbbell Press" },
         { exercise: "Chest Fly (Cable)" },
