@@ -1,12 +1,13 @@
 // src/components/AIFoodLookupBox.jsx
-import React, { useMemo, useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Card, CardContent, CardActions,
-  TextField, Button, Typography, Stack, Chip, Box
+  TextField, Button, Typography, Stack, Box
 } from "@mui/material";
 import UpgradeModal from "./UpgradeModal";
+import { useEntitlements } from "../context/EntitlementsContext.jsx";
 
-// stable per-device id
+// stable per-device id, same pattern we use elsewhere
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -20,155 +21,204 @@ function getClientId() {
   }
 }
 
-function getAuthHeaders() {
+function getUserId() {
   try {
-    // Supabase stores session token in localStorage (v2 uses supabase.auth.getSession(), but we mirror header here)
     const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
-    const access = tok?.currentSession?.access_token || tok?.access_token || null;
-    const userId = tok?.user?.id || tok?.currentSession?.user?.id || null;
-    const email =
-      tok?.user?.email ||
-      tok?.currentSession?.user?.email ||
-      (localStorage.getItem("sc_email") || null);
-
-    const h = {};
-    if (access) h["Authorization"] = `Bearer ${access}`;
-    if (userId) h["x-supabase-user-id"] = userId;
-    if (email) h["x-user-email"] = email;
-    h["x-client-id"] = getClientId();
-    return h;
+    return tok?.user?.id || null;
   } catch {
-    return { "x-client-id": getClientId() };
+    return null;
   }
 }
 
-export default function AIFoodLookupBox({ onAdd }) {
+export default function AIFoodLookupBox({
+  onAddFood,
+  canUseLookup,         // () => boolean
+  registerLookupUse,    // () => void
+  onHitPaywall          // () => void
+}) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
-  const [quantity, setQuantity] = useState(""); // free text: "150g", "1 cup", "2 pieces"
+  const [quantity, setQuantity] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [resData, setResData] = useState(null);
+  const [error, setError] = useState("");
   const [showUpgrade, setShowUpgrade] = useState(false);
-  const disabled = useMemo(() => !food.trim(), [food]);
+
+  const userId = useMemo(() => getUserId(), []);
+  const { isProActive, status } = useEntitlements();
+  const proOrTrial = !!(isProActive || ["active", "trialing", "past_due"].includes(String(status).toLowerCase()));
 
   async function handleLookup() {
-    if (disabled || loading) return;
+    // Local gate BEFORE hitting server, but skip it for Pro/Trial
+    if (!proOrTrial && typeof canUseLookup === "function" && !canUseLookup()) {
+      if (typeof onHitPaywall === "function") onHitPaywall();
+      setShowUpgrade(true);
+      return;
+    }
+
     setLoading(true);
-    setShowUpgrade(false);
-    setResult(null);
+    setError("");
+    setResData(null);
 
     try {
       const resp = await fetch("/api/ai/food-lookup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...getAuthHeaders(),
+          "X-Client-Id": getClientId(),
+          ...(userId ? { "X-Supabase-User-Id": userId } : {})
         },
         body: JSON.stringify({
-          // dedicated endpoint — do NOT send to /api/ai/generate
-          food,
-          brand: brand || null,
-          quantity: quantity || null
-        }),
+          user_id: userId,
+          food: food.trim(),
+          brand: brand.trim(),
+          quantity: quantity.trim()
+        })
       });
 
       if (resp.status === 402) {
+        // server says "paywall"
+        if (typeof onHitPaywall === "function") onHitPaywall();
         setShowUpgrade(true);
         setLoading(false);
         return;
       }
-      if (!resp.ok) {
-        const j = await resp.json().catch(() => ({}));
-        throw new Error(j?.error || `Lookup failed (${resp.status})`);
+
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
+
+      const json = text ? JSON.parse(text) : null;
+      if (!json || !json.calories) throw new Error("No nutrition returned");
+
+      // success
+      setResData(json);
+
+      // burn a credit for free users only
+      if (!proOrTrial && typeof registerLookupUse === "function") {
+        registerLookupUse();
       }
-      const data = await resp.json();
-      setResult(data);
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
-      setResult({ title: "Lookup failed", calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+      setError("Couldn’t fetch nutrition. Please refine the input and try again.");
     } finally {
       setLoading(false);
     }
   }
 
   function handleLog() {
-    if (!result || !onAdd) return;
-    onAdd({
-      title: result.title || food || "Food",
-      calories: Number(result.calories || 0),
-      protein_g: Number(result.protein_g || 0),
-      carbs_g: Number(result.carbs_g || 0),
-      fat_g: Number(result.fat_g || 0),
-    });
-    // keep fields so user can iterate; or clear as preferred
+    if (!resData) return;
+    const payload = {
+      name: resData.brand ? `${resData.name} — ${resData.brand}` : resData.name,
+      calories: Math.max(0, Number(resData.calories) || 0),
+      protein_g: Number(resData.protein_g) || 0,
+      carbs_g: Number(resData.carbs_g) || 0,
+      fat_g: Number(resData.fat_g) || 0
+    };
+    if (typeof onAddFood === "function") onAddFood(payload);
+    setResData(null);
+    setFood("");
+    setBrand("");
+    setQuantity("");
   }
 
-  return (
-    <Card variant="outlined" sx={{ borderRadius: 3 }}>
-      <CardContent>
-        <Typography variant="h6" sx={{ mb: 2 }}>AI Food Lookup</Typography>
+  const disabled = !food.trim() || !quantity.trim() || loading;
 
-        <Stack spacing={2}>
+  return (
+    <Card sx={{ mb: 2 }}>
+      <CardContent>
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>
+          AI Food Lookup
+        </Typography>
+
+        <Stack spacing={1.25}>
           <TextField
             label="Food"
-            placeholder="e.g., Oikos Triple Zero Yogurt"
+            placeholder="e.g., Greek yogurt 0% plain"
             value={food}
             onChange={(e) => setFood(e.target.value)}
             fullWidth
           />
           <TextField
             label="Brand (optional)"
-            placeholder="e.g., Danone"
+            placeholder="e.g., Fage Total"
             value={brand}
             onChange={(e) => setBrand(e.target.value)}
             fullWidth
           />
           <TextField
             label="Quantity"
-            placeholder="e.g., 150g, 1 cup, 1 container"
+            placeholder="e.g., 170 g, 1 cup, 6 oz cooked, 1 stick"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
             fullWidth
           />
 
-          {result && (
-            <Box sx={{
-              px: 2, py: 1.5,
-              borderRadius: 2,
-              bgcolor: "rgba(0,0,0,0.03)"
-            }}>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                {result.title || food}
+          {error && (
+            <Typography color="error" variant="body2">
+              {error}
+            </Typography>
+          )}
+
+          {resData && (
+            <Box
+              sx={{
+                p: 1.25,
+                border: "1px solid rgba(2,6,23,0.08)",
+                borderRadius: 1
+              }}
+            >
+              <Typography variant="subtitle2">
+                {resData.brand ? `${resData.name} — ${resData.brand}` : resData.name}
               </Typography>
-              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-                <Chip label={`${Number(result.calories || 0)} kcal`} />
-                <Chip label={`${Number(result.protein_g || 0)} g`} icon={<span>🥩</span>} />
-                <Chip label={`${Number(result.carbs_g || 0)} g`} icon={<span>🌾</span>} />
-                <Chip label={`${Number(result.fat_g || 0)} g`} icon={<span>🥑</span>} />
+
+              <Typography variant="body2" color="text.secondary">
+                {resData.quantity_input} • {resData.serving?.amount} {resData.serving?.unit}
+                {resData.serving?.grams ? ` (${resData.serving.grams} g)` : ""}
+              </Typography>
+
+              <Stack direction="row" spacing={2} sx={{ mt: 0.75, flexWrap: "wrap" }}>
+                <Typography>🔥 {Math.round(resData.calories)} kcal</Typography>
+                <Typography>🥩 {Math.round(resData.protein_g)} g</Typography>
+                <Typography>🌾 {Math.round(resData.carbs_g)} g</Typography>
+                <Typography>🥑 {Math.round(resData.fat_g)} g</Typography>
               </Stack>
+
+              {typeof resData.confidence === "number" && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 0.5, display: "block" }}
+                >
+                  Confidence: {(resData.confidence * 100).toFixed(0)}%
+                </Typography>
+              )}
+
+              {resData.notes && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                  {resData.notes}
+                </Typography>
+              )}
             </Box>
           )}
         </Stack>
       </CardContent>
 
-      <CardActions sx={{ px: 2, pb: 2, justifyContent: "space-between" }}>
-        <Button
-          variant="outlined"
-          onClick={handleLookup}
-          disabled={disabled || loading}
-        >
-          {loading ? "Getting..." : "Get Nutrition"}
+      <CardActions sx={{ justifyContent: "space-between" }}>
+        <Button variant="outlined" onClick={handleLookup} disabled={disabled}>
+          {loading ? "Looking up..." : "Get Nutrition"}
         </Button>
-        <Button
-          variant="contained"
-          onClick={handleLog}
-          disabled={!result}
-        >
+
+        <Button variant="contained" onClick={handleLog} disabled={!resData}>
           Log
         </Button>
       </CardActions>
 
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      <UpgradeModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Upgrade to Slimcal Pro"
+        description="AI Food Lookup uses advanced nutrition reasoning. Upgrade for unlimited lookups."
+      />
     </Card>
   );
 }

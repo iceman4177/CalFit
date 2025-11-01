@@ -1,3 +1,4 @@
+// src/MealTracker.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Container,
@@ -20,6 +21,8 @@ import {
   Stack,
   Card,
   CardContent,
+  CardHeader,
+  Chip,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -289,7 +292,7 @@ export default function MealTracker({ onMealUpdate }) {
 
   // manual entry state
   const [foodInput, setFoodInput] = useState('');
-  const [selectedFood, setSelectedFood] = useState(null); // ✅ fixed stray "the"
+  const [selectedFood, setSelectedFood] = useState(null);
   const [calories, setCalories] = useState('');
 
   // logged meals
@@ -722,7 +725,7 @@ export default function MealTracker({ onMealUpdate }) {
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography sx={{ fontWeight: 700 }}>AI Assist</Typography>
-            {/* BETA chip removed */}
+            <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 500, height: 20 }} />
           </Box>
         </AccordionSummary>
         <AccordionDetails>

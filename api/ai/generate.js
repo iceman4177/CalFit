@@ -1,8 +1,14 @@
 // /api/ai/generate.js
 //
 // Slimcal AI gateway with server-side free-pass + Pro/Trial bypass.
-// Features supported here: 'workout', 'meal', 'coach'.
-// NOTE: Food nutrition lookup is handled by /api/ai/food-lookup.js
+// Behavior:
+// - Pro/Trial users: unlimited AI usage (bypass free-pass).
+// - Non-Pro users (signed-in or anonymous): up to 3 uses per FEATURE per DAY,
+//   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
+//   Supabase when possible; fallback to in-memory counter if table/policy missing.
+//
+// Features supported: 'workout', 'meal', 'coach'.
+//
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
@@ -14,7 +20,7 @@ const openai = process.env.OPENAI_API_KEY
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 10;
 
-/* -------------------- BASIC UTILS -------------------- */
+// -------------------- BASIC UTILS --------------------
 async function readJson(req) {
   try {
     const bufs = [];
@@ -27,7 +33,7 @@ async function readJson(req) {
 }
 
 function dayKeyUTC(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
 function headerClientId(req) {
@@ -57,10 +63,12 @@ function base64UrlDecode(str) {
 }
 
 function getUserIdFromHeaders(req) {
+  // 1) Explicit headers
   const headerUid =
     (req.headers["x-user-id"] || req.headers["x-supabase-user-id"] || "").toString().trim();
   if (headerUid) return headerUid;
 
+  // 2) Supabase JWT in Authorization: Bearer <token>
   const auth = (req.headers["authorization"] || "").toString().trim();
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7);
@@ -74,18 +82,10 @@ function getUserIdFromHeaders(req) {
   return null;
 }
 
-function getEmailFromHeaders(req) {
-  const e =
-    (req.headers["x-user-email"] ||
-      req.headers["x-email"] ||
-      req.headers["x-user-mail"] ||
-      "").toString().trim().toLowerCase();
-  return e || null;
-}
-
-/* -------------------- ENTITLEMENTS -------------------- */
+// -------------------- ENTITLEMENTS --------------------
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
 function nowSec() { return Math.floor(Date.now() / 1000); }
+
 function tsToSec(ts) {
   if (!ts) return 0;
   const n = typeof ts === "number" ? ts : Math.floor(new Date(ts).getTime() / 1000);
@@ -95,7 +95,7 @@ function tsToSec(ts) {
 async function isEntitled(user_id) {
   if (!user_id || !supabaseAdmin) return false;
 
-  // Preferred: entitlement view
+  // Prefer entitlement view if present
   try {
     const { data: ent, error } = await supabaseAdmin
       .from("v_user_entitlements")
@@ -106,11 +106,13 @@ async function isEntitled(user_id) {
     if (!error && ent) {
       const status = String(ent.status || "").toLowerCase();
       const trialEnd = tsToSec(ent.trial_end);
-      return ENTITLED.has(status) || trialEnd > nowSec();
+      const entitledByStatus = ENTITLED.has(status);
+      const entitledByTrial = trialEnd > nowSec(); // honor trial through end even if canceled
+      return entitledByStatus || entitledByTrial;
     }
-  } catch {}
+  } catch { /* fall through */ }
 
-  // Fallback: latest subscription row
+  // Fallback: most recent app_subscriptions row
   try {
     const { data, error } = await supabaseAdmin
       .from("app_subscriptions")
@@ -123,20 +125,22 @@ async function isEntitled(user_id) {
     const row = data[0];
     const status = String(row.status || "").toLowerCase();
     const trialEnd = tsToSec(row.trial_end);
-    return ENTITLED.has(status) || trialEnd > nowSec();
+    const entitledByStatus = ENTITLED.has(status);
+    const entitledByTrial = trialEnd > nowSec();
+    return entitledByStatus || entitledByTrial;
   } catch {
     return false;
   }
 }
 
-// Resolve user id from headers OR body.user_id OR body/header email -> app_users.id
+// Resolve user_id from headers OR body.user_id OR body.email -> app_users.id
 async function resolveUserId(req, { user_id, email }) {
   const hdr = getUserIdFromHeaders(req);
   if (hdr) return hdr;
+
   if (user_id) return user_id;
 
-  const headerEmail = getEmailFromHeaders(req);
-  const e = (email || headerEmail || "").trim().toLowerCase();
+  const e = (email || "").trim().toLowerCase();
   if (!e) return null;
 
   try {
@@ -147,11 +151,11 @@ async function resolveUserId(req, { user_id, email }) {
       .maybeSingle();
 
     if (!error && data?.id) return data.id;
-  } catch {}
+  } catch { /* ignore */ }
   return null;
 }
 
-/* -------------------- FREE PASS -------------------- */
+// -------------------- FREE PASS --------------------
 const FREE_LIMIT = 3;
 const freeMem = new Map();
 
@@ -221,7 +225,7 @@ async function allowFreeFeature({ req, feature, userId }) {
   return dbAllow(clientId, feature, userId);
 }
 
-/* -------------------- TIMEOUT -------------------- */
+// -------------------- TIMEOUT --------------------
 const OPENAI_TIMEOUT_MS = 6000;
 function withTimeout(promise, ms, onTimeoutValue) {
   return new Promise((resolve) => {
@@ -237,7 +241,7 @@ function withTimeout(promise, ms, onTimeoutValue) {
   });
 }
 
-/* -------------------- WORKOUTS -------------------- */
+// -------------------- WORKOUTS --------------------
 function normalizeIntent(intent) {
   if (!intent) return "general";
   const s = String(intent).toLowerCase();
@@ -291,9 +295,7 @@ function biasBlock(b, intent) {
 }
 
 function intentBank(focus, intent) {
-  const normIntent = normalizeIntent(intent);
   const focusKey = normalizeFocus(focus);
-
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
@@ -445,53 +447,52 @@ function intentBank(focus, intent) {
 
   const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
-  // Build the bank
+  let bank;
+  const normIntent = normalizeIntent(intent);
+
   if (normIntent === "yoga_pilates") {
-    return yogaMobility[focusKey] || yogaMobility.full;
-  }
-
-  let bank = base[focusKey] || base.upper;
-
-  if (normIntent === "endurance" && focusKey !== "cardio") {
-    bank = [...bank, cardioSprinkle];
-  }
-
-  if (normIntent === "powerlifter") {
-    if (["upper", "push", "pull", "chest_back", "shoulders_arms"].includes(focusKey)) {
+    bank = yogaMobility[focusKey] || yogaMobility.full;
+  } else {
+    bank = base[focusKey] || base.upper;
+    if (normIntent === "endurance" && focusKey !== "cardio") {
+      bank = [...bank, cardioSprinkle];
+    }
+    if (normIntent === "powerlifter") {
+      if (["upper","push","pull","chest_back","shoulders_arms"].includes(focusKey)) {
+        bank = [
+          { exercise: "Barbell Bench Press" },
+          { exercise: "Weighted Pull-Up" },
+          { exercise: "Barbell Row" },
+          { exercise: "Overhead Press" },
+          { exercise: "Face Pull" },
+        ];
+      } else if (["lower","legs","glutes_hamstrings","quads_calves"].includes(focusKey)) {
+        bank = [
+          { exercise: "Low-Bar Back Squat" },
+          { exercise: "Conventional Deadlift" },
+          { exercise: "Paused Squat" },
+          { exercise: "Hamstring Curl" },
+        ];
+      } else {
+        bank = [
+          { exercise: "Front Squat" },
+          { exercise: "Bench Press" },
+          { exercise: "Deadlift (technique sets)" },
+          { exercise: "Plank" },
+        ];
+      }
+    }
+    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(focusKey)) {
       bank = [
-        { exercise: "Barbell Bench Press" },
-        { exercise: "Weighted Pull-Up" },
-        { exercise: "Barbell Row" },
-        { exercise: "Overhead Press" },
-        { exercise: "Face Pull" },
-      ];
-    } else if (["lower", "legs", "glutes_hamstrings", "quads_calves"].includes(focusKey)) {
-      bank = [
-        { exercise: "Low-Bar Back Squat" },
-        { exercise: "Conventional Deadlift" },
-        { exercise: "Paused Squat" },
-        { exercise: "Hamstring Curl" },
-      ];
-    } else {
-      bank = [
-        { exercise: "Front Squat" },
-        { exercise: "Bench Press" },
-        { exercise: "Deadlift (technique sets)" },
-        { exercise: "Plank" },
+        { exercise: "Incline Dumbbell Press" },
+        { exercise: "Chest Fly (Cable)" },
+        { exercise: "Lat Pulldown" },
+        { exercise: "Seated Row" },
+        { exercise: "Lateral Raise" },
+        { exercise: "Cable Curl" },
+        { exercise: "Rope Triceps Extension" },
       ];
     }
-  }
-
-  if (normIntent === "bodybuilder" && ["upper", "push", "chest_back", "shoulders_arms"].includes(focusKey)) {
-    bank = [
-      { exercise: "Incline Dumbbell Press" },
-      { exercise: "Chest Fly (Cable)" },
-      { exercise: "Lat Pulldown" },
-      { exercise: "Seated Row" },
-      { exercise: "Lateral Raise" },
-      { exercise: "Cable Curl" },
-      { exercise: "Rope Triceps Extension" },
-    ];
   }
 
   return bank;
@@ -576,14 +577,14 @@ Rules:
   return patched;
 }
 
-/* -------------------- MEALS -------------------- */
+// -------------------- MEALS --------------------
 function normalizeDiet(d) {
   const s = String(d || "omnivore").toLowerCase();
   if (s === "veggie") return "vegetarian";
   return s;
 }
 
-function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTargetG = 120 }, count = 3) {
+function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTargetG = 120, calorieBias = 0 }, count = 3) {
   const d = normalizeDiet(diet);
   const mealsByDiet = {
     vegan: [
@@ -697,22 +698,49 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
     plans.push({
       title: pick.title,
       items: pick.items,
-      total_calories: totals.calories,
+      total_calories: totals.calories + (calorieBias || 0),
       total_protein_g: totals.protein_g
     });
+  }
+  if (["bodybuilder","powerlifter","recomp"].includes(intent) && proteinTargetG) {
+    return plans.map(p => ({
+      ...p,
+      note: p.total_protein_g < proteinTargetG / 3
+        ? "Consider adding a shake or extra lean protein to hit targets."
+        : undefined
+    }));
   }
   return plans;
 }
 
 function flattenMealsToSuggestions(meals) {
-  return (Array.isArray(meals) ? meals : []).map((m) => ({
-    title: m.title || m.name || "Suggested meal",
-    calories: Math.max(0, Number(m.total_calories || m.calories || 0)),
-    protein_g: Math.max(0, Number(m.total_protein_g || m.protein_g || 0)),
-    carbs_g: Math.max(0, Number(m.total_carbs_g || m.carbs_g || 0)),
-    fat_g: Math.max(0, Number(m.total_fat_g || m.fat_g || 0)),
-    prepMinutes: m.prepMinutes ?? m.prep_min ?? null
-  }));
+  return (Array.isArray(meals) ? meals : []).map((m) => {
+    const calories =
+      Number(m.total_calories) || Number(m.calories) ||
+      Number(m.kcal) || Number(m.energy_kcal) ||
+      Number(m?.nutrition?.calories) || 0;
+
+    const protein_g =
+      Number(m.total_protein_g) || Number(m.protein_g) ||
+      Number(m?.nutrition?.protein_g) || 0;
+
+    const carbs_g =
+      Number(m.total_carbs_g) || Number(m.carbs_g) ||
+      Number(m?.nutrition?.carbs_g) || 0;
+
+    const fat_g =
+      Number(m.total_fat_g) || Number(m.fat_g) ||
+      Number(m?.nutrition?.fat_g) || 0;
+
+    return {
+      title: m.title || m.name || "Suggested meal",
+      calories: Math.max(0, calories || 0),
+      protein_g: Math.max(0, protein_g || 0),
+      carbs_g: Math.max(0, carbs_g || 0),
+      fat_g: Math.max(0, fat_g || 0),
+      prepMinutes: m.prepMinutes ?? m.prep_min ?? null
+    };
+  });
 }
 
 async function openAIMealPack(payload, count = 3) {
@@ -732,12 +760,17 @@ async function openAIMealPack(payload, count = 3) {
 
   const sys = `You are a sports nutrition coach. Output ONLY valid JSON matching this schema:
 {"suggestions":[{"title":"...","calories":650,"protein_g":40,"carbs_g":60,"fat_g":20}]}
-No prose or markdown. Numbers only for macro fields.`;
+- No prose or markdown.
+- "calories", "protein_g", "carbs_g", "fat_g" must be numbers.
+- Respect the diet preference strictly. Create ${count} unique meals.`;
 
   const usr = `Create ${count} meal ideas for:
 - diet_preference: ${d}
 - training_intent: ${normIntent}
-- guidance: ${biasText}
+- target_protein_g: ~${proteinTargetG}
+- calorie_bias_per_meal: ${calorieBias}
+Bias:
+- ${biasText}
 Rules:
 - Output only the top-level flattened values per meal (no nested items).
 - Each suggestion must include: title, calories, protein_g, carbs_g, fat_g (numbers).
@@ -745,8 +778,11 @@ Rules:
 
   const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
-    messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
-    temperature: 0.55
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: usr }
+    ],
+    temperature: 0.5
   });
 
   const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -770,7 +806,7 @@ Rules:
   return suggestions;
 }
 
-/* -------------------- COACH -------------------- */
+// -------------------- COACH --------------------
 function fallbackCoachSuggestions({ intent = "general" }, count = 3) {
   const norm = normalizeIntent(intent);
   const msgsByIntent = {
@@ -801,10 +837,12 @@ function fallbackCoachSuggestions({ intent = "general" }, count = 3) {
     ]
   };
   const pool = msgsByIntent[norm] || msgsByIntent.general;
-  return Array.from({ length: Math.max(1, Math.min(count, 5)) }, (_, i) => ({ message: pool[i % pool.length] }));
+  return Array.from({ length: Math.max(1, Math.min(count, 5)) }, (_, i) => ({
+    message: pool[i % pool.length]
+  }));
 }
 
-/* -------------------- MAIN HANDLER -------------------- */
+// -------------------- MAIN HANDLER --------------------
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -814,16 +852,9 @@ export default async function handler(req, res) {
   const body = await readJson(req);
   const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
 
-  // This route only supports these features
-  const supported = new Set(["workout", "meal", "coach"]);
-  if (!supported.has(feature)) {
-    res.status(400).json({ error: "Unsupported feature" });
-    return;
-  }
-
-  // Resolve user
-  const emailInBody = (body?.email || "").trim().toLowerCase();
-  const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email: emailInBody });
+  // Resolve user id robustly (headers OR body.user_id OR body.email)
+  const email = (body?.email || "").trim().toLowerCase();
+  const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
 
   const {
     constraints = {},
@@ -840,10 +871,10 @@ export default async function handler(req, res) {
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
-  // Entitlement bypass
+  // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
-  // Free-pass gating for non-pro/trial-inactive
+  // 2) If not Pro/Trial → per-feature free-pass
   if (!pro) {
     const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
@@ -852,8 +883,9 @@ export default async function handler(req, res) {
     }
   }
 
-  try {
-    if (feature === "workout") {
+  // 3) Route by feature
+  if (feature === "workout") {
+    try {
       const intent = normalizeIntent(constraints?.training_intent || constraints?.intent || "general");
       const suggestions = await openAIWorkoutPack(
         { focus, goal, intent, equipment },
@@ -861,9 +893,19 @@ export default async function handler(req, res) {
       );
       res.status(200).json({ suggestions });
       return;
+    } catch (e) {
+      console.error("[ai/generate] workout error:", e);
+      const fallback = fallbackWorkoutPack(
+        { focus, goal, intent: normalizeIntent(constraints?.training_intent || "general") },
+        Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
+      );
+      res.status(200).json({ suggestions: fallback });
+      return;
     }
+  }
 
-    if (feature === "meal") {
+  if (feature === "meal") {
+    try {
       const intent = normalizeIntent(constraints?.training_intent || "general");
       const suggestions = await openAIMealPack(
         { diet, intent, proteinTargetG, calorieBias },
@@ -871,14 +913,32 @@ export default async function handler(req, res) {
       );
       res.status(200).json({ suggestions });
       return;
+    } catch (e) {
+      console.error("[ai/generate] meal error:", e);
+      const fallback = flattenMealsToSuggestions(
+        fallbackMealPack(
+          { diet, intent: normalizeIntent(constraints?.training_intent || "general"), proteinTargetG, calorieBias },
+          Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
+        )
+      );
+      res.status(200).json({ suggestions: fallback });
+      return;
     }
-
-    // coach
-    const intent = normalizeIntent(constraints?.training_intent || "general");
-    const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
-    res.status(200).json({ suggestions });
-  } catch (e) {
-    console.error("[ai/generate] error:", e);
-    res.status(500).json({ error: "Internal error" });
   }
+
+  if (feature === "coach") {
+    try {
+      const intent = normalizeIntent(constraints?.training_intent || "general");
+      const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
+      res.status(200).json({ suggestions });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] coach error:", e);
+      const suggestions = fallbackCoachSuggestions({ intent: "general" }, 3);
+      res.status(200).json({ suggestions });
+      return;
+    }
+  }
+
+  res.status(400).json({ error: "Unsupported feature" });
 }
