@@ -1,4 +1,4 @@
-// /api/ai/generate.js 
+// /api/ai/generate.js
 //
 // Slimcal AI gateway with server-side free-pass + Pro/Trial bypass.
 // Behavior:
@@ -7,7 +7,7 @@
 //   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
 //   Supabase when possible; fallback to in-memory counter if table/policy missing.
 //
-// Features supported: 'workout', 'meal', 'coach'.
+// Features supported: 'workout', 'meal', 'coach' (plus robust synonyms).
 //
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
@@ -91,6 +91,31 @@ function getEmailFromHeaders(req) {
   return e || null;
 }
 
+// -------------------- FEATURE NORMALIZATION --------------------
+function normalizeFeature(f) {
+  const s = String(f || "").toLowerCase().trim();
+  if (!s) return "workout";
+
+  const mealSyn = new Set([
+    "meal", "meals", "food", "ai_meal", "ai_food", "lookup", "assist", "ai",
+    "ai_assist", "suggest_meal", "meal_suggest", "nutrition", "meal_lookup",
+    "food_lookup", "ai_meal_suggestion", "meal_suggestion"
+  ]);
+  const woSyn = new Set([
+    "workout", "workouts", "ai_workout", "suggest_workout", "training", "plan",
+    "workout_suggestion", "ai_workout_suggestion"
+  ]);
+  const coachSyn = new Set([
+    "coach", "coaching", "tips", "advice", "ai_coach", "dailyrecap", "recap", "message",
+    "coach_suggestion"
+  ]);
+
+  if (mealSyn.has(s)) return "meal";
+  if (woSyn.has(s)) return "workout";
+  if (coachSyn.has(s)) return "coach";
+  return s; // unknown falls through to 400 later
+}
+
 // -------------------- ENTITLEMENTS --------------------
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
 function nowSec() { return Math.floor(Date.now() / 1000); }
@@ -142,7 +167,7 @@ async function isEntitled(user_id) {
   }
 }
 
-// Resolve user_id from headers OR body.user_id OR body.email -> app_users.id
+// Resolve user_id from headers OR body.user_id OR body/header email -> app_users.id
 async function resolveUserId(req, { user_id, email }) {
   const hdr = getUserIdFromHeaders(req);
   if (hdr) return hdr;
@@ -458,12 +483,12 @@ function intentBank(focus, intent) {
   const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
   let bank;
+  const focusKey = normalizeFocus(focus);
   const normIntent = normalizeIntent(intent);
 
   if (normIntent === "yoga_pilates") {
     bank = yogaMobility[focusKey] || yogaMobility.full;
   } else {
-    const focusKey = normalizeFocus(focus);
     bank = base[focusKey] || base.upper;
     if (normIntent === "endurance" && focusKey !== "cardio") {
       bank = [...bank, cardioSprinkle];
@@ -493,7 +518,7 @@ function intentBank(focus, intent) {
         ];
       }
     }
-    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(normalizeFocus(focus))) {
+    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(focusKey)) {
       bank = [
         { exercise: "Incline Dumbbell Press" },
         { exercise: "Chest Fly (Cable)" },
@@ -861,7 +886,7 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
-  const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
+  const feature = normalizeFeature(body?.feature || body?.type || body?.mode || "workout");
 
   // Resolve user id robustly (headers OR body.user_id OR header/body email)
   const emailInBody = (body?.email || "").trim().toLowerCase();
@@ -881,6 +906,12 @@ export default async function handler(req, res) {
     proteinTargetG = constraints?.protein_target_daily_g || constraints?.protein_per_meal_g || 120,
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
+
+  // Reject unknown features explicitly (after normalization)
+  if (!new Set(["workout", "meal", "coach"]).has(feature)) {
+    res.status(400).json({ error: "Unsupported feature", supported: ["workout", "meal", "coach"] });
+    return;
+  }
 
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
@@ -951,5 +982,6 @@ export default async function handler(req, res) {
     }
   }
 
+  // Should never get here due to earlier guard
   res.status(400).json({ error: "Unsupported feature" });
 }
