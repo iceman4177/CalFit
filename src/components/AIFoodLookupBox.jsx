@@ -1,12 +1,12 @@
 // src/components/AIFoodLookupBox.jsx
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Card, CardContent, CardActions,
-  TextField, Button, Typography, Stack, Box
+  TextField, Button, Typography, Stack, Chip, Box
 } from "@mui/material";
 import UpgradeModal from "./UpgradeModal";
 
-// ---- client id (stable per device) ----
+// stable per-device id
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -20,188 +20,155 @@ function getClientId() {
   }
 }
 
-// ---- supabase auth helpers (non-throwing) ----
-function getSupabaseSession() {
+function getAuthHeaders() {
   try {
+    // Supabase stores session token in localStorage (v2 uses supabase.auth.getSession(), but we mirror header here)
     const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
-    // v2 session shape
-    const access_token = tok?.currentSession?.access_token || tok?.access_token || null;
-    const user = tok?.currentSession?.user || tok?.user || null;
-    return { access_token, user };
+    const access = tok?.currentSession?.access_token || tok?.access_token || null;
+    const userId = tok?.user?.id || tok?.currentSession?.user?.id || null;
+    const email =
+      tok?.user?.email ||
+      tok?.currentSession?.user?.email ||
+      (localStorage.getItem("sc_email") || null);
+
+    const h = {};
+    if (access) h["Authorization"] = `Bearer ${access}`;
+    if (userId) h["x-supabase-user-id"] = userId;
+    if (email) h["x-user-email"] = email;
+    h["x-client-id"] = getClientId();
+    return h;
   } catch {
-    return { access_token: null, user: null };
+    return { "x-client-id": getClientId() };
   }
 }
 
 export default function AIFoodLookupBox({ onAdd }) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
-  const [qty, setQty] = useState("");
+  const [quantity, setQuantity] = useState(""); // free text: "150g", "1 cup", "2 pieces"
+  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const disabled = useMemo(() => !food.trim(), [food]);
 
-  const clientId = useMemo(() => getClientId(), []);
-  const { access_token, user } = useMemo(() => getSupabaseSession(), []);
-  const email = useMemo(() => (user?.email || localStorage.getItem("sc_email") || "").toLowerCase(), [user]);
+  async function handleLookup() {
+    if (disabled || loading) return;
+    setLoading(true);
+    setShowUpgrade(false);
+    setResult(null);
 
-  function sanitizeQty(s) {
-    // strip stray backticks and weird whitespace
-    return String(s || "").replace(/[`]+/g, "").trim();
-  }
-
-  async function getNutrition() {
-    setBusy(true);
-    setErr("");
     try {
-      // Build a single-meal “suggestion” request. We bias the model to echo back a single item’s macros.
-      const payload = {
-        feature: "meal",          // normalizeFeature will accept this
-        count: 1,
-        email,
-        constraints: {
-          training_intent: "general"
-        },
-        // nudge the model by embedding our food text into "diet"/goal strings
-        // but the server only cares about constraints + count; model prompt handles content.
-        diet_preference: "omnivore",
-        // extra hint details to increase correctness
-        note: `Estimate macros for a single food: ${brand ? brand + " " : ""}${food}${qty ? `, quantity: ${sanitizeQty(qty)}` : ""}`,
-      };
-
-      const headers = {
-        "Content-Type": "application/json",
-        "x-client-id": clientId,
-        "x-user-email": email || "",
-      };
-      if (user?.id) headers["x-supabase-user-id"] = user.id;
-      if (access_token) headers["Authorization"] = `Bearer ${access_token}`;
-
-      const resp = await fetch("/api/ai/generate", {
+      const resp = await fetch("/api/ai/food-lookup", {
         method: "POST",
-        headers,
-        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          // dedicated endpoint — do NOT send to /api/ai/generate
+          food,
+          brand: brand || null,
+          quantity: quantity || null
+        }),
       });
 
       if (resp.status === 402) {
-        // free-pass limit reached → prompt upgrade
         setShowUpgrade(true);
-        setBusy(false);
+        setLoading(false);
         return;
       }
-
       if (!resp.ok) {
-        const txt = await resp.text().catch(() => "");
-        throw new Error(txt || `HTTP ${resp.status}`);
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j?.error || `Lookup failed (${resp.status})`);
       }
-
       const data = await resp.json();
-      const first = Array.isArray(data?.suggestions) ? data.suggestions[0] : null;
-
-      if (!first) {
-        throw new Error("No suggestions returned.");
-      }
-
-      // Normalize fields we care about
-      const item = {
-        title: first.title || (brand ? `${brand} ${food}` : food) || "Food item",
-        calories: Number(first.calories ?? first.kcal ?? first.energy_kcal ?? 0),
-        protein_g: Number(first.protein_g ?? 0),
-        carbs_g: Number(first.carbs_g ?? 0),
-        fat_g: Number(first.fat_g ?? 0),
-        qty: sanitizeQty(qty) || "1 serving",
-      };
-
-      // Guard against NaN → 0
-      item.calories = Number.isFinite(item.calories) ? item.calories : 0;
-      item.protein_g = Number.isFinite(item.protein_g) ? item.protein_g : 0;
-      item.carbs_g = Number.isFinite(item.carbs_g) ? item.carbs_g : 0;
-      item.fat_g = Number.isFinite(item.fat_g) ? item.fat_g : 0;
-
-      setResult(item);
+      setResult(data);
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
-      setErr("Sorry—couldn’t fetch nutrition. Try tweaking the name/quantity.");
+      setResult({ title: "Lookup failed", calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   }
 
   function handleLog() {
-    if (!result) return;
-    const entry = {
-      title: result.title,
-      calories: Math.max(0, Number(result.calories || 0)),
-      protein_g: Math.max(0, Number(result.protein_g || 0)),
-      carbs_g: Math.max(0, Number(result.carbs_g || 0)),
-      fat_g: Math.max(0, Number(result.fat_g || 0)),
-      quantity: result.qty || "1 serving",
-      source: "ai_lookup",
-      ts: Date.now(),
-    };
-    onAdd?.(entry);
-    // keep the preview visible but you could clear it here if preferred
+    if (!result || !onAdd) return;
+    onAdd({
+      title: result.title || food || "Food",
+      calories: Number(result.calories || 0),
+      protein_g: Number(result.protein_g || 0),
+      carbs_g: Number(result.carbs_g || 0),
+      fat_g: Number(result.fat_g || 0),
+    });
+    // keep fields so user can iterate; or clear as preferred
   }
 
   return (
-    <>
-      <Card className="rounded-2xl shadow-md">
-        <CardContent>
-          <Typography variant="h6" sx={{ mb: 1 }}>AI Food Lookup</Typography>
-          <Stack spacing={1.5}>
-            <TextField
-              label="Food"
-              placeholder="e.g., Oikos Triple Zero yogurt"
-              value={food}
-              onChange={(e) => setFood(e.target.value)}
-              fullWidth
-            />
-            <TextField
-              label="Brand (optional)"
-              placeholder="e.g., Danone / Costco / Kirkland"
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              fullWidth
-            />
-            <TextField
-              label="Quantity"
-              placeholder='e.g., "1 cup", "170 g", "1 stick", "2 pieces"'
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              fullWidth
-            />
+    <Card variant="outlined" sx={{ borderRadius: 3 }}>
+      <CardContent>
+        <Typography variant="h6" sx={{ mb: 2 }}>AI Food Lookup</Typography>
 
-            {result && (
-              <Box sx={{ p: 1.5, border: "1px solid #eee", borderRadius: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                  {result.title} — {result.qty}
-                </Typography>
-                <Stack direction="row" spacing={2}>
-                  <Typography variant="body2">🔥 {result.calories} kcal</Typography>
-                  <Typography variant="body2">🥩 {result.protein_g} g</Typography>
-                  <Typography variant="body2">🌾 {result.carbs_g} g</Typography>
-                  <Typography variant="body2">🥑 {result.fat_g} g</Typography>
-                </Stack>
-              </Box>
-            )}
+        <Stack spacing={2}>
+          <TextField
+            label="Food"
+            placeholder="e.g., Oikos Triple Zero Yogurt"
+            value={food}
+            onChange={(e) => setFood(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Brand (optional)"
+            placeholder="e.g., Danone"
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Quantity"
+            placeholder="e.g., 150g, 1 cup, 1 container"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            fullWidth
+          />
 
-            {!!err && (
-              <Typography variant="body2" color="error">{err}</Typography>
-            )}
-          </Stack>
-        </CardContent>
-        <CardActions sx={{ justifyContent: "space-between", px: 2, pb: 2 }}>
-          <Button onClick={getNutrition} disabled={busy} variant="outlined">
-            {busy ? "Working…" : "Get Nutrition"}
-          </Button>
-          <Button onClick={handleLog} disabled={!result} variant="contained">
-            Log
-          </Button>
-        </CardActions>
-      </Card>
+          {result && (
+            <Box sx={{
+              px: 2, py: 1.5,
+              borderRadius: 2,
+              bgcolor: "rgba(0,0,0,0.03)"
+            }}>
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                {result.title || food}
+              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <Chip label={`${Number(result.calories || 0)} kcal`} />
+                <Chip label={`${Number(result.protein_g || 0)} g`} icon={<span>🥩</span>} />
+                <Chip label={`${Number(result.carbs_g || 0)} g`} icon={<span>🌾</span>} />
+                <Chip label={`${Number(result.fat_g || 0)} g`} icon={<span>🥑</span>} />
+              </Stack>
+            </Box>
+          )}
+        </Stack>
+      </CardContent>
+
+      <CardActions sx={{ px: 2, pb: 2, justifyContent: "space-between" }}>
+        <Button
+          variant="outlined"
+          onClick={handleLookup}
+          disabled={disabled || loading}
+        >
+          {loading ? "Getting..." : "Get Nutrition"}
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleLog}
+          disabled={!result}
+        >
+          Log
+        </Button>
+      </CardActions>
 
       <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
-    </>
+    </Card>
   );
 }

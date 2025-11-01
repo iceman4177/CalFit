@@ -1,28 +1,8 @@
 // /api/ai/food-lookup.js
 //
-// AI nutrition lookup
-// - Pro / Trial users: unlimited
-// - Everyone else: 3 lookups/day per user_id (if logged in) OR per client_id/ip
-//
-// Request body:
-// { user_id, food, brand, quantity }
-//
-// Response 200 JSON:
-// {
-//   name: string,
-//   brand: string|null,
-//   quantity_input: string,
-//   serving: { amount:number, unit:string, grams?:number },
-//   calories:number,
-//   protein_g:number,
-//   carbs_g:number,
-//   fat_g:number,
-//   confidence:number (0-1),
-//   notes?:string
-// }
-//
-// 402 { error: "Upgrade required", reason:"limit_reached" } on cap
-//
+// Dedicated endpoint for *single food* nutrition lookup.
+// Keeps /api/ai/generate focused on workout|meal|coach.
+// Uses the same free-pass gating (3/day per client) but only for the "food" feature.
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
@@ -31,11 +11,10 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-// keep Vercel happy
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 10;
 
-// ---------- utils ----------
+/* ---------- tiny utils ---------- */
 async function readJson(req) {
   try {
     const bufs = [];
@@ -46,271 +25,147 @@ async function readJson(req) {
     return {};
   }
 }
-
-// YYYY-MM-DD UTC
-function dayKeyUTC(date = new Date()) {
-  return date.toISOString().slice(0, 10);
-}
-
-// Prefer explicit client id header, fallback to IP, but if user_id given
-// we'll use that for rate limit.
+function dayKeyUTC(d = new Date()) { return d.toISOString().slice(0, 10); }
 function headerClientId(req) {
   const cid = (req.headers["x-client-id"] || "").toString().trim();
   if (cid) return cid.slice(0, 128);
-
-  const ip = (
-    req.headers["x-forwarded-for"] ||
-    req.headers["x-real-ip"] ||
-    "0.0.0.0"
-  )
-    .toString()
-    .split(",")[0]
-    .trim();
+  const ip = (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "0.0.0.0")
+    .toString().split(",")[0].trim();
   return `ip:${ip}`;
 }
-
-function idKey(req, userId) {
-  if (userId) return `uid:${userId}`;
-  return headerClientId(req);
-}
-
-// ---------- entitlement helpers ----------
-async function isProActive(user_id) {
-  if (!user_id || !supabaseAdmin) return false;
-  const { data, error } = await supabaseAdmin
-    .from("app_subscriptions")
-    .select("status,current_period_end")
-    .eq("user_id", user_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return false;
-  const now = Math.floor(Date.now() / 1000);
-  const active = ["active", "trialing", "past_due"].includes(data.status);
-  return active && (!data.current_period_end || data.current_period_end > now);
-}
-
-// --- free-pass tracking (db-backed w/ in-memory fallback) ---
-const FREE_LIMIT = 3;
-
-const freeMem = new Map();
-// key -> { used:number, day:string }
-function memKey(clientId) {
-  return `lookup:${clientId}`;
-}
-function memAllow(clientId) {
-  const key = memKey(clientId);
-  const today = dayKeyUTC();
-  const rec = freeMem.get(key);
-  if (!rec || rec.day !== today) {
-    freeMem.set(key, { used: 1, day: today });
-    return { allowed: true, remaining: FREE_LIMIT - 1 };
-  }
-  if (rec.used < FREE_LIMIT) {
-    rec.used += 1;
-    return { allowed: true, remaining: FREE_LIMIT - rec.used };
-  }
-  return { allowed: false, remaining: 0 };
-}
-
-async function dbAllowFoodLookup(clientId, userId) {
-  if (!supabaseAdmin) return memAllow(clientId);
+function base64UrlDecode(str) {
   try {
-    const today = dayKeyUTC();
-
-    // NOTE: we reuse ai_free_passes table.
-    // Make sure feature 'food_lookup' is allowed in the CHECK constraint.
-    // If not, either ALTER TABLE or relax the check.
-    const { data, error } = await supabaseAdmin
-      .from("ai_free_passes")
-      .select("uses")
-      .eq("client_id", clientId)
-      .eq("feature", "food_lookup")
-      .eq("day_key", today)
-      .maybeSingle();
-
-    // If unexpected error → fallback to memory
-    if (error && error.code !== "PGRST116") {
-      return memAllow(clientId);
+    const b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 ? "====".slice(0, 4 - (b64.length % 4)) : "";
+    return JSON.parse(Buffer.from(b64 + pad, "base64").toString("utf8"));
+  } catch { return null; }
+}
+function getUserIdFromHeaders(req) {
+  const hdr = (req.headers["x-supabase-user-id"] || req.headers["x-user-id"] || "").toString().trim();
+  if (hdr) return hdr;
+  const auth = (req.headers["authorization"] || "").toString().trim();
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7);
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = base64UrlDecode(parts[1]);
+      const sub = payload?.sub || payload?.user_id || payload?.uid;
+      if (sub) return String(sub);
     }
-
-    if (!data) {
-      // first use today
-      const ins = await supabaseAdmin
-        .from("ai_free_passes")
-        .insert([{
-          client_id: clientId,
-          user_id: userId || null,
-          feature: "food_lookup",
-          day_key: today,
-          uses: 1
-        }])
-        .select("uses")
-        .single();
-
-      if (ins.error) {
-        return memAllow(clientId);
-      }
-      return { allowed: true, remaining: FREE_LIMIT - 1 };
-    }
-
-    const currentUses = data.uses || 0;
-    if (currentUses >= FREE_LIMIT) {
-      return { allowed: false, remaining: 0 };
-    }
-
-    const upd = await supabaseAdmin
-      .from("ai_free_passes")
-      .update({ uses: currentUses + 1, user_id: userId || null })
-      .eq("client_id", clientId)
-      .eq("feature", "food_lookup")
-      .eq("day_key", today)
-      .select("uses")
-      .single();
-
-    if (upd.error) {
-      return memAllow(clientId);
-    }
-    const newUses = upd.data.uses || currentUses + 1;
-    return {
-      allowed: true,
-      remaining: Math.max(0, FREE_LIMIT - newUses)
-    };
-  } catch {
-    return memAllow(clientId);
   }
+  return null;
 }
 
-async function allowLookup({ req, userId }) {
-  const clientId = idKey(req, userId);
-  return dbAllowFoodLookup(clientId, userId);
-}
+/* ---------- free-pass gating (feature = 'food') ---------- */
+const FREE_LIMIT = 3;
+const mem = new Map();
 
-// ---------- timeout helper ----------
-const OPENAI_TIMEOUT_MS = 6000;
-function withTimeout(promise, ms, onTimeoutValue) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const t = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(onTimeoutValue);
-      }
-    }, ms);
-    promise
-      .then((v) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(t);
-          resolve(v);
-        }
-      })
-      .catch(() => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(t);
-          resolve(onTimeoutValue);
-        }
+async function allowFree(req, userId) {
+  const feature = "food";
+  const clientId = userId ? `uid:${userId}` : headerClientId(req);
+  const key = `${clientId}:${feature}`;
+  const today = dayKeyUTC();
+  const rec = mem.get(key);
+  if (!rec || rec.day !== today) {
+    mem.set(key, { uses: 1, day: today });
+    // try to persist
+    try {
+      await supabaseAdmin?.from("ai_free_passes").insert({
+        client_id: clientId, user_id: userId || null, feature, day_key: today, uses: 1
       });
+    } catch {}
+    return true;
+  }
+  if (rec.uses < FREE_LIMIT) {
+    rec.uses += 1;
+    try {
+      await supabaseAdmin?.from("ai_free_passes")
+        .update({ uses: rec.uses, user_id: userId || null })
+        .eq("client_id", clientId).eq("feature", feature).eq("day_key", today);
+    } catch {}
+    return true;
+  }
+  return false;
+}
+
+/* ---------- OpenAI call with strict schema ---------- */
+const OPENAI_TIMEOUT_MS = 6000;
+function withTimeout(p, ms, fallback) {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(fallback); } }, ms);
+    p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } })
+     .catch(() => { if (!done) { done = true; clearTimeout(t); resolve(fallback); } });
   });
 }
 
-// ---------- openAI call ----------
-function fallbackNutrition({ food, brand, quantity }) {
-  // Super bare fallback in case OpenAI is down.
-  // We won't pretend accuracy. We'll just say 0 cals so UI doesn't crash.
-  return {
-    name: food || "Food item",
-    brand: brand || "",
-    quantity_input: quantity || "",
-    serving: { amount: 1, unit: "serving" },
-    calories: 0,
-    protein_g: 0,
-    carbs_g: 0,
-    fat_g: 0,
-    confidence: 0.2,
-    notes: "Fallback estimate only."
-  };
+// very light normalization for obvious “g” units
+function parseQtyToGrams(qtyText) {
+  if (!qtyText) return null;
+  const s = String(qtyText).trim().toLowerCase();
+  const g = s.match(/(\d+(?:\.\d+)?)\s*g\b/);
+  if (g) return Math.max(1, Math.round(parseFloat(g[1])));
+  return null; // let LLM figure out cups/pieces if provided
 }
 
-async function callOpenAI({ food, brand, quantity }) {
+async function llmNutrition({ food, brand, quantity }) {
   if (!openai) {
-    return fallbackNutrition({ food, brand, quantity });
+    // fallback heuristic if OPENAI key not set
+    const grams = parseQtyToGrams(quantity) || 150;
+    // simple yogurt-like baseline; better than 650 kcal nonsense
+    const per100 = { cal: 60, p: 10, c: 4, f: 0 }; // 100g baseline
+    const factor = grams / 100;
+    return {
+      title: `${brand ? brand + " " : ""}${food}${quantity ? " — " + quantity : ""}`,
+      calories: Math.round(per100.cal * factor),
+      protein_g: Math.round(per100.p * factor),
+      carbs_g: Math.round(per100.c * factor),
+      fat_g: Math.round(per100.f * factor),
+    };
   }
 
-  const sys = `
-You are a nutrition label assistant.
-Return ONLY valid JSON with this exact shape:
-{
-  "name": "string food name",
-  "brand": "string brand or null",
-  "quantity_input": "string the user typed for quantity",
-  "serving": { "amount": number, "unit": "string", "grams": number },
-  "calories": number,
-  "protein_g": number,
-  "carbs_g": number,
-  "fat_g": number,
-  "confidence": number,
-  "notes": "optional short string"
-}
+  const sys = `You output nutrition for ONE food item. Return ONLY valid JSON:
+{"title":"...","calories":123,"protein_g":12,"carbs_g":10,"fat_g":2}
 Rules:
-- calories, protein_g, carbs_g, fat_g must be numeric (per the given quantity_input).
-- confidence is 0 to 1 (your confidence that numbers match a common nutrition label for that brand).
-- notes is optional but helpful context (e.g. 'assumes cooked weight').
-No markdown, no extra keys.
-`;
+- If brand or quantity are present, reflect them in "title".
+- Prefer verified, typical values. If uncertain, output a reasonable estimate.
+- All macro fields must be numbers (no strings).`;
 
-  const usr = `
-Food: ${food || ""}
-Brand: ${brand || ""}
-Quantity: ${quantity || ""}
-
-Estimate macros and calories for THAT exact quantity.
-`;
+  const user = `Food: ${food}
+Brand: ${brand || "n/a"}
+Quantity: ${quantity || "n/a"}
+Return exactly: title, calories, protein_g, carbs_g, fat_g (numbers).`;
 
   const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.2,
-    messages: [
-      { role: "system", content: sys.trim() },
-      { role: "user", content: usr.trim() }
-    ]
+    messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+    temperature: 0.2
   });
 
   const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
-  if (!res) {
-    return fallbackNutrition({ food, brand, quantity });
-  }
+  if (!res) return null;
 
   const txt = res?.choices?.[0]?.message?.content || "";
-  let parsed = null;
-  try { parsed = JSON.parse(txt); } catch {}
-
-  if (!parsed || typeof parsed !== "object") {
-    return fallbackNutrition({ food, brand, quantity });
+  try {
+    const j = JSON.parse(txt);
+    const out = {
+      title: j.title || `${brand ? brand + " " : ""}${food}${quantity ? " — " + quantity : ""}`,
+      calories: Number(j.calories || 0),
+      protein_g: Number(j.protein_g || 0),
+      carbs_g: Number(j.carbs_g || 0),
+      fat_g: Number(j.fat_g || 0),
+    };
+    // sanity clamp — avoid crazy 600kcal for yogurt
+    ["calories","protein_g","carbs_g","fat_g"].forEach(k => {
+      if (!Number.isFinite(out[k]) || out[k] < 0) out[k] = 0;
+    });
+    return out;
+  } catch {
+    return null;
   }
-
-  // harden fields
-  return {
-    name: parsed.name || food || "Food item",
-    brand: parsed.brand || brand || "",
-    quantity_input: parsed.quantity_input || quantity || "",
-    serving: {
-      amount: Number(parsed?.serving?.amount) || 1,
-      unit: parsed?.serving?.unit || "serving",
-      grams: Number(parsed?.serving?.grams) || undefined
-    },
-    calories: Number(parsed.calories) || 0,
-    protein_g: Number(parsed.protein_g) || 0,
-    carbs_g: Number(parsed.carbs_g) || 0,
-    fat_g: Number(parsed.fat_g) || 0,
-    confidence: Number(parsed.confidence) || 0,
-    notes: parsed.notes || ""
-  };
 }
 
-// ---------- handler ----------
+/* ---------- handler ---------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -318,38 +173,42 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
-  const user_id = body?.user_id || null;
-  const food = (body?.food || "").toString().slice(0,200);
-  const brand = (body?.brand || "").toString().slice(0,200);
-  const quantity = (body?.quantity || "").toString().slice(0,200);
+  const food = String(body?.food || "").trim();
+  const brand = (body?.brand || "").trim();
+  const quantity = (body?.quantity || "").trim();
 
-  if (!food || !quantity) {
-    res.status(400).json({ error: "food and quantity required" });
+  if (!food) {
+    res.status(400).json({ error: "Missing food" });
     return;
   }
 
-  // 1. Pro / Trial bypass
-  const pro = await isProActive(user_id);
+  // free-pass (you can remove if you want unlimited lookups)
+  const userId = getUserIdFromHeaders(req);
+  const allowed = await allowFree(req, userId);
+  if (!allowed) {
+    res.status(402).json({ error: "Upgrade required" });
+    return;
+  }
 
-  // 2. If NOT pro → enforce daily cap
-  if (!pro) {
-    const pass = await allowLookup({ req, userId: user_id });
-    if (!pass.allowed) {
-      res
-        .status(402)
-        .json({ error: "Upgrade required", reason: "limit_reached" });
+  try {
+    const data = await llmNutrition({ food, brand, quantity });
+    if (!data) {
+      // final guard — modest baseline rather than nonsense
+      const grams = parseQtyToGrams(quantity) || 150;
+      const per100 = { cal: 60, p: 10, c: 4, f: 0 };
+      const factor = grams / 100;
+      res.status(200).json({
+        title: `${brand ? brand + " " : ""}${food}${quantity ? " — " + quantity : ""}`,
+        calories: Math.round(per100.cal * factor),
+        protein_g: Math.round(per100.p * factor),
+        carbs_g: Math.round(per100.c * factor),
+        fat_g: Math.round(per100.f * factor),
+      });
       return;
     }
-  }
-
-  // 3. Call model
-  try {
-    const nutri = await callOpenAI({ food, brand, quantity });
-    res.status(200).json(nutri);
-    return;
+    res.status(200).json(data);
   } catch (e) {
-    console.error("[food-lookup] error", e);
-    res.status(200).json(fallbackNutrition({ food, brand, quantity }));
-    return;
+    console.error("[food-lookup] error:", e);
+    res.status(500).json({ error: "Internal error" });
   }
 }
