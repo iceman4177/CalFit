@@ -1,4 +1,3 @@
-// src/components/AIFoodLookupBox.jsx
 import React, { useState, useMemo } from "react";
 import {
   Card, CardContent, CardActions,
@@ -7,7 +6,7 @@ import {
 import UpgradeModal from "./UpgradeModal";
 import { useEntitlements } from "../context/EntitlementsContext.jsx";
 
-// stable per-device id, same pattern we use elsewhere
+// ---- stable per-device id (same pattern used elsewhere) ----
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -21,20 +20,53 @@ function getClientId() {
   }
 }
 
-function getUserId() {
+// ---- auth headers used by AI endpoints (parity w/ meals/workouts/coach) ----
+function getAuthHeaders() {
   try {
     const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
-    return tok?.user?.id || null;
+    const accessToken =
+      tok?.currentSession?.access_token || tok?.access_token || tok?.provider_token || "";
+    const userId = tok?.user?.id || tok?.currentSession?.user?.id || "";
+    const email =
+      localStorage.getItem("sc_email") ||
+      tok?.user?.email ||
+      tok?.currentSession?.user?.email ||
+      "";
+
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Client-Id": getClientId(),
+    };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    if (userId) headers["X-Supabase-User-Id"] = userId;
+    if (email) headers["X-User-Email"] = email;
+    return headers;
   } catch {
-    return null;
+    return {
+      "Content-Type": "application/json",
+      "X-Client-Id": getClientId(),
+    };
   }
+}
+
+const MAX_FREE_TRIES = 3;
+const LOCAL_TRY_KEY = "aiAssist_freeTries";
+
+function readLocalTries() {
+  const n = Number(localStorage.getItem(LOCAL_TRY_KEY) || "0");
+  return Number.isFinite(n) ? n : 0;
+}
+function bumpLocalTries() {
+  const next = Math.min(readLocalTries() + 1, MAX_FREE_TRIES);
+  localStorage.setItem(LOCAL_TRY_KEY, String(next));
+  return next;
 }
 
 export default function AIFoodLookupBox({
   onAddFood,
-  canUseLookup,         // () => boolean
-  registerLookupUse,    // () => void
-  onHitPaywall          // () => void
+  canUseLookup,        // optional: () => boolean (parent’s counter)
+  registerLookupUse,   // optional: () => void     (parent’s counter)
+  onHitPaywall         // optional: () => void
 }) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
@@ -44,13 +76,30 @@ export default function AIFoodLookupBox({
   const [error, setError] = useState("");
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  const userId = useMemo(() => getUserId(), []);
-  const { isProActive, status } = useEntitlements();
-  const proOrTrial = !!(isProActive || ["active", "trialing", "past_due"].includes(String(status).toLowerCase()));
+  const { isProActive, status, isEntitled } = useEntitlements();
+  const proOrTrial =
+    isEntitled || !!(isProActive || ["active", "trialing", "past_due"].includes(String(status).toLowerCase()));
+
+  // unified check for whether the user can spend a free try (only for non-entitled)
+  const freeTryAvailable = () => {
+    if (proOrTrial) return true;
+    if (typeof canUseLookup === "function") return canUseLookup();
+    return readLocalTries() < MAX_FREE_TRIES;
+  };
+
+  // unified burner for free tries (only for non-entitled)
+  const burnFreeTry = () => {
+    if (proOrTrial) return;
+    if (typeof registerLookupUse === "function") {
+      registerLookupUse();
+    } else {
+      bumpLocalTries();
+    }
+  };
 
   async function handleLookup() {
     // Local gate BEFORE hitting server, but skip it for Pro/Trial
-    if (!proOrTrial && typeof canUseLookup === "function" && !canUseLookup()) {
+    if (!proOrTrial && !freeTryAvailable()) {
       if (typeof onHitPaywall === "function") onHitPaywall();
       setShowUpgrade(true);
       return;
@@ -63,23 +112,23 @@ export default function AIFoodLookupBox({
     try {
       const resp = await fetch("/api/ai/food-lookup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Client-Id": getClientId(),
-          ...(userId ? { "X-Supabase-User-Id": userId } : {})
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          user_id: userId,
           food: food.trim(),
           brand: brand.trim(),
-          quantity: quantity.trim()
-        })
+          quantity: quantity.trim(),
+        }),
       });
 
+      // If server returns 402 but user is entitled (e.g., stale backend),
+      // do NOT show the modal. Just surface a gentle message.
       if (resp.status === 402) {
-        // server says "paywall"
-        if (typeof onHitPaywall === "function") onHitPaywall();
-        setShowUpgrade(true);
+        if (!proOrTrial) {
+          if (typeof onHitPaywall === "function") onHitPaywall();
+          setShowUpgrade(true);
+        } else {
+          setError("You’re entitled to unlimited lookups, but the server returned a 402. Try again.");
+        }
         setLoading(false);
         return;
       }
@@ -94,9 +143,7 @@ export default function AIFoodLookupBox({
       setResData(json);
 
       // burn a credit for free users only
-      if (!proOrTrial && typeof registerLookupUse === "function") {
-        registerLookupUse();
-      }
+      if (!proOrTrial) burnFreeTry();
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
       setError("Couldn’t fetch nutrition. Please refine the input and try again.");
@@ -112,7 +159,7 @@ export default function AIFoodLookupBox({
       calories: Math.max(0, Number(resData.calories) || 0),
       protein_g: Number(resData.protein_g) || 0,
       carbs_g: Number(resData.carbs_g) || 0,
-      fat_g: Number(resData.fat_g) || 0
+      fat_g: Number(resData.fat_g) || 0,
     };
     if (typeof onAddFood === "function") onAddFood(payload);
     setResData(null);
@@ -164,7 +211,7 @@ export default function AIFoodLookupBox({
               sx={{
                 p: 1.25,
                 border: "1px solid rgba(2,6,23,0.08)",
-                borderRadius: 1
+                borderRadius: 1,
               }}
             >
               <Typography variant="subtitle2">

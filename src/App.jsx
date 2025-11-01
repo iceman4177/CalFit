@@ -140,7 +140,7 @@ async function sendIdentity({ user, path, isProActive, planStatus }) {
       user_id: user.id,
       email: user.email || null,
       full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
-      client_id: clientId,
+      client_id,
       last_path: path || '/',
       is_pro: !!isProActive,
       plan_status: planStatus || null,
@@ -720,7 +720,8 @@ export default function App() {
 
   return (
     <>
-      <Header logoSrc="/slimcal-logo.svg" />
+      {/* Pass showBeta={false} to hide any BETA chip in Header */}
+      <Header logoSrc="/slimcal-logo.svg" showBeta={false} />
 
       <Container maxWidth="md" sx={{ py:4 }}>
         <PageTracker />

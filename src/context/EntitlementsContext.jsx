@@ -1,4 +1,3 @@
-// src/context/EntitlementsContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -151,7 +150,7 @@ export function EntitlementsProvider({ children }) {
       const ent = await fetchEntitlements({ uid: userId, mail: email });
       if (!alive) return;
 
-      // Keep a small local echo so UI can hide the CTA instantly across tabs
+      // local echo for instant UI across tabs
       try { localStorage.setItem("isPro", ent.isProActive ? "true" : "false"); } catch {}
 
       setState({
@@ -175,26 +174,30 @@ export function EntitlementsProvider({ children }) {
     };
   }, [userId, email]);
 
-  const value = useMemo(() => ({
-    email,
-    userId,
-    setEmail,
-    ...state,
-    refreshEntitlements: async () => {
-      const ent = await fetchEntitlements({ uid: userId, mail: email });
-      try { localStorage.setItem("isPro", ent.isProActive ? "true" : "false"); } catch {}
-      setState((s) => ({
-        ...s,
-        isProActive: !!ent.isProActive,
-        status: ent.status || "none",
-        trialEnd: ent.trialEnd || null,
-        currentPeriodEnd: ent.currentPeriodEnd || null,
-        cancelAtPeriodEnd: !!ent.cancelAtPeriodEnd,
-        customerId: ent.customerId || null,
-        priceId: ent.priceId || null,
-      }));
-    }
-  }), [email, userId, state]);
+  const value = useMemo(() => {
+    const isEntitled = toBoolStatus({ isProActive: state.isProActive, status: state.status });
+    return {
+      email,
+      userId,
+      setEmail,
+      ...state,
+      isEntitled, // <-- convenient boolean for components
+      refreshEntitlements: async () => {
+        const ent = await fetchEntitlements({ uid: userId, mail: email });
+        try { localStorage.setItem("isPro", ent.isProActive ? "true" : "false"); } catch {}
+        setState((s) => ({
+          ...s,
+          isProActive: !!ent.isProActive,
+          status: ent.status || "none",
+          trialEnd: ent.trialEnd || null,
+          currentPeriodEnd: ent.currentPeriodEnd || null,
+          cancelAtPeriodEnd: !!ent.cancelAtPeriodEnd,
+          customerId: ent.customerId || null,
+          priceId: ent.priceId || null,
+        }));
+      },
+    };
+  }, [email, userId, state]);
 
   return <EntCtx.Provider value={value}>{children}</EntCtx.Provider>;
 }
