@@ -5,9 +5,8 @@ import {
   TextField, Button, Typography, Stack, Box
 } from "@mui/material";
 import UpgradeModal from "./UpgradeModal";
-import { useEntitlements } from "../context/EntitlementsContext.jsx";
 
-// ---- stable per-device id ----
+// ---- client id (stable per device) ----
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -21,277 +20,188 @@ function getClientId() {
   }
 }
 
-function getAuthHeaders() {
+// ---- supabase auth helpers (non-throwing) ----
+function getSupabaseSession() {
   try {
     const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
-    const accessToken =
-      tok?.currentSession?.access_token || tok?.access_token || tok?.provider_token || "";
-    const userId = tok?.user?.id || tok?.currentSession?.user?.id || "";
-    const email =
-      localStorage.getItem("sc_email") ||
-      tok?.user?.email ||
-      tok?.currentSession?.user?.email ||
-      "";
-
-    const headers = {
-      "Content-Type": "application/json",
-      "x-client-id": getClientId(),
-    };
-    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-    if (userId) headers["x-supabase-user-id"] = userId;
-    if (email) headers["x-user-email"] = email;
-    return headers;
+    // v2 session shape
+    const access_token = tok?.currentSession?.access_token || tok?.access_token || null;
+    const user = tok?.currentSession?.user || tok?.user || null;
+    return { access_token, user };
   } catch {
-    return {
-      "Content-Type": "application/json",
-      "x-client-id": getClientId(),
-    };
+    return { access_token: null, user: null };
   }
 }
 
-const MAX_FREE_TRIES = 3;
-const LOCAL_TRY_KEY = "aiAssist_freeTries";
-
-function readLocalTries() {
-  const n = Number(localStorage.getItem(LOCAL_TRY_KEY) || "0");
-  return Number.isFinite(n) ? n : 0;
-}
-function bumpLocalTries() {
-  const next = Math.min(readLocalTries() + 1, MAX_FREE_TRIES);
-  localStorage.setItem(LOCAL_TRY_KEY, String(next));
-  return next;
-}
-
-export default function AIFoodLookupBox({
-  onAddFood,
-  canUseLookup,        // optional external counter
-  registerLookupUse,   // optional external burner
-  onHitPaywall         // optional hook to open Upgrade elsewhere
-}) {
+export default function AIFoodLookupBox({ onAdd }) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [resData, setResData] = useState(null);
-  const [error, setError] = useState("");
+  const [qty, setQty] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  const { isProActive, status, isEntitled } = useEntitlements();
-  const proOrTrial =
-    isEntitled || !!(isProActive || ["active", "trialing", "past_due"].includes(String(status).toLowerCase()));
+  const clientId = useMemo(() => getClientId(), []);
+  const { access_token, user } = useMemo(() => getSupabaseSession(), []);
+  const email = useMemo(() => (user?.email || localStorage.getItem("sc_email") || "").toLowerCase(), [user]);
 
-  const freeTryAvailable = () => {
-    if (proOrTrial) return true;
-    if (typeof canUseLookup === "function") return canUseLookup();
-    return readLocalTries() < MAX_FREE_TRIES;
-  };
+  function sanitizeQty(s) {
+    // strip stray backticks and weird whitespace
+    return String(s || "").replace(/[`]+/g, "").trim();
+  }
 
-  const burnFreeTry = () => {
-    if (proOrTrial) return;
-    if (typeof registerLookupUse === "function") {
-      registerLookupUse();
-    } else {
-      bumpLocalTries();
-    }
-  };
-
-  async function handleLookup() {
-    // local gate before hitting server (skip for Pro/Trial)
-    if (!proOrTrial && !freeTryAvailable()) {
-      onHitPaywall?.();
-      setShowUpgrade(true);
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setResData(null);
-
+  async function getNutrition() {
+    setBusy(true);
+    setErr("");
     try {
-      // ⬇️ use the unified AI gateway with entitlement bypass
+      // Build a single-meal “suggestion” request. We bias the model to echo back a single item’s macros.
+      const payload = {
+        feature: "meal",          // normalizeFeature will accept this
+        count: 1,
+        email,
+        constraints: {
+          training_intent: "general"
+        },
+        // nudge the model by embedding our food text into "diet"/goal strings
+        // but the server only cares about constraints + count; model prompt handles content.
+        diet_preference: "omnivore",
+        // extra hint details to increase correctness
+        note: `Estimate macros for a single food: ${brand ? brand + " " : ""}${food}${qty ? `, quantity: ${sanitizeQty(qty)}` : ""}`,
+      };
+
+      const headers = {
+        "Content-Type": "application/json",
+        "x-client-id": clientId,
+        "x-user-email": email || "",
+      };
+      if (user?.id) headers["x-supabase-user-id"] = user.id;
+      if (access_token) headers["Authorization"] = `Bearer ${access_token}`;
+
       const resp = await fetch("/api/ai/generate", {
         method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          feature: "assist",
-          type: "lookup",
-          mode: "food",
-          prompt: JSON.stringify({ food: food.trim(), brand: brand.trim(), quantity: quantity.trim() }),
-        }),
+        headers,
+        body: JSON.stringify(payload),
       });
 
       if (resp.status === 402) {
-        // Only prompt if NOT entitled. If entitled, surface soft warning.
-        if (!proOrTrial) {
-          onHitPaywall?.();
-          setShowUpgrade(true);
-        } else {
-          setError("You’re entitled to unlimited lookups, but the server returned a 402. Try again.");
-        }
-        setLoading(false);
+        // free-pass limit reached → prompt upgrade
+        setShowUpgrade(true);
+        setBusy(false);
         return;
       }
 
-      const text = await resp.text();
-      if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
-
-      const data = text ? JSON.parse(text) : null;
-      const item = Array.isArray(data?.suggestions) ? data.suggestions[0] : data?.result || null;
-      if (!item || (item.calories == null && !item.nutrition)) {
-        throw new Error("No nutrition returned");
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => "");
+        throw new Error(txt || `HTTP ${resp.status}`);
       }
 
-      const normalized = item.nutrition
-        ? {
-            name: item.title || item.name || "Food",
-            brand: item.brand || brand.trim() || "",
-            quantity_input: quantity.trim(),
-            serving: item.nutrition.serving || { amount: 1, unit: "serving" },
-            calories: Number(item.nutrition.calories) || 0,
-            protein_g: Number(item.nutrition.protein_g) || 0,
-            carbs_g: Number(item.nutrition.carbs_g) || 0,
-            fat_g: Number(item.nutrition.fat_g) || 0,
-            confidence: item.confidence ?? null,
-            notes: item.notes || "",
-          }
-        : {
-            name: item.name || "Food",
-            brand: item.brand || brand.trim() || "",
-            quantity_input: quantity.trim(),
-            serving: item.serving || { amount: 1, unit: "serving" },
-            calories: Number(item.calories) || 0,
-            protein_g: Number(item.protein_g) || 0,
-            carbs_g: Number(item.carbs_g) || 0,
-            fat_g: Number(item.fat_g) || 0,
-            confidence: item.confidence ?? null,
-            notes: item.notes || "",
-          };
+      const data = await resp.json();
+      const first = Array.isArray(data?.suggestions) ? data.suggestions[0] : null;
 
-      setResData(normalized);
+      if (!first) {
+        throw new Error("No suggestions returned.");
+      }
 
-      if (!proOrTrial) burnFreeTry();
+      // Normalize fields we care about
+      const item = {
+        title: first.title || (brand ? `${brand} ${food}` : food) || "Food item",
+        calories: Number(first.calories ?? first.kcal ?? first.energy_kcal ?? 0),
+        protein_g: Number(first.protein_g ?? 0),
+        carbs_g: Number(first.carbs_g ?? 0),
+        fat_g: Number(first.fat_g ?? 0),
+        qty: sanitizeQty(qty) || "1 serving",
+      };
+
+      // Guard against NaN → 0
+      item.calories = Number.isFinite(item.calories) ? item.calories : 0;
+      item.protein_g = Number.isFinite(item.protein_g) ? item.protein_g : 0;
+      item.carbs_g = Number.isFinite(item.carbs_g) ? item.carbs_g : 0;
+      item.fat_g = Number.isFinite(item.fat_g) ? item.fat_g : 0;
+
+      setResult(item);
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
-      setError("Couldn’t fetch nutrition. Please refine the input and try again.");
+      setErr("Sorry—couldn’t fetch nutrition. Try tweaking the name/quantity.");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
   function handleLog() {
-    if (!resData) return;
-    const payload = {
-      name: resData.brand ? `${resData.name} — ${resData.brand}` : resData.name,
-      calories: Math.max(0, Number(resData.calories) || 0),
-      protein_g: Number(resData.protein_g) || 0,
-      carbs_g: Number(resData.carbs_g) || 0,
-      fat_g: Number(resData.fat_g) || 0
+    if (!result) return;
+    const entry = {
+      title: result.title,
+      calories: Math.max(0, Number(result.calories || 0)),
+      protein_g: Math.max(0, Number(result.protein_g || 0)),
+      carbs_g: Math.max(0, Number(result.carbs_g || 0)),
+      fat_g: Math.max(0, Number(result.fat_g || 0)),
+      quantity: result.qty || "1 serving",
+      source: "ai_lookup",
+      ts: Date.now(),
     };
-    onAddFood?.(payload);
-    setResData(null);
-    setFood("");
-    setBrand("");
-    setQuantity("");
+    onAdd?.(entry);
+    // keep the preview visible but you could clear it here if preferred
   }
 
-  const disabled = !food.trim() || !quantity.trim() || loading;
-
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>
-          AI Food Lookup
-        </Typography>
+    <>
+      <Card className="rounded-2xl shadow-md">
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1 }}>AI Food Lookup</Typography>
+          <Stack spacing={1.5}>
+            <TextField
+              label="Food"
+              placeholder="e.g., Oikos Triple Zero yogurt"
+              value={food}
+              onChange={(e) => setFood(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Brand (optional)"
+              placeholder="e.g., Danone / Costco / Kirkland"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Quantity"
+              placeholder='e.g., "1 cup", "170 g", "1 stick", "2 pieces"'
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              fullWidth
+            />
 
-        <Stack spacing={1.25}>
-          <TextField
-            label="Food"
-            placeholder="e.g., Greek yogurt 0% plain"
-            value={food}
-            onChange={(e) => setFood(e.target.value)}
-            fullWidth
-          />
-          <TextField
-            label="Brand (optional)"
-            placeholder="e.g., Fage Total"
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-            fullWidth
-          />
-          <TextField
-            label="Quantity"
-            placeholder="e.g., 170 g, 1 cup, 6 oz cooked, 1 stick"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            fullWidth
-          />
-
-          {error && (
-            <Typography color="error" variant="body2">
-              {error}
-            </Typography>
-          )}
-
-          {resData && (
-            <Box
-              sx={{
-                p: 1.25,
-                border: "1px solid rgba(2,6,23,0.08)",
-                borderRadius: 1
-              }}
-            >
-              <Typography variant="subtitle2">
-                {resData.brand ? `${resData.name} — ${resData.brand}` : resData.name}
-              </Typography>
-
-              <Typography variant="body2" color="text.secondary">
-                {resData.quantity_input} • {resData.serving?.amount} {resData.serving?.unit}
-                {resData.serving?.grams ? ` (${resData.serving.grams} g)` : ""}
-              </Typography>
-
-              <Stack direction="row" spacing={2} sx={{ mt: 0.75, flexWrap: "wrap" }}>
-                <Typography>🔥 {Math.round(resData.calories)} kcal</Typography>
-                <Typography>🥩 {Math.round(resData.protein_g)} g</Typography>
-                <Typography>🌾 {Math.round(resData.carbs_g)} g</Typography>
-                <Typography>🥑 {Math.round(resData.fat_g)} g</Typography>
-              </Stack>
-
-              {typeof resData.confidence === "number" && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ mt: 0.5, display: "block" }}
-                >
-                  Confidence: {(resData.confidence * 100).toFixed(0)}%
+            {result && (
+              <Box sx={{ p: 1.5, border: "1px solid #eee", borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                  {result.title} — {result.qty}
                 </Typography>
-              )}
+                <Stack direction="row" spacing={2}>
+                  <Typography variant="body2">🔥 {result.calories} kcal</Typography>
+                  <Typography variant="body2">🥩 {result.protein_g} g</Typography>
+                  <Typography variant="body2">🌾 {result.carbs_g} g</Typography>
+                  <Typography variant="body2">🥑 {result.fat_g} g</Typography>
+                </Stack>
+              </Box>
+            )}
 
-              {resData.notes && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                  {resData.notes}
-                </Typography>
-              )}
-            </Box>
-          )}
-        </Stack>
-      </CardContent>
+            {!!err && (
+              <Typography variant="body2" color="error">{err}</Typography>
+            )}
+          </Stack>
+        </CardContent>
+        <CardActions sx={{ justifyContent: "space-between", px: 2, pb: 2 }}>
+          <Button onClick={getNutrition} disabled={busy} variant="outlined">
+            {busy ? "Working…" : "Get Nutrition"}
+          </Button>
+          <Button onClick={handleLog} disabled={!result} variant="contained">
+            Log
+          </Button>
+        </CardActions>
+      </Card>
 
-      <CardActions sx={{ justifyContent: "space-between" }}>
-        <Button variant="outlined" onClick={handleLookup} disabled={disabled}>
-          {loading ? "Looking up..." : "Get Nutrition"}
-        </Button>
-
-        <Button variant="contained" onClick={handleLog} disabled={!resData}>
-          Log
-        </Button>
-      </CardActions>
-
-      <UpgradeModal
-        open={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        title="Upgrade to Slimcal Pro"
-        description="AI Food Lookup uses advanced nutrition reasoning. Upgrade for unlimited lookups."
-      />
-    </Card>
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+    </>
   );
 }
