@@ -1,4 +1,4 @@
-// /api/ai/generate.js
+// /api/ai/generate.js 
 //
 // Slimcal AI gateway with server-side free-pass + Pro/Trial bypass.
 // Behavior:
@@ -82,6 +82,15 @@ function getUserIdFromHeaders(req) {
   return null;
 }
 
+function getEmailFromHeaders(req) {
+  const e =
+    (req.headers["x-user-email"] ||
+      req.headers["x-email"] ||
+      req.headers["x-user-mail"] ||
+      "").toString().trim().toLowerCase();
+  return e || null;
+}
+
 // -------------------- ENTITLEMENTS --------------------
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
 function nowSec() { return Math.floor(Date.now() / 1000); }
@@ -140,7 +149,8 @@ async function resolveUserId(req, { user_id, email }) {
 
   if (user_id) return user_id;
 
-  const e = (email || "").trim().toLowerCase();
+  const headerEmail = getEmailFromHeaders(req);
+  const e = (email || headerEmail || "").trim().toLowerCase();
   if (!e) return null;
 
   try {
@@ -453,6 +463,7 @@ function intentBank(focus, intent) {
   if (normIntent === "yoga_pilates") {
     bank = yogaMobility[focusKey] || yogaMobility.full;
   } else {
+    const focusKey = normalizeFocus(focus);
     bank = base[focusKey] || base.upper;
     if (normIntent === "endurance" && focusKey !== "cardio") {
       bank = [...bank, cardioSprinkle];
@@ -482,7 +493,7 @@ function intentBank(focus, intent) {
         ];
       }
     }
-    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(focusKey)) {
+    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(normalizeFocus(focus))) {
       bank = [
         { exercise: "Incline Dumbbell Press" },
         { exercise: "Chest Fly (Cable)" },
@@ -852,9 +863,9 @@ export default async function handler(req, res) {
   const body = await readJson(req);
   const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
 
-  // Resolve user id robustly (headers OR body.user_id OR body.email)
-  const email = (body?.email || "").trim().toLowerCase();
-  const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
+  // Resolve user id robustly (headers OR body.user_id OR header/body email)
+  const emailInBody = (body?.email || "").trim().toLowerCase();
+  const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email: emailInBody });
 
   const {
     constraints = {},

@@ -1,3 +1,4 @@
+// src/components/AIFoodLookupBox.jsx
 import React, { useState, useMemo } from "react";
 import {
   Card, CardContent, CardActions,
@@ -6,7 +7,7 @@ import {
 import UpgradeModal from "./UpgradeModal";
 import { useEntitlements } from "../context/EntitlementsContext.jsx";
 
-// ---- stable per-device id (same pattern used elsewhere) ----
+// ---- stable per-device id ----
 function getClientId() {
   try {
     let cid = localStorage.getItem("clientId");
@@ -20,7 +21,6 @@ function getClientId() {
   }
 }
 
-// ---- auth headers used by AI endpoints (parity w/ meals/workouts/coach) ----
 function getAuthHeaders() {
   try {
     const tok = JSON.parse(localStorage.getItem("supabase.auth.token") || "null");
@@ -35,16 +35,16 @@ function getAuthHeaders() {
 
     const headers = {
       "Content-Type": "application/json",
-      "X-Client-Id": getClientId(),
+      "x-client-id": getClientId(),
     };
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-    if (userId) headers["X-Supabase-User-Id"] = userId;
-    if (email) headers["X-User-Email"] = email;
+    if (userId) headers["x-supabase-user-id"] = userId;
+    if (email) headers["x-user-email"] = email;
     return headers;
   } catch {
     return {
       "Content-Type": "application/json",
-      "X-Client-Id": getClientId(),
+      "x-client-id": getClientId(),
     };
   }
 }
@@ -64,9 +64,9 @@ function bumpLocalTries() {
 
 export default function AIFoodLookupBox({
   onAddFood,
-  canUseLookup,        // optional: () => boolean (parent’s counter)
-  registerLookupUse,   // optional: () => void     (parent’s counter)
-  onHitPaywall         // optional: () => void
+  canUseLookup,        // optional external counter
+  registerLookupUse,   // optional external burner
+  onHitPaywall         // optional hook to open Upgrade elsewhere
 }) {
   const [food, setFood] = useState("");
   const [brand, setBrand] = useState("");
@@ -80,14 +80,12 @@ export default function AIFoodLookupBox({
   const proOrTrial =
     isEntitled || !!(isProActive || ["active", "trialing", "past_due"].includes(String(status).toLowerCase()));
 
-  // unified check for whether the user can spend a free try (only for non-entitled)
   const freeTryAvailable = () => {
     if (proOrTrial) return true;
     if (typeof canUseLookup === "function") return canUseLookup();
     return readLocalTries() < MAX_FREE_TRIES;
   };
 
-  // unified burner for free tries (only for non-entitled)
   const burnFreeTry = () => {
     if (proOrTrial) return;
     if (typeof registerLookupUse === "function") {
@@ -98,9 +96,9 @@ export default function AIFoodLookupBox({
   };
 
   async function handleLookup() {
-    // Local gate BEFORE hitting server, but skip it for Pro/Trial
+    // local gate before hitting server (skip for Pro/Trial)
     if (!proOrTrial && !freeTryAvailable()) {
-      if (typeof onHitPaywall === "function") onHitPaywall();
+      onHitPaywall?.();
       setShowUpgrade(true);
       return;
     }
@@ -110,21 +108,22 @@ export default function AIFoodLookupBox({
     setResData(null);
 
     try {
-      const resp = await fetch("/api/ai/food-lookup", {
+      // ⬇️ use the unified AI gateway with entitlement bypass
+      const resp = await fetch("/api/ai/generate", {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          food: food.trim(),
-          brand: brand.trim(),
-          quantity: quantity.trim(),
+          feature: "assist",
+          type: "lookup",
+          mode: "food",
+          prompt: JSON.stringify({ food: food.trim(), brand: brand.trim(), quantity: quantity.trim() }),
         }),
       });
 
-      // If server returns 402 but user is entitled (e.g., stale backend),
-      // do NOT show the modal. Just surface a gentle message.
       if (resp.status === 402) {
+        // Only prompt if NOT entitled. If entitled, surface soft warning.
         if (!proOrTrial) {
-          if (typeof onHitPaywall === "function") onHitPaywall();
+          onHitPaywall?.();
           setShowUpgrade(true);
         } else {
           setError("You’re entitled to unlimited lookups, but the server returned a 402. Try again.");
@@ -136,13 +135,40 @@ export default function AIFoodLookupBox({
       const text = await resp.text();
       if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
 
-      const json = text ? JSON.parse(text) : null;
-      if (!json || !json.calories) throw new Error("No nutrition returned");
+      const data = text ? JSON.parse(text) : null;
+      const item = Array.isArray(data?.suggestions) ? data.suggestions[0] : data?.result || null;
+      if (!item || (item.calories == null && !item.nutrition)) {
+        throw new Error("No nutrition returned");
+      }
 
-      // success
-      setResData(json);
+      const normalized = item.nutrition
+        ? {
+            name: item.title || item.name || "Food",
+            brand: item.brand || brand.trim() || "",
+            quantity_input: quantity.trim(),
+            serving: item.nutrition.serving || { amount: 1, unit: "serving" },
+            calories: Number(item.nutrition.calories) || 0,
+            protein_g: Number(item.nutrition.protein_g) || 0,
+            carbs_g: Number(item.nutrition.carbs_g) || 0,
+            fat_g: Number(item.nutrition.fat_g) || 0,
+            confidence: item.confidence ?? null,
+            notes: item.notes || "",
+          }
+        : {
+            name: item.name || "Food",
+            brand: item.brand || brand.trim() || "",
+            quantity_input: quantity.trim(),
+            serving: item.serving || { amount: 1, unit: "serving" },
+            calories: Number(item.calories) || 0,
+            protein_g: Number(item.protein_g) || 0,
+            carbs_g: Number(item.carbs_g) || 0,
+            fat_g: Number(item.fat_g) || 0,
+            confidence: item.confidence ?? null,
+            notes: item.notes || "",
+          };
 
-      // burn a credit for free users only
+      setResData(normalized);
+
       if (!proOrTrial) burnFreeTry();
     } catch (e) {
       console.error("[AIFoodLookupBox] lookup failed", e);
@@ -159,9 +185,9 @@ export default function AIFoodLookupBox({
       calories: Math.max(0, Number(resData.calories) || 0),
       protein_g: Number(resData.protein_g) || 0,
       carbs_g: Number(resData.carbs_g) || 0,
-      fat_g: Number(resData.fat_g) || 0,
+      fat_g: Number(resData.fat_g) || 0
     };
-    if (typeof onAddFood === "function") onAddFood(payload);
+    onAddFood?.(payload);
     setResData(null);
     setFood("");
     setBrand("");
@@ -211,7 +237,7 @@ export default function AIFoodLookupBox({
               sx={{
                 p: 1.25,
                 border: "1px solid rgba(2,6,23,0.08)",
-                borderRadius: 1,
+                borderRadius: 1
               }}
             >
               <Typography variant="subtitle2">

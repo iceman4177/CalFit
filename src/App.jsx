@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -140,7 +139,7 @@ async function sendIdentity({ user, path, isProActive, planStatus }) {
       user_id: user.id,
       email: user.email || null,
       full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
-      client_id,
+      client_id: clientId,               // ✅ fix: use defined variable
       last_path: path || '/',
       is_pro: !!isProActive,
       plan_status: planStatus || null,
