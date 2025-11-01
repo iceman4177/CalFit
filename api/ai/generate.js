@@ -1,14 +1,8 @@
 // /api/ai/generate.js
 //
 // Slimcal AI gateway with server-side free-pass + Pro/Trial bypass.
-// Behavior:
-// - Pro/Trial users: unlimited AI usage (bypass free-pass).
-// - Non-Pro users (signed-in or anonymous): up to 3 uses per FEATURE per DAY,
-//   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
-//   Supabase when possible; fallback to in-memory counter if table/policy missing.
-//
-// Features supported: 'workout', 'meal', 'coach' (plus robust synonyms).
-//
+// Features supported here: 'workout', 'meal', 'coach'.
+// NOTE: Food nutrition lookup is handled by /api/ai/food-lookup.js
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import OpenAI from "openai";
@@ -20,7 +14,7 @@ const openai = process.env.OPENAI_API_KEY
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 10;
 
-// -------------------- BASIC UTILS --------------------
+/* -------------------- BASIC UTILS -------------------- */
 async function readJson(req) {
   try {
     const bufs = [];
@@ -33,7 +27,7 @@ async function readJson(req) {
 }
 
 function dayKeyUTC(date = new Date()) {
-  return date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  return date.toISOString().slice(0, 10);
 }
 
 function headerClientId(req) {
@@ -63,12 +57,10 @@ function base64UrlDecode(str) {
 }
 
 function getUserIdFromHeaders(req) {
-  // 1) Explicit headers
   const headerUid =
     (req.headers["x-user-id"] || req.headers["x-supabase-user-id"] || "").toString().trim();
   if (headerUid) return headerUid;
 
-  // 2) Supabase JWT in Authorization: Bearer <token>
   const auth = (req.headers["authorization"] || "").toString().trim();
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7);
@@ -91,35 +83,9 @@ function getEmailFromHeaders(req) {
   return e || null;
 }
 
-// -------------------- FEATURE NORMALIZATION --------------------
-function normalizeFeature(f) {
-  const s = String(f || "").toLowerCase().trim();
-  if (!s) return "workout";
-
-  const mealSyn = new Set([
-    "meal", "meals", "food", "ai_meal", "ai_food", "lookup", "assist", "ai",
-    "ai_assist", "suggest_meal", "meal_suggest", "nutrition", "meal_lookup",
-    "food_lookup", "ai_meal_suggestion", "meal_suggestion"
-  ]);
-  const woSyn = new Set([
-    "workout", "workouts", "ai_workout", "suggest_workout", "training", "plan",
-    "workout_suggestion", "ai_workout_suggestion"
-  ]);
-  const coachSyn = new Set([
-    "coach", "coaching", "tips", "advice", "ai_coach", "dailyrecap", "recap", "message",
-    "coach_suggestion"
-  ]);
-
-  if (mealSyn.has(s)) return "meal";
-  if (woSyn.has(s)) return "workout";
-  if (coachSyn.has(s)) return "coach";
-  return s; // unknown falls through to 400 later
-}
-
-// -------------------- ENTITLEMENTS --------------------
+/* -------------------- ENTITLEMENTS -------------------- */
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
 function nowSec() { return Math.floor(Date.now() / 1000); }
-
 function tsToSec(ts) {
   if (!ts) return 0;
   const n = typeof ts === "number" ? ts : Math.floor(new Date(ts).getTime() / 1000);
@@ -129,7 +95,7 @@ function tsToSec(ts) {
 async function isEntitled(user_id) {
   if (!user_id || !supabaseAdmin) return false;
 
-  // Prefer entitlement view if present
+  // Preferred: entitlement view
   try {
     const { data: ent, error } = await supabaseAdmin
       .from("v_user_entitlements")
@@ -140,13 +106,11 @@ async function isEntitled(user_id) {
     if (!error && ent) {
       const status = String(ent.status || "").toLowerCase();
       const trialEnd = tsToSec(ent.trial_end);
-      const entitledByStatus = ENTITLED.has(status);
-      const entitledByTrial = trialEnd > nowSec(); // honor trial through end even if canceled
-      return entitledByStatus || entitledByTrial;
+      return ENTITLED.has(status) || trialEnd > nowSec();
     }
-  } catch { /* fall through */ }
+  } catch {}
 
-  // Fallback: most recent app_subscriptions row
+  // Fallback: latest subscription row
   try {
     const { data, error } = await supabaseAdmin
       .from("app_subscriptions")
@@ -159,19 +123,16 @@ async function isEntitled(user_id) {
     const row = data[0];
     const status = String(row.status || "").toLowerCase();
     const trialEnd = tsToSec(row.trial_end);
-    const entitledByStatus = ENTITLED.has(status);
-    const entitledByTrial = trialEnd > nowSec();
-    return entitledByStatus || entitledByTrial;
+    return ENTITLED.has(status) || trialEnd > nowSec();
   } catch {
     return false;
   }
 }
 
-// Resolve user_id from headers OR body.user_id OR body/header email -> app_users.id
+// Resolve user id from headers OR body.user_id OR body/header email -> app_users.id
 async function resolveUserId(req, { user_id, email }) {
   const hdr = getUserIdFromHeaders(req);
   if (hdr) return hdr;
-
   if (user_id) return user_id;
 
   const headerEmail = getEmailFromHeaders(req);
@@ -186,11 +147,11 @@ async function resolveUserId(req, { user_id, email }) {
       .maybeSingle();
 
     if (!error && data?.id) return data.id;
-  } catch { /* ignore */ }
+  } catch {}
   return null;
 }
 
-// -------------------- FREE PASS --------------------
+/* -------------------- FREE PASS -------------------- */
 const FREE_LIMIT = 3;
 const freeMem = new Map();
 
@@ -260,7 +221,7 @@ async function allowFreeFeature({ req, feature, userId }) {
   return dbAllow(clientId, feature, userId);
 }
 
-// -------------------- TIMEOUT --------------------
+/* -------------------- TIMEOUT -------------------- */
 const OPENAI_TIMEOUT_MS = 6000;
 function withTimeout(promise, ms, onTimeoutValue) {
   return new Promise((resolve) => {
@@ -276,7 +237,7 @@ function withTimeout(promise, ms, onTimeoutValue) {
   });
 }
 
-// -------------------- WORKOUTS --------------------
+/* -------------------- WORKOUTS -------------------- */
 function normalizeIntent(intent) {
   if (!intent) return "general";
   const s = String(intent).toLowerCase();
@@ -330,7 +291,9 @@ function biasBlock(b, intent) {
 }
 
 function intentBank(focus, intent) {
-  const fKey = normalizeFocus(focus); // <— single declaration
+  const normIntent = normalizeIntent(intent);
+  const focusKey = normalizeFocus(focus);
+
   const base = {
     upper: [
       { exercise: "Incline Dumbbell Press" },
@@ -482,52 +445,53 @@ function intentBank(focus, intent) {
 
   const cardioSprinkle = { exercise: "Bike Intervals (Moderate)" };
 
-  let bank;
-  const normIntent = normalizeIntent(intent);
-
+  // Build the bank
   if (normIntent === "yoga_pilates") {
-    bank = yogaMobility[fKey] || yogaMobility.full;
-  } else {
-    bank = base[fKey] || base.upper;
-    if (normIntent === "endurance" && fKey !== "cardio") {
-      bank = [...bank, cardioSprinkle];
-    }
-    if (normIntent === "powerlifter") {
-      if (["upper","push","pull","chest_back","shoulders_arms"].includes(fKey)) {
-        bank = [
-          { exercise: "Barbell Bench Press" },
-          { exercise: "Weighted Pull-Up" },
-          { exercise: "Barbell Row" },
-          { exercise: "Overhead Press" },
-          { exercise: "Face Pull" },
-        ];
-      } else if (["lower","legs","glutes_hamstrings","quads_calves"].includes(fKey)) {
-        bank = [
-          { exercise: "Low-Bar Back Squat" },
-          { exercise: "Conventional Deadlift" },
-          { exercise: "Paused Squat" },
-          { exercise: "Hamstring Curl" },
-        ];
-      } else {
-        bank = [
-          { exercise: "Front Squat" },
-          { exercise: "Bench Press" },
-          { exercise: "Deadlift (technique sets)" },
-          { exercise: "Plank" },
-        ];
-      }
-    }
-    if (normIntent === "bodybuilder" && ["upper","push","chest_back","shoulders_arms"].includes(fKey)) {
+    return yogaMobility[focusKey] || yogaMobility.full;
+  }
+
+  let bank = base[focusKey] || base.upper;
+
+  if (normIntent === "endurance" && focusKey !== "cardio") {
+    bank = [...bank, cardioSprinkle];
+  }
+
+  if (normIntent === "powerlifter") {
+    if (["upper", "push", "pull", "chest_back", "shoulders_arms"].includes(focusKey)) {
       bank = [
-        { exercise: "Incline Dumbbell Press" },
-        { exercise: "Chest Fly (Cable)" },
-        { exercise: "Lat Pulldown" },
-        { exercise: "Seated Row" },
-        { exercise: "Lateral Raise" },
-        { exercise: "Cable Curl" },
-        { exercise: "Rope Triceps Extension" },
+        { exercise: "Barbell Bench Press" },
+        { exercise: "Weighted Pull-Up" },
+        { exercise: "Barbell Row" },
+        { exercise: "Overhead Press" },
+        { exercise: "Face Pull" },
+      ];
+    } else if (["lower", "legs", "glutes_hamstrings", "quads_calves"].includes(focusKey)) {
+      bank = [
+        { exercise: "Low-Bar Back Squat" },
+        { exercise: "Conventional Deadlift" },
+        { exercise: "Paused Squat" },
+        { exercise: "Hamstring Curl" },
+      ];
+    } else {
+      bank = [
+        { exercise: "Front Squat" },
+        { exercise: "Bench Press" },
+        { exercise: "Deadlift (technique sets)" },
+        { exercise: "Plank" },
       ];
     }
+  }
+
+  if (normIntent === "bodybuilder" && ["upper", "push", "chest_back", "shoulders_arms"].includes(focusKey)) {
+    bank = [
+      { exercise: "Incline Dumbbell Press" },
+      { exercise: "Chest Fly (Cable)" },
+      { exercise: "Lat Pulldown" },
+      { exercise: "Seated Row" },
+      { exercise: "Lateral Raise" },
+      { exercise: "Cable Curl" },
+      { exercise: "Rope Triceps Extension" },
+    ];
   }
 
   return bank;
@@ -612,14 +576,14 @@ Rules:
   return patched;
 }
 
-// -------------------- MEALS --------------------
+/* -------------------- MEALS -------------------- */
 function normalizeDiet(d) {
   const s = String(d || "omnivore").toLowerCase();
   if (s === "veggie") return "vegetarian";
   return s;
 }
 
-function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTargetG = 120, calorieBias = 0 }, count = 3) {
+function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTargetG = 120 }, count = 3) {
   const d = normalizeDiet(diet);
   const mealsByDiet = {
     vegan: [
@@ -733,49 +697,22 @@ function fallbackMealPack({ diet = "omnivore", intent = "general", proteinTarget
     plans.push({
       title: pick.title,
       items: pick.items,
-      total_calories: totals.calories + (calorieBias || 0),
+      total_calories: totals.calories,
       total_protein_g: totals.protein_g
     });
-  }
-  if (["bodybuilder","powerlifter","recomp"].includes(intent) && proteinTargetG) {
-    return plans.map(p => ({
-      ...p,
-      note: p.total_protein_g < proteinTargetG / 3
-        ? "Consider adding a shake or extra lean protein to hit targets."
-        : undefined
-    }));
   }
   return plans;
 }
 
 function flattenMealsToSuggestions(meals) {
-  return (Array.isArray(meals) ? meals : []).map((m) => {
-    const calories =
-      Number(m.total_calories) || Number(m.calories) ||
-      Number(m.kcal) || Number(m.energy_kcal) ||
-      Number(m?.nutrition?.calories) || 0;
-
-    const protein_g =
-      Number(m.total_protein_g) || Number(m.protein_g) ||
-      Number(m?.nutrition?.protein_g) || 0;
-
-    const carbs_g =
-      Number(m.total_carbs_g) || Number(m.carbs_g) ||
-      Number(m?.nutrition?.carbs_g) || 0;
-
-    const fat_g =
-      Number(m.total_fat_g) || Number(m.fat_g) ||
-      Number(m?.nutrition?.fat_g) || 0;
-
-    return {
-      title: m.title || m.name || "Suggested meal",
-      calories: Math.max(0, calories || 0),
-      protein_g: Math.max(0, protein_g || 0),
-      carbs_g: Math.max(0, carbs_g || 0),
-      fat_g: Math.max(0, fat_g || 0),
-      prepMinutes: m.prepMinutes ?? m.prep_min ?? null
-    };
-  });
+  return (Array.isArray(meals) ? meals : []).map((m) => ({
+    title: m.title || m.name || "Suggested meal",
+    calories: Math.max(0, Number(m.total_calories || m.calories || 0)),
+    protein_g: Math.max(0, Number(m.total_protein_g || m.protein_g || 0)),
+    carbs_g: Math.max(0, Number(m.total_carbs_g || m.carbs_g || 0)),
+    fat_g: Math.max(0, Number(m.total_fat_g || m.fat_g || 0)),
+    prepMinutes: m.prepMinutes ?? m.prep_min ?? null
+  }));
 }
 
 async function openAIMealPack(payload, count = 3) {
@@ -795,17 +732,12 @@ async function openAIMealPack(payload, count = 3) {
 
   const sys = `You are a sports nutrition coach. Output ONLY valid JSON matching this schema:
 {"suggestions":[{"title":"...","calories":650,"protein_g":40,"carbs_g":60,"fat_g":20}]}
-- No prose or markdown.
-- "calories", "protein_g", "carbs_g", "fat_g" must be numbers.
-- Respect the diet preference strictly. Create ${count} unique meals.`;
+No prose or markdown. Numbers only for macro fields.`;
 
   const usr = `Create ${count} meal ideas for:
 - diet_preference: ${d}
 - training_intent: ${normIntent}
-- target_protein_g: ~${proteinTargetG}
-- calorie_bias_per_meal: ${calorieBias}
-Bias:
-- ${biasText}
+- guidance: ${biasText}
 Rules:
 - Output only the top-level flattened values per meal (no nested items).
 - Each suggestion must include: title, calories, protein_g, carbs_g, fat_g (numbers).
@@ -813,11 +745,8 @@ Rules:
 
   const call = openai.chat.completions.create({
     model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: sys },
-      { role: "user", content: usr }
-    ],
-    temperature: 0.5
+    messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
+    temperature: 0.55
   });
 
   const res = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -841,7 +770,7 @@ Rules:
   return suggestions;
 }
 
-// -------------------- COACH --------------------
+/* -------------------- COACH -------------------- */
 function fallbackCoachSuggestions({ intent = "general" }, count = 3) {
   const norm = normalizeIntent(intent);
   const msgsByIntent = {
@@ -872,12 +801,10 @@ function fallbackCoachSuggestions({ intent = "general" }, count = 3) {
     ]
   };
   const pool = msgsByIntent[norm] || msgsByIntent.general;
-  return Array.from({ length: Math.max(1, Math.min(count, 5)) }, (_, i) => ({
-    message: pool[i % pool.length]
-  }));
+  return Array.from({ length: Math.max(1, Math.min(count, 5)) }, (_, i) => ({ message: pool[i % pool.length] }));
 }
 
-// -------------------- MAIN HANDLER --------------------
+/* -------------------- MAIN HANDLER -------------------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -885,9 +812,16 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
-  const feature = normalizeFeature(body?.feature || body?.type || body?.mode || "workout");
+  const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
 
-  // Resolve user id robustly (headers OR body.user_id OR header/body email)
+  // This route only supports these features
+  const supported = new Set(["workout", "meal", "coach"]);
+  if (!supported.has(feature)) {
+    res.status(400).json({ error: "Unsupported feature" });
+    return;
+  }
+
+  // Resolve user
   const emailInBody = (body?.email || "").trim().toLowerCase();
   const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email: emailInBody });
 
@@ -906,16 +840,10 @@ export default async function handler(req, res) {
     calorieBias = constraints?.calorie_bias || 0
   } = body || {};
 
-  // Reject unknown features explicitly (after normalization)
-  if (!new Set(["workout", "meal", "coach"]).has(feature)) {
-    res.status(400).json({ error: "Unsupported feature", supported: ["workout", "meal", "coach"] });
-    return;
-  }
-
-  // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
+  // Entitlement bypass
   const pro = await isEntitled(resolvedUserId);
 
-  // 2) If not Pro/Trial → per-feature free-pass
+  // Free-pass gating for non-pro/trial-inactive
   if (!pro) {
     const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
@@ -924,9 +852,8 @@ export default async function handler(req, res) {
     }
   }
 
-  // 3) Route by feature
-  if (feature === "workout") {
-    try {
+  try {
+    if (feature === "workout") {
       const intent = normalizeIntent(constraints?.training_intent || constraints?.intent || "general");
       const suggestions = await openAIWorkoutPack(
         { focus, goal, intent, equipment },
@@ -934,19 +861,9 @@ export default async function handler(req, res) {
       );
       res.status(200).json({ suggestions });
       return;
-    } catch (e) {
-      console.error("[ai/generate] workout error:", e);
-      const fallback = fallbackWorkoutPack(
-        { focus, goal, intent: normalizeIntent(constraints?.training_intent || "general") },
-        Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
-      );
-      res.status(200).json({ suggestions: fallback });
-      return;
     }
-  }
 
-  if (feature === "meal") {
-    try {
+    if (feature === "meal") {
       const intent = normalizeIntent(constraints?.training_intent || "general");
       const suggestions = await openAIMealPack(
         { diet, intent, proteinTargetG, calorieBias },
@@ -954,33 +871,14 @@ export default async function handler(req, res) {
       );
       res.status(200).json({ suggestions });
       return;
-    } catch (e) {
-      console.error("[ai/generate] meal error:", e);
-      const fallback = flattenMealsToSuggestions(
-        fallbackMealPack(
-          { diet, intent: normalizeIntent(constraints?.training_intent || "general"), proteinTargetG, calorieBias },
-          Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
-        )
-      );
-      res.status(200).json({ suggestions: fallback });
-      return;
     }
-  }
 
-  if (feature === "coach") {
-    try {
-      const intent = normalizeIntent(constraints?.training_intent || "general");
-      const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
-      res.status(200).json({ suggestions });
-      return;
-    } catch (e) {
-      console.error("[ai/generate] coach error:", e);
-      const suggestions = fallbackCoachSuggestions({ intent: "general" }, 3);
-      res.status(200).json({ suggestions });
-      return;
-    }
+    // coach
+    const intent = normalizeIntent(constraints?.training_intent || "general");
+    const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
+    res.status(200).json({ suggestions });
+  } catch (e) {
+    console.error("[ai/generate] error:", e);
+    res.status(500).json({ error: "Internal error" });
   }
-
-  // Should never get here due to earlier guard
-  res.status(400).json({ error: "Unsupported feature" });
 }
