@@ -25,8 +25,15 @@ function isProLocal() {
 }
 
 export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
-  const { isProActive } = useEntitlements();
+  // Preserve existing pro logic
+  const { isProActive, entitlements, features } = useEntitlements();
   const location = useLocation();
+
+  // Derive ambassador flag without disturbing old behavior
+  // Supports either a Set (`entitlements`) or an array (`features`) depending on context version.
+  const hasAmbassador =
+    !!(entitlements && typeof entitlements.has === 'function' && entitlements.has('ambassador_badge')) ||
+    !!(Array.isArray(features) && features.includes('ambassador_badge'));
 
   // auth state (so we can decide whether to open OAuth first)
   const [authUser, setAuthUser] = useState(null);
@@ -122,6 +129,23 @@ export default function Header({ logoSrc = '/slimcal-logo.svg' }) {
               Slimcal.ai
             </Typography>
           </a>
+
+          {/* Ambassador badge (non-intrusive addition) */}
+          {hasAmbassador && (
+            <Tooltip title="Slimcal Ambassador">
+              <Chip
+                label="Ambassador"
+                size="small"
+                color="warning"
+                sx={{
+                  ml: 1,
+                  fontWeight: 700,
+                  height: 22,
+                  '& .MuiChip-label': { px: 1 },
+                }}
+              />
+            </Tooltip>
+          )}
         </Box>
 
         {/* Primary nav */}
