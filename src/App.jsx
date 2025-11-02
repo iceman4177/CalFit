@@ -23,6 +23,7 @@ import {
   Snackbar,
   Alert,
   Badge,
+  Chip,
 } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -320,8 +321,17 @@ export default function App() {
   }, []);
 
   /* ---------------- Entitlements (context) ---------------- */
-  const { isProActive, status } = useEntitlements();
+  const { isProActive, status, entitlements } = useEntitlements();
   const trialActive = status === 'trialing';
+
+  // Ambassador badge detection (robust to Set/Array/object)
+  const hasAmbassadorBadge = React.useMemo(() => {
+    if (!entitlements) return false;
+    if (typeof entitlements.has === 'function') return entitlements.has('ambassador_badge');
+    if (Array.isArray(entitlements)) return entitlements.includes('ambassador_badge');
+    if (typeof entitlements === 'object') return Boolean(entitlements['ambassador_badge']);
+    return false;
+  }, [entitlements]);
 
   /* --------------- Server-truth Pro check (debounce flash) --------------- */
   const [proCheck, setProCheck] = useState({ loading: false, isPro: false, status: null });
@@ -776,12 +786,22 @@ export default function App() {
           )}
 
           {authUser && (
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              Signed in as {authUser.email}{' '}
+            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Typography variant="body2">
+                Signed in as {authUser.email}
+              </Typography>
+              {hasAmbassadorBadge && (
+                <Chip
+                  label="Ambassador"
+                  color="warning"
+                  size="small"
+                  sx={{ fontWeight: 600 }}
+                />
+              )}
               <Button size="small" onClick={async () => { await supabase.auth.signOut(); }}>
                 SIGN OUT
               </Button>
-            </Typography>
+            </Box>
           )}
         </Box>
 
