@@ -37,6 +37,36 @@ const ENV = useLive ? "LIVE" : "TEST";
 const toIso = (sec) => (sec ? new Date(sec * 1000).toISOString() : null);
 const nowIso = () => new Date().toISOString();
 
+async function notify(subject, payload = {}) {
+  try {
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
+      (process.env.VERCEL_URL
+        ? (process.env.VERCEL_URL.startsWith("http")
+            ? process.env.VERCEL_URL
+            : `https://${process.env.VERCEL_URL}`).replace(/\/$/, "")
+        : "");
+    if (!base) return;
+    const url = `${base}/api/_notify-email`;
+    if (!process.env.NOTIFY_SECRET) return;
+
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Notify-Secret": process.env.NOTIFY_SECRET,
+      },
+      body: JSON.stringify({
+        subject,
+        text: JSON.stringify(payload, null, 2),
+        html: `<pre>${JSON.stringify(payload, null, 2)}</pre>`,
+      }),
+    });
+  } catch {
+    // do not fail webhook because of notify
+  }
+}
+
 /** Ensure app_users exists/updated */
 async function upsertUser(user_id, email) {
   if (!user_id) return;
@@ -65,53 +95,44 @@ async function resolveUserIdFromCustomer(stripeCustomerId) {
   return data?.user_id ?? null;
 }
 
+/** Try to fetch user email for notifications */
+async function getEmailForUser(user_id, fallbackEmail = null) {
+  if (!user_id) return fallbackEmail;
+  const { data } = await supabaseAdmin
+    .from("app_users")
+    .select("email")
+    .eq("user_id", user_id)
+    .maybeSingle();
+  return data?.email || fallbackEmail;
+}
+
 /** Normalize + persist subscriptions for clean admin views */
 async function upsertSubscription({ user_id, sub }) {
   const item = sub.items?.data?.[0];
   const price = item?.price;
 
   const payload = {
-    // Primary key / conflict target
     subscription_id: sub.id,
-
-    // Stripe identifiers
     stripe_subscription_id: sub.id,
     customer_id: sub.customer || null,
     stripe_customer_id: sub.customer || null,
-
-    // Relationship
     user_id: user_id ?? null,
-
-    // Status
     status: sub.status || null,
     cancel_at_period_end: !!sub.cancel_at_period_end,
-
-    // Price info
     price_id: price?.id || null,
     price_nickname: price?.nickname || null,
     currency: price?.currency || null,
     interval: price?.recurring?.interval || null,
     amount: typeof price?.unit_amount === "number" ? price.unit_amount : null,
-
-    // Periods / dates
     started_at: toIso(sub.start_date),
     current_period_start: toIso(sub.current_period_start),
     current_period_end: toIso(sub.current_period_end),
     canceled_at: toIso(sub.canceled_at),
     trial_start: toIso(sub.trial_start),
     trial_end: toIso(sub.trial_end),
-
-    // Meta
     env: ENV.toLowerCase(),
     updated_at: nowIso(),
   };
-
-  console.log(`[wh:${ENV}] upsert subscription`, {
-    sub_id: payload.stripe_subscription_id,
-    status: payload.status,
-    user_id: payload.user_id,
-    cancel_at_period_end: payload.cancel_at_period_end,
-  });
 
   const { error } = await supabaseAdmin
     .from("app_subscriptions")
@@ -119,11 +140,9 @@ async function upsertSubscription({ user_id, sub }) {
 
   if (error) {
     console.error("[wh] upsert app_subscriptions ERROR:", error.message, { payload });
-  } else {
-    console.log("[wh] upsert app_subscriptions OK");
   }
 
-  // Opportunistic flip of is_pro (keep any DB-side triggers you have)
+  // Opportunistic is_pro flip
   if (user_id) {
     if (["active", "trialing", "past_due"].includes(sub.status)) {
       await supabaseAdmin
@@ -181,57 +200,155 @@ export default async function handler(req, res) {
         if (session.subscription) {
           const sub = await stripe.subscriptions.retrieve(session.subscription);
           await upsertSubscription({ user_id, sub });
+
+          // Notify if we're already in trial at this moment
+          if (sub.status === "trialing") {
+            const notifyEmail = await getEmailForUser(user_id, email);
+            await notify(`Trial started: ${notifyEmail || user_id}`, {
+              user_id,
+              email: notifyEmail,
+              subscription_id: sub.id,
+              trial_start: toIso(sub.trial_start),
+              trial_end: toIso(sub.trial_end),
+              env: ENV,
+            });
+          }
         }
         break;
       }
 
       /* -------------------- Subscription lifecycle -------------------- */
-      case "customer.subscription.created":
-      case "customer.subscription.updated":
-      case "customer.subscription.deleted": {
+      case "customer.subscription.created": {
         const sub = event.data.object;
-
         const user_id =
           sub?.metadata?.app_user_id ||
           sub?.metadata?.user_id ||
           (await resolveUserIdFromCustomer(sub?.customer)) ||
           null;
 
-        // Best-effort user email update when available
         await upsertUser(user_id, sub?.customer_email || null);
-
         await upsertSubscription({ user_id, sub });
+
+        if (sub.status === "trialing") {
+          const notifyEmail = await getEmailForUser(user_id, sub?.customer_email || null);
+          await notify(`Trial started: ${notifyEmail || user_id}`, {
+            user_id,
+            email: notifyEmail,
+            subscription_id: sub.id,
+            trial_start: toIso(sub.trial_start),
+            trial_end: toIso(sub.trial_end),
+            env: ENV,
+          });
+        }
         break;
       }
 
-      /* -------------------- Invoice outcomes (optional) -------------------- */
+      case "customer.subscription.updated": {
+        const sub = event.data.object;
+        const previous = event.data.previous_attributes || {};
+        const user_id =
+          sub?.metadata?.app_user_id ||
+          sub?.metadata?.user_id ||
+          (await resolveUserIdFromCustomer(sub?.customer)) ||
+          null;
+
+        await upsertUser(user_id, sub?.customer_email || null);
+        await upsertSubscription({ user_id, sub });
+
+        // Detect transition to trialing (rare but possible)
+        if (sub.status === "trialing" && previous.status !== "trialing") {
+          const notifyEmail = await getEmailForUser(user_id, sub?.customer_email || null);
+          await notify(`Trial started (update): ${notifyEmail || user_id}`, {
+            user_id,
+            email: notifyEmail,
+            subscription_id: sub.id,
+            trial_start: toIso(sub.trial_start),
+            trial_end: toIso(sub.trial_end),
+            env: ENV,
+          });
+        }
+
+        // Detect TRIAL -> ACTIVE (paid conversion)
+        const nowSec = Math.floor(Date.now() / 1000);
+        const converted =
+          sub.status === "active" &&
+          sub.trial_end &&
+          sub.trial_end < nowSec &&
+          previous.status !== "active";
+
+        if (converted) {
+          const notifyEmail = await getEmailForUser(user_id, sub?.customer_email || null);
+          await notify(`Trial converted to PAID: ${notifyEmail || user_id}`, {
+            user_id,
+            email: notifyEmail,
+            subscription_id: sub.id,
+            current_period_end: toIso(sub.current_period_end),
+            env: ENV,
+          });
+        }
+        break;
+      }
+
+      /* -------------------- Invoice (backup conversion signal) -------------------- */
       case "invoice.payment_succeeded": {
         const inv = event.data.object;
-        console.log(`[wh:${ENV}] invoice.payment_succeeded`, inv.id);
+        const subId = inv.subscription;
+
+        // Retrieve the sub to check conversion condition
+        if (subId) {
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const converted = sub.status === "active" && sub.trial_end && sub.trial_end < nowSec;
+
+          if (converted) {
+            const user_id =
+              sub?.metadata?.app_user_id ||
+              sub?.metadata?.user_id ||
+              (await resolveUserIdFromCustomer(sub?.customer)) ||
+              null;
+            const email = inv.customer_email || (await getEmailForUser(user_id, null));
+            await notify(`Trial converted to PAID: ${email || user_id}`, {
+              user_id,
+              email,
+              subscription_id: sub.id,
+              invoice_id: inv.id,
+              current_period_end: toIso(sub.current_period_end),
+              env: ENV,
+            });
+          }
+        }
         break;
       }
-      case "invoice.payment_failed": {
-        const inv = event.data.object;
-        console.warn(`[wh:${ENV}] invoice.payment_failed`, inv.id);
+
+      case "customer.subscription.deleted": {
+        const sub = event.data.object;
+        const user_id =
+          sub?.metadata?.app_user_id ||
+          sub?.metadata?.user_id ||
+          (await resolveUserIdFromCustomer(sub?.customer)) ||
+          null;
+
+        await upsertUser(user_id, sub?.customer_email || null);
+        await upsertSubscription({ user_id, sub });
+        // (Optional) notify on cancel; you didn't request it, so skipping
         break;
       }
 
       case "customer.subscription.trial_will_end": {
         const sub = event.data.object;
-        console.log(`[wh:${ENV}] trial_will_end for`, sub.id);
+        // Optional: notify that trial is about to end
         break;
       }
 
       default:
-        console.log(`[wh:${ENV}] Ignored event`, event.type);
+        // keep logs light in prod
         break;
     }
 
-    // Return 200 so Stripe considers the event delivered
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error(`[wh:${ENV}] handler error:`, err);
-    // Return 200 to avoid repeated retries if the failure is non-critical
+    // still 200 so Stripe doesn't retry forever on non-critical failures
     return res.status(200).json({ received: true, note: "handled with warnings" });
   }
 }

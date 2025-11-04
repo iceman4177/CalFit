@@ -1,4 +1,4 @@
-// /api/users/heartbeat.js (or your current filename)
+// /api/users/heartbeat.js
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 
 export const config = { api: { bodyParser: true } };
@@ -7,12 +7,14 @@ async function notify(subject, payload = {}) {
   try {
     const base =
       process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
-      process.env.VERCEL_URL?.replace(/\/$/, "")?.startsWith("http")
-        ? process.env.VERCEL_URL.replace(/\/$/, "")
-        : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+      (process.env.VERCEL_URL
+        ? (process.env.VERCEL_URL.startsWith("http")
+            ? process.env.VERCEL_URL
+            : `https://${process.env.VERCEL_URL}`).replace(/\/$/, "")
+        : "");
+    if (!base) return;
     const url = `${base}/api/_notify-email`;
-
-    if (!process.env.NOTIFY_SECRET || !url) return;
+    if (!process.env.NOTIFY_SECRET) return;
 
     await fetch(url, {
       method: "POST",
@@ -27,7 +29,7 @@ async function notify(subject, payload = {}) {
       }),
     });
   } catch {
-    // swallow notify errors to avoid affecting heartbeat
+    // never block heartbeat on notify
   }
 }
 
@@ -50,7 +52,7 @@ export default async function handler(req, res) {
 
     const now = new Date().toISOString();
 
-    // --- Check if we have seen this user before (by id if present; else by email)
+    // Check if we've seen this user before
     let hadExisting = false;
     if (id) {
       const existingById = await supabaseAdmin
@@ -69,7 +71,7 @@ export default async function handler(req, res) {
       hadExisting = !!existingByEmail?.data;
     }
 
-    // --- Upsert (existing behavior preserved)
+    // Upsert user row
     const payload = {
       email: String(email).toLowerCase(),
       last_seen_at: now,
@@ -89,7 +91,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    // --- Fire FIRST SIGN-IN email if this is a new user
+    // FIRST SIGN-IN email
     if (!hadExisting && data) {
       await notify(`New user signed in: ${data.email}`, {
         user_id: data.id || id || null,
