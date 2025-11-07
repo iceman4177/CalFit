@@ -48,6 +48,7 @@ export default async function handler(req, res) {
   const useLive = NODE_ENV === "production" && !!STRIPE_SECRET_KEY_LIVE;
   const envLabel = useLive ? "LIVE" : "TEST";
 
+  let stripe; // declare up here so catch can log
   try {
     const secretKey = useLive ? STRIPE_SECRET_KEY_LIVE : STRIPE_SECRET_KEY;
     const priceMonthly = useLive ? STRIPE_PRICE_ID_MONTHLY_LIVE : STRIPE_PRICE_ID_MONTHLY;
@@ -55,7 +56,7 @@ export default async function handler(req, res) {
 
     if (!secretKey) throw new Error(`[${envLabel}] Missing Stripe secret key`);
     const { default: Stripe } = await import("stripe");
-    const stripe = new Stripe(secretKey, { apiVersion: "2023-10-16" });
+    stripe = new Stripe(secretKey, { apiVersion: "2024-06-20" });
 
     const body = await readJson(req);
     const {
@@ -74,6 +75,8 @@ export default async function handler(req, res) {
     const priceId = period === "annual" ? priceAnnual : priceMonthly;
     if (!priceId) throw new Error(`[${envLabel}] Missing price for period='${period}'`);
 
+    // Try to find an existing Stripe customer mapping for this user.
+    // If found, we pass customer (only). If not found, we pass customer_email (only).
     let supabaseAdmin = null;
     try {
       const mod = await import("./_lib/supabaseAdmin.js");
@@ -82,9 +85,7 @@ export default async function handler(req, res) {
       /* optional */
     }
 
-    // Find or create Stripe Customer (env-safe)
     let stripeCustomerId = null;
-
     if (supabaseAdmin) {
       const { data: rows, error: selectErr } = await supabaseAdmin
         .from("app_stripe_customers")
@@ -93,47 +94,23 @@ export default async function handler(req, res) {
         .order("updated_at", { ascending: false })
         .limit(1);
 
-      if (!selectErr && rows?.length) {
-        stripeCustomerId = typeof rows[0].customer_id === "string" ? rows[0].customer_id.trim() : null;
+      if (selectErr && selectErr.code !== "PGRST116") {
+        console.warn("[checkout] supabase app_stripe_customers select error:", selectErr);
       }
+      stripeCustomerId = rows?.[0]?.customer_id || null;
     }
 
+    // If we think we have a customer, verify it exists; otherwise, ignore it.
     if (stripeCustomerId) {
       try {
+        // throws if not found
         await stripe.customers.retrieve(stripeCustomerId);
-      } catch (e) {
+      } catch {
         stripeCustomerId = null;
       }
     }
 
-    if (!stripeCustomerId) {
-      const created = await stripe.customers.create({
-        email: email || undefined,
-        metadata: { app_user_id: user_id, env: envLabel },
-      });
-      stripeCustomerId = created.id;
-
-      if (supabaseAdmin) {
-        try {
-          await supabaseAdmin
-            .from("app_stripe_customers")
-            .insert({
-              customer_id: stripeCustomerId,
-              user_id,
-              email: email ?? null,
-              updated_at: nowIso(),
-            });
-        } catch {
-          try {
-            await supabaseAdmin
-              .from("app_stripe_customers")
-              .update({ email: email ?? null, updated_at: nowIso() })
-              .eq("customer_id", stripeCustomerId);
-          } catch {}
-        }
-      }
-    }
-
+    // Build URLs
     const successUrl = absUrl(
       success_path.includes("session_id")
         ? success_path
@@ -143,17 +120,17 @@ export default async function handler(req, res) {
     const cancelUrl  = absUrl(cancel_path, APP_BASE_URL);
     const trialDays  = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
 
+    // Base session payload (shared)
     const sessionPayload = {
       mode: "subscription",
-      customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
       client_reference_id: user_id,
-      customer_email: email || undefined,
       metadata: { user_id, email: email || null, period, env: envLabel },
       success_url: successUrl,
       cancel_url: cancelUrl,
     };
+
     if (trialDays > 0) {
       sessionPayload.subscription_data = {
         trial_period_days: trialDays,
@@ -161,9 +138,42 @@ export default async function handler(req, res) {
       };
     }
 
+    // EITHER customer OR customer_email (never both)
+    if (stripeCustomerId) {
+      sessionPayload.customer = stripeCustomerId;
+    } else {
+      if (!email) throw new Error("Missing email for new customer checkout");
+      sessionPayload.customer_email = email;
+    }
+
     const session = await stripe.checkout.sessions.create(sessionPayload);
 
-    console.log(`[checkout:${envLabel}] session ${session.id} created for ${email || user_id} -> ${session.url}`);
+    // If this session already has a customer (happens when we passed 'customer'),
+    // we can ensure our mapping is up to date. For the customer_email path,
+    // we'll persist the created customer in the Stripe webhook after completion.
+    if (session.customer && typeof session.customer === "string" && supabaseAdmin) {
+      try {
+        await supabaseAdmin
+          .from("app_stripe_customers")
+          .upsert(
+            {
+              customer_id: session.customer,
+              user_id,
+              email: email ?? null,
+              updated_at: nowIso(),
+            },
+            { onConflict: "customer_id" }
+          );
+      } catch (e) {
+        console.warn("[checkout] upsert app_stripe_customers warning:", e?.message || e);
+      }
+    }
+
+    console.log(
+      `[checkout:${envLabel}] session ${session.id} created for ${
+        stripeCustomerId ? `customer ${stripeCustomerId}` : (email || user_id)
+      } -> ${session.url}`
+    );
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (err) {
     console.error(`[checkout:${envLabel}] error`, err);
