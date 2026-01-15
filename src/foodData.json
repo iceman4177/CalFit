@@ -59,5 +59,41 @@
   { "name": "Onion, chopped (1/2 cup)", "calories": 32 },
   { "name": "Garlic (1 clove)", "calories": 4 },
   { "name": "Olive Oil (1 tbsp)", "calories": 119 },
+
+  { "name": "Bacon (1/2 cup cooked)", "calories": 270 },
+  { "name": "Spinach (1/2 cup cooked)", "calories": 20 },
+  { "name": "Oats (1/2 cup dry)", "calories": 150 },
+  { "name": "Peanut Butter (1/2 tbsp)", "calories": 48 },
+  { "name": "White Rice (1/2 cup cooked)", "calories": 102 },
+  { "name": "Brown Rice (1/2 cup cooked)", "calories": 108 },
+  { "name": "Pasta (1/2 cup cooked)", "calories": 100 },
+  { "name": "Quinoa (1/2 cup cooked)", "calories": 111 },
+  { "name": "Lentils (1/2 cup cooked)", "calories": 115 },
+  { "name": "Orzo (1/2 cup cooked)", "calories": 105 },
+  { "name": "Broccoli (1/2 cup)", "calories": 28 },
+  { "name": "Carrots (1/2 cup)", "calories": 25 },
+  { "name": "Zucchini (1/2 cup cooked)", "calories": 9 },
+  { "name": "Diced Tomatoes (1 cup)", "calories": 40 },
+
+  { "name": "Avocado (1/2 avocado)", "calories": 120 },
+  { "name": "Avocado (1/4 avocado)", "calories": 60 },
+
+  { "name": "Chicken Breast (1/2 cup cooked)", "calories": 115 },
+  { "name": "Ground Turkey (93% lean, 1/2 cup cooked)", "calories": 120 },
+  { "name": "Eggs (2 large)", "calories": 140 },
+  { "name": "Egg Whites (1/2 cup)", "calories": 120 },
+
+  { "name": "Greek Yogurt (plain, 1/2 cup)", "calories": 70 },
+  { "name": "Cottage Cheese (1/2 cup)", "calories": 110 },
+
+  { "name": "Sweet Potato (1/2 cup cooked)", "calories": 90 },
+  { "name": "Oatmeal (1/2 cup cooked)", "calories": 75 },
+
+  { "name": "Protein Shake (2 scoops)", "calories": 240 },
+  { "name": "Whey Protein (1 scoop, water)", "calories": 120 },
+
+  { "name": "Olive Oil (1 tsp)", "calories": 40 },
+  { "name": "Mixed Nuts (1/2 cup)", "calories": 400 },
+
   { "name": "Custom Food (enter calories/macros)", "calories": 0, "action": "open_custom_nutrition" }
 ]
