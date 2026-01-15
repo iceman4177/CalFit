@@ -1,99 +1,180 @@
 [
-  { "name": "Apple (medium)", "calories": 95 },
-  { "name": "Banana (medium)", "calories": 105 },
-  { "name": "Chicken Breast (100g)", "calories": 165 },
-  { "name": "Egg (large)", "calories": 70 },
-  { "name": "Oatmeal (1 cup cooked)", "calories": 150 },
-  { "name": "White Rice (1 cup cooked)", "calories": 205 },
-  { "name": "Brown Rice (1 cup cooked)", "calories": 215 },
-  { "name": "Broccoli (1 cup)", "calories": 55 },
-  { "name": "Avocado (whole)", "calories": 240 },
-  { "name": "Peanut Butter (2 tbsp)", "calories": 190 },
-  { "name": "Almonds (1 oz)", "calories": 165 },
-  { "name": "Greek Yogurt (plain, 6 oz)", "calories": 100 },
-  { "name": "Protein Shake (1 scoop)", "calories": 120 },
-  { "name": "Granola Bar", "calories": 130 },
-  { "name": "Cheddar Cheese (1 oz)", "calories": 115 },
-  { "name": "Turkey Sandwich", "calories": 320 },
-  { "name": "Pasta (1 cup cooked)", "calories": 200 },
-  { "name": "Salmon (100g)", "calories": 208 },
-  { "name": "Ground Beef (80/20, 100g)", "calories": 254 },
-  { "name": "Sweet Potato (1 medium)", "calories": 103 },
-  { "name": "Carrots (1 cup)", "calories": 50 },
-  { "name": "Cucumber (1 medium)", "calories": 45 },
-  { "name": "Tuna (canned, 3 oz)", "calories": 100 },
-  { "name": "Milk (1 cup, whole)", "calories": 150 },
-  { "name": "Orange (medium)", "calories": 62 },
-  { "name": "Strawberries (1 cup)", "calories": 50 },
-  { "name": "Blueberries (1 cup)", "calories": 85 },
-  { "name": "Toast (1 slice)", "calories": 80 },
-  { "name": "Bagel (plain)", "calories": 280 },
-  { "name": "Butter (1 tbsp)", "calories": 100 },
-  { "name": "Cereal (1 cup)", "calories": 110 },
-  { "name": "Pizza Slice (cheese)", "calories": 285 },
-  { "name": "Burger (single patty)", "calories": 354 },
-  { "name": "French Fries (small)", "calories": 230 },
-  { "name": "Ice Cream (1/2 cup)", "calories": 137 },
-  { "name": "Soda (12 oz can)", "calories": 150 },
-  { "name": "Coffee (black)", "calories": 2 },
-  { "name": "Latte (medium)", "calories": 190 },
-  { "name": "Smoothie (16 oz)", "calories": 250 },
-  { "name": "Chocolate Bar (1.5 oz)", "calories": 210 },
-  { "name": "Popcorn (1 cup, air-popped)", "calories": 30 },
-  { "name": "Trail Mix (1 oz)", "calories": 140 },
-  { "name": "Egg Whites (3 tbsp)", "calories": 51 },
-  { "name": "Tofu (100g)", "calories": 76 },
-  { "name": "Quinoa (1 cup cooked)", "calories": 222 },
-  { "name": "Lentils (1 cup cooked)", "calories": 230 },
-  { "name": "Hummus (2 tbsp)", "calories": 70 },
-  { "name": "Spinach (1 cup raw)", "calories": 7 },
-  { "name": "Zucchini (1 cup cooked)", "calories": 17 },
-  { "name": "Greek Yogurt (plain, 150 g / 5.3 oz)", "calories": 90 },
-  { "name": "Pepper Jack Cheese Stick (1 stick)", "calories": 90 },
-  { "name": "Fairlife Core Power Elite (42 g protein)", "calories": 240 },
-  { "name": "Orzo (1 cup cooked)", "calories": 210 },
-  { "name": "Bison (100g)", "calories": 143 },
-  { "name": "Beef Steak, diced (100g)", "calories": 210 },
-  { "name": "Diced Tomatoes (1/2 cup)", "calories": 20 },
-  { "name": "Green Bell Pepper (1 cup)", "calories": 30 },
-  { "name": "Onion, chopped (1/2 cup)", "calories": 32 },
-  { "name": "Garlic (1 clove)", "calories": 4 },
-  { "name": "Olive Oil (1 tbsp)", "calories": 119 },
+  { "id": "apple", "name": "Apple", "portions": [{ "id": "medium", "label": "1 medium", "unit": "item", "calories": 95 }] },
+  { "id": "banana", "name": "Banana", "portions": [{ "id": "medium", "label": "1 medium", "unit": "item", "calories": 105 }] },
 
-  { "name": "Bacon (1/2 cup cooked)", "calories": 270 },
-  { "name": "Spinach (1/2 cup cooked)", "calories": 20 },
-  { "name": "Oats (1/2 cup dry)", "calories": 150 },
-  { "name": "Peanut Butter (1/2 tbsp)", "calories": 48 },
-  { "name": "White Rice (1/2 cup cooked)", "calories": 102 },
-  { "name": "Brown Rice (1/2 cup cooked)", "calories": 108 },
-  { "name": "Pasta (1/2 cup cooked)", "calories": 100 },
-  { "name": "Quinoa (1/2 cup cooked)", "calories": 111 },
-  { "name": "Lentils (1/2 cup cooked)", "calories": 115 },
-  { "name": "Orzo (1/2 cup cooked)", "calories": 105 },
-  { "name": "Broccoli (1/2 cup)", "calories": 28 },
-  { "name": "Carrots (1/2 cup)", "calories": 25 },
-  { "name": "Zucchini (1/2 cup cooked)", "calories": 9 },
-  { "name": "Diced Tomatoes (1 cup)", "calories": 40 },
+  { "id": "chicken_breast", "name": "Chicken Breast", "portions": [
+    { "id": "100g", "label": "100 g", "unit": "g", "calories": 165 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115 }
+  ] },
 
-  { "name": "Avocado (1/2 avocado)", "calories": 120 },
-  { "name": "Avocado (1/4 avocado)", "calories": 60 },
+  { "id": "eggs", "name": "Eggs", "portions": [
+    { "id": "1_large", "label": "1 large egg", "unit": "egg", "calories": 70 }
+  ] },
 
-  { "name": "Chicken Breast (1/2 cup cooked)", "calories": 115 },
-  { "name": "Ground Turkey (93% lean, 1/2 cup cooked)", "calories": 120 },
-  { "name": "Eggs (2 large)", "calories": 140 },
-  { "name": "Egg Whites (1/2 cup)", "calories": 120 },
+  { "id": "egg_whites", "name": "Egg Whites", "portions": [
+    { "id": "3_tbsp", "label": "3 tbsp", "unit": "tbsp", "calories": 51 },
+    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 120 }
+  ] },
 
-  { "name": "Greek Yogurt (plain, 1/2 cup)", "calories": 70 },
-  { "name": "Cottage Cheese (1/2 cup)", "calories": 110 },
+  { "id": "oatmeal", "name": "Oatmeal", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 150 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 75 }
+  ] },
 
-  { "name": "Sweet Potato (1/2 cup cooked)", "calories": 90 },
-  { "name": "Oatmeal (1/2 cup cooked)", "calories": 75 },
+  { "id": "oats", "name": "Oats", "portions": [
+    { "id": "half_cup_dry", "label": "1/2 cup dry", "unit": "cup", "calories": 150 }
+  ] },
 
-  { "name": "Protein Shake (2 scoops)", "calories": 240 },
-  { "name": "Whey Protein (1 scoop, water)", "calories": 120 },
+  { "id": "white_rice", "name": "White Rice", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 205 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 102 }
+  ] },
 
-  { "name": "Olive Oil (1 tsp)", "calories": 40 },
-  { "name": "Mixed Nuts (1/2 cup)", "calories": 400 },
+  { "id": "brown_rice", "name": "Brown Rice", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 215 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 108 }
+  ] },
 
-  { "name": "Custom Food (enter calories/macros)", "calories": 0, "action": "open_custom_nutrition" }
+  { "id": "broccoli", "name": "Broccoli", "portions": [
+    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 55 },
+    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 28 }
+  ] },
+
+  { "id": "avocado", "name": "Avocado", "portions": [
+    { "id": "whole", "label": "1 whole", "unit": "item", "calories": 240 },
+    { "id": "half", "label": "1/2 avocado", "unit": "item", "calories": 120 },
+    { "id": "quarter", "label": "1/4 avocado", "unit": "item", "calories": 60 }
+  ] },
+
+  { "id": "peanut_butter", "name": "Peanut Butter", "portions": [
+    { "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 190 },
+    { "id": "half_tbsp", "label": "1/2 tbsp", "unit": "tbsp", "calories": 48 }
+  ] },
+
+  { "id": "almonds", "name": "Almonds", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 165 }] },
+
+  { "id": "greek_yogurt", "name": "Greek Yogurt (plain)", "portions": [
+    { "id": "6_oz", "label": "6 oz", "unit": "oz", "calories": 100 },
+    { "id": "150g", "label": "150 g / 5.3 oz", "unit": "g", "calories": 90 },
+    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 70 }
+  ] },
+
+  { "id": "protein_shake", "name": "Protein Shake", "portions": [
+    { "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120 },
+    { "id": "2_scoops", "label": "2 scoops", "unit": "scoop", "calories": 240 }
+  ] },
+
+  { "id": "whey_protein", "name": "Whey Protein (water)", "portions": [{ "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120 }] },
+
+  { "id": "granola_bar", "name": "Granola Bar", "portions": [{ "id": "1_bar", "label": "1 bar", "unit": "item", "calories": 130 }] },
+  { "id": "cheddar_cheese", "name": "Cheddar Cheese", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 115 }] },
+  { "id": "pepper_jack_stick", "name": "Pepper Jack Cheese Stick", "portions": [{ "id": "1_stick", "label": "1 stick", "unit": "item", "calories": 90 }] },
+
+  { "id": "turkey_sandwich", "name": "Turkey Sandwich", "portions": [{ "id": "1", "label": "1 sandwich", "unit": "item", "calories": 320 }] },
+
+  { "id": "pasta", "name": "Pasta", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 200 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 100 }
+  ] },
+
+  { "id": "salmon", "name": "Salmon", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 208 }] },
+  { "id": "ground_beef_8020", "name": "Ground Beef (80/20)", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 254 }] },
+  { "id": "bison", "name": "Bison", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 143 }] },
+  { "id": "beef_steak_diced", "name": "Beef Steak, diced", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 210 }] },
+  { "id": "ground_turkey_93", "name": "Ground Turkey (93% lean)", "portions": [{ "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 120 }] },
+
+  { "id": "sweet_potato", "name": "Sweet Potato", "portions": [
+    { "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 103 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 90 }
+  ] },
+
+  { "id": "carrots", "name": "Carrots", "portions": [
+    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50 },
+    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 25 }
+  ] },
+
+  { "id": "cucumber", "name": "Cucumber", "portions": [{ "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 45 }] },
+
+  { "id": "tuna_canned", "name": "Tuna (canned)", "portions": [{ "id": "3_oz", "label": "3 oz", "unit": "oz", "calories": 100 }] },
+
+  { "id": "milk_whole", "name": "Milk (whole)", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 150 }] },
+
+  { "id": "orange", "name": "Orange", "portions": [{ "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 62 }] },
+  { "id": "strawberries", "name": "Strawberries", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50 }] },
+  { "id": "blueberries", "name": "Blueberries", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 85 }] },
+
+  { "id": "toast", "name": "Toast", "portions": [{ "id": "1_slice", "label": "1 slice", "unit": "slice", "calories": 80 }] },
+  { "id": "bagel", "name": "Bagel (plain)", "portions": [{ "id": "1", "label": "1 bagel", "unit": "item", "calories": 280 }] },
+
+  { "id": "butter", "name": "Butter", "portions": [{ "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 100 }] },
+
+  { "id": "olive_oil", "name": "Olive Oil", "portions": [
+    { "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 119 },
+    { "id": "1_tsp", "label": "1 tsp", "unit": "tsp", "calories": 40 }
+  ] },
+
+  { "id": "cereal", "name": "Cereal", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 110 }] },
+
+  { "id": "pizza_slice_cheese", "name": "Pizza Slice (cheese)", "portions": [{ "id": "1", "label": "1 slice", "unit": "slice", "calories": 285 }] },
+  { "id": "burger_single", "name": "Burger (single patty)", "portions": [{ "id": "1", "label": "1 burger", "unit": "item", "calories": 354 }] },
+  { "id": "fries_small", "name": "French Fries", "portions": [{ "id": "small", "label": "Small", "unit": "serving", "calories": 230 }] },
+
+  { "id": "ice_cream", "name": "Ice Cream", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 137 }] },
+  { "id": "soda", "name": "Soda", "portions": [{ "id": "12_oz", "label": "12 oz can", "unit": "oz", "calories": 150 }] },
+
+  { "id": "coffee_black", "name": "Coffee (black)", "portions": [{ "id": "1", "label": "1 cup", "unit": "cup", "calories": 2 }] },
+  { "id": "latte", "name": "Latte", "portions": [{ "id": "medium", "label": "Medium", "unit": "serving", "calories": 190 }] },
+
+  { "id": "smoothie", "name": "Smoothie", "portions": [{ "id": "16_oz", "label": "16 oz", "unit": "oz", "calories": 250 }] },
+  { "id": "chocolate_bar", "name": "Chocolate Bar", "portions": [{ "id": "1_5_oz", "label": "1.5 oz", "unit": "oz", "calories": 210 }] },
+
+  { "id": "popcorn_air", "name": "Popcorn (air-popped)", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30 }] },
+  { "id": "trail_mix", "name": "Trail Mix", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 140 }] },
+  { "id": "mixed_nuts", "name": "Mixed Nuts", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 400 }] },
+
+  { "id": "tofu", "name": "Tofu", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 76 }] },
+
+  { "id": "quinoa", "name": "Quinoa", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 222 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 111 }
+  ] },
+
+  { "id": "lentils", "name": "Lentils", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 230 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115 }
+  ] },
+
+  { "id": "hummus", "name": "Hummus", "portions": [{ "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 70 }] },
+
+  { "id": "spinach", "name": "Spinach", "portions": [
+    { "id": "1_cup_raw", "label": "1 cup raw", "unit": "cup", "calories": 7 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 20 }
+  ] },
+
+  { "id": "zucchini", "name": "Zucchini", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 17 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 9 }
+  ] },
+
+  { "id": "orzo", "name": "Orzo", "portions": [
+    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 210 },
+    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 105 }
+  ] },
+
+  { "id": "diced_tomatoes", "name": "Diced Tomatoes", "portions": [
+    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 20 },
+    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 40 }
+  ] },
+
+  { "id": "green_bell_pepper", "name": "Green Bell Pepper", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30 }] },
+  { "id": "onion_chopped", "name": "Onion (chopped)", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 32 }] },
+  { "id": "garlic", "name": "Garlic", "portions": [{ "id": "1_clove", "label": "1 clove", "unit": "clove", "calories": 4 }] },
+
+  { "id": "bacon", "name": "Bacon", "portions": [{ "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 270 }] },
+
+  { "id": "cottage_cheese", "name": "Cottage Cheese", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 110 }] },
+
+  { "id": "fairlife_core_power_elite", "name": "Fairlife Core Power Elite (42 g protein)", "portions": [{ "id": "1_bottle", "label": "1 bottle", "unit": "item", "calories": 240 }] },
+
+  { "id": "custom_food", "name": "Custom Food (enter calories/macros)", "action": "open_custom_nutrition" }
 ]

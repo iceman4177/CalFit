@@ -21,11 +21,14 @@ import {
   Stack,
   Card,
   CardContent,
-  CardHeader,
   Chip,
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -46,7 +49,7 @@ import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
-import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
+import { callAIGenerate } from './lib/ai';
 
 // ---------- Pro / gating helpers ----------
 const isProUser = () => {
@@ -55,11 +58,8 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-const getMealAICount = () =>
-  parseInt(localStorage.getItem('aiMealCount') || '0', 10);
-
-const incMealAICount = () =>
-  localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
+const getMealAICount = () => parseInt(localStorage.getItem('aiMealCount') || '0', 10);
+const incMealAICount = () => localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
 
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
@@ -67,6 +67,28 @@ function kcalFromMacros(p = 0, c = 0, f = 0) {
     C = Number(c) || 0,
     F = Number(f) || 0;
   return Math.max(0, Math.round(P * 4 + C * 4 + F * 9));
+}
+
+function pluralizeUnit(unit, qty) {
+  const q = Number(qty) || 0;
+  if (!unit) return '';
+  if (q === 1) return unit;
+
+  // common irregular-ish
+  if (unit === 'slice') return 'slices';
+  if (unit === 'clove') return 'cloves';
+  if (unit === 'egg') return 'eggs';
+
+  // units that generally shouldn't pluralize
+  const noPlural = new Set(['g', 'oz', 'tbsp', 'tsp', 'cup', 'serving', 'item', 'scoop']);
+  if (noPlural.has(unit)) return unit;
+
+  return `${unit}s`;
+}
+
+function safeNumber(val, fallback = 0) {
+  const n = typeof val === 'string' && val.trim() === '' ? NaN : Number(val);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 // ---------- Dialogs ----------
@@ -104,12 +126,7 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
       <DialogTitle>Custom Food</DialogTitle>
       <DialogContent>
         <Stack spacing={1.5} sx={{ mt: 1 }}>
-          <TextField
-            label="Food name"
-            fullWidth
-            value={name}
-            onChange={e => setName(e.target.value)}
-          />
+          <TextField label="Food name" fullWidth value={name} onChange={e => setName(e.target.value)} />
           <TextField
             label="Calories (kcal)"
             type="number"
@@ -121,27 +138,9 @@ function CustomNutritionDialog({ open, onClose, onConfirm }) {
             Or enter macros (we’ll calculate calories if Calories is blank)
           </Typography>
           <Stack direction="row" spacing={1.5}>
-            <TextField
-              label="Protein (g)"
-              type="number"
-              fullWidth
-              value={p}
-              onChange={e => setP(e.target.value)}
-            />
-            <TextField
-              label="Carbs (g)"
-              type="number"
-              fullWidth
-              value={c}
-              onChange={e => setC(e.target.value)}
-            />
-            <TextField
-              label="Fat (g)"
-              type="number"
-              fullWidth
-              value={f}
-              onChange={e => setF(e.target.value)}
-            />
+            <TextField label="Protein (g)" type="number" fullWidth value={p} onChange={e => setP(e.target.value)} />
+            <TextField label="Carbs (g)" type="number" fullWidth value={c} onChange={e => setC(e.target.value)} />
+            <TextField label="Fat (g)" type="number" fullWidth value={f} onChange={e => setF(e.target.value)} />
           </Stack>
           <Typography variant="body2" color="text.secondary">
             Total calories: <strong>{effectiveCalories}</strong>
@@ -177,31 +176,16 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
   const [rows, setRows] = useState([{ name: '', calories: '' }]);
 
   useEffect(() => {
-    if (open) {
-      setRows([{ name: '', calories: '' }]);
-    }
+    if (open) setRows([{ name: '', calories: '' }]);
   }, [open]);
 
-  const addRow = () =>
-    setRows(prev => [...prev, { name: '', calories: '' }]);
+  const addRow = () => setRows(prev => [...prev, { name: '', calories: '' }]);
+  const update = (i, key, val) => setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
+  const remove = i => setRows(prev => prev.filter((_, idx) => idx !== i));
 
-  const update = (i, key, val) =>
-    setRows(prev =>
-      prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r))
-    );
+  const total = useMemo(() => rows.reduce((s, r) => s + (parseInt(r.calories, 10) || 0), 0), [rows]);
 
-  const remove = i =>
-    setRows(prev => prev.filter((_, idx) => idx !== i));
-
-  const total = useMemo(
-    () =>
-      rows.reduce((s, r) => s + (parseInt(r.calories, 10) || 0), 0),
-    [rows]
-  );
-
-  const hasValid = rows.every(
-    r => r.name.trim().length > 0 && (parseInt(r.calories, 10) || 0) > 0
-  );
+  const hasValid = rows.every(r => r.name.trim().length > 0 && (parseInt(r.calories, 10) || 0) > 0);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -213,33 +197,16 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
             <Stack key={i} direction="row" spacing={1}>
-              <TextField
-                label={`Ingredient ${i + 1}`}
-                value={r.name}
-                onChange={e => update(i, 'name', e.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="Calories"
-                type="number"
-                value={r.calories}
-                onChange={e => update(i, 'calories', e.target.value)}
-                sx={{ width: 140 }}
-              />
-              <IconButton
-                aria-label="remove"
-                onClick={() => remove(i)}
-                disabled={rows.length === 1}
-              >
+              <TextField label={`Ingredient ${i + 1}`} value={r.name} onChange={e => update(i, 'name', e.target.value)} fullWidth />
+              <TextField label="Calories" type="number" value={r.calories} onChange={e => update(i, 'calories', e.target.value)} sx={{ width: 140 }} />
+              <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
                 <DeleteIcon />
               </IconButton>
             </Stack>
           ))}
-
           <Button onClick={addRow} startIcon={<AddCircleOutlineIcon />}>
             Add Ingredient
           </Button>
-
           <Typography variant="body2" sx={{ mt: 0.5 }}>
             Bowl total: <strong>{total}</strong> kcal
           </Typography>
@@ -252,14 +219,8 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
           variant="contained"
           disabled={!hasValid || total <= 0}
           onClick={() => {
-            const pretty = rows
-              .map(r => r.name.trim())
-              .filter(Boolean)
-              .join(', ');
-            onConfirm?.({
-              name: `Bowl: ${pretty}`,
-              calories: total
-            });
+            const pretty = rows.map(r => r.name.trim()).filter(Boolean).join(', ');
+            onConfirm?.({ name: `Bowl: ${pretty}`, calories: total });
             onClose?.();
           }}
         >
@@ -273,27 +234,20 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
 // ---------- Main ----------
 export default function MealTracker({ onMealUpdate }) {
   // onboarding tips
-  const [FoodTip, triggerFoodTip] = useFirstTimeTip(
-    'tip_food',
-    'Search or type a food name.'
-  );
-  const [CalTip, triggerCalTip] = useFirstTimeTip(
-    'tip_cal',
-    'Enter calories.'
-  );
-  const [AddTip, triggerAddTip] = useFirstTimeTip(
-    'tip_add',
-    'Tap to add this meal.'
-  );
-  const [ClearTip, triggerClearTip] = useFirstTimeTip(
-    'tip_clear',
-    'Tap to clear today’s meals.'
-  );
+  const [FoodTip, triggerFoodTip] = useFirstTimeTip('tip_food', 'Search or type a food name.');
+  const [CalTip, triggerCalTip] = useFirstTimeTip('tip_cal', 'Enter calories.');
+  const [AddTip, triggerAddTip] = useFirstTimeTip('tip_add', 'Tap to add this meal.');
+  const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
   // manual entry state
   const [foodInput, setFoodInput] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
+
+  const [selectedPortionId, setSelectedPortionId] = useState('');
+  const [qty, setQty] = useState('1');
+
   const [calories, setCalories] = useState('');
+  const [caloriesManualOverride, setCaloriesManualOverride] = useState(false);
 
   // logged meals
   const [mealLog, setMealLog] = useState([]);
@@ -313,18 +267,8 @@ export default function MealTracker({ onMealUpdate }) {
 
   // canonical "today"
   const now = new Date();
-  const todayUS = now.toLocaleDateString('en-US'); // e.g. 10/26/2025
-  const todayISO = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  )
-    .toISOString()
-    .slice(0, 10); // YYYY-MM-DD @ local midnight
-
-  // goalType (for AI probe)
-  const stored = JSON.parse(localStorage.getItem('userData') || '{}');
-  const goalType = stored.goalType || 'maintain';
+  const todayUS = now.toLocaleDateString('en-US');
+  const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
 
   // streak + initial data load
   useEffect(() => {
@@ -337,29 +281,20 @@ export default function MealTracker({ onMealUpdate }) {
     const meals = todayLog ? todayLog.meals || [] : [];
     setMealLog(meals);
 
-    const totalInit = meals.reduce(
-      (s, m) => s + (Number(m.calories) || 0),
-      0
-    );
+    const totalInit = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
     onMealUpdate?.(totalInit);
   }, [onMealUpdate, todayUS]);
 
   // ------------ persistence helpers ------------
   const persistToday = meals => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(
-      e => e.date !== todayUS
-    );
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
     rest.push({ date: todayUS, meals });
     localStorage.setItem('mealHistory', JSON.stringify(rest));
   };
 
   const emitConsumed = total => {
     try {
-      window.dispatchEvent(
-        new CustomEvent('slimcal:consumed:update', {
-          detail: { date: todayISO, consumed: total }
-        })
-      );
+      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: total } }));
     } catch {}
   };
 
@@ -376,14 +311,8 @@ export default function MealTracker({ onMealUpdate }) {
   const syncDailyMetrics = async consumedTotal => {
     const burned = getBurnedTodayLocal(todayUS);
 
-    const cache = JSON.parse(
-      localStorage.getItem('dailyMetricsCache') || '{}'
-    );
-    cache[todayISO] = {
-      burned,
-      consumed: consumedTotal,
-      net: consumedTotal - burned
-    };
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
+    cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
     localStorage.setItem('consumedToday', String(consumedTotal));
     emitConsumed(consumedTotal);
@@ -399,19 +328,44 @@ export default function MealTracker({ onMealUpdate }) {
 
   const saveDay = meals => {
     persistToday(meals);
-    const total = meals.reduce(
-      (s, m) => s + (Number(m.calories) || 0),
-      0
-    );
+    const total = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
     onMealUpdate?.(total);
     syncDailyMetrics(total);
   };
 
-  // core logger for any meal object
-  const logOne = async ({ name, calories, macros }) => {
+  // Helpers for selected food/portion
+  const portions = useMemo(() => {
+    return Array.isArray(selectedFood?.portions) ? selectedFood.portions : [];
+  }, [selectedFood]);
+
+  const selectedPortion = useMemo(() => {
+    if (!portions.length) return null;
+    const found = portions.find(p => String(p.id) === String(selectedPortionId));
+    return found || portions[0] || null;
+  }, [portions, selectedPortionId]);
+
+  const autoCalories = useMemo(() => {
+    if (!selectedFood || !selectedPortion) return null;
+    const q = safeNumber(qty, 0);
+    const per = safeNumber(selectedPortion.calories, 0);
+    if (q <= 0 || per <= 0) return 0;
+    return Math.round(q * per);
+  }, [selectedFood, selectedPortion, qty]);
+
+  // When food/portion/qty changes, update calories unless user overrode it manually
+  useEffect(() => {
+    if (!selectedFood || !selectedPortion) return;
+    if (caloriesManualOverride) return;
+    if (autoCalories == null) return;
+    setCalories(String(autoCalories));
+  }, [selectedFood, selectedPortion, qty, autoCalories, caloriesManualOverride]);
+
+  // core logger for any meal object (local + optional cloud)
+  const logOne = async ({ name, calories, macros, meta }) => {
     const safe = {
       name,
-      calories: Math.max(0, Number(calories) || 0)
+      calories: Math.max(0, Number(calories) || 0),
+      ...(meta || {})
     };
 
     setMealLog(prev => {
@@ -422,10 +376,14 @@ export default function MealTracker({ onMealUpdate }) {
 
     updateStreak();
 
-    // optional: send to Supabase for history
     try {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
+
+        // Build one "meal item" line with qty/unit if present
+        const qtyNum = meta?.qty != null ? Number(meta.qty) : 1;
+        const unitStr = meta?.unit || 'serving';
+
         await saveMeal(
           user.id,
           {
@@ -435,9 +393,9 @@ export default function MealTracker({ onMealUpdate }) {
           },
           [
             {
-              food_name: safe.name,
-              qty: 1,
-              unit: 'serving',
+              food_name: meta?.food_name || safe.name,
+              qty: Number.isFinite(qtyNum) ? qtyNum : 1,
+              unit: unitStr,
               calories: safe.calories,
               protein: macros?.protein_g ?? null,
               carbs: macros?.carbs_g ?? null,
@@ -453,16 +411,65 @@ export default function MealTracker({ onMealUpdate }) {
 
   // manual "Add Meal" button
   const handleAdd = async () => {
+    const nameText = foodInput.trim();
+
+    // Structured path: selectedFood + portion + qty
+    if (selectedFood && selectedPortion) {
+      const q = safeNumber(qty, 0);
+      if (!Number.isFinite(q) || q <= 0) {
+        alert('Enter a valid quantity.');
+        return;
+      }
+
+      const c = safeNumber(calories, NaN);
+      if (!Number.isFinite(c) || c <= 0) {
+        alert('Calories must be greater than 0.');
+        return;
+      }
+
+      const unit = selectedPortion.unit || 'serving';
+      const unitPretty = pluralizeUnit(unit, q);
+
+      // Nice display name: "Eggs — 6 eggs (1 large egg)"
+      const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
+
+      await logOne({
+        name: displayName,
+        calories: c,
+        meta: {
+          food_id: selectedFood.id,
+          portion_id: selectedPortion.id,
+          portion_label: selectedPortion.label,
+          qty: q,
+          unit,
+          food_name: selectedFood.name
+        }
+      });
+
+      setFoodInput('');
+      setSelectedFood(null);
+      setSelectedPortionId('');
+      setQty('1');
+      setCalories('');
+      setCaloriesManualOverride(false);
+      return;
+    }
+
+    // Legacy/freeSolo path: requires manual calories
     const c = Number.parseInt(calories, 10);
-    if (!foodInput.trim() || !Number.isFinite(c) || c <= 0) {
+    if (!nameText || !Number.isFinite(c) || c <= 0) {
       alert('Enter a valid food & calories.');
       return;
     }
-    await logOne({ name: foodInput.trim(), calories: c });
+
+    await logOne({ name: nameText, calories: c });
 
     setFoodInput('');
     setCalories('');
     setSelectedFood(null);
+    setSelectedPortionId('');
+    setQty('1');
+    setCaloriesManualOverride(false);
   };
 
   const handleDeleteMeal = index => {
@@ -474,9 +481,7 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const handleClear = () => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(
-      e => e.date !== todayUS
-    );
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
     localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]);
     onMealUpdate?.(0);
@@ -490,26 +495,16 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
-    // Optional local pre-gate for non-pros; the server is still the authority
     if (!isProUser() && getMealAICount() >= 3) {
       // continue to server probe; if gated, it will 402
     }
 
     try {
-      const dietPreference =
-        localStorage.getItem('diet_preference') || 'omnivore';
-      const trainingIntent =
-        localStorage.getItem('training_intent') || 'general';
-      const proteinMealG = parseInt(
-        localStorage.getItem('protein_target_meal_g') || '0',
-        10
-      );
-      const calorieBias = parseInt(
-        localStorage.getItem('calorie_bias') || '0',
-        10
-      );
+      const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
+      const trainingIntent = localStorage.getItem('training_intent') || 'general';
+      const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
+      const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      // Probe with count=1; entitled users (Pro/trial) will always pass
       await callAIGenerate({
         feature: 'meal',
         user_id: user?.id || null,
@@ -529,9 +524,7 @@ export default function MealTracker({ onMealUpdate }) {
       console.warn('[MealTracker] gateway probe failed', e);
     }
 
-    if (!isProUser()) {
-      incMealAICount();
-    }
+    if (!isProUser()) incMealAICount();
 
     setShowSuggest(true);
 
@@ -542,13 +535,15 @@ export default function MealTracker({ onMealUpdate }) {
     }, 50);
   }, [showSuggest, user?.id]);
 
-  const total = mealLog.reduce(
-    (s, m) => s + (Number(m.calories) || 0),
-    0
-  );
+  const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
 
-  // Autocomplete shows real foods only
-  const options = useMemo(() => foodData, []);
+  // Autocomplete options: foods only (portions handled separately)
+  const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
+
+  // Handle special custom action row (kept as a "pseudo option" below)
+  const customAction = useMemo(() => {
+    return Array.isArray(foodData) ? foodData.find(f => f.action === 'open_custom_nutrition') : null;
+  }, []);
 
   return (
     <Container
@@ -569,7 +564,7 @@ export default function MealTracker({ onMealUpdate }) {
       <Card
         sx={{
           borderRadius: 3,
-          boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
         }}
       >
         <CardContent sx={{ pb: 2 }}>
@@ -588,7 +583,6 @@ export default function MealTracker({ onMealUpdate }) {
               </Typography>
             </Box>
 
-            {/* ✅ Single AI entrypoint (no duplicates elsewhere) */}
             <Button
               onClick={handleToggleMealIdeas}
               variant={showSuggest ? 'outlined' : 'contained'}
@@ -637,35 +631,99 @@ export default function MealTracker({ onMealUpdate }) {
           <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
         </AccordionSummary>
         <AccordionDetails>
-          {/* Food + Calories */}
           <Box sx={{ mb: 2 }}>
             <Autocomplete
               freeSolo
               options={options}
-              getOptionLabel={o => o.name}
+              getOptionLabel={o => (typeof o === 'string' ? o : o?.name || '')}
               value={selectedFood}
               inputValue={foodInput}
               onChange={(_, v) => {
+                // If user types freeSolo string
                 if (!v) {
                   setSelectedFood(null);
+                  setSelectedPortionId('');
+                  setQty('1');
+                  setCalories('');
+                  setCaloriesManualOverride(false);
                   return;
                 }
+
+                if (typeof v === 'string') {
+                  setSelectedFood(null);
+                  setFoodInput(v);
+                  setSelectedPortionId('');
+                  setQty('1');
+                  setCaloriesManualOverride(false);
+                  return;
+                }
+
+                // Selected structured food
                 setSelectedFood(v);
                 setFoodInput(v.name);
-                if (typeof v.calories !== 'undefined') {
-                  setCalories(String(v.calories));
+
+                const firstPortion = Array.isArray(v.portions) && v.portions.length ? v.portions[0] : null;
+                setSelectedPortionId(firstPortion?.id ? String(firstPortion.id) : '');
+                setQty('1');
+                setCaloriesManualOverride(false);
+
+                if (firstPortion?.calories != null) {
+                  setCalories(String(Math.round(Number(firstPortion.calories) || 0)));
+                } else {
+                  setCalories('');
                 }
               }}
-              onInputChange={(_, v) => setFoodInput(v)}
+              onInputChange={(_, v) => {
+                setFoodInput(v);
+                // If user starts typing, treat it as freeSolo unless they re-select an option
+                if (!selectedFood) return;
+                if (v !== selectedFood?.name) {
+                  setSelectedFood(null);
+                  setSelectedPortionId('');
+                  setQty('1');
+                  setCaloriesManualOverride(false);
+                }
+              }}
               renderInput={params => (
-                <TextField
-                  {...params}
-                  label="Food Name"
-                  fullWidth
-                  onFocus={triggerFoodTip}
-                />
+                <TextField {...params} label="Food Name" fullWidth onFocus={triggerFoodTip} />
               )}
             />
+
+            {/* Portion + Quantity only if a structured food is selected */}
+            {selectedFood && (
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
+                <FormControl fullWidth>
+                  <InputLabel id="portion-label">Portion</InputLabel>
+                  <Select
+                    labelId="portion-label"
+                    label="Portion"
+                    value={selectedPortionId || (portions[0]?.id ? String(portions[0].id) : '')}
+                    onChange={(e) => {
+                      setSelectedPortionId(String(e.target.value || ''));
+                      setCaloriesManualOverride(false);
+                    }}
+                  >
+                    {portions.map(p => (
+                      <MenuItem key={String(p.id)} value={String(p.id)}>
+                        {p.label} — {Number(p.calories) || 0} kcal
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  label="Quantity"
+                  type="number"
+                  fullWidth
+                  value={qty}
+                  onChange={(e) => {
+                    setQty(e.target.value);
+                    setCaloriesManualOverride(false);
+                  }}
+                  inputProps={{ min: 0, step: 1 }}
+                />
+              </Stack>
+            )}
 
             <TextField
               label="Calories"
@@ -674,17 +732,37 @@ export default function MealTracker({ onMealUpdate }) {
               sx={{ mt: 2 }}
               value={calories}
               onFocus={triggerCalTip}
-              onChange={e => setCalories(e.target.value)}
+              onChange={e => {
+                setCalories(e.target.value);
+                // Mark manual override only if a structured food is selected
+                if (selectedFood) setCaloriesManualOverride(true);
+              }}
+              helperText={
+                selectedFood && selectedPortion
+                  ? `Auto: ${autoCalories ?? 0} kcal (edit to override)`
+                  : ''
+              }
             />
 
+            {/* Provide a quick "Custom Food" action hint */}
             {!selectedFood && foodInput.length > 2 && (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Not found — enter calories manually or use Quick Actions.
               </Alert>
             )}
+
+            {/* Explicit custom item button (keeps old behavior but cleaner) */}
+            {customAction && (
+              <Button
+                onClick={() => setOpenCustom(true)}
+                variant="text"
+                sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}
+              >
+                + Custom Food (macros)
+              </Button>
+            )}
           </Box>
 
-          {/* Action row */}
           <Box
             sx={{
               display: 'flex',
@@ -729,10 +807,8 @@ export default function MealTracker({ onMealUpdate }) {
           </Box>
         </AccordionSummary>
         <AccordionDetails>
-          {/* AI Food Lookup */}
           <AIFoodLookupBox
             onAddFood={payload => {
-              // { name, calories, protein_g, carbs_g, fat_g }
               logOne({
                 name: payload.name,
                 calories: payload.calories,
@@ -745,20 +821,13 @@ export default function MealTracker({ onMealUpdate }) {
             }}
           />
 
-          {/* Meal suggestions panel (shown only when toggled from hero) */}
           {showSuggest && (
             <Box sx={{ mt: 2 }}>
               <MealSuggestion
                 consumedCalories={total}
                 onAddMeal={async meal => {
-                  const safeCalories = Number.isFinite(meal.calories)
-                    ? Number(meal.calories)
-                    : 0;
-
-                  await logOne({
-                    name: meal.name,
-                    calories: safeCalories
-                  });
+                  const safeCalories = Number.isFinite(meal.calories) ? Number(meal.calories) : 0;
+                  await logOne({ name: meal.name, calories: safeCalories });
                 }}
               />
             </Box>
@@ -769,9 +838,7 @@ export default function MealTracker({ onMealUpdate }) {
       {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography sx={{ fontWeight: 700 }}>
-            Meals Logged Today ({todayUS})
-          </Typography>
+          <Typography sx={{ fontWeight: 700 }}>Meals Logged Today ({todayUS})</Typography>
         </AccordionSummary>
         <AccordionDetails>
           {mealLog.length === 0 ? (
@@ -783,8 +850,7 @@ export default function MealTracker({ onMealUpdate }) {
                   borderRadius: 2,
                   overflow: 'hidden',
                   border: '1px solid rgba(0,0,0,0.05)',
-                  boxShadow:
-                    '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
                 }}
               >
                 {mealLog.map((m, i) => (
@@ -792,12 +858,7 @@ export default function MealTracker({ onMealUpdate }) {
                     <ListItem
                       secondaryAction={
                         <Tooltip title="Delete this meal">
-                          <IconButton
-                            edge="end"
-                            aria-label="delete meal"
-                            onClick={() => handleDeleteMeal(i)}
-                            size="small"
-                          >
+                          <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -821,7 +882,6 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
-      {/* Upgrade modal */}
       <UpgradeModal
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -829,17 +889,8 @@ export default function MealTracker({ onMealUpdate }) {
         description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, AI Food Lookup without limits, and advanced insights."
       />
 
-      {/* Dialogs */}
-      <CustomNutritionDialog
-        open={openCustom}
-        onClose={() => setOpenCustom(false)}
-        onConfirm={item => logOne(item)}
-      />
-      <BuildBowlDialog
-        open={openBowl}
-        onClose={() => setOpenBowl(false)}
-        onConfirm={item => logOne(item)}
-      />
+      <CustomNutritionDialog open={openCustom} onClose={() => setOpenCustom(false)} onConfirm={item => logOne(item)} />
+      <BuildBowlDialog open={openBowl} onClose={() => setOpenBowl(false)} onConfirm={item => logOne(item)} />
     </Container>
   );
 }
