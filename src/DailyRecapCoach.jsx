@@ -50,7 +50,16 @@ function persistQuestSelection(dayKey, quests) {
 
 function loadQuestSelection(dayKey) {
   const cached = readJsonLS(QUESTS_KEY, null);
-  if (!cached || cached.dayKey !== dayKey) return null;
+  if (!cached) return null;
+
+  // Migration: older builds stored { dayKey, quests:[...] } (functions stripped -> crashes).
+  // If we detect that shape, wipe it.
+  if (Array.isArray(cached.quests)) {
+    try { localStorage.removeItem(QUESTS_KEY); } catch {}
+    return null;
+  }
+
+  if (cached.dayKey !== dayKey) return null;
   if (!Array.isArray(cached.order)) return null;
   return { order: cached.order, lockedIds: Array.isArray(cached.lockedIds) ? cached.lockedIds : [] };
 }
