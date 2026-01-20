@@ -36,49 +36,6 @@ import {
 // ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
 const XP_KEY = 'slimcal:xp:v1';
 const QUESTS_KEY = 'slimcal:quests:v1';
-/**
- * IMPORTANT:
- * Do NOT persist quest objects that contain functions (progress/check) into localStorage.
- * JSON serialization strips functions, causing runtime errors like: "progress is not a function".
- * We persist only quest IDs + locked state, then rebuild quest objects from the pool on load.
- */
-function persistQuestSelection(dayKey, quests) {
-  const order = quests.map((q) => q.id);
-  const lockedIds = quests.filter((q) => q.locked).map((q) => q.id);
-  writeJsonLS(QUESTS_KEY, { dayKey, order, lockedIds });
-}
-
-function loadQuestSelection(dayKey) {
-  const cached = readJsonLS(QUESTS_KEY, null);
-  if (!cached) return null;
-
-  // Migration: older builds stored { dayKey, quests:[...] } (functions stripped -> crashes).
-  // If we detect that shape, wipe it.
-  if (Array.isArray(cached.quests)) {
-    try { localStorage.removeItem(QUESTS_KEY); } catch {}
-    return null;
-  }
-
-  if (cached.dayKey !== dayKey) return null;
-  if (!Array.isArray(cached.order)) return null;
-  return { order: cached.order, lockedIds: Array.isArray(cached.lockedIds) ? cached.lockedIds : [] };
-}
-
-function rebuildQuestsFromSelection({ selection, isPro, proteinTarget }) {
-  const pool = buildQuestPool({ proteinTarget });
-  const byId = new Map(pool.map((q) => [q.id, q]));
-  const freeUnlocked = 2;
-  const maxShown = Math.min(6, pool.length);
-
-  if (!selection?.order?.every((id) => byId.has(id))) return null;
-
-  return selection.order.slice(0, maxShown).map((id, idx) => {
-    const q = byId.get(id);
-    const locked = !isPro && idx >= freeUnlocked;
-    return { ...q, locked };
-  });
-}
-
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -192,21 +149,33 @@ function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) 
   return base + mealXp + workoutXp + proteinXp + caloriesXp;
 }
 
-function missedBreakfastLine({ now, mealsCount }) {
+function missedBreakfastLine({ now, mealsCount, consumedCalories }) {
+  // Fun + funny, but psychologically effective (less corny / less "zesty")
+  // Only warn if there is *actually* no food logged.
   const h = now.getHours();
-  if (h >= 12 && mealsCount === 0) {
-    return "ok bestie it’s past noon and breakfast is still missing 😭🍳 we are NOT running on vibes today.";
+  const t = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  // If calories exist but meals list is missing (cache mismatch), don't claim they didn't eat.
+  const hasAnyFood = mealsCount > 0 || consumedCalories > 0;
+  if (!hasAnyFood && h >= 11 && h < 16) {
+    return `It’s ${t}. Quick win: log a real meal now (protein first) so your day doesn’t drift.`;
   }
-  if (h >= 15 && mealsCount <= 1) {
-    return "it’s 3pm-ish and we’re running on *one* meal? that’s not a physique plan, that’s a cry for help 💀";
+
+  if (hasAnyFood && mealsCount <= 1 && h >= 15 && h < 22) {
+    return `It’s ${t}. You’ve got momentum—lock in one more protein-heavy meal or a short workout and finish strong.`;
   }
+
+  if (!hasAnyFood && h >= 16) {
+    return `It’s ${t}. If today got away from you, do a 10–20 min session or log a high-protein meal right now. One move changes the day.`;
+  }
+
   return null;
 }
 
 const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with MET later
 
 function isoDay(d = new Date()) {
-  // Local-day safe ISO string (prevents UTC day-rollover showing the wrong date in PST, etc.)
+  // Local-day safe ISO string (prevents UTC day-rollover showing the wrong date in PST evenings)
   try {
     const dd = new Date(d);
     const localMidnight = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
@@ -214,6 +183,37 @@ function isoDay(d = new Date()) {
   } catch {
     return d;
   }
+}
+
+function estimateMacrosForLocalMeal(m) {
+  // Many local MealTracker entries store calories + display name but not macros.
+  // We estimate a few common foods to make Coach accurate.
+  const existingProtein = safeNum(m?.protein_g ?? m?.protein, 0);
+  const existingCarbs = safeNum(m?.carbs_g ?? m?.carbs, 0);
+  const existingFat = safeNum(m?.fat_g ?? m?.fat, 0);
+  if (existingProtein > 0 || existingCarbs > 0 || existingFat > 0) {
+    return { protein_g: existingProtein, carbs_g: existingCarbs, fat_g: existingFat };
+  }
+
+  const name = String(m?.name || '').toLowerCase();
+  const qty = safeNum(m?.qty, 0);
+
+  // Eggs: ~6g protein, ~5g fat per large egg
+  if (name.startsWith('eggs')) {
+    let eggs = qty;
+    if (!eggs) {
+      // Try parse "Eggs — 6 eggs (1 large egg)"
+      const match = String(m?.name || '').match(/\b(\d+)\s*eggs?\b/i);
+      if (match) eggs = safeNum(match[1], 0);
+    }
+    if (!eggs) {
+      const c = safeNum(m?.calories, 0);
+      if (c > 0) eggs = Math.round(c / 70);
+    }
+    return { protein_g: Math.round(eggs * 6), carbs_g: 0, fat_g: Math.round(eggs * 5) };
+  }
+
+  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
 }
 
 function usDay(d = new Date()) {
@@ -252,34 +252,6 @@ function calcCaloriesFromSets(sets) {
     vol += w * r;
   }
   return Math.round(vol * SCALE);
-}
-
-function estimateMacrosForLocalMeal(m) {
-  // If MealTracker didn't store macros, we estimate a few common foods for better Coach accuracy.
-  // (We can expand this map later.)
-  const existingProtein = safeNum(m?.protein_g ?? m?.protein ?? 0, 0);
-  const existingCarbs = safeNum(m?.carbs_g ?? m?.carbs ?? 0, 0);
-  const existingFat = safeNum(m?.fat_g ?? m?.fat ?? 0, 0);
-
-  if (existingProtein > 0 || existingCarbs > 0 || existingFat > 0) {
-    return { protein_g: existingProtein, carbs_g: existingCarbs, fat_g: existingFat };
-  }
-
-  const foodId = String(m?.food_id || "").toLowerCase();
-  const foodName = String(m?.food_name || m?.name || "").toLowerCase();
-  const qty = safeNum(m?.qty, 0);
-
-  // Eggs: ~6g protein, ~5g fat, ~0g carbs per large egg
-  if (foodId === "eggs" || foodName.startsWith("eggs")) {
-    const q = qty > 0 ? qty : (() => {
-      // fallback: infer from calories (70 kcal per egg)
-      const c = safeNum(m?.calories, 0);
-      return c > 0 ? Math.round(c / 70) : 0;
-    })();
-    return { protein_g: Math.round(q * 6), carbs_g: 0, fat_g: Math.round(q * 5) };
-  }
-
-  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
 }
 
 function sumMacros(items = []) {
@@ -376,25 +348,25 @@ function buildLocalContext(todayISO) {
   // Try to use createdAt/time if present; otherwise “Unknown time”
   const meals = localMeals.map((m, idx) => {
     const eaten_at = m.createdAt || m.eaten_at || null;
+    const est = estimateMacrosForLocalMeal(m);
     const items = [
       {
         food_name: m.name || "Meal",
         qty: m.qty ?? 1,
         unit: m.unit || "serving",
         calories: round(m.calories || 0),
-        protein: (m.protein_g ?? m.protein) != null ? (m.protein_g ?? m.protein) : (typeof est !== 'undefined' ? est.protein_g : null),
-        carbs: (m.carbs_g ?? m.carbs) != null ? (m.carbs_g ?? m.carbs) : (typeof est !== 'undefined' ? est.carbs_g : null),
-        fat: (m.fat_g ?? m.fat) != null ? (m.fat_g ?? m.fat) : (typeof est !== 'undefined' ? est.fat_g : null),
+        // Prefer stored macros; fallback to estimates for common foods (eggs, etc.)
+        protein: (m.protein_g ?? m.protein) != null ? (m.protein_g ?? m.protein) : est.protein_g,
+        carbs: (m.carbs_g ?? m.carbs) != null ? (m.carbs_g ?? m.carbs) : est.carbs_g,
+        fat: (m.fat_g ?? m.fat) != null ? (m.fat_g ?? m.fat) : est.fat_g,
       },
     ];
 
-    const est = estimateMacrosForLocalMeal(m);
-
     const macros = sumMacros([
       {
-        protein_g: est.protein_g,
-        carbs_g: est.carbs_g,
-        fat_g: est.fat_g,
+        protein_g: (m.protein_g ?? m.protein) != null ? safeNum(m.protein_g ?? m.protein, 0) : est.protein_g,
+        carbs_g: (m.carbs_g ?? m.carbs) != null ? safeNum(m.carbs_g ?? m.carbs, 0) : est.carbs_g,
+        fat_g: (m.fat_g ?? m.fat) != null ? safeNum(m.fat_g ?? m.fat, 0) : est.fat_g,
       },
     ]);
 
@@ -506,12 +478,10 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   // Daily quests
   const [quests, setQuests] = useState(() => {
-    const selection = loadQuestSelection(todayISO);
-    const rebuilt = rebuildQuestsFromSelection({ selection, isPro, proteinTarget: targets.proteinDaily || 170 });
-    if (rebuilt) return rebuilt;
-
+    const cached = readJsonLS(QUESTS_KEY, null);
+    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
-    persistQuestSelection(todayISO, picked);
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
     return picked;
   });
 
@@ -555,7 +525,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   useEffect(() => {
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
     setQuests(picked);
-    persistQuestSelection(todayISO, picked);
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro, todayISO]);
 
@@ -1186,18 +1156,21 @@ Output format (use these headings):
     );
   }
 
-  const now = useMemo(() => new Date(), []);
-  const mealsCount = (dayCtx?.meals || []).length;
+  // Use real current time each render so time-based coaching is accurate.
+  const now = new Date();
+  const mealsCountRaw = (dayCtx?.meals || []).length;
   const workoutsCount = (dayCtx?.workouts || []).length;
   const goal = targets.dailyGoal || 0;
   const eaten = round(dayCtx?.consumed || 0);
   const burned = round(dayCtx?.burned || 0);
   const net = round(eaten - burned);
   const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+  // If calories exist but meal details are missing (cache mismatch), don't show 0 meals.
+  const mealsCount = mealsCountRaw > 0 ? mealsCountRaw : eaten > 0 ? 1 : 0;
   const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
   const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
   const lvl = useMemo(() => computeLevel(xpState.totalXp || 0), [xpState.totalXp]);
-  const roastLine = missedBreakfastLine({ now, mealsCount });
+  const roastLine = missedBreakfastLine({ now, mealsCount, consumedCalories: eaten });
 
   return (
     <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
