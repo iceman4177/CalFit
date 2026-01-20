@@ -92,6 +92,41 @@ function sumMacros(items = []) {
   return totals;
 }
 
+function estimateMacrosFromName({ name, qty = 1, unit = "", calories = 0 }) {
+  const n = String(name || "").toLowerCase();
+  const q = Math.max(0, Number(qty) || 0);
+
+  // Large egg ~= 6g protein, 5g fat, 0.6g carbs
+  if (n.includes("egg") && !n.includes("white")) {
+    return {
+      protein_g: Math.round(q * 6),
+      fat_g: Math.round(q * 5),
+      carbs_g: Math.round(q * 0.6),
+    };
+  }
+
+  // Egg white ~= 3.6g protein
+  if (n.includes("egg") && n.includes("white")) {
+    return {
+      protein_g: Math.round(q * 3.6),
+      fat_g: Math.round(q * 0.1),
+      carbs_g: Math.round(q * 0.2),
+    };
+  }
+
+  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+}
+
+function mergeEstimatedMacros(existing, estimate) {
+  const ex = existing || {};
+  const est = estimate || {};
+  return {
+    protein_g: safeNum(ex.protein_g, 0) > 0 ? safeNum(ex.protein_g, 0) : safeNum(est.protein_g, 0),
+    carbs_g: safeNum(ex.carbs_g, 0) > 0 ? safeNum(ex.carbs_g, 0) : safeNum(est.carbs_g, 0),
+    fat_g: safeNum(ex.fat_g, 0) > 0 ? safeNum(ex.fat_g, 0) : safeNum(est.fat_g, 0),
+  };
+}
+
 
 function estimateLocalMacrosForMeal(meal) {
   // Fallback when mealHistory doesn't include macros.
@@ -503,7 +538,19 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
         });
       }
 
-      // totals
+      
+      /* FALLBACK_LOCAL_MEALS */
+      // If we have server totals (daily metrics) but no meal rows, use localStorage mealHistory
+      if ((!meals || meals.length === 0) && (consumed > 0)) {
+        try {
+          const local = buildLocalContext(todayISO);
+          if (Array.isArray(local?.meals) && local.meals.length > 0) {
+            meals = local.meals;
+          }
+        } catch {}
+      }
+
+// totals
       macroTotals = sumMacros(
         meals.flatMap((mm) => [
           {
@@ -792,7 +839,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach • FIX10 • BUILD_FIX_10 • BUILD_STABLE_10
+            Daily Recap Coach • BUILD_STABLE_11
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
@@ -908,6 +955,8 @@ function Feature({ text }) {
     <Stack direction="row" spacing={1} alignItems="center">
       <Chip label="✓" size="small" variant="outlined" />
       <Typography variant="caption">{text}</Typography>
-    </Stack>
+    
+      {History}
+</Stack>
   );
 }
