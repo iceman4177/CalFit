@@ -35,7 +35,17 @@ import {
 
 // ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
 const XP_KEY = 'slimcal:xp:v1';
-const QUESTS_KEY = 'slimcal:quests:v1';
+const QUESTS_KEY = 'slimcal:quests:v2';
+function wipeBrokenQuestCacheIfNeeded() {
+  try {
+    const cached = readJsonLS(QUESTS_KEY, null);
+    // Old builds stored `quests` array with functions stripped by JSON -> crashes.
+    if (cached && Array.isArray(cached.quests)) {
+      localStorage.removeItem(QUESTS_KEY);
+    }
+  } catch {}
+}
+
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -86,44 +96,14 @@ function seededRng(seedStr) {
 }
 
 function buildQuestPool({ proteinTarget }) {
-  const lunchProtein = Math.min(60, Math.max(30, Math.round(proteinTarget * 0.35 || 40)));
+  const lunchProtein = Math.min(60, Math.max(30, Math.round((proteinTarget || 170) * 0.35)));
   return [
-    {
-      id: 'breakfast_before_11',
-      label: 'Log breakfast before 11am',
-      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
-      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
-    },
-    {
-      id: 'protein_by_lunch',
-      label: `Hit ${lunchProtein}g protein by lunch`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
-    },
-    {
-      id: 'log_3_meals',
-      label: 'Log 3 meals today',
-      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
-      complete: ({ mealsCount }) => mealsCount >= 3,
-    },
-    {
-      id: 'burn_150',
-      label: 'Burn 150+ cals',
-      progress: ({ burned }) => ({ value: burned, goal: 150 }),
-      complete: ({ burned }) => burned >= 150,
-    },
-    {
-      id: 'burn_300',
-      label: 'Burn 300+ cals',
-      progress: ({ burned }) => ({ value: burned, goal: 300 }),
-      complete: ({ burned }) => burned >= 300,
-    },
-    {
-      id: 'hit_protein_goal',
-      label: `Hit protein goal (${proteinTarget || 170}g)`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
-    },
+    { id: "burn_150", label: "Burn 150+ cals", kind: "burn", goal: 150 },
+    { id: "burn_300", label: "Burn 300+ cals", kind: "burn", goal: 300 },
+    { id: "breakfast_before_11", label: "Log breakfast before 11am", kind: "breakfast11", goal: 1 },
+    { id: "log_3_meals", label: "Log 3 meals today", kind: "meals", goal: 3 },
+    { id: "protein_by_lunch", label: `Hit ${lunchProtein}g protein by lunch`, kind: "protein", goal: lunchProtein, byHour: 15 },
+    { id: "protein_goal", label: `Hit protein goal (${proteinTarget || 170}g)`, kind: "protein", goal: proteinTarget || 170 },
   ];
 }
 
@@ -140,6 +120,39 @@ function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
   }));
 }
 
+
+function computeQuestProgress(quest, ctx) {
+  const now = new Date();
+  const hour = now.getHours();
+
+  switch (quest.kind) {
+    case "burn": {
+      const v = Math.max(0, Math.round(ctx?.burned || 0));
+      return { value: v, goal: quest.goal };
+    }
+    case "meals": {
+      const v = Math.max(0, Math.round(ctx?.mealsCount || 0));
+      return { value: v, goal: quest.goal };
+    }
+    case "protein": {
+      const v = Math.max(0, Math.round(ctx?.protein || 0));
+      // If it's a "by lunch" quest and it's past the cutoff, keep showing progress but user can still complete (we don't hard-fail)
+      return { value: v, goal: quest.goal };
+    }
+    case "breakfast11": {
+      const v = (ctx?.mealsCount || 0) > 0 ? 1 : 0;
+      // If after 11 and no meals, it remains 0/1
+      return { value: v, goal: 1 };
+    }
+    default:
+      return { value: 0, goal: 1 };
+  }
+}
+
+function computeQuestDone(quest, ctx) {
+  const p = computeQuestProgress(quest, ctx);
+  return (p.value || 0) >= (p.goal || 1);
+}
 function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) {
   const base = 10;
   const mealXp = mealsCount * 25;
@@ -479,9 +492,9 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   // Daily quests
   const [quests, setQuests] = useState(() => {
     const cached = readJsonLS(QUESTS_KEY, null);
-    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
+    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) { /* ignore broken cache */ }
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    /* quests cache disabled (functions cannot be stored) */
     return picked;
   });
 
@@ -525,7 +538,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   useEffect(() => {
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
     setQuests(picked);
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    /* quests cache disabled (functions cannot be stored) */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro, todayISO]);
 
@@ -1052,7 +1065,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach
+            Daily Recap Coach  •  BUILD_FIX_7
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
@@ -1235,7 +1248,7 @@ Output format (use these headings):
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
-              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
+              const prog = (typeof q.progress === 'function' ? q.progress({ mealsCount, burned, proteinSoFar, now }) : null);
               const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
               return (
@@ -1246,7 +1259,7 @@ Output format (use these headings):
                       <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
                       <LinearProgress variant="determinate" value={q.locked ? 0 : pct} sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }} />
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
-                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog?.goal ?? 1}`}
                       </Typography>
                     </Box>
                     {q.locked && (
