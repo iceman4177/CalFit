@@ -1065,7 +1065,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach  •  BUILD_FIX_7
+            Daily Recap Coach  •  BUILD_FIX_8
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
@@ -1249,7 +1249,7 @@ Output format (use these headings):
           <Stack spacing={1.1}>
             {quests.map((q) => {
               const prog = (typeof q.progress === 'function' ? q.progress({ mealsCount, burned, proteinSoFar, now }) : null);
-              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
+              const done = !q.locked && computeQuestDone(q, { mealsCount, burned, protein: proteinSoFar });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
               return (
                 <Box key={q.id} sx={{ p: 1.2, borderRadius: 1.5, border: "1px solid rgba(2,6,23,0.08)", background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white" }}>
