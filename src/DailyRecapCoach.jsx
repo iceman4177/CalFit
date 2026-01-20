@@ -246,7 +246,7 @@ function buildLocalContext(todayISO) {
     const items = [
       {
         food_name: m.name || "Meal",
-        qty: m.qty ?? 1,
+        qty: m.qty ?? 0,
         unit: m.unit || "serving",
         calories: round(m.calories || 0),
         protein: proteinRaw != null ? proteinRaw : est.protein_g,
@@ -521,15 +521,37 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
       for (const m of mealsAll) {
         const itemsRaw = itemsMap?.[m.id] || [];
-        const items = itemsRaw.map((it) => ({
-          food_name: it.food_name,
-          qty: it.qty,
-          unit: it.unit,
-          calories: round(it.calories),
-          protein: it.protein,
-          carbs: it.carbs,
-          fat: it.fat,
-        }));
+        const items = itemsRaw.map((it) => {
+          const base = {
+            food_name: it.food_name,
+            qty: it.qty ?? null,
+            unit: it.unit ?? null,
+            calories: round(it.calories || 0),
+            protein: it.protein ?? null,
+            carbs: it.carbs ?? null,
+            fat: it.fat ?? null,
+          };
+
+          const needsEst =
+            safeNum(base.protein, 0) === 0 &&
+            safeNum(base.carbs, 0) === 0 &&
+            safeNum(base.fat, 0) === 0 &&
+            safeNum(base.calories, 0) > 0;
+
+          if (needsEst) {
+            const est = estimateMacrosFromName({
+              name: base.food_name,
+              qty: base.qty ?? 0,
+              unit: base.unit || "",
+              calories: base.calories,
+            });
+            base.protein = est.protein_g || 0;
+            base.carbs = est.carbs_g || 0;
+            base.fat = est.fat_g || 0;
+          }
+
+          return base;
+        });
 
         const macros = sumMacros(
           itemsRaw.map((it) => ({
@@ -639,7 +661,24 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
       const timing = computeTimingNotes(ctx.meals || []);
 
-      const coachFacts = {
+      
+      const topNudge = (() => {
+        const now = new Date();
+        const h = now.getHours();
+        const mealsCount = (ctx.meals || []).length;
+        const burned = round(ctx.burned || 0);
+        const p = round(ctx.macroTotals?.protein_g || 0);
+        const goalCals = goal || 3000;
+        const remaining = Math.max(0, goalCals - round(ctx.consumed || 0));
+
+        if (mealsCount === 0 && h >= 10) return "First meal wins the day. Get 30–40g protein in ASAP.";
+        if (p < 60 && h >= 14) return "Protein is behind. Next meal: +40g protein. Easy win.";
+        if (burned < 100 && h >= 16) return "Quick momentum: 10–15 min walk right now.";
+        if (remaining > 900 && h >= 18) return "Big calories left. Keep it simple: protein + carbs x2 meals.";
+        return "Solid. Keep logging and stack small wins.";
+      })();
+
+const coachFacts = {
         day: todayISO,
         goals: {
           daily_calorie_goal: goal || null,
@@ -851,7 +890,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach • BUILD_STABLE_12
+            Daily Recap Coach
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
