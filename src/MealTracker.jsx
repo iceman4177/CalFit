@@ -1,901 +1,1480 @@
-// src/MealTracker.jsx
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+// src/DailyRecapCoach.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Container,
-  Typography,
   Box,
-  TextField,
   Button,
-  List,
-  ListItem,
-  ListItemText,
-  Divider,
-  Autocomplete,
-  Alert,
-  IconButton,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Stack,
+  CircularProgress,
+  Typography,
   Card,
   CardContent,
+  Stack,
+  Divider,
   Chip,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel
-} from '@mui/material';
+  Tooltip,
+  LinearProgress,
+  IconButton,
+} from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import ShareIcon from "@mui/icons-material/Share";
+import UpgradeModal from "./components/UpgradeModal";
+import { useAuth } from "./context/AuthProvider.jsx";
+import { useEntitlements } from "./context/EntitlementsContext.jsx";
+import {
+  getWorkouts,
+  getWorkoutSetsFor,
+  getDailyMetricsRange,
+  getMeals,
+  getMealItemsForMealIds,
+} from "./lib/db";
 
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import DeleteIcon from '@mui/icons-material/Delete';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import RestaurantIcon from '@mui/icons-material/RamenDining';
-import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+// ---- Helpers ----------------------------------------------------------------
 
-import foodData from './foodData.json';
+// ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
+const XP_KEY = 'slimcal:xp:v1';
+const QUESTS_KEY = 'slimcal:quests:v1';
 
-import useFirstTimeTip from './hooks/useFirstTimeTip';
-import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
-
-import MealSuggestion from './MealSuggestion';
-import UpgradeModal from './components/UpgradeModal';
-import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
-
-// auth + db
-import { useAuth } from './context/AuthProvider.jsx';
-import { saveMeal, upsertDailyMetrics } from './lib/db';
-import { callAIGenerate } from './lib/ai';
-
-// ---------- Pro / gating helpers ----------
-const isProUser = () => {
-  if (localStorage.getItem('isPro') === 'true') return true;
-  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
-  return !!ud.isPremium;
-};
-
-const getMealAICount = () => parseInt(localStorage.getItem('aiMealCount') || '0', 10);
-const incMealAICount = () => localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
-
-// ---------- helpers ----------
-function kcalFromMacros(p = 0, c = 0, f = 0) {
-  const P = Number(p) || 0,
-    C = Number(c) || 0,
-    F = Number(f) || 0;
-  return Math.max(0, Math.round(P * 4 + C * 4 + F * 9));
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
 }
 
-function pluralizeUnit(unit, qty) {
-  const q = Number(qty) || 0;
-  if (!unit) return '';
-  if (q === 1) return unit;
-
-  // common irregular-ish
-  if (unit === 'slice') return 'slices';
-  if (unit === 'clove') return 'cloves';
-  if (unit === 'egg') return 'eggs';
-
-  // units that generally shouldn't pluralize
-  const noPlural = new Set(['g', 'oz', 'tbsp', 'tsp', 'cup', 'serving', 'item', 'scoop']);
-  if (noPlural.has(unit)) return unit;
-
-  return `${unit}s`;
+function computeLevel(xp) {
+  let level = 1;
+  let remaining = Math.max(0, safeNum(xp, 0));
+  let req = 100;
+  while (remaining >= req) {
+    remaining -= req;
+    level += 1;
+    req = Math.round(req * 1.35);
+    if (level > 99) break;
+  }
+  return { level, progress: remaining, next: req };
 }
 
-function safeNumber(val, fallback = 0) {
-  const n = typeof val === 'string' && val.trim() === '' ? NaN : Number(val);
-  return Number.isFinite(n) ? n : fallback;
+function readJsonLS(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
 }
 
-// ---------- Dialogs ----------
-function CustomNutritionDialog({ open, onClose, onConfirm }) {
-  const [name, setName] = useState('');
-  const [cal, setCal] = useState('');
-  const [p, setP] = useState('');
-  const [c, setC] = useState('');
-  const [f, setF] = useState('');
+function writeJsonLS(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
 
-  useEffect(() => {
-    if (open) {
-      setName('');
-      setCal('');
-      setP('');
-      setC('');
-      setF('');
+function seededRng(seedStr) {
+  // deterministic pseudo-random (mulberry32)
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+function buildQuestPool({ proteinTarget }) {
+  const lunchProtein = Math.min(60, Math.max(30, Math.round(proteinTarget * 0.35 || 40)));
+  return [
+    {
+      id: 'breakfast_before_11',
+      label: 'Log breakfast before 11am',
+      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
+      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+    },
+    {
+      id: 'protein_by_lunch',
+      label: `Hit ${lunchProtein}g protein by lunch`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
+    },
+    {
+      id: 'log_3_meals',
+      label: 'Log 3 meals today',
+      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
+      complete: ({ mealsCount }) => mealsCount >= 3,
+    },
+    {
+      id: 'burn_150',
+      label: 'Burn 150+ cals',
+      progress: ({ burned }) => ({ value: burned, goal: 150 }),
+      complete: ({ burned }) => burned >= 150,
+    },
+    {
+      id: 'burn_300',
+      label: 'Burn 300+ cals',
+      progress: ({ burned }) => ({ value: burned, goal: 300 }),
+      complete: ({ burned }) => burned >= 300,
+    },
+    {
+      id: 'hit_protein_goal',
+      label: `Hit protein goal (${proteinTarget || 170}g)`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
+    },
+  ];
+}
+
+function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
+  const rng = seededRng(`${dayKey}|quests`);
+  const pool = buildQuestPool({ proteinTarget });
+  const shuffled = [...pool].sort(() => rng() - 0.5);
+  const freeUnlocked = 2;
+  const maxShown = Math.min(6, shuffled.length);
+
+  return shuffled.slice(0, maxShown).map((q, idx) => ({
+    ...q,
+    locked: !isPro && idx >= freeUnlocked,
+  }));
+}
+
+function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) {
+  const base = 10;
+  const mealXp = mealsCount * 25;
+  const workoutXp = workoutsCount * 40;
+  const proteinXp = hitProtein ? 60 : 0;
+  const caloriesXp = hitCalories ? 40 : 0;
+  return base + mealXp + workoutXp + proteinXp + caloriesXp;
+}
+
+function formatClock(date) {
+  try {
+    return new Date(date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function missedBreakfastLine({
+  now,
+  meals = [],
+  workoutsCount = 0,
+  consumed = 0,
+  burned = 0,
+  proteinTotal = 0,
+  calorieGoal = 0,
+  proteinGoal = 0
+}) {
+  const h = now.getHours();
+  const mealsCount = Array.isArray(meals) ? meals.length : 0;
+
+  // Try to detect the first meal time
+  const firstMeal = mealsCount > 0 ? meals.slice().sort((a, b) => (a?.eatenAt || a?.createdAt || 0) > (b?.eatenAt || b?.createdAt || 0) ? 1 : -1)[0] : null;
+  const firstTime = firstMeal?.eatenAt || firstMeal?.createdAt || null;
+  const firstTimeStr = firstTime ? formatClock(firstTime) : null;
+
+  const calRem = Math.max(0, (Number(calorieGoal) || 0) - (Number(consumed) || 0));
+  const proRem = Math.max(0, (Number(proteinGoal) || 0) - (Number(proteinTotal) || 0));
+
+  // Nothing logged
+  if (mealsCount === 0 && workoutsCount === 0) {
+    if (h >= 12) {
+      return "No logs yet and we’re past noon 😅. Do one small win: log a meal *or* knock out a quick lift. Momentum > motivation.";
     }
-  }, [open]);
+    return "Fresh day. Log your first meal early and you’ll cruise the rest of the day.";
+  }
 
-  const effectiveCalories = useMemo(() => {
-    if (String(cal).trim() !== '') {
-      return Math.max(0, parseInt(cal, 10) || 0);
+  // Meals logged late
+  if (mealsCount > 0 && firstTimeStr && h >= 18) {
+    if (firstMeal && new Date(firstTime).getHours() >= 15) {
+      return `First meal was at ${firstTimeStr}. Late start — not a problem, just go **protein-first** the rest of the night.`;
     }
-    if (p || c || f) {
-      return kcalFromMacros(p, c, f);
+  }
+
+  // Protein guidance
+  if (proteinGoal > 0 && h >= 14) {
+    const pct = proteinGoal ? (proteinTotal / proteinGoal) : 0;
+    if (pct < 0.35) {
+      return `Protein is low (${Math.round(proteinTotal)}g). You’ve got ~${Math.round(proRem)}g left — next meal should be **lean protein + carbs**.`;
     }
-    return 0;
-  }, [cal, p, c, f]);
+  }
 
-  const canSave = name.trim().length > 0 && effectiveCalories > 0;
+  // Calories guidance (bulk)
+  if (calorieGoal > 0 && h >= 16 && calRem > 800) {
+    return `You’ve got ${Math.round(calRem)} calories left. Keep it simple: **2 meals** (protein + carbs) and you’re back on track.`;
+  }
 
-  return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Custom Food</DialogTitle>
-      <DialogContent>
-        <Stack spacing={1.5} sx={{ mt: 1 }}>
-          <TextField label="Food name" fullWidth value={name} onChange={e => setName(e.target.value)} />
-          <TextField
-            label="Calories (kcal)"
-            type="number"
-            fullWidth
-            value={cal}
-            onChange={e => setCal(e.target.value)}
-          />
-          <Typography variant="caption" color="text.secondary">
-            Or enter macros (we’ll calculate calories if Calories is blank)
-          </Typography>
-          <Stack direction="row" spacing={1.5}>
-            <TextField label="Protein (g)" type="number" fullWidth value={p} onChange={e => setP(e.target.value)} />
-            <TextField label="Carbs (g)" type="number" fullWidth value={c} onChange={e => setC(e.target.value)} />
-            <TextField label="Fat (g)" type="number" fullWidth value={f} onChange={e => setF(e.target.value)} />
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Total calories: <strong>{effectiveCalories}</strong>
-          </Typography>
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          disabled={!canSave}
-          onClick={() => {
-            onConfirm?.({
-              name: name.trim(),
-              calories: effectiveCalories,
-              macros: {
-                protein_g: Number(p) || 0,
-                carbs_g: Number(c) || 0,
-                fat_g: Number(f) || 0
-              }
-            });
-            onClose?.();
-          }}
-        >
-          Add
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+  // Training guidance
+  if (workoutsCount === 0 && h >= 17) {
+    return "Food is in ✅. Now earn it: even 20–30 minutes of lifting or a long walk keeps the day productive.";
+  }
+
+  return "Solid progress today. Keep stacking small wins.";
 }
 
-function BuildBowlDialog({ open, onClose, onConfirm }) {
-  const [rows, setRows] = useState([{ name: '', calories: '' }]);
-
-  useEffect(() => {
-    if (open) setRows([{ name: '', calories: '' }]);
-  }, [open]);
-
-  const addRow = () => setRows(prev => [...prev, { name: '', calories: '' }]);
-  const update = (i, key, val) => setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
-  const remove = i => setRows(prev => prev.filter((_, idx) => idx !== i));
-
-  const total = useMemo(() => rows.reduce((s, r) => s + (parseInt(r.calories, 10) || 0), 0), [rows]);
-
-  const hasValid = rows.every(r => r.name.trim().length > 0 && (parseInt(r.calories, 10) || 0) > 0);
-
-  return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Build a Bowl</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Add each ingredient separately for accurate tracking.
-        </Typography>
-        <Stack spacing={1.25} sx={{ mt: 1 }}>
-          {rows.map((r, i) => (
-            <Stack key={i} direction="row" spacing={1}>
-              <TextField label={`Ingredient ${i + 1}`} value={r.name} onChange={e => update(i, 'name', e.target.value)} fullWidth />
-              <TextField label="Calories" type="number" value={r.calories} onChange={e => update(i, 'calories', e.target.value)} sx={{ width: 140 }} />
-              <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
-                <DeleteIcon />
-              </IconButton>
-            </Stack>
-          ))}
-          <Button onClick={addRow} startIcon={<AddCircleOutlineIcon />}>
-            Add Ingredient
-          </Button>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>
-            Bowl total: <strong>{total}</strong> kcal
-          </Typography>
-        </Stack>
-      </DialogContent>
-
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          disabled={!hasValid || total <= 0}
-          onClick={() => {
-            const pretty = rows.map(r => r.name.trim()).filter(Boolean).join(', ');
-            onConfirm?.({ name: `Bowl: ${pretty}`, calories: total });
-            onClose?.();
-          }}
-        >
-          Add Bowl
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+// --- Macro inference (covers common foods when macros aren't stored) ---
+function parseQtyFromText(text) {
+  const m = String(text || '').match(/\b(\d+(?:\.\d+)?)\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
 }
 
-// ---------- Main ----------
-export default function MealTracker({ onMealUpdate }) {
-  // onboarding tips
-  const [FoodTip, triggerFoodTip] = useFirstTimeTip('tip_food', 'Search or type a food name.');
-  const [CalTip, triggerCalTip] = useFirstTimeTip('tip_cal', 'Enter calories.');
-  const [AddTip, triggerAddTip] = useFirstTimeTip('tip_add', 'Tap to add this meal.');
-  const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
+function estimateMacrosFromCalories(calories) {
+  const c = Math.max(0, Number(calories) || 0);
+  if (!c) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
 
-  // manual entry state
-  const [foodInput, setFoodInput] = useState('');
-  const [selectedFood, setSelectedFood] = useState(null);
+  // Balanced default: 25% protein kcal, 45% carbs kcal, 30% fat kcal
+  const protein = Math.round((c * 0.25) / 4);
+  const carbs = Math.round((c * 0.45) / 4);
+  const fat = Math.round((c * 0.30) / 9);
+  return { protein_g: protein, carbs_g: carbs, fat_g: fat };
+}
 
-  const [selectedPortionId, setSelectedPortionId] = useState('');
-  const [qty, setQty] = useState('1');
+function estimateMacrosFromName(name, calories = 0, meta = {}) {
+  const t = String(name || '').toLowerCase();
+  const qty = Number(meta.qty) || parseQtyFromText(name) || 1;
+  const unit = String(meta.unit || '').toLowerCase();
 
-  const [calories, setCalories] = useState('');
-  const [caloriesManualOverride, setCaloriesManualOverride] = useState(false);
+  // Eggs (works for local displayName and cloud items)
+  if (t.includes('egg')) {
+    const perEgg = { protein_g: 6, carbs_g: 1, fat_g: 5, kcal: 70 };
+    let protein = perEgg.protein_g * qty;
+    let carbs = perEgg.carbs_g * qty;
+    let fat = perEgg.fat_g * qty;
 
-  // logged meals
-  const [mealLog, setMealLog] = useState([]);
+    const expected = perEgg.kcal * qty;
+    const c = Number(calories) || 0;
+    if (c > 0 && expected > 0 && Math.abs(c - expected) / expected > 0.15) {
+      const factor = c / expected;
+      protein = Math.round(protein * factor);
+      carbs = Math.round(carbs * factor);
+      fat = Math.round(fat * factor);
+    }
 
-  // AI panel state
-  const [showSuggest, setShowSuggest] = useState(false);
-  const [showUpgrade, setShowUpgrade] = useState(false);
+    return { protein_g: protein, carbs_g: carbs, fat_g: fat };
+  }
 
-  // dialogs
-  const [openCustom, setOpenCustom] = useState(false);
-  const [openBowl, setOpenBowl] = useState(false);
+  // Fallback heuristic
+  return estimateMacrosFromCalories(calories);
+}
 
+
+
+const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with MET later
+
+function isoDay(d = new Date()) {
+  try {
+    return new Date(d).toISOString().slice(0, 10);
+  } catch {
+    return d;
+  }
+}
+
+// Local calendar-day as YYYY-MM-DD (stable across timezones)
+function localISODay(d = new Date()) {
+  try {
+    const dt = new Date(d);
+    const localMidnight = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return localMidnight.toISOString().slice(0, 10);
+  } catch {
+    return d;
+  }
+}
+
+// Convert a local calendar day (YYYY-MM-DD) into a UTC range [from, to] (inclusive)
+function localDayToUtcRangeInclusive(dayISO) {
+  try {
+    const [y, m, d] = String(dayISO).split("-").map(Number);
+    const startLocal = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+    const endLocalExclusive = new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
+    const to = new Date(endLocalExclusive.getTime() - 1).toISOString();
+    return { from: startLocal.toISOString(), to };
+  } catch {
+    // Fall back to UTC day bounds
+    return {
+      from: `${dayISO}T00:00:00.000Z`,
+      to: `${dayISO}T23:59:59.999Z`,
+    };
+  }
+}
+
+function usDay(d = new Date()) {
+  try {
+    return new Date(d).toLocaleDateString("en-US");
+  } catch {
+    return d;
+  }
+}
+
+function toTimeLabel(ts) {
+  try {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function safeNum(n, fallback = 0) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function round(n) {
+  return Math.round(safeNum(n, 0));
+}
+
+function calcCaloriesFromSets(sets) {
+  if (!Array.isArray(sets) || sets.length === 0) return 0;
+  let vol = 0;
+  for (const s of sets) {
+    const w = safeNum(s.weight, 0);
+    const r = safeNum(s.reps, 0);
+    vol += w * r;
+  }
+  return Math.round(vol * SCALE);
+}
+
+function sumMacros(items = []) {
+  const totals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  for (const it of items) {
+    totals.protein_g += safeNum(it.protein_g ?? it.protein ?? 0, 0);
+    totals.carbs_g += safeNum(it.carbs_g ?? it.carbs ?? 0, 0);
+    totals.fat_g += safeNum(it.fat_g ?? it.fat ?? 0, 0);
+  }
+  totals.protein_g = Math.round(totals.protein_g);
+  totals.carbs_g = Math.round(totals.carbs_g);
+  totals.fat_g = Math.round(totals.fat_g);
+  return totals;
+}
+
+function formatClock(date) {
+  try {
+    return new Date(date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+
+function clampNonNeg(n) {
+  const x = Number(n);
+  return Number.isFinite(x) && x > 0 ? x : 0;
+}
+
+function estimateMacrosFallbackFromCalories(calories) {
+  const cals = clampNonNeg(calories);
+  if (cals <= 0) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  // Very rough default split for unknown foods
+  const p = Math.round((cals * 0.25) / 4);
+  const c = Math.round((cals * 0.45) / 4);
+  const f = Math.round((cals * 0.30) / 9);
+  return { protein_g: clampNonNeg(p), carbs_g: clampNonNeg(c), fat_g: clampNonNeg(f) };
+}
+
+function estimateMacrosForFood({ name, qty, unit, calories }) {
+  const text = String(name || '').toLowerCase();
+  const q = Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : (parseQtyFromText(text) || 1);
+  const cals = clampNonNeg(calories);
+
+  // Eggs (most common in your logs)
+  if (text.includes('egg')) {
+    // Approx per large egg: 6g protein, 0.5g carbs, 5g fat, ~70 kcal
+    const base = { protein_g: 6 * q, carbs_g: 0.5 * q, fat_g: 5 * q };
+    const expectedCals = 70 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale))
+    };
+  }
+
+  // Oats (dry)
+  if (text.includes('oat')) {
+    // ~150 cals per 1/2 cup dry: 5P 27C 3F
+    const base = { protein_g: 5 * q, carbs_g: 27 * q, fat_g: 3 * q };
+    const expectedCals = 150 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale))
+    };
+  }
+
+  // Peanut butter (1 tbsp)
+  if (text.includes('peanut butter') || text.includes('pb')) {
+    // ~95 cals per tbsp: 4P 3C 8F
+    const base = { protein_g: 4 * q, carbs_g: 3 * q, fat_g: 8 * q };
+    const expectedCals = 95 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale))
+    };
+  }
+
+  // Default fallback
+  return estimateMacrosFallbackFromCalories(cals);
+}
+
+function fmtDelta(n) {
+  const v = round(n);
+  if (v === 0) return "0";
+  return v > 0 ? `+${v}` : `${v}`;
+}
+
+function getUserTargets() {
+  try {
+    const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
+    const dailyGoal = safeNum(ud.dailyGoal, 0);
+    const goalType = ud.goalType || localStorage.getItem("fitness_goal") || "";
+    const dietPreference =
+      ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
+
+    const proteinDaily =
+      safeNum(ud?.proteinTargets?.daily_g, 0) ||
+      safeNum(localStorage.getItem("protein_target_daily_g"), 0);
+
+    const proteinMeal =
+      safeNum(ud?.proteinTargets?.per_meal_g, 0) ||
+      safeNum(localStorage.getItem("protein_target_meal_g"), 0);
+
+    const trainingIntent =
+      ud.trainingIntent || localStorage.getItem("training_intent") || "general";
+
+    const trainingSplit =
+      ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
+
+    const lastFocus = ud.lastFocus || localStorage.getItem("last_focus") || "upper";
+
+    return {
+      dailyGoal,
+      goalType,
+      dietPreference,
+      proteinDaily,
+      proteinMeal,
+      trainingIntent,
+      trainingSplit,
+      lastFocus,
+      raw: ud,
+    };
+  } catch {
+    return {
+      dailyGoal: 0,
+      goalType: "",
+      dietPreference: "omnivore",
+      proteinDaily: 0,
+      proteinMeal: 0,
+      trainingIntent: "general",
+      trainingSplit: "full_body",
+      lastFocus: "upper",
+      raw: {},
+    };
+  }
+}
+
+// Build local fallback context for today (works offline)
+function buildLocalContext(todayISO) {
+  const todayUS = usDay();
+  const wh = JSON.parse(localStorage.getItem("workoutHistory") || "[]");
+  const mh = JSON.parse(localStorage.getItem("mealHistory") || "[]");
+
+  const todayWorkouts = wh.filter((w) => w.date === todayUS);
+  const workouts = [];
+  for (const w of todayWorkouts) {
+    for (const ex of w.exercises || []) {
+      workouts.push({
+        exercise_name: ex.name,
+        reps: ex.reps || 0,
+        weight: ex.weight || 0,
+        calories: round(ex.calories || 0),
+      });
+    }
+  }
+
+  const mealsRec = mh.find((m) => m.date === todayUS);
+  const localMeals = mealsRec?.meals || [];
+
+  // Try to use createdAt/time if present; otherwise “Unknown time”
+  const meals = localMeals.map((m, idx) => {
+    const eaten_at = m.createdAt || m.eaten_at || null;
+    const est = estimateMacrosForFood({
+      name: m.food_name || m.name || "Meal",
+      qty: m.qty ?? 1,
+      unit: m.unit || "serving",
+      calories: m.calories || 0,
+    });
+
+    const items = [
+      {
+        food_name: m.food_name || m.name || "Meal",
+        qty: m.qty ?? 1,
+        unit: m.unit || "serving",
+        calories: round(m.calories || 0),
+        // prefer logged macros, fall back to estimates
+        protein: safeNum(m.protein_g ?? m.protein, est.protein_g || null),
+        carbs: safeNum(m.carbs_g ?? m.carbs, est.carbs_g || null),
+        fat: safeNum(m.fat_g ?? m.fat, est.fat_g || null),
+        _estimated_macros: !((m.protein_g ?? m.protein) || (m.carbs_g ?? m.carbs) || (m.fat_g ?? m.fat)),
+      },
+    ];
+
+    const macros = sumMacros(items);
+
+    return {
+      id: `local_${todayISO}_${idx}`,
+      eaten_at,
+      time_label: eaten_at ? toTimeLabel(eaten_at) : "",
+      title: m.name || "Meal",
+      total_calories: round(m.calories || 0),
+      items,
+      macros,
+    };
+  });
+
+  const burned = todayWorkouts.reduce((s, w) => s + round(w.totalCalories || 0), 0);
+  const consumed = meals.reduce((s, m) => s + round(m.total_calories || 0), 0);
+
+  const macroTotals = sumMacros(meals.flatMap((m) => m.items || []));
+
+  return { burned, consumed, meals, workouts, macroTotals, source: "local" };
+}
+
+function suggestionSnippets({ goalType, dietPreference, calorieRemaining, proteinRemaining }) {
+  const diet = (dietPreference || "omnivore").toLowerCase();
+  const goal = (goalType || "").toLowerCase();
+
+  const proteinFoods = {
+    vegan: ["tofu", "tempeh", "lentils", "edamame", "vegan protein shake"],
+    vegetarian: ["greek yogurt", "eggs", "cottage cheese", "lentils", "protein shake"],
+    pescatarian: ["salmon", "tuna", "shrimp", "greek yogurt", "protein shake"],
+    keto: ["steak", "chicken", "salmon", "eggs", "cheese"],
+    mediterranean: ["fish", "chicken", "greek yogurt", "chickpeas", "lentils"],
+    omnivore: ["chicken", "lean beef", "eggs", "greek yogurt", "protein shake"],
+  };
+
+  const carbFoods = {
+    bulking: ["rice", "oats", "potatoes", "pasta", "fruit"],
+    cutting: ["berries", "vegetables", "sweet potatoes", "beans", "oats"],
+    maintenance: ["rice", "oats", "potatoes", "fruit", "whole grains"],
+  };
+
+  const fats = ["olive oil", "avocado", "nuts", "peanut butter"];
+
+  const pList = proteinFoods[diet] || proteinFoods.omnivore;
+  const cList = carbFoods[goal] || carbFoods.maintenance;
+
+  const recs = [];
+
+  if (proteinRemaining > 0) {
+    recs.push(`Protein boost: ${pList.slice(0, 3).join(", ")}`);
+  }
+
+  if (calorieRemaining > 0) {
+    if (goal === "cutting") {
+      recs.push(`Stay full while cutting: ${cList.slice(0, 3).join(", ")}`);
+    } else if (goal === "bulking") {
+      recs.push(`Easy calories for bulking: ${cList.slice(0, 3).join(", ")}`);
+      recs.push(`Add fats if you need quick calories: ${fats.slice(0, 3).join(", ")}`);
+    } else {
+      recs.push(`Balanced add-on: ${cList.slice(0, 3).join(", ")}`);
+    }
+  }
+
+  return recs.slice(0, 4);
+}
+
+// -----------------------------------------------------------------------------
+// Component
+export default function DailyRecapCoach({ embedded = false } = {}) {
   const { user } = useAuth();
+  const ent = useEntitlements();
 
-  // smooth scroll target for suggestions on mobile
-  const suggestRef = useRef(null);
+  // True for active, trialing, or past_due (matches server logic)
+  const isPro =
+    !!ent?.isProActive ||
+    (typeof window !== "undefined" && localStorage.getItem("isPro") === "true");
 
-  // canonical "today"
-  const now = new Date();
-  const todayUS = now.toLocaleDateString('en-US');
-  const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+  const [loading, setLoading] = useState(false);
+  const [recap, setRecap] = useState("");
+  const [error, setError] = useState("");
+  const [count, setCount] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
 
-  // streak + initial data load
+  const [savedAt, setSavedAt] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const todayUS = useMemo(() => usDay(), []);
+  const todayISO = useMemo(() => localISODay(), []);
+  const storageKey = `recapUsage`;
+  const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
+  const recapHistoryKey = "dailyRecapHistory";
+
+  const targets = useMemo(() => getUserTargets(), []);
+
+  // Coach homepage needs data even before generating a recap
+  const [dayCtx, setDayCtx] = useState(null);
+  const [dayCtxLoading, setDayCtxLoading] = useState(true);
+
+  // XP state (awarded once per day)
+  const [xpState, setXpState] = useState(() => readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 }));
+
+  // Daily quests
+  const [quests, setQuests] = useState(() => {
+    const cached = readJsonLS(QUESTS_KEY, null);
+    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
+    const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    return picked;
+  });
+
+  // Load saved recap + history
   useEffect(() => {
-    hydrateStreakOnStartup();
+    try {
+      const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
+      if (saved?.content) {
+        setRecap(String(saved.content));
+        setSavedAt(saved.createdAt || null);
+      }
+    } catch {}
+
+    try {
+      const hist = JSON.parse(localStorage.getItem(recapHistoryKey) || "[]");
+      setHistory(Array.isArray(hist) ? hist : []);
+    } catch {
+      setHistory([]);
+    }
+  }, [recapKeyToday]);
+
+  // Prefetch today context so Coach can show XP/Quests instantly
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setDayCtxLoading(true);
+      try {
+        const ctx = await buildContext();
+        if (mounted) setDayCtx(ctx);
+      } catch (e) {
+        if (mounted) setDayCtx(null);
+      } finally {
+        if (mounted) setDayCtxLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, todayISO]);
+
+  // Keep quests in sync with Pro status
+  useEffect(() => {
+    const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
+    setQuests(picked);
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, todayISO]);
+
+  // Load or reset today’s count on mount and whenever entitlement changes
+  useEffect(() => {
+    if (isPro) {
+      // Pro/Trial: clear any client-side cap for today
+      try {
+        const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
+        if (stored.date === todayUS && stored.count) {
+          localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: 0 }));
+        }
+      } catch {}
+      setCount(0);
+      return;
+    }
+    // Free users: load today’s usage
+    const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    setCount(stored.date === todayUS ? stored.count || 0 : 0);
+  }, [isPro, todayUS]);
+
+  // Keep an eye on Pro refresh events (login/logout, billing changes)
+  useEffect(() => {
+    const onRefresh = () => {
+      if (localStorage.getItem("isPro") === "true") {
+        setCount(0);
+      }
+    };
+    window.addEventListener("slimcal:pro:refresh", onRefresh);
+    return () => window.removeEventListener("slimcal:pro:refresh", onRefresh);
   }, []);
 
-  useEffect(() => {
-    const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayLog = all.find(e => e.date === todayUS);
-    const meals = todayLog ? todayLog.meals || [] : [];
-    setMealLog(meals);
-
-    const totalInit = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
-    onMealUpdate?.(totalInit);
-  }, [onMealUpdate, todayUS]);
-
-  // ------------ persistence helpers ------------
-  const persistToday = meals => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
-    rest.push({ date: todayUS, meals });
-    localStorage.setItem('mealHistory', JSON.stringify(rest));
+  const incrementCount = () => {
+    if (isPro) return 0; // never increment for Pro/Trial
+    const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    const newCount = stored.date === todayUS ? (stored.count || 0) + 1 : 1;
+    localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: newCount }));
+    setCount(newCount);
+    return newCount;
   };
 
-  const emitConsumed = total => {
-    try {
-      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: total } }));
-    } catch {}
-  };
-
-  const getBurnedTodayLocal = dateUS => {
-    try {
-      const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      const entry = all.find(e => e.date === dateUS);
-      return Number(entry?.totalCalories) || 0;
-    } catch {
-      return 0;
-    }
-  };
-
-  const syncDailyMetrics = async consumedTotal => {
-    const burned = getBurnedTodayLocal(todayUS);
-
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
-    cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
-    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-    localStorage.setItem('consumedToday', String(consumedTotal));
-    emitConsumed(consumedTotal);
-
-    try {
-      if (user?.id) {
-        await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
-      }
-    } catch (err) {
-      console.error('[MealTracker] upsertDailyMetrics failed', err);
-    }
-  };
-
-  const saveDay = meals => {
-    persistToday(meals);
-    const total = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
-    onMealUpdate?.(total);
-    syncDailyMetrics(total);
-  };
-
-  // Helpers for selected food/portion
-  const portions = useMemo(() => {
-    return Array.isArray(selectedFood?.portions) ? selectedFood.portions : [];
-  }, [selectedFood]);
-
-  const selectedPortion = useMemo(() => {
-    if (!portions.length) return null;
-    const found = portions.find(p => String(p.id) === String(selectedPortionId));
-    return found || portions[0] || null;
-  }, [portions, selectedPortionId]);
-
-  const autoCalories = useMemo(() => {
-    if (!selectedFood || !selectedPortion) return null;
-    const q = safeNumber(qty, 0);
-    const per = safeNumber(selectedPortion.calories, 0);
-    if (q <= 0 || per <= 0) return 0;
-    return Math.round(q * per);
-  }, [selectedFood, selectedPortion, qty]);
-
-  // When food/portion/qty changes, update calories unless user overrode it manually
-  useEffect(() => {
-    if (!selectedFood || !selectedPortion) return;
-    if (caloriesManualOverride) return;
-    if (autoCalories == null) return;
-    setCalories(String(autoCalories));
-  }, [selectedFood, selectedPortion, qty, autoCalories, caloriesManualOverride]);
-
-  // core logger for any meal object (local + optional cloud)
-  const logOne = async ({ name, calories, macros, meta }) => {
-    const safe = {
-      name,
-      calories: Math.max(0, Number(calories) || 0),
-      // Persist macros locally when available so Daily Recap Coach can be more detailed offline
-      protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
-      carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
-      fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
+  const saveRecapLocal = (content) => {
+    const entry = {
+      dateISO: todayISO,
+      dateUS: todayUS,
+      content: String(content || ""),
       createdAt: new Date().toISOString(),
-      ...(meta || {})
     };
 
-    setMealLog(prev => {
-      const upd = [...prev, safe];
-      saveDay(upd);
-      return upd;
-    });
-
-    updateStreak();
+    try {
+      localStorage.setItem(recapKeyToday, JSON.stringify(entry));
+    } catch {}
 
     try {
-      if (user?.id) {
-        const eatenISO = new Date().toISOString();
+      const prev = JSON.parse(localStorage.getItem(recapHistoryKey) || "[]");
+      const arr = Array.isArray(prev) ? prev : [];
+      const filtered = arr.filter((e) => e?.dateISO !== todayISO);
+      const next = [entry, ...filtered].slice(0, 30);
+      localStorage.setItem(recapHistoryKey, JSON.stringify(next));
+      setHistory(next);
+    } catch {}
 
-        // Build one "meal item" line with qty/unit if present
-        const qtyNum = meta?.qty != null ? Number(meta.qty) : 1;
-        const unitStr = meta?.unit || 'serving';
-
-        await saveMeal(
-          user.id,
-          {
-            eaten_at: eatenISO,
-            title: safe.name,
-            total_calories: safe.calories
-          },
-          [
-            {
-              food_name: meta?.food_name || safe.name,
-              qty: Number.isFinite(qtyNum) ? qtyNum : 1,
-              unit: unitStr,
-              calories: safe.calories,
-              protein: macros?.protein_g ?? null,
-              carbs: macros?.carbs_g ?? null,
-              fat: macros?.fat_g ?? null
-            }
-          ]
-        );
-      }
-    } catch (err) {
-      console.error('[MealTracker] cloud save failed', err);
-    }
+    setSavedAt(entry.createdAt);
   };
 
-  // manual "Add Meal" button
-  const handleAdd = async () => {
-    const nameText = foodInput.trim();
-
-    // Structured path: selectedFood + portion + qty
-    if (selectedFood && selectedPortion) {
-      const q = safeNumber(qty, 0);
-      if (!Number.isFinite(q) || q <= 0) {
-        alert('Enter a valid quantity.');
-        return;
-      }
-
-      const c = safeNumber(calories, NaN);
-      if (!Number.isFinite(c) || c <= 0) {
-        alert('Calories must be greater than 0.');
-        return;
-      }
-
-      const unit = selectedPortion.unit || 'serving';
-      const unitPretty = pluralizeUnit(unit, q);
-
-      // Nice display name: "Eggs — 6 eggs (1 large egg)"
-      const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
-
-      await logOne({
-        name: displayName,
-        calories: c,
-        meta: {
-          food_id: selectedFood.id,
-          portion_id: selectedPortion.id,
-          portion_label: selectedPortion.label,
-          qty: q,
-          unit,
-          food_name: selectedFood.name
-        }
-      });
-
-      setFoodInput('');
-      setSelectedFood(null);
-      setSelectedPortionId('');
-      setQty('1');
-      setCalories('');
-      setCaloriesManualOverride(false);
-      return;
+  // Build the recap context (Supabase if signed in; otherwise local)
+  async function buildContext() {
+    if (!user) {
+      return buildLocalContext(todayISO);
     }
 
-    // Legacy/freeSolo path: requires manual calories
-    const c = Number.parseInt(calories, 10);
-    if (!nameText || !Number.isFinite(c) || c <= 0) {
-      alert('Enter a valid food & calories.');
-      return;
-    }
-
-    await logOne({ name: nameText, calories: c });
-
-    setFoodInput('');
-    setCalories('');
-    setSelectedFood(null);
-    setSelectedPortionId('');
-    setQty('1');
-    setCaloriesManualOverride(false);
-  };
-
-  const handleDeleteMeal = index => {
-    setMealLog(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      saveDay(updated);
-      return updated;
-    });
-  };
-
-  const handleClear = () => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
-    localStorage.setItem('mealHistory', JSON.stringify(rest));
-    setMealLog([]);
-    onMealUpdate?.(0);
-    syncDailyMetrics(0);
-  };
-
-  // toggle meal ideas panel — identity-aware probe to avoid false 402s
-  const handleToggleMealIdeas = useCallback(async () => {
-    if (showSuggest) {
-      setShowSuggest(false);
-      return;
-    }
-
-    if (!isProUser() && getMealAICount() >= 3) {
-      // continue to server probe; if gated, it will 402
-    }
-
+    // 1) Today’s daily metrics
+    let burned = 0;
+    let consumed = 0;
     try {
-      const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
-      const trainingIntent = localStorage.getItem('training_intent') || 'general';
-      const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
-      const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
-
-      await callAIGenerate({
-        feature: 'meal',
-        user_id: user?.id || null,
-        constraints: {
-          diet_preference: dietPreference,
-          training_intent: trainingIntent,
-          protein_per_meal_g: proteinMealG || undefined,
-          calorie_bias: calorieBias || undefined
-        },
-        count: 1
-      });
+      const dm = await getDailyMetricsRange(user.id, todayISO, todayISO);
+      const row = dm?.[0];
+      burned = round(row?.burned ?? row?.cals_burned ?? 0);
+      consumed = round(row?.eaten ?? row?.cals_eaten ?? 0);
     } catch (e) {
-      if (e?.code === 402) {
-        setShowUpgrade(true);
-        return;
-      }
-      console.warn('[MealTracker] gateway probe failed', e);
+      console.warn("[DailyRecapCoach] getDailyMetricsRange failed, continuing", e);
     }
 
-    if (!isProUser()) incMealAICount();
+    // 2) Today’s workouts → sets → kcal proxy
+    const workouts = [];
+    try {
+      const ws = await getWorkouts(user.id, { limit: 30 });
+      const todays = ws.filter((w) => (w.started_at || "").slice(0, 10) === todayISO);
+      for (const w of todays) {
+        const sets = await getWorkoutSetsFor(w.id, user.id);
+        const kcal = calcCaloriesFromSets(sets);
 
-    setShowSuggest(true);
+        if (Array.isArray(sets) && sets.length > 0) {
+          // group by exercise_name to show cleaner summary
+          const byEx = new Map();
+          for (const s of sets) {
+            const k = s.exercise_name || "Exercise";
+            const prev = byEx.get(k) || { exercise_name: k, sets: 0, reps: 0, weight_max: 0 };
+            prev.sets += 1;
+            prev.reps += safeNum(s.reps, 0);
+            prev.weight_max = Math.max(prev.weight_max, safeNum(s.weight, 0));
+            byEx.set(k, prev);
+          }
 
-    setTimeout(() => {
+          for (const v of byEx.values()) {
+            workouts.push({
+              exercise_name: v.exercise_name,
+              sets: v.sets,
+              reps: v.reps,
+              weight: v.weight_max,
+              calories: kcal,
+            });
+          }
+        } else {
+          workouts.push({
+            exercise_name: "Workout session",
+            sets: 0,
+            reps: 0,
+            weight: 0,
+            calories: kcal,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[DailyRecapCoach] workouts fetch failed, continuing", e);
+    }
+
+    // 3) Today’s meals + meal items (macros + timing)
+    const meals = [];
+    let macroTotals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
+
+    try {
+      // Query meals by *local* calendar day, converted to an equivalent UTC timestamp range.
+      // Without this, meals logged in the evening can fall into the "next day" in UTC.
+      const { from: mealsFrom, to: mealsTo } = localDayToUtcRangeInclusive(todayISO);
+
+      const mealsAll = await getMeals(user.id, {
+        from: mealsFrom,
+        to: mealsTo,
+        limit: 200,
+      });
+
+      const ids = mealsAll.map((m) => m.id);
+      const itemsMap = await getMealItemsForMealIds(user.id, ids);
+
+      for (const m of mealsAll) {
+        const itemsRaw = (itemsMap?.[m.id] || []).filter(Boolean);
+
+        // If meal_items are missing (or macros are null), synthesize/estimate so the coach recap stays accurate.
+        const baseItems = itemsRaw.length
+          ? itemsRaw
+          : [
+              {
+                food_name: m.title || "Meal",
+                qty: 1,
+                unit: "serving",
+                calories: m.total_calories,
+                protein: null,
+                carbs: null,
+                fat: null,
+              },
+            ];
+
+        const items = baseItems.map((it) => {
+          const est = estimateMacrosForFood({
+            name: it.food_name,
+            qty: it.qty,
+            unit: it.unit,
+            calories: it.calories,
+          });
+
+          return {
+            food_name: it.food_name,
+            qty: it.qty || 1,
+            unit: it.unit || "serving",
+            calories: round(it.calories),
+            protein: safeNum(it.protein, safeNum(est.protein_g, 0)),
+            carbs: safeNum(it.carbs, safeNum(est.carbs_g, 0)),
+            fat: safeNum(it.fat, safeNum(est.fat_g, 0)),
+          };
+        });
+
+        const macros = sumMacros(items);
+
+        meals.push({
+          id: m.id,
+          eaten_at: m.eaten_at,
+          time_label: toTimeLabel(m.eaten_at),
+          title: m.title || "Meal",
+          total_calories: round(m.total_calories || 0),
+          items,
+          macros,
+        });
+      }
+
+      // totals
+      macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
+
+      // If daily_metrics was missing, compute consumed from meals
+      if (!consumed) {
+        consumed = meals.reduce((s, mm) => s + round(mm.total_calories || 0), 0);
+      }
+    } catch (e) {
+      console.warn("[DailyRecapCoach] meals fetch failed, continuing", e);
+    }
+
+    // Merge any local (offline) meals that haven't synced yet, so the coach always reflects
+    // what the user sees in Meal History.
+    try {
+      const localCtx = buildLocalContext(todayISO);
+      const localMeals = localCtx?.meals || [];
+      if (localMeals.length) {
+        const keyOf = (m) => `${m.title}|${round(m.total_calories || 0)}|${m.time_label || ""}`;
+        const existing = new Set(meals.map(keyOf));
+
+        for (const lm of localMeals) {
+          const key = keyOf(lm);
+          if (!existing.has(key)) {
+            existing.add(key);
+            meals.push({ ...lm, id: lm.id || `local-${btoa(key).slice(0, 10)}` });
+          }
+        }
+
+        // If local metrics are ahead of cloud, use them.
+        consumed = Math.max(consumed || 0, localCtx?.consumed || 0);
+        burned = Math.max(burned || 0, localCtx?.burned || 0);
+        macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
+      }
+    } catch (e) {
+      // localStorage may be unavailable in some contexts; ignore safely
+    }
+
+    return { burned, consumed, meals, workouts, macroTotals, source: "cloud" };
+  }
+
+  function computeTimingNotes(meals = []) {
+    const withTime = meals
+      .map((m) => {
+        const t = m.eaten_at ? new Date(m.eaten_at).getTime() : NaN;
+        return { ...m, _t: t };
+      })
+      .filter((m) => Number.isFinite(m._t))
+      .sort((a, b) => a._t - b._t);
+
+    if (withTime.length < 2) return { first: null, last: null, gaps: [] };
+
+    const gaps = [];
+    for (let i = 1; i < withTime.length; i++) {
+      const prev = withTime[i - 1];
+      const cur = withTime[i];
+      const mins = Math.round((cur._t - prev._t) / 60000);
+      gaps.push({
+        from: prev.time_label,
+        to: cur.time_label,
+        minutes: mins,
+      });
+    }
+
+    return {
+      first: withTime[0].time_label,
+      last: withTime[withTime.length - 1].time_label,
+      gaps,
+    };
+  }
+
+  // Award XP once per day based on current day state
+  useEffect(() => {
+    if (xpState?.lastAwardDay === todayISO) return;
+
+    const mealsCount = (dayCtx?.meals || []).length;
+    const workoutsCount = (dayCtx?.workouts || []).length;
+
+    const goal = targets.dailyGoal || 0;
+    const eaten = round(dayCtx?.consumed || 0);
+    const burned = round(dayCtx?.burned || 0);
+    const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+
+    const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
+    const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+
+    const earned = computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories });
+    const next = {
+      totalXp: Math.max(0, safeNum(xpState?.totalXp, 0) + earned),
+      lastAwardDay: todayISO,
+      lastEarned: earned,
+      updatedAt: Date.now(),
+    };
+    setXpState(next);
+    writeJsonLS(XP_KEY, next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayISO, dayCtxLoading]);
+
+  // Auto-generate recap on open (Pro only)
+  useEffect(() => {
+    if (!isPro) return;
+    // if already have a saved recap today, don't auto
+    try {
+      const saved = JSON.parse(localStorage.getItem(recapKeyToday) || 'null');
+      if (saved?.content) return;
+    } catch {}
+    if (!loading && !recap) {
+      // don't spam if context still loading
+      if (!dayCtxLoading) handleGetRecap();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, recapKeyToday, dayCtxLoading]);
+
+  const handleGetRecap = async () => {
+    // Non-Pro users are limited to 3/day
+    if (!isPro && count >= 3) {
+      setModalOpen(true);
+      return;
+    }
+    incrementCount();
+
+    setLoading(true);
+    setError("");
+    setRecap("");
+
+    try {
+      const ctx = await buildContext();
+
+      const goal = targets.dailyGoal || 0;
+      const net = round((ctx.consumed || 0) - (ctx.burned || 0));
+      const caloriesRemaining = goal ? round(goal - (ctx.consumed || 0)) : 0;
+
+      const proteinTarget = targets.proteinDaily || 0;
+      const proteinSoFar = round(ctx.macroTotals?.protein_g || 0);
+      const proteinRemaining = proteinTarget ? round(proteinTarget - proteinSoFar) : 0;
+
+      const timing = computeTimingNotes(ctx.meals || []);
+
+      const coachFacts = {
+        day: todayISO,
+        goals: {
+          daily_calorie_goal: goal || null,
+          fitness_goal: targets.goalType || null,
+          diet_preference: targets.dietPreference || null,
+          training_intent: targets.trainingIntent || null,
+          training_split: targets.trainingSplit || null,
+          last_focus: targets.lastFocus || null,
+          protein_target_g: proteinTarget || null,
+          protein_per_meal_g: targets.proteinMeal || null,
+        },
+        totals: {
+          eaten: round(ctx.consumed || 0),
+          burned: round(ctx.burned || 0),
+          net,
+          protein_g: round(ctx.macroTotals?.protein_g || 0),
+          carbs_g: round(ctx.macroTotals?.carbs_g || 0),
+          fat_g: round(ctx.macroTotals?.fat_g || 0),
+          calories_remaining: goal ? caloriesRemaining : null,
+          protein_remaining_g: proteinTarget ? proteinRemaining : null,
+        },
+        meals: (ctx.meals || []).map((m) => ({
+          time: m.time_label || null,
+          title: m.title,
+          total_calories: round(m.total_calories || 0),
+          macros: {
+            protein_g: round(m.macros?.protein_g || 0),
+            carbs_g: round(m.macros?.carbs_g || 0),
+            fat_g: round(m.macros?.fat_g || 0),
+          },
+          items: (m.items || []).slice(0, 20).map((it) => ({
+            food: it.food_name,
+            qty: it.qty ?? null,
+            unit: it.unit ?? null,
+            calories: round(it.calories || 0),
+            protein_g: it.protein ?? null,
+            carbs_g: it.carbs ?? null,
+            fat_g: it.fat ?? null,
+          })),
+        })),
+        workouts: (ctx.workouts || []).map((w) => ({
+          exercise: w.exercise_name,
+          sets: w.sets ?? null,
+          reps: w.reps ?? null,
+          weight: w.weight ?? null,
+          calories_est: round(w.calories || 0),
+        })),
+        timing: {
+          first_meal_time: timing.first,
+          last_meal_time: timing.last,
+          gaps_minutes: (timing.gaps || []).slice(0, 8),
+        },
+        client_context: {
+          app: "slimcal.ai",
+          source: ctx.source,
+        },
+      };
+
+      const autoSuggestions = suggestionSnippets({
+        goalType: targets.goalType,
+        dietPreference: targets.dietPreference,
+        calorieRemaining: Math.max(0, caloriesRemaining),
+        proteinRemaining: Math.max(0, proteinRemaining),
+      });
+
+      const system = `You are Slimcal Coach — an authentically fun, motivating, psychologically addicting fitness coach.
+
+Rules:
+- Be specific and grounded in today's data.
+- If any data is missing, say what is missing and give a best-effort alternative.
+- Use short punchy sections, emojis (tastefully), and coach-like energy.
+- Do NOT invent foods or workouts that are not in the provided data.
+
+Output format (use these headings):
+1) \"Today’s Scoreboard\" (calories eaten/burned/net + macro totals)
+2) \"What You Ate\" (list each meal with time + items + macros)
+3) \"Training Check-In\" (what was trained + quick note)
+4) \"Goal Progress\" (daily kcal goal + how far off + protein target progress)
+5) \"Timing & Consistency\" (comments on meal timing & gaps; practical fix)
+6) \"Next Move\" (2–4 actionable steps + 2–3 foods to hit targets)
+7) \"Coach Challenge\" (a fun micro-challenge for tomorrow)
+`;
+
+      const userMsg = `Here is my structured day data as JSON. Use it exactly:\n\n${JSON.stringify(
+        coachFacts,
+        null,
+        2
+      )}\n\nAlso, here are 2–4 non-AI suggestions you may weave in if relevant (only if they fit the data):\n- ${autoSuggestions.join(
+        "\n- "
+      )}`;
+
+      // Call OpenAI-backed API
+      const res = await fetch("/api/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userMsg },
+          ],
+          context: coachFacts,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API error (${res.status}): ${text}`);
+      }
+
+      const data = await res.json();
+      const msg = data.choices?.[0]?.message?.content;
+      if (!msg) throw new Error("No message returned from OpenAI.");
+      setRecap(msg);
+      saveRecapLocal(msg);
+    } catch (err) {
+      console.error("Recap error:", err);
+      setError(err.message || "Sorry, I couldn’t generate your daily recap right now.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---- Share helpers ----------------------------------------------------------
+  async function copyRecap() {
+    const text = String(recap || '').trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }
+
+  async function shareRecap() {
+    const text = String(recap || '').trim();
+    if (!text) return;
+    if (navigator.share) {
       try {
-        suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } catch {}
-    }, 50);
-  }, [showSuggest, user?.id]);
+        await navigator.share({ title: 'SlimCal Coach Recap', text });
+        return;
+      } catch {
+        // user canceled
+      }
+    }
+    await copyRecap();
+  }
 
-  const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+  // ---- UI --------------------------------------------------------------------
+  const FreeUsageBanner = !isPro ? (
+    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+      Free recaps used today: <strong>{count}</strong>/3
+    </Typography>
+  ) : null;
 
-  // Autocomplete options: foods only (portions handled separately)
-  const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
-
-  // Handle special custom action row (kept as a "pseudo option" below)
-  const customAction = useMemo(() => {
-    return Array.isArray(foodData) ? foodData.find(f => f.action === 'open_custom_nutrition') : null;
-  }, []);
-
-  return (
-    <Container
-      maxWidth="sm"
+  const UpsellCard = !isPro ? (
+    <Card
+      elevation={0}
       sx={{
-        py: { xs: 2, md: 4 },
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3
+        mb: 2.5,
+        border: "1px solid rgba(2,6,23,0.08)",
+        background: "linear-gradient(180deg, #ffffff, #fbfdff)",
+        borderRadius: 2,
       }}
     >
-      <FoodTip />
-      <CalTip />
-      <AddTip />
-      <ClearTip />
+      <CardContent>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
+            <Typography
+              variant="subtitle1"
+              sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}
+            >
+              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Detailed breakdowns, goals tracking, meal timing tips, and better recommendations.
+            </Typography>
+          </Box>
 
-      {/* ------------------- HERO: Title + Single AI CTA ------------------- */}
-      <Card
-        sx={{
-          borderRadius: 3,
-          boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
-        }}
+          <Stack direction="row" spacing={1} justifyContent={{ xs: "center", sm: "flex-end" }}>
+            <Button
+              variant="contained"
+              sx={{ fontWeight: 800 }}
+              onClick={async () => {
+                if (!user) {
+                  // open sign in
+                  window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
+                } else {
+                  setModalOpen(true);
+                }
+              }}
+            >
+              Start Free Trial
+            </Button>
+          </Stack>
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems="center"
+          justifyContent={{ xs: "center", sm: "flex-start" }}
+        >
+          <Feature text="Macros + meal timing coaching" />
+          <Feature text="Saved recap history" />
+          <Feature text="Smarter food suggestions" />
+        </Stack>
+      </CardContent>
+    </Card>
+  ) : null;
+
+  const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
+
+  const RecapHeader = (
+    <Stack
+      direction={{ xs: "column", sm: "row" }}
+      spacing={1.25}
+      alignItems={{ xs: "stretch", sm: "center" }}
+      justifyContent="space-between"
+    >
+      <Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
+            Daily Recap Coach
+          </Typography>
+          <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
+          {!embedded && !isPro && (
+            <Chip
+              label="3/day Free"
+              size="small"
+              variant="outlined"
+              sx={{ fontWeight: 700 }}
+            />
+          )}
+        </Stack>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Get a detailed recap of today’s calories, macros, training, timing, and next steps.
+        </Typography>
+
+        {savedAt && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+            Saved: {new Date(savedAt).toLocaleString()}
+          </Typography>
+        )}
+      </Box>
+
+      <Button
+        variant="contained"
+        onClick={handleGetRecap}
+        disabled={loading}
+        sx={{ fontWeight: 900, borderRadius: 999, px: 3 }}
       >
-        <CardContent sx={{ pb: 2 }}>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            alignItems={{ xs: 'flex-start', sm: 'center' }}
-            justifyContent="space-between"
-            spacing={2}
-          >
-            <Box>
-              <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                Meals
+        {loading ? <CircularProgress size={24} /> : buttonText}
+      </Button>
+    </Stack>
+  );
+
+  const History = history?.length ? (
+    <Accordion sx={{ mt: 2 }} disableGutters>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography sx={{ fontWeight: 800 }}>Recap History</Typography>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={1.25}>
+          {history.slice(0, 7).map((h, idx) => (
+            <Box
+              key={`${h?.dateISO || idx}-${idx}`}
+              sx={{
+                p: 1,
+                border: "1px solid rgba(2,6,23,0.08)",
+                borderRadius: 2,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary">
+                {h?.dateUS || h?.dateISO || ""}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Log foods and keep your net calories up to date.
+              <Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }} variant="body2">
+                {h?.content || ""}
               </Typography>
             </Box>
+          ))}
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
+  ) : null;
 
-            <Button
-              onClick={handleToggleMealIdeas}
-              variant={showSuggest ? 'outlined' : 'contained'}
-              startIcon={<SmartToyOutlinedIcon />}
-              size="large"
-              sx={{ fontWeight: 700, borderRadius: 999 }}
-            >
-              {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
-            </Button>
+  const Inner = (
+    <>
+      {!embedded && UpsellCard}
+
+      {RecapHeader}
+      {FreeUsageBanner}
+
+      {error && (
+        <Typography color="error" sx={{ mt: 2 }}>
+          {error}
+        </Typography>
+      )}
+
+      {recap && (
+        <Box sx={{ mt: 2 }}>
+          <Typography sx={{ whiteSpace: "pre-wrap" }}>{recap}</Typography>
+        </Box>
+      )}
+
+      {!embedded && History}
+
+      <UpgradeModal open={modalOpen} onClose={() => setModalOpen(false)} />
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <Card
+        elevation={0}
+        sx={{
+          borderRadius: 3,
+          border: "1px solid rgba(2,6,23,0.08)",
+          background: "linear-gradient(180deg, #ffffff, #fbfdff)",
+        }}
+      >
+        <CardContent sx={{ p: 2.25 }}>{Inner}</CardContent>
+      </Card>
+    );
+  }
+
+  const now = useMemo(() => new Date(), []);
+  const mealsCount = (dayCtx?.meals || []).length;
+  const workoutsCount = (dayCtx?.workouts || []).length;
+  const goal = targets.dailyGoal || 0;
+  const eaten = round(dayCtx?.consumed || 0);
+  const burned = round(dayCtx?.burned || 0);
+  const net = round(eaten - burned);
+  const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+  const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
+  const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+  const lvl = useMemo(() => computeLevel(xpState.totalXp || 0), [xpState.totalXp]);
+  const roastLine = missedBreakfastLine({
+    now,
+    meals: dayCtx?.meals || [],
+    workoutsCount: dayCtx?.workouts?.length || 0,
+    consumed: dayCtx?.consumed || 0,
+    burned: dayCtx?.burned || 0,
+    proteinTotal: dayCtx?.macroTotals?.protein_g || 0,
+    calorieGoal: goalCalories,
+    proteinGoal: goalProtein
+  });
+
+  return (
+    <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
+
+      {/* 🏠 Coach homepage header */}
+      <Box sx={{ mb: 2.2 }}>
+        <Typography variant={embedded ? "h6" : "h4"} sx={{ fontWeight: 900, letterSpacing: "-0.02em" }}>
+          🧠 Coach
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.3 }}>
+          Open app → Coach reacts to your day → you log meals/workouts → come back for the recap.
+        </Typography>
+      </Box>
+
+      {/* Missed breakfast reactions (time-based) */}
+      {roastLine && (
+        <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2, background: "rgba(2,6,23,0.03)" }}>
+          <CardContent>
+            <Typography sx={{ fontWeight: 900, lineHeight: 1.35 }}>{roastLine}</Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* XP + Level */}
+      <Card data-testid="coach-xp" elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>Level {lvl.level}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                +{xpState.lastEarned || 0} XP earned today
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 220 }}>
+              <LinearProgress
+                variant="determinate"
+                value={lvl.next ? clamp((lvl.progress / lvl.next) * 100, 0, 100) : 0}
+                sx={{ height: 10, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
+              />
+              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
+                <Chip size="small" label={`🍽️ Meals: ${mealsCount}`} />
+                <Chip size="small" label={`🔥 Burned: ${burned}`} />
+                <Chip size="small" label={`🥩 Protein: ${proteinSoFar}g`} />
+                <Chip size="small" label={`⚖️ Net: ${net > 0 ? `+${net}` : net}`} />
+              </Stack>
+            </Box>
           </Stack>
         </CardContent>
       </Card>
 
-      {/* ------------------- ACCORDION: Quick Actions ------------------- */}
-      <Accordion disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography sx={{ fontWeight: 700 }}>Quick Actions</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-            <Button
-              onClick={() => setOpenCustom(true)}
-              startIcon={<AddCircleOutlineIcon />}
-              variant="outlined"
-              size="small"
-              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
-            >
-              Custom Food
-            </Button>
-            <Button
-              onClick={() => setOpenBowl(true)}
-              startIcon={<RestaurantIcon />}
-              variant="outlined"
-              size="small"
-              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
-            >
-              Build a Bowl
-            </Button>
-          </Stack>
-        </AccordionDetails>
-      </Accordion>
-
-      {/* ------------------- ACCORDION: Manual Entry (default open) ------------------- */}
-      <Accordion defaultExpanded disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ mb: 2 }}>
-            <Autocomplete
-              freeSolo
-              options={options}
-              getOptionLabel={o => (typeof o === 'string' ? o : o?.name || '')}
-              value={selectedFood}
-              inputValue={foodInput}
-              onChange={(_, v) => {
-                // If user types freeSolo string
-                if (!v) {
-                  setSelectedFood(null);
-                  setSelectedPortionId('');
-                  setQty('1');
-                  setCalories('');
-                  setCaloriesManualOverride(false);
-                  return;
-                }
-
-                if (typeof v === 'string') {
-                  setSelectedFood(null);
-                  setFoodInput(v);
-                  setSelectedPortionId('');
-                  setQty('1');
-                  setCaloriesManualOverride(false);
-                  return;
-                }
-
-                // Selected structured food
-                setSelectedFood(v);
-                setFoodInput(v.name);
-
-                const firstPortion = Array.isArray(v.portions) && v.portions.length ? v.portions[0] : null;
-                setSelectedPortionId(firstPortion?.id ? String(firstPortion.id) : '');
-                setQty('1');
-                setCaloriesManualOverride(false);
-
-                if (firstPortion?.calories != null) {
-                  setCalories(String(Math.round(Number(firstPortion.calories) || 0)));
-                } else {
-                  setCalories('');
-                }
-              }}
-              onInputChange={(_, v) => {
-                setFoodInput(v);
-                // If user starts typing, treat it as freeSolo unless they re-select an option
-                if (!selectedFood) return;
-                if (v !== selectedFood?.name) {
-                  setSelectedFood(null);
-                  setSelectedPortionId('');
-                  setQty('1');
-                  setCaloriesManualOverride(false);
-                }
-              }}
-              renderInput={params => (
-                <TextField {...params} label="Food Name" fullWidth onFocus={triggerFoodTip} />
-              )}
-            />
-
-            {/* Portion + Quantity only if a structured food is selected */}
-            {selectedFood && (
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
-                <FormControl fullWidth>
-                  <InputLabel id="portion-label">Portion</InputLabel>
-                  <Select
-                    labelId="portion-label"
-                    label="Portion"
-                    value={selectedPortionId || (portions[0]?.id ? String(portions[0].id) : '')}
-                    onChange={(e) => {
-                      setSelectedPortionId(String(e.target.value || ''));
-                      setCaloriesManualOverride(false);
-                    }}
-                  >
-                    {portions.map(p => (
-                      <MenuItem key={String(p.id)} value={String(p.id)}>
-                        {p.label} — {Number(p.calories) || 0} kcal
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <TextField
-                  label="Quantity"
-                  type="number"
-                  fullWidth
-                  value={qty}
-                  onChange={(e) => {
-                    setQty(e.target.value);
-                    setCaloriesManualOverride(false);
-                  }}
-                  inputProps={{ min: 0, step: 1 }}
-                />
-              </Stack>
-            )}
-
-            <TextField
-              label="Calories"
-              type="number"
-              fullWidth
-              sx={{ mt: 2 }}
-              value={calories}
-              onFocus={triggerCalTip}
-              onChange={e => {
-                setCalories(e.target.value);
-                // Mark manual override only if a structured food is selected
-                if (selectedFood) setCaloriesManualOverride(true);
-              }}
-              helperText={
-                selectedFood && selectedPortion
-                  ? `Auto: ${autoCalories ?? 0} kcal (edit to override)`
-                  : ''
-              }
-            />
-
-            {/* Provide a quick "Custom Food" action hint */}
-            {!selectedFood && foodInput.length > 2 && (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                Not found — enter calories manually or use Quick Actions.
-              </Alert>
-            )}
-
-            {/* Explicit custom item button (keeps old behavior but cleaner) */}
-            {customAction && (
-              <Button
-                onClick={() => setOpenCustom(true)}
-                variant="text"
-                sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}
-              >
-                + Custom Food (macros)
+      {/* Daily Quests (viral) */}
+      <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>🎯 Daily Quests</Typography>
+            {!isPro && (
+              <Button size="small" variant="outlined" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                🔥 Unlock 5 Quests + smarter coaching
               </Button>
             )}
-          </Box>
+          </Stack>
 
-          <Box
-            sx={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              rowGap: 1.5,
-              columnGap: 2,
-              justifyContent: { xs: 'flex-start', sm: 'space-between' }
-            }}
-          >
-            <Button
-              variant="contained"
-              sx={{ minWidth: 120, fontWeight: 600 }}
-              onClick={() => {
-                triggerAddTip();
-                handleAdd();
-              }}
-            >
-              Add Meal
-            </Button>
+          <Stack spacing={1.1}>
+            {quests.map((q) => {
+              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
+              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
+              const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+              return (
+                <Box key={q.id} sx={{ p: 1.2, borderRadius: 1.5, border: "1px solid rgba(2,6,23,0.08)", background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white" }}>
+                  <Stack direction="row" spacing={1.2} alignItems="center">
+                    <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>{q.locked ? "🔒" : done ? "✅" : "🎯"}</Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
+                      <LinearProgress variant="determinate" value={q.locked ? 0 : pct} sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }} />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
+                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                      </Typography>
+                    </Box>
+                    {q.locked && (
+                      <Button size="small" variant="contained" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                        Unlock
+                      </Button>
+                    )}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
 
-            <Button
-              variant="text"
-              color="error"
-              sx={{ fontWeight: 500, minWidth: 120 }}
-              onClick={() => {
-                triggerClearTip();
-                handleClear();
-              }}
-            >
-              Clear Meals
-            </Button>
-          </Box>
-        </AccordionDetails>
-      </Accordion>
-
-      {/* ------------------- ACCORDION: AI Assist (open) ------------------- */}
-      <Accordion defaultExpanded disableGutters ref={suggestRef}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontWeight: 700 }}>AI Assist</Typography>
-            <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 500, height: 20 }} />
-          </Box>
-        </AccordionSummary>
-        <AccordionDetails>
-          <AIFoodLookupBox
-            onAddFood={payload => {
-              logOne({
-                name: payload.name,
-                calories: payload.calories,
-                macros: {
-                  protein_g: payload.protein_g,
-                  carbs_g: payload.carbs_g,
-                  fat_g: payload.fat_g
-                }
-              });
-            }}
-          />
-
-          {showSuggest && (
-            <Box sx={{ mt: 2 }}>
-              <MealSuggestion
-                consumedCalories={total}
-                onAddMeal={async meal => {
-                  const safeCalories = Number.isFinite(meal.calories) ? Number(meal.calories) : 0;
-                  await logOne({ name: meal.name, calories: safeCalories });
-                }}
-              />
-            </Box>
+          {!isPro && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.2 }}>
+              Free gets 1–2 quests. Pro gets 5–7 quests + streak multipliers + card export.
+            </Typography>
           )}
-        </AccordionDetails>
-      </Accordion>
+        </CardContent>
+      </Card>
 
-      {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
-      <Accordion defaultExpanded disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography sx={{ fontWeight: 700 }}>Meals Logged Today ({todayUS})</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          {mealLog.length === 0 ? (
-            <Typography color="text.secondary">No meals added yet.</Typography>
-          ) : (
-            <>
-              <List
-                sx={{
-                  borderRadius: 2,
-                  overflow: 'hidden',
-                  border: '1px solid rgba(0,0,0,0.05)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
-                }}
-              >
-                {mealLog.map((m, i) => (
-                  <Box key={`${m.name}-${i}`}>
-                    <ListItem
-                      secondaryAction={
-                        <Tooltip title="Delete this meal">
-                          <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      }
-                    >
-                      <ListItemText
-                        primary={<Typography fontWeight={500}>{m.name}</Typography>}
-                        secondary={`${Number(m.calories) || 0} cals`}
-                      />
-                    </ListItem>
-                    {i < mealLog.length - 1 && <Divider />}
-                  </Box>
-                ))}
-              </List>
+      {Inner}
+    </Box>
+  );
+}
 
-              <Typography variant="h6" align="right" sx={{ mt: 2, fontWeight: 600 }}>
-                Total Calories: {total}
-              </Typography>
-            </>
-          )}
-        </AccordionDetails>
-      </Accordion>
-
-      <UpgradeModal
-        open={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        title="Upgrade to Slimcal Pro"
-        description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, AI Food Lookup without limits, and advanced insights."
-      />
-
-      <CustomNutritionDialog open={openCustom} onClose={() => setOpenCustom(false)} onConfirm={item => logOne(item)} />
-      <BuildBowlDialog open={openBowl} onClose={() => setOpenBowl(false)} onConfirm={item => logOne(item)} />
-    </Container>
+function Feature({ text }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Chip label="✓" size="small" variant="outlined" />
+      <Typography variant="caption">{text}</Typography>
+    </Stack>
   );
 }
