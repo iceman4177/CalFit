@@ -85,7 +85,7 @@ function buildLocalContext() {
 
 // -----------------------------------------------------------------------------
 // Component
-export default function DailyRecapCoach() {
+export default function DailyRecapCoach({ embedded = false }) {
   const { user } = useAuth();
   const ent = useEntitlements();
 
@@ -141,10 +141,13 @@ export default function DailyRecapCoach() {
     if (isPro) return 0; // never increment for Pro/Trial
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const newCount = stored.date === todayUS ? (stored.count || 0) + 1 : 1;
-    localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: newCount }));
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ date: todayUS, count: newCount })
+    );
     setCount(newCount);
     return newCount;
-    };
+  };
 
   // Build the recap context (Supabase if signed in; otherwise local)
   async function buildContext() {
@@ -360,7 +363,13 @@ export default function DailyRecapCoach() {
   ) : null;
 
   return (
-    <Box sx={{ p: 2, maxWidth: 800, mx: "auto" }}>
+    <Box
+      sx={
+        embedded
+          ? { p: 0, maxWidth: "100%", mx: 0 }
+          : { p: 2, maxWidth: 800, mx: "auto" }
+      }
+    >
       {UpsellCard}
 
       <Box sx={{ textAlign: "center" }}>

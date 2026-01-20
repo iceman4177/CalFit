@@ -45,6 +45,7 @@ import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
 import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
+import DailyRecapCoach from './DailyRecapCoach';
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
@@ -595,6 +596,22 @@ export default function MealTracker({ onMealUpdate }) {
           </Stack>
         </CardContent>
       </Card>
+
+      {/* ------------------- ACCORDION: DAILY RECAP COACH (PRIMARY FEATURE) ------------------- */}
+      <Accordion defaultExpanded disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontWeight: 800 }}>Daily Recap Coach</Typography>
+            <Chip size="small" color="primary" label="AI" sx={{ fontWeight: 700, height: 20 }} />
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Get a short recap of today’s calories + training with 2–3 action steps to improve.
+          </Typography>
+          <DailyRecapCoach embedded />
+        </AccordionDetails>
+      </Accordion>
 
       {/* ------------------- ACCORDION: Quick Actions ------------------- */}
       <Accordion disableGutters>
