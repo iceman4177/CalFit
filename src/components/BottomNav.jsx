@@ -12,7 +12,7 @@ import DashboardIcon     from '@mui/icons-material/Dashboard';
 import HomeIcon          from '@mui/icons-material/Home';
 
 const tabs = [
-  { label: 'Home',     value: '/',          icon: <HomeIcon /> },
+  { label: 'Coach',    value: '/',          icon: <HomeIcon /> },
   { label: 'Workout',  value: '/workout',   icon: <FitnessCenterIcon /> },
   { label: 'Meals',    value: '/meals',     icon: <RestaurantIcon /> },
   { label: 'History',  value: '/history',   icon: <HistoryIcon /> },

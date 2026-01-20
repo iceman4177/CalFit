@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
   Switch,
+  Redirect,
   NavLink,
   useLocation,
   useHistory
@@ -82,6 +83,7 @@ import {
 } from './utils/streak';
 
 const routeTips = {
+  '/':            'Coach: your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
@@ -90,7 +92,7 @@ const routeTips = {
   '/achievements': 'Achievements: hit milestones to unlock badges!',
   '/calorie-log':  'Calorie Log: detailed daily breakdown of intake vs burn.',
   '/summary':      'Summary: quick overview of today’s net calories.',
-  '/recap':        'Daily Recap: your AI coach summarizes your progress!',
+  '/recap':        'Coach (legacy route): redirects to the new homepage Coach.',
   '/waitlist':     'Join our waitlist for early access to new features!',
   '/preferences':  'Customize when you get meal reminders each day.'
 };
@@ -580,7 +582,7 @@ export default function App() {
     try { return localStorage.getItem('slimcal:recapHintSeen') !== '1'; } catch { return true; }
   });
   useEffect(() => {
-    if (location.pathname === '/recap' && showRecapHint) {
+    if (location.pathname === '/' && showRecapHint) {
       try { localStorage.setItem('slimcal:recapHintSeen', '1'); } catch {}
       setShowRecapHint(false);
     }
@@ -602,7 +604,7 @@ export default function App() {
         </Tooltip>
 
         {/* AI Daily Recap front and center with pulsing 'AI' badge until first visit */}
-        <Tooltip title="AI Daily Recap">
+        <Tooltip title="Coach">
           <span>
             <Badge
               invisible={!showRecapHint}
@@ -627,7 +629,7 @@ export default function App() {
             >
               <Button
                 component={NavLink}
-                to="/recap"
+                to="/"
                 variant="outlined"
                 startIcon={<ChatIcon />}
                 onClick={() => {
@@ -637,7 +639,7 @@ export default function App() {
                   }
                 }}
               >
-                RECAP
+                COACH
               </Button>
             </Badge>
           </span>
@@ -860,10 +862,10 @@ export default function App() {
           <Route path="/achievements" component={Achievements} />
           <Route path="/calorie-log"  component={CalorieHistory} />
           <Route path="/summary"      component={CalorieSummary} />
-          <Route path="/recap"        render={() => <DailyRecapCoach userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }} />} />
+          <Route path="/recap" render={() => <Redirect to="/" />} />
           <Route path="/waitlist"     component={WaitlistSignup} />
           <Route path="/preferences"  component={AlertPreferences} />
-          <Route exact path="/"       render={() => null} />
+          <Route exact path="/" render={() => <DailyRecapCoach userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }} />} />
         </Switch>
 
         <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>

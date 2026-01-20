@@ -14,8 +14,12 @@ import {
   AccordionSummary,
   AccordionDetails,
   Tooltip,
+  LinearProgress,
+  IconButton,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import ShareIcon from "@mui/icons-material/Share";
 import UpgradeModal from "./components/UpgradeModal";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
@@ -28,6 +32,134 @@ import {
 } from "./lib/db";
 
 // ---- Helpers ----------------------------------------------------------------
+
+// ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
+const XP_KEY = 'slimcal:xp:v1';
+const QUESTS_KEY = 'slimcal:quests:v1';
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function computeLevel(xp) {
+  let level = 1;
+  let remaining = Math.max(0, safeNum(xp, 0));
+  let req = 100;
+  while (remaining >= req) {
+    remaining -= req;
+    level += 1;
+    req = Math.round(req * 1.35);
+    if (level > 99) break;
+  }
+  return { level, progress: remaining, next: req };
+}
+
+function readJsonLS(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonLS(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function seededRng(seedStr) {
+  // deterministic pseudo-random (mulberry32)
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+function buildQuestPool({ proteinTarget }) {
+  const lunchProtein = Math.min(60, Math.max(30, Math.round(proteinTarget * 0.35 || 40)));
+  return [
+    {
+      id: 'breakfast_before_11',
+      label: 'Log breakfast before 11am',
+      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
+      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+    },
+    {
+      id: 'protein_by_lunch',
+      label: `Hit ${lunchProtein}g protein by lunch`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
+    },
+    {
+      id: 'log_3_meals',
+      label: 'Log 3 meals today',
+      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
+      complete: ({ mealsCount }) => mealsCount >= 3,
+    },
+    {
+      id: 'burn_150',
+      label: 'Burn 150+ cals',
+      progress: ({ burned }) => ({ value: burned, goal: 150 }),
+      complete: ({ burned }) => burned >= 150,
+    },
+    {
+      id: 'burn_300',
+      label: 'Burn 300+ cals',
+      progress: ({ burned }) => ({ value: burned, goal: 300 }),
+      complete: ({ burned }) => burned >= 300,
+    },
+    {
+      id: 'hit_protein_goal',
+      label: `Hit protein goal (${proteinTarget || 170}g)`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
+    },
+  ];
+}
+
+function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
+  const rng = seededRng(`${dayKey}|quests`);
+  const pool = buildQuestPool({ proteinTarget });
+  const shuffled = [...pool].sort(() => rng() - 0.5);
+  const freeUnlocked = 2;
+  const maxShown = Math.min(6, shuffled.length);
+
+  return shuffled.slice(0, maxShown).map((q, idx) => ({
+    ...q,
+    locked: !isPro && idx >= freeUnlocked,
+  }));
+}
+
+function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) {
+  const base = 10;
+  const mealXp = mealsCount * 25;
+  const workoutXp = workoutsCount * 40;
+  const proteinXp = hitProtein ? 60 : 0;
+  const caloriesXp = hitCalories ? 40 : 0;
+  return base + mealXp + workoutXp + proteinXp + caloriesXp;
+}
+
+function missedBreakfastLine({ now, mealsCount }) {
+  const h = now.getHours();
+  if (h >= 12 && mealsCount === 0) {
+    return "ok bestie it’s past noon and breakfast is still missing 😭🍳 we are NOT running on vibes today.";
+  }
+  if (h >= 15 && mealsCount <= 1) {
+    return "it’s 3pm-ish and we’re running on *one* meal? that’s not a physique plan, that’s a cry for help 💀";
+  }
+  return null;
+}
+
 const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with MET later
 
 function isoDay(d = new Date()) {
@@ -289,6 +421,22 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   const targets = useMemo(() => getUserTargets(), []);
 
+  // Coach homepage needs data even before generating a recap
+  const [dayCtx, setDayCtx] = useState(null);
+  const [dayCtxLoading, setDayCtxLoading] = useState(true);
+
+  // XP state (awarded once per day)
+  const [xpState, setXpState] = useState(() => readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 }));
+
+  // Daily quests
+  const [quests, setQuests] = useState(() => {
+    const cached = readJsonLS(QUESTS_KEY, null);
+    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
+    const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    return picked;
+  });
+
   // Load saved recap + history
   useEffect(() => {
     try {
@@ -306,6 +454,32 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       setHistory([]);
     }
   }, [recapKeyToday]);
+
+  // Prefetch today context so Coach can show XP/Quests instantly
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setDayCtxLoading(true);
+      try {
+        const ctx = await buildContext();
+        if (mounted) setDayCtx(ctx);
+      } catch (e) {
+        if (mounted) setDayCtx(null);
+      } finally {
+        if (mounted) setDayCtxLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, todayISO]);
+
+  // Keep quests in sync with Pro status
+  useEffect(() => {
+    const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
+    setQuests(picked);
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, todayISO]);
 
   // Load or reset today’s count on mount and whenever entitlement changes
   useEffect(() => {
@@ -528,6 +702,48 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     };
   }
 
+  // Award XP once per day based on current day state
+  useEffect(() => {
+    if (xpState?.lastAwardDay === todayISO) return;
+
+    const mealsCount = (dayCtx?.meals || []).length;
+    const workoutsCount = (dayCtx?.workouts || []).length;
+
+    const goal = targets.dailyGoal || 0;
+    const eaten = round(dayCtx?.consumed || 0);
+    const burned = round(dayCtx?.burned || 0);
+    const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+
+    const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
+    const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+
+    const earned = computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories });
+    const next = {
+      totalXp: Math.max(0, safeNum(xpState?.totalXp, 0) + earned),
+      lastAwardDay: todayISO,
+      lastEarned: earned,
+      updatedAt: Date.now(),
+    };
+    setXpState(next);
+    writeJsonLS(XP_KEY, next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayISO, dayCtxLoading]);
+
+  // Auto-generate recap on open (Pro only)
+  useEffect(() => {
+    if (!isPro) return;
+    // if already have a saved recap today, don't auto
+    try {
+      const saved = JSON.parse(localStorage.getItem(recapKeyToday) || 'null');
+      if (saved?.content) return;
+    } catch {}
+    if (!loading && !recap) {
+      // don't spam if context still loading
+      if (!dayCtxLoading) handleGetRecap();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, recapKeyToday, dayCtxLoading]);
+
   const handleGetRecap = async () => {
     // Non-Pro users are limited to 3/day
     if (!isPro && count >= 3) {
@@ -675,6 +891,36 @@ Output format (use these headings):
       setLoading(false);
     }
   };
+
+  // ---- Share helpers ----------------------------------------------------------
+  async function copyRecap() {
+    const text = String(recap || '').trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }
+
+  async function shareRecap() {
+    const text = String(recap || '').trim();
+    if (!text) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'SlimCal Coach Recap', text });
+        return;
+      } catch {
+        // user canceled
+      }
+    }
+    await copyRecap();
+  }
 
   // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
@@ -862,8 +1108,115 @@ Output format (use these headings):
     );
   }
 
+  const now = useMemo(() => new Date(), []);
+  const mealsCount = (dayCtx?.meals || []).length;
+  const workoutsCount = (dayCtx?.workouts || []).length;
+  const goal = targets.dailyGoal || 0;
+  const eaten = round(dayCtx?.consumed || 0);
+  const burned = round(dayCtx?.burned || 0);
+  const net = round(eaten - burned);
+  const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+  const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
+  const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+  const lvl = useMemo(() => computeLevel(xpState.totalXp || 0), [xpState.totalXp]);
+  const roastLine = missedBreakfastLine({ now, mealsCount });
+
   return (
     <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
+
+      {/* 🏠 Coach homepage header */}
+      <Box sx={{ mb: 2.2 }}>
+        <Typography variant={embedded ? "h6" : "h4"} sx={{ fontWeight: 900, letterSpacing: "-0.02em" }}>
+          🧠 Coach
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.3 }}>
+          Open app → Coach reacts to your day → you log meals/workouts → come back for the recap.
+        </Typography>
+      </Box>
+
+      {/* Missed breakfast reactions (time-based) */}
+      {roastLine && (
+        <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2, background: "rgba(2,6,23,0.03)" }}>
+          <CardContent>
+            <Typography sx={{ fontWeight: 900, lineHeight: 1.35 }}>{roastLine}</Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* XP + Level */}
+      <Card data-testid="coach-xp" elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>Level {lvl.level}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                +{xpState.lastEarned || 0} XP earned today
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 220 }}>
+              <LinearProgress
+                variant="determinate"
+                value={lvl.next ? clamp((lvl.progress / lvl.next) * 100, 0, 100) : 0}
+                sx={{ height: 10, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
+              />
+              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
+                <Chip size="small" label={`🍽️ Meals: ${mealsCount}`} />
+                <Chip size="small" label={`🔥 Burned: ${burned}`} />
+                <Chip size="small" label={`🥩 Protein: ${proteinSoFar}g`} />
+                <Chip size="small" label={`⚖️ Net: ${net > 0 ? `+${net}` : net}`} />
+              </Stack>
+            </Box>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {/* Daily Quests (viral) */}
+      <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>🎯 Daily Quests</Typography>
+            {!isPro && (
+              <Button size="small" variant="outlined" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                🔥 Unlock 5 Quests + smarter coaching
+              </Button>
+            )}
+          </Stack>
+
+          <Stack spacing={1.1}>
+            {quests.map((q) => {
+              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
+              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
+              const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+              return (
+                <Box key={q.id} sx={{ p: 1.2, borderRadius: 1.5, border: "1px solid rgba(2,6,23,0.08)", background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white" }}>
+                  <Stack direction="row" spacing={1.2} alignItems="center">
+                    <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>{q.locked ? "🔒" : done ? "✅" : "🎯"}</Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
+                      <LinearProgress variant="determinate" value={q.locked ? 0 : pct} sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }} />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
+                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                      </Typography>
+                    </Box>
+                    {q.locked && (
+                      <Button size="small" variant="contained" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                        Unlock
+                      </Button>
+                    )}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+
+          {!isPro && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.2 }}>
+              Free gets 1–2 quests. Pro gets 5–7 quests + streak multipliers + card export.
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
+
       {Inner}
     </Box>
   );
