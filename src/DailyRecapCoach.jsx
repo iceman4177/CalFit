@@ -92,9 +92,21 @@ function sumMacros(items = []) {
   return totals;
 }
 
-function estimateMacrosFromName({ name, qty = 1, unit = "", calories = 0 }) {
+function estimateMacrosFromName({ name, qty = 0, unit = "", calories = 0 }) {
   const n = String(name || "").toLowerCase();
-  const q = Math.max(0, Number(qty) || 0);
+  let q = Math.max(0, Number(qty) || 0);
+
+  // If qty wasn't stored, try to infer it from the name: "Eggs (6 eggs)" or "Eggs — 6 eggs"
+  if (q <= 0) {
+    const match = n.match(/(\d+)\s*egg/);
+    if (match) q = Number(match[1]) || 0;
+  }
+
+  // If still unknown, infer from calories for eggs (70 kcal per egg)
+  if (q <= 0 && n.includes("egg") && !n.includes("white")) {
+    const c = Math.max(0, Number(calories) || 0);
+    if (c > 0) q = Math.max(1, Math.round(c / 70));
+  }
 
   // Large egg ~= 6g protein, 5g fat, 0.6g carbs
   if (n.includes("egg") && !n.includes("white")) {
@@ -839,7 +851,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach • BUILD_STABLE_11
+            Daily Recap Coach • BUILD_STABLE_12
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
