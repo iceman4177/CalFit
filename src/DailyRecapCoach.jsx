@@ -36,6 +36,40 @@ import {
 // ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
 const XP_KEY = 'slimcal:xp:v1';
 const QUESTS_KEY = 'slimcal:quests:v1';
+/**
+ * IMPORTANT:
+ * Do NOT persist quest objects that contain functions (progress/check) into localStorage.
+ * JSON serialization strips functions, causing runtime errors like: "progress is not a function".
+ * We persist only quest IDs + locked state, then rebuild quest objects from the pool on load.
+ */
+function persistQuestSelection(dayKey, quests) {
+  const order = quests.map((q) => q.id);
+  const lockedIds = quests.filter((q) => q.locked).map((q) => q.id);
+  writeJsonLS(QUESTS_KEY, { dayKey, order, lockedIds });
+}
+
+function loadQuestSelection(dayKey) {
+  const cached = readJsonLS(QUESTS_KEY, null);
+  if (!cached || cached.dayKey !== dayKey) return null;
+  if (!Array.isArray(cached.order)) return null;
+  return { order: cached.order, lockedIds: Array.isArray(cached.lockedIds) ? cached.lockedIds : [] };
+}
+
+function rebuildQuestsFromSelection({ selection, isPro, proteinTarget }) {
+  const pool = buildQuestPool({ proteinTarget });
+  const byId = new Map(pool.map((q) => [q.id, q]));
+  const freeUnlocked = 2;
+  const maxShown = Math.min(6, pool.length);
+
+  if (!selection?.order?.every((id) => byId.has(id))) return null;
+
+  return selection.order.slice(0, maxShown).map((id, idx) => {
+    const q = byId.get(id);
+    const locked = !isPro && idx >= freeUnlocked;
+    return { ...q, locked };
+  });
+}
+
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -430,10 +464,12 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   // Daily quests
   const [quests, setQuests] = useState(() => {
-    const cached = readJsonLS(QUESTS_KEY, null);
-    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
+    const selection = loadQuestSelection(todayISO);
+    const rebuilt = rebuildQuestsFromSelection({ selection, isPro, proteinTarget: targets.proteinDaily || 170 });
+    if (rebuilt) return rebuilt;
+
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    persistQuestSelection(todayISO, picked);
     return picked;
   });
 
@@ -477,7 +513,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   useEffect(() => {
     const picked = pickDailyQuests({ dayKey: todayISO, isPro, proteinTarget: targets.proteinDaily || 170 });
     setQuests(picked);
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    persistQuestSelection(todayISO, picked);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro, todayISO]);
 
