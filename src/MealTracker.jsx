@@ -366,6 +366,11 @@ export default function MealTracker({ onMealUpdate }) {
     const safe = {
       name,
       calories: Math.max(0, Number(calories) || 0),
+      // Persist macros locally when available so Daily Recap Coach can be more detailed offline
+      protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
+      carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
+      fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
+      createdAt: new Date().toISOString(),
       ...(meta || {})
     };
 
@@ -597,7 +602,7 @@ export default function MealTracker({ onMealUpdate }) {
         </CardContent>
       </Card>
 
-      {/* ------------------- ACCORDION: DAILY RECAP COACH (PRIMARY FEATURE) ------------------- */}
+      {/* ------------------- PRIMARY: Daily Recap Coach ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -607,7 +612,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionSummary>
         <AccordionDetails>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Get a short recap of today’s calories + training with 2–3 action steps to improve.
+            Get a detailed recap of today’s food + training, your goal progress, and a simple plan for tomorrow.
           </Typography>
           <DailyRecapCoach embedded />
         </AccordionDetails>

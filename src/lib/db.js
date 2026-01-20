@@ -217,6 +217,33 @@ export async function getMeals(userId, { from, to, limit = 500 } = {}) {
   return data || [];
 }
 
+/**
+ * Fetch meal_items for a list of meal IDs.
+ * Returns a map: { [meal_id]: mealItem[] }
+ */
+export async function getMealItemsForMealIds(userId, mealIds = []) {
+  if (!userId) return {};
+  const ids = Array.isArray(mealIds) ? mealIds.filter(Boolean) : [];
+  if (ids.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('meal_items')
+    .select('meal_id, food_name, qty, unit, calories, protein, carbs, fat')
+    .eq('user_id', userId)
+    .in('meal_id', ids)
+    .order('meal_id', { ascending: true });
+
+  if (error) throw error;
+
+  const map = {};
+  for (const row of data || []) {
+    const k = row.meal_id;
+    if (!map[k]) map[k] = [];
+    map[k].push(row);
+  }
+  return map;
+}
+
 // -----------------------------------------------------------------------------
 // Readers (workouts + metrics)
 // -----------------------------------------------------------------------------
