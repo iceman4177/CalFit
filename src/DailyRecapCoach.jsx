@@ -206,8 +206,11 @@ function missedBreakfastLine({ now, mealsCount }) {
 const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with MET later
 
 function isoDay(d = new Date()) {
+  // Local-day safe ISO string (prevents UTC day-rollover showing the wrong date in PST, etc.)
   try {
-    return new Date(d).toISOString().slice(0, 10);
+    const dd = new Date(d);
+    const localMidnight = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+    return localMidnight.toISOString().slice(0, 10);
   } catch {
     return d;
   }
@@ -249,6 +252,34 @@ function calcCaloriesFromSets(sets) {
     vol += w * r;
   }
   return Math.round(vol * SCALE);
+}
+
+function estimateMacrosForLocalMeal(m) {
+  // If MealTracker didn't store macros, we estimate a few common foods for better Coach accuracy.
+  // (We can expand this map later.)
+  const existingProtein = safeNum(m?.protein_g ?? m?.protein ?? 0, 0);
+  const existingCarbs = safeNum(m?.carbs_g ?? m?.carbs ?? 0, 0);
+  const existingFat = safeNum(m?.fat_g ?? m?.fat ?? 0, 0);
+
+  if (existingProtein > 0 || existingCarbs > 0 || existingFat > 0) {
+    return { protein_g: existingProtein, carbs_g: existingCarbs, fat_g: existingFat };
+  }
+
+  const foodId = String(m?.food_id || "").toLowerCase();
+  const foodName = String(m?.food_name || m?.name || "").toLowerCase();
+  const qty = safeNum(m?.qty, 0);
+
+  // Eggs: ~6g protein, ~5g fat, ~0g carbs per large egg
+  if (foodId === "eggs" || foodName.startsWith("eggs")) {
+    const q = qty > 0 ? qty : (() => {
+      // fallback: infer from calories (70 kcal per egg)
+      const c = safeNum(m?.calories, 0);
+      return c > 0 ? Math.round(c / 70) : 0;
+    })();
+    return { protein_g: Math.round(q * 6), carbs_g: 0, fat_g: Math.round(q * 5) };
+  }
+
+  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
 }
 
 function sumMacros(items = []) {
@@ -351,17 +382,19 @@ function buildLocalContext(todayISO) {
         qty: m.qty ?? 1,
         unit: m.unit || "serving",
         calories: round(m.calories || 0),
-        protein: m.protein_g ?? m.protein ?? null,
-        carbs: m.carbs_g ?? m.carbs ?? null,
-        fat: m.fat_g ?? m.fat ?? null,
+        protein: (m.protein_g ?? m.protein) != null ? (m.protein_g ?? m.protein) : (typeof est !== 'undefined' ? est.protein_g : null),
+        carbs: (m.carbs_g ?? m.carbs) != null ? (m.carbs_g ?? m.carbs) : (typeof est !== 'undefined' ? est.carbs_g : null),
+        fat: (m.fat_g ?? m.fat) != null ? (m.fat_g ?? m.fat) : (typeof est !== 'undefined' ? est.fat_g : null),
       },
     ];
 
+    const est = estimateMacrosForLocalMeal(m);
+
     const macros = sumMacros([
       {
-        protein_g: safeNum(m.protein_g ?? m.protein, 0),
-        carbs_g: safeNum(m.carbs_g ?? m.carbs, 0),
-        fat_g: safeNum(m.fat_g ?? m.fat, 0),
+        protein_g: est.protein_g,
+        carbs_g: est.carbs_g,
+        fat_g: est.fat_g,
       },
     ]);
 
