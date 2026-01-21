@@ -15,11 +15,11 @@ export const FREE_DAILY_LIMITS = {
   ai_food_lookup: 3,
   daily_recap: 3,
 
-  // (Optional aliases, harmless if unused elsewhere)
+  // Optional aliases (harmless if unused elsewhere)
   coach: 3,
   meal: 3,
   workout: 3,
-  food: 3
+  food: 3,
 };
 
 function getTodayISO() {
@@ -46,11 +46,9 @@ function readState() {
   if (!st || st.date !== today || typeof st !== 'object') {
     return { date: today, counts: {} };
   }
-
   if (!st.counts || typeof st.counts !== 'object') {
     return { date: today, counts: {} };
   }
-
   return st;
 }
 
@@ -62,8 +60,6 @@ function writeState(st) {
   }
 }
 
-// -------------------- Named exports used across the app -----------------------
-
 export function getFreeDailyLimit(featureKey) {
   return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
 }
@@ -73,7 +69,6 @@ export function getDailyUsed(featureKey) {
   return Math.max(0, Number(st.counts?.[featureKey]) || 0);
 }
 
-// ✅ FIX: this MUST be exported (DailyRecapCoach imports it)
 export function getDailyRemaining(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
   const used = getDailyUsed(featureKey);
@@ -111,7 +106,7 @@ export default function FeatureUseBadge({
   sx = {},
   proLabel = 'PRO',
   freePrefix = 'Free left',
-  showWhenPro = true
+  showWhenPro = true,
 }) {
   const remaining = getDailyRemaining(featureKey);
   const limit = getFreeDailyLimit(featureKey);

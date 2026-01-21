@@ -25,12 +25,6 @@ import FeatureUseBadge, {
 } from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
-import FeatureUseBadge, {
-  canUseDailyFeature,
-  registerDailyFeatureUse,
-  getDailyRemaining,
-  getFreeDailyLimit,
-} from "./components/FeatureUseBadge.jsx";
 import {
   getWorkouts,
   getWorkoutSetsFor,
@@ -1077,14 +1071,15 @@ Output format (use these headings):
         border: "1px solid rgba(2,6,23,0.08)",
         background: "linear-gradient(180deg, #ffffff, #fbfdff)",
         borderRadius: 2,
+        overflow: 'visible',
       }}
     >
-      <CardContent sx={{ position: 'relative' }}>
+      <CardContent sx={{ position: 'relative', overflow: 'visible', pt: 3 }}>
         {!isPro && (
           <FeatureUseBadge
             featureKey="daily_recap"
             isPro={false}
-            sx={{ position: 'absolute', top: 12, right: 12 }}
+            sx={{ position: 'absolute', top: 10, right: 10, zIndex: 3, pointerEvents: 'none' }}
           />
         )}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
@@ -1136,7 +1131,6 @@ Output format (use these headings):
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />}
-          {!embedded && !isPro && <FeatureUseBadge featureKey="daily_recap" isPro={false} />}
         </Stack>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
