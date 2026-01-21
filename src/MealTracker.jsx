@@ -52,15 +52,12 @@ import FeatureUseBadge, {
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
+import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { saveMeal, upsertDailyMetrics } from './lib/db';
 import { callAIGenerate } from './lib/ai';
 
 // ---------- Pro / gating helpers ----------
-const isProUser = () => {
-  if (localStorage.getItem('isPro') === 'true') return true;
-  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
-  return !!ud.isPremium;
-};
+
 
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
@@ -371,6 +368,9 @@ export default function MealTracker({ onMealUpdate }) {
   const [openBowl, setOpenBowl] = useState(false);
 
   const { user } = useAuth();
+  const { isProActive } = useEntitlements();
+  const userId = user?.id || null;
+  const isEntitled = !!isProActive;
 
   // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
@@ -639,7 +639,7 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     // Local free-limit gate (server-side 402 still acts as backup)
-    if (!isProUser() && !canUseDailyFeature('ai_meal')) {
+    if (!isEntitled && !canUseDailyFeature('ai_meal', userId)) {
       setShowUpgrade(true);
       return;
     }
@@ -669,8 +669,8 @@ export default function MealTracker({ onMealUpdate }) {
       console.warn('[MealTracker] gateway probe failed', e);
     }
 
-    if (!isProUser()) {
-      registerDailyFeatureUse('ai_meal');
+    if (!isEntitled) {
+      registerDailyFeatureUse('ai_meal', userId);
     }
 
     setShowSuggest(true);
@@ -723,10 +723,10 @@ export default function MealTracker({ onMealUpdate }) {
             overflow: 'visible' // ✅ critical: avoid clipping in CardContent
           }}
         >
-          {!isProUser() && (
+          {!isEntitled && (
             <FeatureUseBadge
               featureKey="ai_meal"
-              isPro={false}
+              userId={userId} isPro={isEntitled}
               sx={{
                 position: 'absolute',
                 top: 10,
@@ -984,7 +984,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionSummary>
 
         <AccordionDetails sx={{ overflow: 'visible' }}>
-          {!isProUser() && (
+          {!isEntitled && (
             <Box
               sx={{
                 position: 'relative',
@@ -995,7 +995,7 @@ export default function MealTracker({ onMealUpdate }) {
             >
               <FeatureUseBadge
                 featureKey="ai_food_lookup"
-                isPro={false}
+                userId={userId} isPro={isEntitled}
                 sx={{
                   position: 'absolute',
                   top: 0,
@@ -1008,9 +1008,9 @@ export default function MealTracker({ onMealUpdate }) {
           )}
 
           <AIFoodLookupBox
-            canUseLookup={() => isProUser() || canUseDailyFeature('ai_food_lookup')}
+            canUseLookup={() => isEntitled || canUseDailyFeature('ai_food_lookup', userId)}
             registerLookupUse={() => {
-              if (!isProUser()) registerDailyFeatureUse('ai_food_lookup');
+              if (!isEntitled) registerDailyFeatureUse('ai_food_lookup', userId);
             }}
             onAddFood={payload => {
               logOne({

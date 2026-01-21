@@ -655,7 +655,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   // Daily recap is a high-value feature, so it is strongly paywalled:
   // Free users get a small number of uses per day.
-  const freeDailyRecapLimit = getFreeDailyLimit("daily_recap");
+  const freeDailyRecapLimit = getFreeDailyLimit("ai_coach");
 
   // Sync display counter from our shared daily tracker
   useEffect(() => {
@@ -663,14 +663,14 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       setCount(0);
       return;
     }
-    const used = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
+    const used = Math.max(0, freeDailyRecapLimit - getDailyRemaining("ai_coach"));
     setCount(used);
   }, [isPro, todayUS, freeDailyRecapLimit]);
 
   const incrementCount = () => {
     if (isPro) return 0;
-    registerDailyFeatureUse("daily_recap");
-    const usedNow = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
+    registerDailyFeatureUse("ai_coach");
+    const usedNow = Math.max(0, freeDailyRecapLimit - getDailyRemaining("ai_coach"));
     setCount(usedNow);
     return usedNow;
   };
@@ -1073,12 +1073,12 @@ Output format (use these headings):
         borderRadius: 2,
       }}
     >
-      <CardContent sx={{ position: 'relative', overflow: 'visible' }}>
+      <CardContent sx={{ position: 'relative' }}>
         {!isPro && (
           <FeatureUseBadge
-            featureKey="daily_recap"
+            featureKey="ai_coach"
             isPro={false}
-            sx={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
+            sx={{ position: 'absolute', top: 12, right: 12 }}
           />
         )}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">

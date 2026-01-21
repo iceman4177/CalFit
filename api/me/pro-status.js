@@ -82,13 +82,13 @@ export default async function handler(req, res) {
       isFuture(toDate(subRow?.current_period_end));
 
     const is_pro_flag = !!userRow?.is_pro;
-    const isProActive = is_pro_flag || trialActive || subActive;
+    const isProActive = trialActive || subActive;
 
     // 4) Response (include both modern and legacy flags)
     return res.status(200).json({
       isProActive,
       isPro: isProActive, // legacy compatibility for old callers expecting `isPro`
-      source: is_pro_flag ? "users" : (subActive || trialActive ? "subscriptions" : "none"),
+      source: (subActive || trialActive) ? "subscriptions" : "none",
       // helpful details:
       is_pro: is_pro_flag,
       status: subRow?.status || null,
