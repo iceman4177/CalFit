@@ -91,104 +91,26 @@ function safeNumber(val, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function clampNonNeg(n) {
+function fmt0(n) {
   const x = Number(n);
-  return Number.isFinite(x) && x > 0 ? x : 0;
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x);
 }
 
-/**
- * Pull macros from the SAME place calories come from: foodData.json portions.
- * If macros are missing in the portion (older foodData), we apply a small fallback
- * for common foods so totals don’t show 0g (especially eggs).
- *
- * This keeps the “source of truth” aligned with your portion selection flow.
- */
-function getPerPortionMacros({ food, portion }) {
-  const p = portion || {};
-  const foodId = String(food?.id || '').toLowerCase();
-  const foodName = String(food?.name || '').toLowerCase();
-  const unit = String(p?.unit || '').toLowerCase();
+// Render "420 cals • P 36g • C 3g • F 30g" when macros exist
+function formatMealSecondary(meal) {
+  const cals = fmt0(meal?.calories);
+  const p = meal?.protein_g;
+  const c = meal?.carbs_g;
+  const f = meal?.fat_g;
 
-  // 1) Preferred: explicit macros on the portion (future-proof once you add them to foodData)
-  const hasExplicit =
-    p?.protein != null || p?.carbs != null || p?.fat != null ||
-    p?.protein_g != null || p?.carbs_g != null || p?.fat_g != null;
+  const hasAnyMacro =
+    p != null || c != null || f != null;
 
-  if (hasExplicit) {
-    return {
-      protein_g: clampNonNeg(p.protein_g ?? p.protein ?? 0),
-      carbs_g: clampNonNeg(p.carbs_g ?? p.carbs ?? 0),
-      fat_g: clampNonNeg(p.fat_g ?? p.fat ?? 0)
-    };
-  }
+  // Keep legacy display for old entries that don't have macros at all
+  if (!hasAnyMacro) return `${cals} cals`;
 
-  // 2) Minimal fallback for common manual foods when macros aren’t stored in foodData yet
-  // Eggs: 1 large egg ~ 6P / 0.5C / 5F (and you already use 70 kcal/egg)
-  if (foodId === 'eggs' || (foodName.includes('egg') && unit === 'egg')) {
-    return { protein_g: 6, carbs_g: 0.5, fat_g: 5 };
-  }
-
-  // Oats (dry): per 1/2 cup dry ~ 5P / 27C / 3F (your baseline assumes 150 kcal)
-  if (foodId === 'oats' || foodName.includes('oat')) {
-    // This is “per portion”, not per 1 unit; your foodData portion represents “1/2 cup dry”
-    // so return the macros for that portion.
-    if (String(p?.id || '').toLowerCase().includes('half_cup_dry') || String(p?.label || '').toLowerCase().includes('1/2 cup')) {
-      return { protein_g: 5, carbs_g: 27, fat_g: 3 };
-    }
-  }
-
-  // Peanut butter: per 1/2 tbsp ~ 2P / 1.5C / 4F (scaled from 1 tbsp 4P/3C/8F)
-  if (foodId === 'peanut_butter' || foodName.includes('peanut butter') || foodName === 'pb') {
-    const pid = String(p?.id || '').toLowerCase();
-    if (pid.includes('half_tbsp') || String(p?.label || '').toLowerCase().includes('1/2 tbsp')) {
-      return { protein_g: 2, carbs_g: 1.5, fat_g: 4 };
-    }
-    if (pid.includes('2_tbsp') || String(p?.label || '').toLowerCase().includes('2 tbsp')) {
-      return { protein_g: 8, carbs_g: 6, fat_g: 16 };
-    }
-    // default to 1 tbsp
-    return { protein_g: 4, carbs_g: 3, fat_g: 8 };
-  }
-
-  // No macros available
-  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
-}
-
-function calcStructuredTotals({ food, portion, qty, caloriesOverride }) {
-  const q = Number.isFinite(Number(qty)) ? Number(qty) : 0;
-  const perCals = safeNumber(portion?.calories, 0);
-  const baseCals = Math.round(Math.max(0, q * perCals));
-
-  // If user overrides calories, keep calories overridden,
-  // but macros should still come from the same portion data.
-  const calories = Number.isFinite(Number(caloriesOverride)) && Number(caloriesOverride) > 0
-    ? Math.round(Number(caloriesOverride))
-    : baseCals;
-
-  const perMacros = getPerPortionMacros({ food, portion });
-  let protein = perMacros.protein_g * q;
-  let carbs = perMacros.carbs_g * q;
-  let fat = perMacros.fat_g * q;
-
-  // Optional: if calories are overridden and macros exist, proportionally scale macros
-  // so protein doesn’t lie when user overrides calories hugely.
-  // BUT: if macros are all zero (no data), don’t scale.
-  const macroCals = kcalFromMacros(protein, carbs, fat);
-  if (macroCals > 0 && baseCals > 0 && calories !== baseCals) {
-    const factor = calories / baseCals;
-    protein = protein * factor;
-    carbs = carbs * factor;
-    fat = fat * factor;
-  }
-
-  return {
-    calories: Math.max(0, Math.round(calories)),
-    macros: {
-      protein_g: Math.max(0, Math.round(protein)),
-      carbs_g: Math.max(0, Math.round(carbs)),
-      fat_g: Math.max(0, Math.round(fat))
-    }
-  };
+  return `${cals} cals • P ${fmt0(p)}g • C ${fmt0(c)}g • F ${fmt0(f)}g`;
 }
 
 // ---------- Dialogs ----------
@@ -465,7 +387,7 @@ export default function MealTracker({ onMealUpdate }) {
     const safe = {
       name,
       calories: Math.max(0, Number(calories) || 0),
-      // Persist macros locally so Daily Recap Coach totals match what you logged
+      // Persist macros locally when available so Daily Recap Coach can be more detailed offline
       protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
       carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
       fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
@@ -538,18 +460,21 @@ export default function MealTracker({ onMealUpdate }) {
       // Nice display name: "Eggs — 6 eggs (1 large egg)"
       const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
 
-      // ✅ Pull macros from the SAME flow as calories: foodData portion * qty
-      const totals = calcStructuredTotals({
-        food: selectedFood,
-        portion: selectedPortion,
-        qty: q,
-        caloriesOverride: caloriesManualOverride ? c : undefined
-      });
+      // If your foodData.json includes macros per-portion, pass them here the same way
+      // your recap already expects (protein_g / carbs_g / fat_g).
+      const portionMacros = selectedPortion?.macros || selectedPortion?.macro || null;
+      const macros = portionMacros
+        ? {
+            protein_g: (Number(portionMacros.protein_g) || 0) * q,
+            carbs_g: (Number(portionMacros.carbs_g) || 0) * q,
+            fat_g: (Number(portionMacros.fat_g) || 0) * q
+          }
+        : undefined;
 
       await logOne({
         name: displayName,
-        calories: totals.calories,
-        macros: totals.macros,
+        calories: c,
+        macros,
         meta: {
           food_id: selectedFood.id,
           portion_id: selectedPortion.id,
@@ -650,6 +575,18 @@ export default function MealTracker({ onMealUpdate }) {
   }, [showSuggest, user?.id]);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+
+  const totalMacros = useMemo(() => {
+    return mealLog.reduce(
+      (acc, m) => {
+        acc.protein += Number(m.protein_g) || 0;
+        acc.carbs += Number(m.carbs_g) || 0;
+        acc.fat += Number(m.fat_g) || 0;
+        return acc;
+      },
+      { protein: 0, carbs: 0, fat: 0 }
+    );
+  }, [mealLog]);
 
   // Autocomplete options: foods only (portions handled separately)
   const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
@@ -858,14 +795,12 @@ export default function MealTracker({ onMealUpdate }) {
               }
             />
 
-            {/* Provide a quick "Custom Food" action hint */}
             {!selectedFood && foodInput.length > 2 && (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Not found — enter calories manually or use Quick Actions.
               </Alert>
             )}
 
-            {/* Explicit custom item button (keeps old behavior but cleaner) */}
             {customAction && (
               <Button
                 onClick={() => setOpenCustom(true)}
@@ -980,7 +915,7 @@ export default function MealTracker({ onMealUpdate }) {
                     >
                       <ListItemText
                         primary={<Typography fontWeight={500}>{m.name}</Typography>}
-                        secondary={`${Number(m.calories) || 0} cals`}
+                        secondary={formatMealSecondary(m)}
                       />
                     </ListItem>
                     {i < mealLog.length - 1 && <Divider />}
@@ -990,6 +925,11 @@ export default function MealTracker({ onMealUpdate }) {
 
               <Typography variant="h6" align="right" sx={{ mt: 2, fontWeight: 600 }}>
                 Total Calories: {total}
+              </Typography>
+
+              {/* Optional: show totals macros if any meal has macros */}
+              <Typography variant="body2" align="right" color="text.secondary" sx={{ mt: 0.5 }}>
+                Totals — P {fmt0(totalMacros.protein)}g • C {fmt0(totalMacros.carbs)}g • F {fmt0(totalMacros.fat)}g
               </Typography>
             </>
           )}
