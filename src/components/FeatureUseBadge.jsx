@@ -14,7 +14,7 @@ export const FREE_DAILY_LIMITS = {
   ai_meal: 3,
   ai_workout: 3,
   ai_food_lookup: 1,
-  daily_recap: 1
+  daily_recap: 3,
 };
 
 function getTodayISO() {
@@ -24,19 +24,19 @@ function getTodayISO() {
 
 function safeParseJSON(val, fallback) {
   try {
-    const p = JSON.parse(val);
-    return p ?? fallback;
+    return JSON.parse(val);
   } catch {
     return fallback;
   }
 }
 
 function readState() {
-  const today = getTodayISO();
   const raw = localStorage.getItem(STORAGE_KEY);
   const st = safeParseJSON(raw, null);
 
-  if (!st || st.date !== today || typeof st !== 'object') {
+  const today = getTodayISO();
+
+  if (!st || typeof st !== 'object' || !st.date || st.date !== today) {
     return { date: today, counts: {} };
   }
 
@@ -50,75 +50,64 @@ function readState() {
 function writeState(st) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 export function getFreeDailyLimit(featureKey) {
-  return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
-}
-
-export function getDailyUsed(featureKey) {
-  const st = readState();
-  return Math.max(0, Number(st.counts?.[featureKey]) || 0);
+  return FREE_DAILY_LIMITS?.[featureKey] ?? 0;
 }
 
 export function getDailyRemaining(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
-  const used = getDailyUsed(featureKey);
+  if (!limit) return 0;
+
+  const st = readState();
+  const used = Math.max(0, Number(st.counts?.[featureKey] ?? 0));
   return Math.max(0, limit - used);
 }
 
-export function canUseDailyFeature(featureKey) {
-  return getDailyRemaining(featureKey) > 0;
-}
-
 export function registerDailyFeatureUse(featureKey) {
-  const st = readState();
-  const used = Math.max(0, Number(st.counts?.[featureKey]) || 0);
-  st.counts = st.counts || {};
-  st.counts[featureKey] = used + 1;
-  writeState(st);
-  return getDailyRemaining(featureKey);
-}
+  const limit = getFreeDailyLimit(featureKey);
+  if (!limit) return 0;
 
-export function resetDailyUsageCache() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+  const st = readState();
+  const used = Math.max(0, Number(st.counts?.[featureKey] ?? 0));
+  const nextUsed = used + 1;
+
+  st.counts = st.counts || {};
+  st.counts[featureKey] = nextUsed;
+
+  writeState(st);
+
+  return nextUsed;
 }
 
 // -----------------------------------------------------------------------------
 // UI Badge
 // -----------------------------------------------------------------------------
-
 export default function FeatureUseBadge({
   featureKey,
-  isPro = false,
+  isPro,
   sx = {},
-  proLabel = 'PRO',
-  freePrefix = 'Free left',
-  showWhenPro = true
+  labelPrefix,
 }) {
-  const remaining = getDailyRemaining(featureKey);
-  const limit = getFreeDailyLimit(featureKey);
-
-  if (isPro && !showWhenPro) return null;
-
   if (isPro) {
     return (
-      <Chip
-        size="small"
-        color="success"
-        label={proLabel}
-        sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
-      />
+      <Tooltip title="PRO: Unlimited" arrow>
+        <Chip
+          size="small"
+          color="success"
+          label="PRO ∞"
+          sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
+        />
+      </Tooltip>
     );
   }
 
+  const limit = getFreeDailyLimit(featureKey);
+  const remaining = getDailyRemaining(featureKey);
+
+  const freePrefix = labelPrefix || 'Free';
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
