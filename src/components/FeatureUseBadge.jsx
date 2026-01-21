@@ -8,25 +8,18 @@ import { Chip, Tooltip } from '@mui/material';
 
 const STORAGE_KEY = 'slimcal_usage_v1';
 
-// ✅ Free tier limits (per day) — ALL FEATURES = 3/day
+// Free tier limits (per day)
+// Adjust here to tune upgrade psychology.
 export const FREE_DAILY_LIMITS = {
   ai_meal: 3,
   ai_workout: 3,
   ai_food_lookup: 3,
-  daily_recap: 3,
-
-  // Common aliases used across older files (safe to keep)
-  coach: 3,
-  meal: 3,
-  workout: 3,
-  food: 3,
+  daily_recap: 3
 };
 
 function getTodayISO() {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
 }
 
 function safeParseJSON(val, fallback) {
@@ -46,9 +39,11 @@ function readState() {
   if (!st || st.date !== today || typeof st !== 'object') {
     return { date: today, counts: {} };
   }
+
   if (!st.counts || typeof st.counts !== 'object') {
     return { date: today, counts: {} };
   }
+
   return st;
 }
 
@@ -59,8 +54,6 @@ function writeState(st) {
     // ignore
   }
 }
-
-// -------------------- Named exports used across the app -----------------------
 
 export function getFreeDailyLimit(featureKey) {
   return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
@@ -77,23 +70,14 @@ export function getDailyRemaining(featureKey) {
   return Math.max(0, limit - used);
 }
 
-// ✅ Back-compat alias (some files import this older name)
+// Back-compat: some files import getDailyFeatureRemaining
 export function getDailyFeatureRemaining(featureKey) {
   return getDailyRemaining(featureKey);
 }
 
-// ✅ Back-compat alias (some older code uses "getRemaining")
-export function getRemaining(featureKey) {
-  return getDailyRemaining(featureKey);
-}
 
 export function canUseDailyFeature(featureKey) {
   return getDailyRemaining(featureKey) > 0;
-}
-
-// ✅ Back-compat alias (some older code uses "canUseFeature")
-export function canUseFeature(featureKey) {
-  return canUseDailyFeature(featureKey);
 }
 
 export function registerDailyFeatureUse(featureKey) {
@@ -103,11 +87,6 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts[featureKey] = used + 1;
   writeState(st);
   return getDailyRemaining(featureKey);
-}
-
-// ✅ Back-compat alias (some older code uses "registerFeatureUse")
-export function registerFeatureUse(featureKey) {
-  return registerDailyFeatureUse(featureKey);
 }
 
 export function resetDailyUsageCache() {
@@ -128,7 +107,7 @@ export default function FeatureUseBadge({
   sx = {},
   proLabel = 'PRO',
   freePrefix = 'Free left',
-  showWhenPro = true,
+  showWhenPro = true
 }) {
   const remaining = getDailyRemaining(featureKey);
   const limit = getFreeDailyLimit(featureKey);
@@ -145,9 +124,6 @@ export default function FeatureUseBadge({
       />
     );
   }
-
-  // If limit is 0, hide badge (feature not configured)
-  if (!limit) return null;
 
   const label = `${freePrefix}: ${remaining}/${limit}`;
 

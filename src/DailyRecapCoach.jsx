@@ -1071,15 +1071,14 @@ Output format (use these headings):
         border: "1px solid rgba(2,6,23,0.08)",
         background: "linear-gradient(180deg, #ffffff, #fbfdff)",
         borderRadius: 2,
-        overflow: 'visible',
       }}
     >
-      <CardContent sx={{ position: 'relative', overflow: 'visible', pt: 3 }}>
+      <CardContent sx={{ position: 'relative', overflow: 'visible' }}>
         {!isPro && (
           <FeatureUseBadge
             featureKey="daily_recap"
             isPro={false}
-            sx={{ position: 'absolute', top: 10, right: 10, zIndex: 3, pointerEvents: 'none' }}
+            sx={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
           />
         )}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
