@@ -15,7 +15,7 @@ export const FREE_DAILY_LIMITS = {
   ai_food_lookup: 3,
   daily_recap: 3,
 
-  // Optional aliases (harmless if unused elsewhere)
+  // Common aliases used across older files (safe to keep)
   coach: 3,
   meal: 3,
   workout: 3,
@@ -60,6 +60,8 @@ function writeState(st) {
   }
 }
 
+// -------------------- Named exports used across the app -----------------------
+
 export function getFreeDailyLimit(featureKey) {
   return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
 }
@@ -75,8 +77,23 @@ export function getDailyRemaining(featureKey) {
   return Math.max(0, limit - used);
 }
 
+// ✅ Back-compat alias (some files import this older name)
+export function getDailyFeatureRemaining(featureKey) {
+  return getDailyRemaining(featureKey);
+}
+
+// ✅ Back-compat alias (some older code uses "getRemaining")
+export function getRemaining(featureKey) {
+  return getDailyRemaining(featureKey);
+}
+
 export function canUseDailyFeature(featureKey) {
   return getDailyRemaining(featureKey) > 0;
+}
+
+// ✅ Back-compat alias (some older code uses "canUseFeature")
+export function canUseFeature(featureKey) {
+  return canUseDailyFeature(featureKey);
 }
 
 export function registerDailyFeatureUse(featureKey) {
@@ -86,6 +103,11 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts[featureKey] = used + 1;
   writeState(st);
   return getDailyRemaining(featureKey);
+}
+
+// ✅ Back-compat alias (some older code uses "registerFeatureUse")
+export function registerFeatureUse(featureKey) {
+  return registerDailyFeatureUse(featureKey);
 }
 
 export function resetDailyUsageCache() {
