@@ -17,6 +17,12 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import UpgradeModal from "./components/UpgradeModal";
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  registerDailyFeatureUse,
+  getDailyRemaining,
+  getFreeDailyLimit,
+} from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
@@ -577,7 +583,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   const todayUS = useMemo(() => usDay(), []);
   const todayISO = useMemo(() => localISODay(), []);
-  const storageKey = `recapUsage`;
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
 
@@ -648,37 +653,26 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, todayISO]);
 
-  // Load/reset daily free usage
+  // Daily recap is a high-value feature, so it is strongly paywalled:
+  // Free users get a small number of uses per day.
+  const freeDailyRecapLimit = getFreeDailyLimit("daily_recap");
+
+  // Sync display counter from our shared daily tracker
   useEffect(() => {
     if (isPro) {
-      try {
-        const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-        if (stored.date === todayUS && stored.count) {
-          localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: 0 }));
-        }
-      } catch {}
       setCount(0);
       return;
     }
-    const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    setCount(stored.date === todayUS ? stored.count || 0 : 0);
-  }, [isPro, todayUS]);
-
-  useEffect(() => {
-    const onRefresh = () => {
-      if (localStorage.getItem("isPro") === "true") setCount(0);
-    };
-    window.addEventListener("slimcal:pro:refresh", onRefresh);
-    return () => window.removeEventListener("slimcal:pro:refresh", onRefresh);
-  }, []);
+    const used = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
+    setCount(used);
+  }, [isPro, todayUS, freeDailyRecapLimit]);
 
   const incrementCount = () => {
     if (isPro) return 0;
-    const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    const newCount = stored.date === todayUS ? (stored.count || 0) + 1 : 1;
-    localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: newCount }));
-    setCount(newCount);
-    return newCount;
+    registerDailyFeatureUse("daily_recap");
+    const usedNow = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
+    setCount(usedNow);
+    return usedNow;
   };
 
   const saveRecapLocal = (content) => {
@@ -921,7 +915,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   }, [isPro, recapKeyToday, dayCtxLoading]);
 
   const handleGetRecap = async () => {
-    if (!isPro && count >= 3) {
+    if (!isPro && count >= freeRecapLimit) {
       setModalOpen(true);
       return;
     }
@@ -1064,7 +1058,7 @@ Output format (use these headings):
   // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-      Free recaps used today: <strong>{count}</strong>/3
+      Free recaps used today: <strong>{count}</strong>/{freeRecapLimit}
     </Typography>
   ) : null;
 
@@ -1078,7 +1072,14 @@ Output format (use these headings):
         borderRadius: 2,
       }}
     >
-      <CardContent>
+      <CardContent sx={{ position: 'relative' }}>
+        {!isPro && (
+          <FeatureUseBadge
+            featureKey="daily_recap"
+            isPro={false}
+            sx={{ position: 'absolute', top: 12, right: 12 }}
+          />
+        )}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
           <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}>

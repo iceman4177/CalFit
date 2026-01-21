@@ -27,6 +27,10 @@ import { EXERCISE_ROM } from './exerciseConstants';
 import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  registerDailyFeatureUse
+} from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
@@ -41,10 +45,7 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-const getAICount = () =>
-  parseInt(localStorage.getItem('aiWorkoutCount') || '0', 10);
-const incAICount = () =>
-  localStorage.setItem('aiWorkoutCount', String(getAICount() + 1));
+// Usage limits are tracked per-day in FeatureUseBadge (ai_workout)
 
 function formatExerciseLine(ex) {
   const setsNum = parseInt(ex.sets, 10);
@@ -427,10 +428,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
-      // Optional lightweight UI gate for non-pros; server remains source of truth
-      if (!isProUser() && getAICount() >= 3) {
-        // Let the server have a say once; if still gated it will 402
-        // fall through to probe rather than blocking immediately
+      // Local free-limit gate (server-side 402 still acts as backup)
+      if (!isProUser() && !canUseDailyFeature('ai_workout')) {
+        setShowUpgrade(true);
+        return;
       }
       try {
         const trainingIntent = localStorage.getItem('training_intent') || 'general';
@@ -454,7 +455,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }
         console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
       }
-      if (!isProUser()) incAICount();
+      if (!isProUser()) {
+        registerDailyFeatureUse('ai_workout');
+      }
       setShowSuggestCard(true);
       return;
     }
@@ -636,14 +639,23 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       <Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
           <Stack spacing={2}>
-            <Button
-              variant="contained"
-              fullWidth
-              onClick={handleSuggestAIClick}
-              sx={{ fontWeight: 700 }}
-            >
-              Suggest a Workout (AI)
-            </Button>
+            <Box sx={{ position: 'relative' }}>
+              {!isProUser() && (
+                <FeatureUseBadge
+                  featureKey="ai_workout"
+                  isPro={false}
+                  sx={{ position: 'absolute', top: -10, right: -10 }}
+                />
+              )}
+              <Button
+                variant="contained"
+                fullWidth
+                onClick={handleSuggestAIClick}
+                sx={{ fontWeight: 700 }}
+              >
+                Suggest a Workout (AI)
+              </Button>
+            </Box>
 
             {showSuggestCard && (
               <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />

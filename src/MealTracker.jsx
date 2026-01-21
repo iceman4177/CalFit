@@ -45,6 +45,10 @@ import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 import MealSuggestion from './MealSuggestion';
 import UpgradeModal from './components/UpgradeModal';
 import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  registerDailyFeatureUse
+} from './components/FeatureUseBadge.jsx';
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
@@ -58,8 +62,7 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-const getMealAICount = () => parseInt(localStorage.getItem('aiMealCount') || '0', 10);
-const incMealAICount = () => localStorage.setItem('aiMealCount', String(getMealAICount() + 1));
+// Daily Free-tier usage for AI meals is handled via FeatureUseBadge helpers.
 
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
@@ -614,8 +617,10 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
-    if (!isProUser() && getMealAICount() >= 3) {
-      // continue to server probe; if gated, it will 402
+    // Local free-limit gate (server-side 402 still acts as backup)
+    if (!isProUser() && !canUseDailyFeature('ai_meal')) {
+      setShowUpgrade(true);
+      return;
     }
 
     try {
@@ -643,7 +648,9 @@ export default function MealTracker({ onMealUpdate }) {
       console.warn('[MealTracker] gateway probe failed', e);
     }
 
-    if (!isProUser()) incMealAICount();
+    if (!isProUser()) {
+      registerDailyFeatureUse('ai_meal');
+    }
 
     setShowSuggest(true);
 
@@ -686,7 +693,14 @@ export default function MealTracker({ onMealUpdate }) {
           boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
         }}
       >
-        <CardContent sx={{ pb: 2 }}>
+        <CardContent sx={{ pb: 2, position: 'relative' }}>
+          {!isProUser() && (
+            <FeatureUseBadge
+              featureKey="ai_meal"
+              isPro={false}
+              sx={{ position: 'absolute', top: 12, right: 12 }}
+            />
+          )}
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             alignItems={{ xs: 'flex-start', sm: 'center' }}
@@ -926,7 +940,20 @@ export default function MealTracker({ onMealUpdate }) {
           </Box>
         </AccordionSummary>
         <AccordionDetails>
+          {!isProUser() && (
+            <Box sx={{ position: 'relative', mb: 1 }}>
+              <FeatureUseBadge
+                featureKey="ai_food_lookup"
+                isPro={false}
+                sx={{ position: 'absolute', top: 0, right: 0 }}
+              />
+            </Box>
+          )}
           <AIFoodLookupBox
+            canUseLookup={() => isProUser() || canUseDailyFeature('ai_food_lookup')}
+            registerLookupUse={() => {
+              if (!isProUser()) registerDailyFeatureUse('ai_food_lookup');
+            }}
             onAddFood={payload => {
               // ✅ payload may or may not include macros or food_id/portion_id
               logOne({
