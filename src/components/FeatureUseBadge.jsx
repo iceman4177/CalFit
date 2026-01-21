@@ -1,48 +1,28 @@
 // src/components/FeatureUseBadge.jsx
-import React, { useMemo } from 'react';
-import { Chip } from '@mui/material';
+import React from 'react';
+import { Chip, Tooltip } from '@mui/material';
 
-// -----------------------------
-// Centralized daily free limits
-// -----------------------------
-const FREE_DAILY_LIMITS = {
+// -----------------------------------------------------------------------------
+// Daily Free-tier usage tracking (client-side)
+// -----------------------------------------------------------------------------
+
+const STORAGE_KEY = 'slimcal_usage_v1';
+
+// Free tier limits (per day)
+// Adjust here to tune upgrade psychology.
+export const FREE_DAILY_LIMITS = {
   ai_meal: 3,
   ai_workout: 3,
-  ai_food_lookup: 3,
-  ai_coach: 3,
+  ai_food_lookup: 1,
+  daily_recap: 1
 };
 
-// Back-compat aliases (older keys that might still be used)
-const KEY_ALIASES = {
-  meal: 'ai_meal',
-  workout: 'ai_workout',
-  food: 'ai_food_lookup',
-  coach: 'ai_coach',
-};
-
-// Stable per-device id (for anon + guests)
-function getClientId() {
-  try {
-    let cid = localStorage.getItem('clientId');
-    if (!cid) {
-      cid = (crypto?.randomUUID?.() || `cid_${Date.now()}`).slice(0, 36);
-      localStorage.setItem('clientId', cid);
-    }
-    return cid;
-  } catch {
-    return 'anon';
-  }
+function getTodayISO() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
 }
 
-function todayKey() {
-  try {
-    return new Date().toLocaleDateString('en-US');
-  } catch {
-    return String(Date.now()).slice(0, 10);
-  }
-}
-
-function safeJSONParse(val, fallback) {
+function safeParseJSON(val, fallback) {
   try {
     const p = JSON.parse(val);
     return p ?? fallback;
@@ -51,110 +31,104 @@ function safeJSONParse(val, fallback) {
   }
 }
 
-function normalizeFeatureKey(k) {
-  const raw = String(k || '').trim();
-  const key = raw.toLowerCase();
-  return KEY_ALIASES[key] || key;
+function readState() {
+  const today = getTodayISO();
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const st = safeParseJSON(raw, null);
+
+  if (!st || st.date !== today || typeof st !== 'object') {
+    return { date: today, counts: {} };
+  }
+
+  if (!st.counts || typeof st.counts !== 'object') {
+    return { date: today, counts: {} };
+  }
+
+  return st;
+}
+
+function writeState(st) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  } catch {
+    // ignore
+  }
 }
 
 export function getFreeDailyLimit(featureKey) {
-  const k = normalizeFeatureKey(featureKey);
-  return Number(FREE_DAILY_LIMITS[k]) || 0;
+  return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
 }
 
-/**
- * Storage key:
- * - Always per-feature
- * - Optionally per-userId (so logging in doesn't "lose" usage state unexpectedly)
- *   If you don't pass userId, we fall back to device id.
- */
-function makeStorageKey(featureKey, userId) {
-  const k = normalizeFeatureKey(featureKey);
-  const scope = userId ? `u:${userId}` : `c:${getClientId()}`;
-  return `dailyFeatureUse:${k}:${scope}`;
+export function getDailyUsed(featureKey) {
+  const st = readState();
+  return Math.max(0, Number(st.counts?.[featureKey]) || 0);
 }
 
-function readRecord(featureKey, userId) {
-  const key = makeStorageKey(featureKey, userId);
-  const rec = safeJSONParse(localStorage.getItem(key) || '', {});
-  const tk = todayKey();
-  if (rec?.date !== tk) return { key, date: tk, count: 0 };
-  return { key, date: tk, count: Number(rec.count) || 0 };
-}
-
-function writeRecord(key, date, count) {
-  localStorage.setItem(key, JSON.stringify({ date, count }));
-}
-
-export function getDailyFeatureUsed(featureKey, userId) {
-  const { count } = readRecord(featureKey, userId);
-  return count;
-}
-
-export function getDailyFeatureRemaining(featureKey, userId) {
+export function getDailyRemaining(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
-  if (!limit) return 0;
-  const used = getDailyFeatureUsed(featureKey, userId);
+  const used = getDailyUsed(featureKey);
   return Math.max(0, limit - used);
 }
 
-// Back-compat export names
-export const getDailyRemaining = getDailyFeatureRemaining;
-
-export function canUseDailyFeature(featureKey, userId) {
-  return getDailyFeatureRemaining(featureKey, userId) > 0;
+export function canUseDailyFeature(featureKey) {
+  return getDailyRemaining(featureKey) > 0;
 }
 
-export function registerDailyFeatureUse(featureKey, userId) {
-  const limit = getFreeDailyLimit(featureKey);
-  if (!limit) return 0;
-
-  const rec = readRecord(featureKey, userId);
-  const next = (Number(rec.count) || 0) + 1;
-  writeRecord(rec.key, rec.date, next);
-  return next;
+export function registerDailyFeatureUse(featureKey) {
+  const st = readState();
+  const used = Math.max(0, Number(st.counts?.[featureKey]) || 0);
+  st.counts = st.counts || {};
+  st.counts[featureKey] = used + 1;
+  writeState(st);
+  return getDailyRemaining(featureKey);
 }
 
-export function resetDailyFeatureUse(featureKey, userId) {
-  const rec = readRecord(featureKey, userId);
-  writeRecord(rec.key, rec.date, 0);
-  return 0;
+export function resetDailyUsageCache() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
-/**
- * FeatureUseBadge
- * Shows "Free left: X/Y" unless the user is Pro/Trial (then returns null).
- *
- * Props:
- * - featureKey: string (e.g., "ai_meal")
- * - isPro: boolean (treat trial as pro for UI)
- * - userId: optional string (scopes counts to the logged-in user when provided)
- */
+// -----------------------------------------------------------------------------
+// UI Badge
+// -----------------------------------------------------------------------------
+
 export default function FeatureUseBadge({
   featureKey,
   isPro = false,
-  userId = null,
-  sx,
+  sx = {},
+  proLabel = 'PRO',
+  freePrefix = 'Free left',
+  showWhenPro = true
 }) {
-  const limit = useMemo(() => getFreeDailyLimit(featureKey), [featureKey]);
+  const remaining = getDailyRemaining(featureKey);
+  const limit = getFreeDailyLimit(featureKey);
 
-  const remaining = useMemo(() => {
-    return getDailyFeatureRemaining(featureKey, userId);
-  }, [featureKey, userId]);
+  if (isPro && !showWhenPro) return null;
 
-  // If this feature isn't meant to show (limit 0) or user is entitled, hide badge
-  if (!limit || isPro) return null;
+  if (isPro) {
+    return (
+      <Chip
+        size="small"
+        color="success"
+        label={proLabel}
+        sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
+      />
+    );
+  }
+
+  const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
-    <Chip
-      size="small"
-      label={`Free left: ${remaining}/${limit}`}
-      sx={{
-        fontWeight: 800,
-        height: 22,
-        borderRadius: 999,
-        ...sx,
-      }}
-    />
+    <Tooltip title="Free daily uses. Upgrade for unlimited." arrow>
+      <Chip
+        size="small"
+        variant="outlined"
+        label={label}
+        sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
+      />
+    </Tooltip>
   );
 }
