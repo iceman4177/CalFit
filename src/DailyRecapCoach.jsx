@@ -292,20 +292,18 @@ function buildQuestPool({ proteinTarget }) {
   ];
 }
 
-function pickDailyQuests({ dayKey, proteinTarget }) {
+function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
   const rng = seededRng(`${dayKey}|quests`);
   const pool = buildQuestPool({ proteinTarget });
   const shuffled = [...pool].sort(() => rng() - 0.5);
 
   const maxShown = Math.min(6, shuffled.length);
 
-  // All quests are free/unlocked.
-  return shuffled.slice(0, maxShown).map((q) => ({
+  return shuffled.slice(0, maxShown).map((q, idx) => ({
     ...q,
     locked: false,
   }));
 }
-
 
 // -------------------- Coach reaction line ------------------------------------
 function missedBreakfastLine({
@@ -1085,39 +1083,6 @@ Output format (use these headings):
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
           <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}>
-              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Detailed breakdowns, goals tracking, meal timing tips, and better recommendations.
-            </Typography>
-          </Box>
-
-          <Stack direction="row" spacing={1} justifyContent={{ xs: "center", sm: "flex-end" }}>
-            <Button
-              variant="contained"
-              sx={{ fontWeight: 800 }}
-              onClick={async () => {
-                if (!user) {
-                  window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
-                } else {
-                  setModalOpen(true);
-                }
-              }}
-            >
-              Start Free Trial
-            </Button>
-          </Stack>
-        </Stack>
-
-        <Divider sx={{ my: 1.5 }} />
-
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent={{ xs: "center", sm: "flex-start" }}>
-          <Feature text="Macros + meal timing coaching" />
-          <Feature text="Saved recap history" />
-          <Feature text="Smarter food suggestions" />
-        </Stack>
-      </CardContent>
-    </Card>
   ) : null;
 
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
@@ -1198,20 +1163,6 @@ Output format (use these headings):
     </>
   );
 
-  if (embedded) {
-    return (
-      <Card
-        elevation={0}
-        sx={{
-          borderRadius: 3,
-          border: "1px solid rgba(2,6,23,0.08)",
-          background: "linear-gradient(180deg, #ffffff, #fbfdff)",
-        }}
-      >
-        <CardContent sx={{ p: 2.25 }}>{Inner}</CardContent>
-      </Card>
-    );
-  }
 
   const now = useMemo(() => new Date(), []);
   const mealsCount = (dayCtx?.meals || []).length;
@@ -1296,16 +1247,13 @@ Output format (use these headings):
               🎯 Daily Quests
             </Typography>
             {!isPro && (
-              <Button size="small" variant="outlined" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
-                🔥 Unlock 5 Quests + smarter coaching
-              </Button>
             )}
           </Stack>
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
               const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
-              const done = q.complete({ mealsCount, burned, proteinSoFar, now });
+              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
               return (
                 <Box
@@ -1314,36 +1262,35 @@ Output format (use these headings):
                     p: 1.2,
                     borderRadius: 1.5,
                     border: "1px solid rgba(2,6,23,0.08)",
-                    background: done ? "rgba(2,6,23,0.04)" : "white",
+                    background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white",
                   }}
                 >
                   <Stack direction="row" spacing={1.2} alignItems="center">
                     <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>
-                      {done ? "✅" : "🎯"}
+                      {q.locked ? "🔒" : done ? "✅" : "🎯"}
                     </Box>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 800, opacity: 1 }}>{q.label}</Typography>
+                      <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
                       <LinearProgress
                         variant="determinate"
-                        value={pct}
+                        value={q.locked ? 0 : pct}
                         sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
                       />
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
-                        {`${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
                       </Typography>
                     </Box>
-                    
+                    {q.locked && (
+                      <Button size="small" variant="contained" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                        Unlock
+                      </Button>
+                    )}
                   </Stack>
                 </Box>
               );
             })}
           </Stack>
 
-          {!isPro && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.2 }}>
-              Free gets 1–2 quests. Pro gets 5–7 quests + streak multipliers + card export.
-            </Typography>
-          )}
         </CardContent>
       </Card>
 
