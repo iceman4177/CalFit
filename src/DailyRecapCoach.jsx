@@ -8,7 +8,6 @@ import {
   Card,
   CardContent,
   Stack,
-  Divider,
   Chip,
   Accordion,
   AccordionSummary,
@@ -18,7 +17,6 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import UpgradeModal from "./components/UpgradeModal";
 import FeatureUseBadge, {
-  canUseDailyFeature,
   registerDailyFeatureUse,
   getDailyRemaining,
   getFreeDailyLimit,
@@ -175,14 +173,6 @@ function estimateMacrosFallbackFromCalories(calories) {
   return { protein_g: clampNonNeg(p), carbs_g: clampNonNeg(c), fat_g: clampNonNeg(f) };
 }
 
-/**
- * Stronger macro estimation:
- * - It tries to find qty from:
- *    qty param OR any number inside name OR any number inside unit/serving/label text
- * - This fixes cases like:
- *    name: "Eggs" + unit/serving: "6 eggs (1 large egg)"
- *    displayName: "Eggs — 6 eggs (1 large egg)"
- */
 function estimateMacrosForFood({ name, qty, unit, calories, extraText } = {}) {
   const n = String(name || "");
   const u = String(unit || "");
@@ -197,7 +187,6 @@ function estimateMacrosForFood({ name, qty, unit, calories, extraText } = {}) {
   const cals = clampNonNeg(calories);
 
   if (hay.includes("egg")) {
-    // per large egg: ~6g protein, ~0.5g carbs, ~5g fat, ~70 kcal
     const base = { protein_g: 6 * q, carbs_g: 0.5 * q, fat_g: 5 * q };
     const expectedCals = 70 * q;
     const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
@@ -209,7 +198,6 @@ function estimateMacrosForFood({ name, qty, unit, calories, extraText } = {}) {
   }
 
   if (hay.includes("oat")) {
-    // ~150 cals per 1/2 cup dry: 5P 27C 3F
     const base = { protein_g: 5 * q, carbs_g: 27 * q, fat_g: 3 * q };
     const expectedCals = 150 * q;
     const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
@@ -221,7 +209,6 @@ function estimateMacrosForFood({ name, qty, unit, calories, extraText } = {}) {
   }
 
   if (hay.includes("peanut butter") || hay.includes(" pb")) {
-    // ~95 cals per tbsp: 4P 3C 8F
     const base = { protein_g: 4 * q, carbs_g: 3 * q, fat_g: 8 * q };
     const expectedCals = 95 * q;
     const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
@@ -248,7 +235,7 @@ function sumMacros(items = []) {
   return totals;
 }
 
-// -------------------- Quests (DO NOT persist functions) -----------------------
+// -------------------- Quests (FREE) -------------------------------------------
 function buildQuestPool({ proteinTarget }) {
   const lunchProtein = Math.min(60, Math.max(30, Math.round((proteinTarget || 0) * 0.35 || 40)));
 
@@ -292,14 +279,13 @@ function buildQuestPool({ proteinTarget }) {
   ];
 }
 
-function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
+function pickDailyQuests({ dayKey, proteinTarget }) {
   const rng = seededRng(`${dayKey}|quests`);
   const pool = buildQuestPool({ proteinTarget });
   const shuffled = [...pool].sort(() => rng() - 0.5);
-
   const maxShown = Math.min(6, shuffled.length);
 
-  return shuffled.slice(0, maxShown).map((q, idx) => ({
+  return shuffled.slice(0, maxShown).map((q) => ({
     ...q,
     locked: false,
   }));
@@ -434,7 +420,6 @@ function buildLocalContext(todayISO) {
   const localMeals = mealsRec?.meals || [];
 
   const meals = localMeals.map((m, idx) => {
-    // 🔥 robust name/qty extraction to fix the eggs/macros bug
     const name =
       m.food_name ||
       m.foodName ||
@@ -478,7 +463,11 @@ function buildLocalContext(todayISO) {
         protein: safeNum(m.protein_g ?? m.protein ?? m.proteinG, est.protein_g),
         carbs: safeNum(m.carbs_g ?? m.carbs ?? m.carbsG, est.carbs_g),
         fat: safeNum(m.fat_g ?? m.fat ?? m.fatG, est.fat_g),
-        _estimated_macros: !((m.protein_g ?? m.protein ?? m.proteinG) || (m.carbs_g ?? m.carbs ?? m.carbsG) || (m.fat_g ?? m.fat ?? m.fatG)),
+        _estimated_macros: !(
+          (m.protein_g ?? m.protein ?? m.proteinG) ||
+          (m.carbs_g ?? m.carbs ?? m.carbsG) ||
+          (m.fat_g ?? m.fat ?? m.fatG)
+        ),
       },
     ];
 
@@ -594,11 +583,10 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 })
   );
 
-  // ✅ quests are regenerated deterministically; we do NOT persist functions
+  // ✅ quests are deterministic (FREE)
   const [quests, setQuests] = useState(() =>
     pickDailyQuests({
       dayKey: todayISO,
-      isPro,
       proteinTarget: targets.proteinDaily || 170,
     })
   );
@@ -607,12 +595,11 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     setQuests(
       pickDailyQuests({
         dayKey: todayISO,
-        isPro,
         proteinTarget: targets.proteinDaily || 170,
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPro, todayISO]);
+  }, [todayISO]);
 
   // Load saved recap + history
   useEffect(() => {
@@ -652,11 +639,9 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, todayISO]);
 
-  // Daily recap is a high-value feature, so it is strongly paywalled:
-  // Free users get a small number of uses per day.
+  // Daily recap limit (Stripe gating stays)
   const freeDailyRecapLimit = getFreeDailyLimit("daily_recap");
 
-  // Sync display counter from our shared daily tracker
   useEffect(() => {
     if (isPro) {
       setCount(0);
@@ -698,7 +683,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     setSavedAt(entry.createdAt);
   };
 
-  // Build recap context (Supabase if signed in; otherwise local)
   async function buildContext() {
     if (!user) {
       return buildLocalContext(todayISO);
@@ -914,7 +898,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   }, [isPro, recapKeyToday, dayCtxLoading]);
 
   const handleGetRecap = async () => {
-    // NOTE: the limit constant is `freeDailyRecapLimit` (defined above)
     if (!isPro && count >= freeDailyRecapLimit) {
       setModalOpen(true);
       return;
@@ -1023,7 +1006,9 @@ Output format (use these headings):
         coachFacts,
         null,
         2
-      )}\n\nAlso, here are 2–4 non-AI suggestions you may weave in if relevant (only if they fit the data):\n- ${autoSuggestions.join("\n- ")}`;
+      )}\n\nAlso, here are 2–4 non-AI suggestions you may weave in if relevant (only if they fit the data):\n- ${autoSuggestions.join(
+        "\n- "
+      )}`;
 
       const res = await fetch("/api/openai", {
         method: "POST",
@@ -1062,40 +1047,28 @@ Output format (use these headings):
     </Typography>
   ) : null;
 
-  const UpsellCard = !isPro ? (
-    <Card
-      elevation={0}
-      sx={{
-        mb: 2.5,
-        border: "1px solid rgba(2,6,23,0.08)",
-        background: "linear-gradient(180deg, #ffffff, #fbfdff)",
-        borderRadius: 2,
-      }}
-    >
-      <CardContent sx={{ position: 'relative' }}>
-        {!isPro && (
-          <FeatureUseBadge
-            featureKey="daily_recap"
-            isPro={false}
-            sx={{ position: 'absolute', top: 12, right: 12 }}
-          />
-        )}
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
-          <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}>
-  ) : null;
-
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
   const RecapHeader = (
-    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+    <Stack
+      direction={{ xs: "column", sm: "row" }}
+      spacing={1.25}
+      alignItems={{ xs: "stretch", sm: "center" }}
+      justifyContent="space-between"
+      sx={{ mt: 1 }}
+    >
       <Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
             Daily Recap Coach
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
-          {!embedded && !isPro && <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />}
+          {!embedded && !isPro && (
+            <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />
+          )}
+          {!embedded && !isPro && (
+            <FeatureUseBadge featureKey="daily_recap" isPro={false} />
+          )}
         </Stack>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -1109,7 +1082,12 @@ Output format (use these headings):
         )}
       </Box>
 
-      <Button variant="contained" onClick={handleGetRecap} disabled={loading} sx={{ fontWeight: 900, borderRadius: 999, px: 3 }}>
+      <Button
+        variant="contained"
+        onClick={handleGetRecap}
+        disabled={loading}
+        sx={{ fontWeight: 900, borderRadius: 999, px: 3 }}
+      >
         {loading ? <CircularProgress size={24} /> : buttonText}
       </Button>
     </Stack>
@@ -1142,7 +1120,6 @@ Output format (use these headings):
 
   const Inner = (
     <>
-      {!embedded && UpsellCard}
       {RecapHeader}
       {FreeUsageBanner}
 
@@ -1162,7 +1139,6 @@ Output format (use these headings):
       <UpgradeModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </>
   );
-
 
   const now = useMemo(() => new Date(), []);
   const mealsCount = (dayCtx?.meals || []).length;
@@ -1212,9 +1188,18 @@ Output format (use these headings):
         </Card>
       )}
 
-      <Card data-testid="coach-xp" elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+      <Card
+        data-testid="coach-xp"
+        elevation={0}
+        sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}
+      >
         <CardContent>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ xs: "stretch", sm: "center" }}
+            justifyContent="space-between"
+          >
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
                 Level {lvl.level}
@@ -1242,19 +1227,24 @@ Output format (use these headings):
 
       <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
         <CardContent>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" sx={{ mb: 1.5 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            justifyContent="space-between"
+            sx={{ mb: 1.5 }}
+          >
             <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
               🎯 Daily Quests
             </Typography>
-            {!isPro && (
-            )}
           </Stack>
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
               const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
-              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
+              const done = q.complete({ mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+
               return (
                 <Box
                   key={q.id}
@@ -1262,48 +1252,33 @@ Output format (use these headings):
                     p: 1.2,
                     borderRadius: 1.5,
                     border: "1px solid rgba(2,6,23,0.08)",
-                    background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white",
+                    background: done ? "rgba(2,6,23,0.04)" : "white",
                   }}
                 >
                   <Stack direction="row" spacing={1.2} alignItems="center">
                     <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>
-                      {q.locked ? "🔒" : done ? "✅" : "🎯"}
+                      {done ? "✅" : "🎯"}
                     </Box>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
+                      <Typography sx={{ fontWeight: 800 }}>{q.label}</Typography>
                       <LinearProgress
                         variant="determinate"
-                        value={q.locked ? 0 : pct}
+                        value={pct}
                         sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
                       />
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
-                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                        {`${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
                       </Typography>
                     </Box>
-                    {q.locked && (
-                      <Button size="small" variant="contained" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
-                        Unlock
-                      </Button>
-                    )}
                   </Stack>
                 </Box>
               );
             })}
           </Stack>
-
         </CardContent>
       </Card>
 
       {Inner}
     </Box>
-  );
-}
-
-function Feature({ text }) {
-  return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <Chip label="✓" size="small" variant="outlined" />
-      <Typography variant="caption">{text}</Typography>
-    </Stack>
   );
 }
