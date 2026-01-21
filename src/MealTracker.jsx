@@ -74,10 +74,12 @@ function pluralizeUnit(unit, qty) {
   if (!unit) return '';
   if (q === 1) return unit;
 
+  // common irregular-ish
   if (unit === 'slice') return 'slices';
   if (unit === 'clove') return 'cloves';
   if (unit === 'egg') return 'eggs';
 
+  // units that generally shouldn't pluralize
   const noPlural = new Set(['g', 'oz', 'tbsp', 'tsp', 'cup', 'serving', 'item', 'scoop']);
   if (noPlural.has(unit)) return unit;
 
@@ -89,134 +91,97 @@ function safeNumber(val, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function fmt0(n) {
+// Normalize + clamp macros
+function normMacro(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
-  return Math.round(x);
+  return Math.max(0, Math.round(x));
 }
 
-// Pull qty from the display string if needed: "Eggs — 6 eggs (1 large egg)"
-function parseQtyFromName(name) {
-  try {
-    if (!name || typeof name !== 'string') return null;
-    const m = name.match(/—\s*([0-9]+(?:\.[0-9]+)?)\s+/);
-    if (!m) return null;
-    const q = Number(m[1]);
-    return Number.isFinite(q) ? q : null;
-  } catch {
-    return null;
-  }
-}
-
-// Try match food by id first, else by name prefix "Eggs — ..."
-function findFoodForMeal(meal, foods) {
-  if (!meal) return null;
-
-  const foodId = meal.food_id || meal.foodId || meal.foodID || null;
-  if (foodId) {
-    const byId = foods.find(f => String(f.id) === String(foodId));
+// Find a food item in foodData by id or name (case-insensitive)
+function findFoodInData(fd, { food_id, food_name, displayName }) {
+  const arr = Array.isArray(fd) ? fd : [];
+  const id = String(food_id || '').trim();
+  if (id) {
+    const byId = arr.find(f => String(f?.id || '') === id);
     if (byId) return byId;
   }
 
-  // fallback by name prefix (before " —")
-  const rawName = typeof meal.name === 'string' ? meal.name : '';
-  const prefix = rawName.split('—')[0]?.trim();
-  if (!prefix) return null;
+  const nameCandidates = [food_name, displayName]
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean);
 
-  const byName = foods.find(f => String(f.name).toLowerCase() === String(prefix).toLowerCase());
-  return byName || null;
+  if (nameCandidates.length) {
+    const lower = nameCandidates.map(s => s.toLowerCase());
+    const byName = arr.find(f => {
+      const fn = String(f?.name || '').toLowerCase();
+      return lower.includes(fn);
+    });
+    if (byName) return byName;
+
+    // softer contains match (last resort)
+    const soft = arr.find(f => {
+      const fn = String(f?.name || '').toLowerCase();
+      return lower.some(x => x.includes(fn) || fn.includes(x));
+    });
+    if (soft) return soft;
+  }
+
+  return null;
 }
 
-function findPortionForMeal(meal, food) {
-  if (!food || !Array.isArray(food.portions)) return null;
-  const pid = meal.portion_id || meal.portionId || null;
+function findPortion(food, portion_id) {
+  const portions = Array.isArray(food?.portions) ? food.portions : [];
+  if (!portions.length) return null;
+  const pid = String(portion_id || '').trim();
   if (pid) {
-    const byId = food.portions.find(p => String(p.id) === String(pid));
-    if (byId) return byId;
+    const p = portions.find(x => String(x?.id || '') === pid);
+    if (p) return p;
   }
-  return null;
+  return portions[0] || null;
 }
 
-// read macros from portion in a flexible way
-function getPortionMacros(portion) {
-  if (!portion) return null;
+/**
+ * Hydrate macros from foodData.json (per portion) and scale by qty.
+ * Expects portion macros fields:
+ *   protein_g, carbs_g, fat_g  (numbers per 1 portion)
+ */
+function getMacrosForEntry(fd, { macros, meta, name, calories }) {
+  // If macros were already provided and non-zero-ish, respect them.
+  const p0 = Number(macros?.protein_g);
+  const c0 = Number(macros?.carbs_g);
+  const f0 = Number(macros?.fat_g);
+  const hasProvided =
+    Number.isFinite(p0) || Number.isFinite(c0) || Number.isFinite(f0);
 
-  // preferred
-  if (portion.macros && typeof portion.macros === 'object') {
-    const p = portion.macros.protein_g ?? portion.macros.protein ?? 0;
-    const c = portion.macros.carbs_g ?? portion.macros.carbs ?? 0;
-    const f = portion.macros.fat_g ?? portion.macros.fat ?? 0;
-    return { protein_g: Number(p) || 0, carbs_g: Number(c) || 0, fat_g: Number(f) || 0 };
-  }
-
-  // flat fields
-  if (
-    portion.protein_g != null ||
-    portion.carbs_g != null ||
-    portion.fat_g != null ||
-    portion.protein != null ||
-    portion.carbs != null ||
-    portion.fat != null
-  ) {
-    const p = portion.protein_g ?? portion.protein ?? 0;
-    const c = portion.carbs_g ?? portion.carbs ?? 0;
-    const f = portion.fat_g ?? portion.fat ?? 0;
-    return { protein_g: Number(p) || 0, carbs_g: Number(c) || 0, fat_g: Number(f) || 0 };
-  }
-
-  return null;
-}
-
-// Compute macros for a meal:
-// 1) use stored macros if present
-// 2) else derive from foodData (food_id + portion_id + qty)
-// If we can’t compute, returns nulls.
-function computeMealMacros(meal, foods) {
-  const storedHasAny =
-    meal?.protein_g != null || meal?.carbs_g != null || meal?.fat_g != null;
-
-  if (storedHasAny) {
+  if (hasProvided) {
     return {
-      protein_g: Number(meal.protein_g) || 0,
-      carbs_g: Number(meal.carbs_g) || 0,
-      fat_g: Number(meal.fat_g) || 0,
-      source: 'stored'
+      protein_g: normMacro(p0),
+      carbs_g: normMacro(c0),
+      fat_g: normMacro(f0)
     };
   }
 
-  const food = findFoodForMeal(meal, foods);
-  if (!food) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+  const qty = safeNumber(meta?.qty ?? 1, 1);
+  const food = findFoodInData(fd, {
+    food_id: meta?.food_id,
+    food_name: meta?.food_name,
+    displayName: name
+  });
+  if (!food) return null;
 
-  const portion = findPortionForMeal(meal, food);
-  if (!portion) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+  const portion = findPortion(food, meta?.portion_id);
+  if (!portion) return null;
 
-  const per = getPortionMacros(portion);
-  if (!per) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+  const P = normMacro((Number(portion?.protein_g) || 0) * qty);
+  const C = normMacro((Number(portion?.carbs_g) || 0) * qty);
+  const F = normMacro((Number(portion?.fat_g) || 0) * qty);
 
-  const q =
-    (meal.qty != null && Number(meal.qty)) ||
-    parseQtyFromName(meal.name) ||
-    1;
+  // If your foodData doesn't yet have macros for some items, don't force 0s into UI.
+  const any = P > 0 || C > 0 || F > 0;
+  if (!any) return null;
 
-  return {
-    protein_g: (Number(per.protein_g) || 0) * (Number(q) || 1),
-    carbs_g: (Number(per.carbs_g) || 0) * (Number(q) || 1),
-    fat_g: (Number(per.fat_g) || 0) * (Number(q) || 1),
-    source: 'derived'
-  };
-}
-
-function formatMealSecondary(calories, macros) {
-  const cals = fmt0(calories);
-  const p = macros?.protein_g;
-  const c = macros?.carbs_g;
-  const f = macros?.fat_g;
-
-  const hasAnyMacro = p != null || c != null || f != null;
-
-  if (!hasAnyMacro) return `${cals} cals`;
-
-  return `${cals} cals • P ${fmt0(p)}g • C ${fmt0(c)}g • F ${fmt0(f)}g`;
+  return { protein_g: P, carbs_g: C, fat_g: F };
 }
 
 // ---------- Dialogs ----------
@@ -325,19 +290,8 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
             <Stack key={i} direction="row" spacing={1}>
-              <TextField
-                label={`Ingredient ${i + 1}`}
-                value={r.name}
-                onChange={e => update(i, 'name', e.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="Calories"
-                type="number"
-                value={r.calories}
-                onChange={e => update(i, 'calories', e.target.value)}
-                sx={{ width: 140 }}
-              />
+              <TextField label={`Ingredient ${i + 1}`} value={r.name} onChange={e => update(i, 'name', e.target.value)} fullWidth />
+              <TextField label="Calories" type="number" value={r.calories} onChange={e => update(i, 'calories', e.target.value)} sx={{ width: 140 }} />
               <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
                 <DeleteIcon />
               </IconButton>
@@ -372,11 +326,13 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
 
 // ---------- Main ----------
 export default function MealTracker({ onMealUpdate }) {
+  // onboarding tips
   const [FoodTip, triggerFoodTip] = useFirstTimeTip('tip_food', 'Search or type a food name.');
   const [CalTip, triggerCalTip] = useFirstTimeTip('tip_cal', 'Enter calories.');
   const [AddTip, triggerAddTip] = useFirstTimeTip('tip_add', 'Tap to add this meal.');
   const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
+  // manual entry state
   const [foodInput, setFoodInput] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
 
@@ -386,22 +342,28 @@ export default function MealTracker({ onMealUpdate }) {
   const [calories, setCalories] = useState('');
   const [caloriesManualOverride, setCaloriesManualOverride] = useState(false);
 
+  // logged meals
   const [mealLog, setMealLog] = useState([]);
 
+  // AI panel state
   const [showSuggest, setShowSuggest] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
+  // dialogs
   const [openCustom, setOpenCustom] = useState(false);
   const [openBowl, setOpenBowl] = useState(false);
 
   const { user } = useAuth();
 
+  // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
 
+  // canonical "today"
   const now = new Date();
   const todayUS = now.toLocaleDateString('en-US');
   const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
 
+  // streak + initial data load
   useEffect(() => {
     hydrateStreakOnStartup();
   }, []);
@@ -410,12 +372,15 @@ export default function MealTracker({ onMealUpdate }) {
     const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayLog = all.find(e => e.date === todayUS);
     const meals = todayLog ? todayLog.meals || [] : [];
+
+    // IMPORTANT: do NOT rehydrate here; we want stored macros to already exist.
     setMealLog(meals);
 
     const totalInit = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
     onMealUpdate?.(totalInit);
   }, [onMealUpdate, todayUS]);
 
+  // ------------ persistence helpers ------------
   const persistToday = meals => {
     const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
     rest.push({ date: todayUS, meals });
@@ -463,6 +428,7 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(total);
   };
 
+  // Helpers for selected food/portion
   const portions = useMemo(() => {
     return Array.isArray(selectedFood?.portions) ? selectedFood.portions : [];
   }, [selectedFood]);
@@ -481,6 +447,7 @@ export default function MealTracker({ onMealUpdate }) {
     return Math.round(q * per);
   }, [selectedFood, selectedPortion, qty]);
 
+  // When food/portion/qty changes, update calories unless user overrode it manually
   useEffect(() => {
     if (!selectedFood || !selectedPortion) return;
     if (caloriesManualOverride) return;
@@ -488,13 +455,28 @@ export default function MealTracker({ onMealUpdate }) {
     setCalories(String(autoCalories));
   }, [selectedFood, selectedPortion, qty, autoCalories, caloriesManualOverride]);
 
+  // core logger for any meal object (local + optional cloud)
   const logOne = async ({ name, calories, macros, meta }) => {
+    const baseCalories = Math.max(0, Number(calories) || 0);
+
+    // ✅ NEW: If macros missing, hydrate from foodData using meta or name
+    const hydrated = getMacrosForEntry(foodData, { macros, meta, name, calories: baseCalories });
+
+    const finalMacros = hydrated || (macros ? {
+      protein_g: normMacro(macros?.protein_g),
+      carbs_g: normMacro(macros?.carbs_g),
+      fat_g: normMacro(macros?.fat_g)
+    } : null);
+
     const safe = {
       name,
-      calories: Math.max(0, Number(calories) || 0),
-      protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
-      carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
-      fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
+      calories: baseCalories,
+
+      // Persist macros locally when available so totals + recap are correct (even offline / no account)
+      protein_g: finalMacros ? finalMacros.protein_g : undefined,
+      carbs_g: finalMacros ? finalMacros.carbs_g : undefined,
+      fat_g: finalMacros ? finalMacros.fat_g : undefined,
+
       createdAt: new Date().toISOString(),
       ...(meta || {})
     };
@@ -511,6 +493,7 @@ export default function MealTracker({ onMealUpdate }) {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
 
+        // Build one "meal item" line with qty/unit if present
         const qtyNum = meta?.qty != null ? Number(meta.qty) : 1;
         const unitStr = meta?.unit || 'serving';
 
@@ -527,9 +510,9 @@ export default function MealTracker({ onMealUpdate }) {
               qty: Number.isFinite(qtyNum) ? qtyNum : 1,
               unit: unitStr,
               calories: safe.calories,
-              protein: macros?.protein_g ?? null,
-              carbs: macros?.carbs_g ?? null,
-              fat: macros?.fat_g ?? null
+              protein: finalMacros?.protein_g ?? null,
+              carbs: finalMacros?.carbs_g ?? null,
+              fat: finalMacros?.fat_g ?? null
             }
           ]
         );
@@ -539,9 +522,11 @@ export default function MealTracker({ onMealUpdate }) {
     }
   };
 
+  // manual "Add Meal" button
   const handleAdd = async () => {
     const nameText = foodInput.trim();
 
+    // Structured path: selectedFood + portion + qty
     if (selectedFood && selectedPortion) {
       const q = safeNumber(qty, 0);
       if (!Number.isFinite(q) || q <= 0) {
@@ -558,22 +543,18 @@ export default function MealTracker({ onMealUpdate }) {
       const unit = selectedPortion.unit || 'serving';
       const unitPretty = pluralizeUnit(unit, q);
 
+      // Nice display name: "Eggs — 6 eggs (1 large egg)"
       const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
-
-      // If foodData portions contain macros, store them at log-time too.
-      const per = getPortionMacros(selectedPortion);
-      const macros = per
-        ? {
-            protein_g: (Number(per.protein_g) || 0) * q,
-            carbs_g: (Number(per.carbs_g) || 0) * q,
-            fat_g: (Number(per.fat_g) || 0) * q
-          }
-        : undefined;
 
       await logOne({
         name: displayName,
         calories: c,
-        macros,
+        macros: {
+          // if foodData has portion macros, logOne will hydrate anyway; but keep this for clarity
+          protein_g: selectedPortion.protein_g != null ? Number(selectedPortion.protein_g) * q : undefined,
+          carbs_g: selectedPortion.carbs_g != null ? Number(selectedPortion.carbs_g) * q : undefined,
+          fat_g: selectedPortion.fat_g != null ? Number(selectedPortion.fat_g) * q : undefined
+        },
         meta: {
           food_id: selectedFood.id,
           portion_id: selectedPortion.id,
@@ -593,6 +574,7 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
+    // Legacy/freeSolo path: requires manual calories
     const c = Number.parseInt(calories, 10);
     if (!nameText || !Number.isFinite(c) || c <= 0) {
       alert('Enter a valid food & calories.');
@@ -625,6 +607,7 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
+  // toggle meal ideas panel — identity-aware probe to avoid false 402s
   const handleToggleMealIdeas = useCallback(async () => {
     if (showSuggest) {
       setShowSuggest(false);
@@ -671,36 +654,15 @@ export default function MealTracker({ onMealUpdate }) {
     }, 50);
   }, [showSuggest, user?.id]);
 
+  const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+
+  // Autocomplete options: foods only (portions handled separately)
   const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
+
+  // Handle special custom action row (kept as a "pseudo option" below)
   const customAction = useMemo(() => {
     return Array.isArray(foodData) ? foodData.find(f => f.action === 'open_custom_nutrition') : null;
   }, []);
-
-  // ✅ Rehydrate macros for display using foodData when missing
-  const displayMeals = useMemo(() => {
-    const foods = options; // only real foods
-    return (mealLog || []).map(m => {
-      const macros = computeMealMacros(m, foods);
-      return { ...m, _displayMacros: macros };
-    });
-  }, [mealLog, options]);
-
-  const totalCalories = useMemo(() => {
-    return (mealLog || []).reduce((s, m) => s + (Number(m.calories) || 0), 0);
-  }, [mealLog]);
-
-  const totalMacros = useMemo(() => {
-    return displayMeals.reduce(
-      (acc, m) => {
-        const mm = m._displayMacros;
-        acc.protein += Number(mm?.protein_g) || 0;
-        acc.carbs += Number(mm?.carbs_g) || 0;
-        acc.fat += Number(mm?.fat_g) || 0;
-        return acc;
-      },
-      { protein: 0, carbs: 0, fat: 0 }
-    );
-  }, [displayMeals]);
 
   return (
     <Container
@@ -717,6 +679,7 @@ export default function MealTracker({ onMealUpdate }) {
       <AddTip />
       <ClearTip />
 
+      {/* ------------------- HERO: Title + Single AI CTA ------------------- */}
       <Card
         sx={{
           borderRadius: 3,
@@ -752,6 +715,7 @@ export default function MealTracker({ onMealUpdate }) {
         </CardContent>
       </Card>
 
+      {/* ------------------- ACCORDION: Quick Actions ------------------- */}
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Quick Actions</Typography>
@@ -780,6 +744,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
+      {/* ------------------- ACCORDION: Manual Entry (default open) ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
@@ -793,6 +758,7 @@ export default function MealTracker({ onMealUpdate }) {
               value={selectedFood}
               inputValue={foodInput}
               onChange={(_, v) => {
+                // If user types freeSolo string
                 if (!v) {
                   setSelectedFood(null);
                   setSelectedPortionId('');
@@ -811,6 +777,7 @@ export default function MealTracker({ onMealUpdate }) {
                   return;
                 }
 
+                // Selected structured food
                 setSelectedFood(v);
                 setFoodInput(v.name);
 
@@ -827,6 +794,7 @@ export default function MealTracker({ onMealUpdate }) {
               }}
               onInputChange={(_, v) => {
                 setFoodInput(v);
+                // If user starts typing, treat it as freeSolo unless they re-select an option
                 if (!selectedFood) return;
                 if (v !== selectedFood?.name) {
                   setSelectedFood(null);
@@ -840,6 +808,7 @@ export default function MealTracker({ onMealUpdate }) {
               )}
             />
 
+            {/* Portion + Quantity only if a structured food is selected */}
             {selectedFood && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
                 <FormControl fullWidth>
@@ -884,6 +853,7 @@ export default function MealTracker({ onMealUpdate }) {
               onFocus={triggerCalTip}
               onChange={e => {
                 setCalories(e.target.value);
+                // Mark manual override only if a structured food is selected
                 if (selectedFood) setCaloriesManualOverride(true);
               }}
               helperText={
@@ -893,12 +863,14 @@ export default function MealTracker({ onMealUpdate }) {
               }
             />
 
+            {/* Provide a quick "Custom Food" action hint */}
             {!selectedFood && foodInput.length > 2 && (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Not found — enter calories manually or use Quick Actions.
               </Alert>
             )}
 
+            {/* Explicit custom item button (keeps old behavior but cleaner) */}
             {customAction && (
               <Button
                 onClick={() => setOpenCustom(true)}
@@ -945,6 +917,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
+      {/* ------------------- ACCORDION: AI Assist (open) ------------------- */}
       <Accordion defaultExpanded disableGutters ref={suggestRef}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -955,6 +928,7 @@ export default function MealTracker({ onMealUpdate }) {
         <AccordionDetails>
           <AIFoodLookupBox
             onAddFood={payload => {
+              // ✅ payload may or may not include macros or food_id/portion_id
               logOne({
                 name: payload.name,
                 calories: payload.calories,
@@ -962,6 +936,13 @@ export default function MealTracker({ onMealUpdate }) {
                   protein_g: payload.protein_g,
                   carbs_g: payload.carbs_g,
                   fat_g: payload.fat_g
+                },
+                meta: {
+                  food_id: payload.food_id,
+                  portion_id: payload.portion_id,
+                  qty: payload.qty,
+                  unit: payload.unit,
+                  food_name: payload.food_name || payload.name
                 }
               });
             }}
@@ -970,7 +951,7 @@ export default function MealTracker({ onMealUpdate }) {
           {showSuggest && (
             <Box sx={{ mt: 2 }}>
               <MealSuggestion
-                consumedCalories={totalCalories}
+                consumedCalories={total}
                 onAddMeal={async meal => {
                   const safeCalories = Number.isFinite(meal.calories) ? Number(meal.calories) : 0;
                   await logOne({ name: meal.name, calories: safeCalories });
@@ -981,7 +962,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
-      {/* ------------------- Logged Meals ------------------- */}
+      {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Meals Logged Today ({todayUS})</Typography>
@@ -999,17 +980,12 @@ export default function MealTracker({ onMealUpdate }) {
                   boxShadow: '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
                 }}
               >
-                {displayMeals.map((m, i) => (
+                {mealLog.map((m, i) => (
                   <Box key={`${m.name}-${i}`}>
                     <ListItem
                       secondaryAction={
                         <Tooltip title="Delete this meal">
-                          <IconButton
-                            edge="end"
-                            aria-label="delete meal"
-                            onClick={() => handleDeleteMeal(i)}
-                            size="small"
-                          >
+                          <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -1017,20 +993,27 @@ export default function MealTracker({ onMealUpdate }) {
                     >
                       <ListItemText
                         primary={<Typography fontWeight={500}>{m.name}</Typography>}
-                        secondary={formatMealSecondary(m.calories, m._displayMacros)}
+                        secondary={
+                          <>
+                            <span>{Number(m.calories) || 0} cals</span>
+                            {((Number(m.protein_g) || 0) + (Number(m.carbs_g) || 0) + (Number(m.fat_g) || 0)) > 0 && (
+                              <span>{` • P ${Number(m.protein_g) || 0}g • C ${Number(m.carbs_g) || 0}g • F ${Number(m.fat_g) || 0}g`}</span>
+                            )}
+                          </>
+                        }
                       />
                     </ListItem>
-                    {i < displayMeals.length - 1 && <Divider />}
+                    {i < mealLog.length - 1 && <Divider />}
                   </Box>
                 ))}
               </List>
 
               <Typography variant="h6" align="right" sx={{ mt: 2, fontWeight: 600 }}>
-                Total Calories: {fmt0(totalCalories)}
+                Total Calories: {total}
               </Typography>
 
-              <Typography variant="body2" align="right" color="text.secondary" sx={{ mt: 0.5 }}>
-                Totals — P {fmt0(totalMacros.protein)}g • C {fmt0(totalMacros.carbs)}g • F {fmt0(totalMacros.fat)}g
+              <Typography variant="body2" align="right" sx={{ mt: 0.5, color: 'text.secondary' }}>
+                Totals — P {mealLog.reduce((s, m) => s + (Number(m.protein_g) || 0), 0)}g • C {mealLog.reduce((s, m) => s + (Number(m.carbs_g) || 0), 0)}g • F {mealLog.reduce((s, m) => s + (Number(m.fat_g) || 0), 0)}g
               </Typography>
             </>
           )}
