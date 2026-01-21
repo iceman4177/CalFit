@@ -13,7 +13,11 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
-import { supabase } from '../lib/supabaseClient'; // <-- fixed path
+import { supabase } from '../lib/supabaseClient';
+
+// ✅ ADD
+import useAiQuota from '../hooks/useAiQuota';
+import AiQuotaBadge from './AiQuotaBadge';
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -63,9 +67,7 @@ async function buildAuthHeaders() {
     token = sessionData?.session?.access_token || null;
     userId = userData?.user?.id || null;
     email  = userData?.user?.email || null;
-  } catch {
-    // ignore — will fall back to anonymous client id
-  }
+  } catch {}
 
   return {
     'Content-Type': 'application/json',
@@ -111,12 +113,23 @@ function toLocalWorkout(ai) {
   return { name: title, exercises: exs };
 }
 
+// ✅ helper (client-side hint only)
+const isProUser = () => {
+  if (localStorage.getItem('isPro') === 'true') return true;
+  const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+  return !!ud.isPremium;
+};
+
 export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [pack, setPack] = useState([]);   // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+
+  // ✅ quota for this feature
+  const quota = useAiQuota('workout');
+  const pro = isProUser();
 
   // derive intent/goal/split defaults
   const trainingIntent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
@@ -129,7 +142,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
-  async function fetchAI(focusOverride) {
+  async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
     setErr(null);
 
@@ -160,7 +173,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       });
 
       if (resp.status === 402) {
-        // Free cap hit (only happens if entitlement not resolved) → show paywall
         setShowUpgrade(true);
         setPack([]);
         setLoading(false);
@@ -179,6 +191,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
       setPack(suggestions);
       setIdx(0);
+
+      // ✅ only consume a free use when we truly generated from server successfully
+      if (!pro && countAsUse) quota.increment();
     } catch (e) {
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
       setErr('Could not fetch a workout suggestion. Try again.');
@@ -188,21 +203,35 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
     }
   }
 
-  // Fetch on mount and when userData changes
-  useEffect(() => { fetchAI(); /* eslint-disable-next-line */ }, [userData]);
+  // Fetch on mount and when userData changes — counts as a use (unless Pro)
+  useEffect(() => { fetchAI(undefined, { countAsUse: true }); /* eslint-disable-next-line */ }, [userData]);
 
   const handleRefresh = () => {
-    if (pack.length <= 1) {
-      fetchAI();
-    } else {
+    // ✅ If we have extra suggestions already, cycling does NOT consume a use
+    if (pack.length > 1) {
       setIdx((i) => (i + 1) % pack.length);
+      return;
     }
+
+    // ✅ Need to call server → enforce local free quota UX (server still final)
+    if (!pro && !quota.canUse) {
+      setShowUpgrade(true);
+      return;
+    }
+
+    fetchAI(undefined, { countAsUse: true });
   };
 
   const onPickSplit = (v) => {
     const focus = normalizeFocus(v);
     setSplit(focus);
-    fetchAI(focus);
+
+    if (!pro && !quota.canUse) {
+      setShowUpgrade(true);
+      return;
+    }
+
+    fetchAI(focus, { countAsUse: true });
   };
 
   if (loading) {
@@ -223,13 +252,14 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       <Card sx={{ mb: 4 }}>
         <CardContent>
           <Typography variant="h6" color="error">{err}</Typography>
-          <Button variant="outlined" sx={{ mt: 1 }} onClick={() => fetchAI()}>Try Again</Button>
+          <Button variant="outlined" sx={{ mt: 1 }} onClick={() => fetchAI(undefined, { countAsUse: true })}>
+            Try Again
+          </Button>
         </CardContent>
       </Card>
     );
   }
 
-  // If we hit the cap and cleared pack, still mount the modal
   if (!current) {
     return (
       <>
@@ -250,18 +280,20 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       <CardContent>
         <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <Typography variant="h5">Suggested Workout</Typography>
-          <Box sx={{ display:'flex', gap:1 }}>
+
+          <Box sx={{ display:'flex', gap:1, flexWrap:'wrap', justifyContent:'flex-end' }}>
+            <AiQuotaBadge
+              isPro={pro}
+              remaining={quota.remaining}
+              limit={quota.limit}
+              label="Free"
+            />
             <Chip size="small" label={(trainingIntent || 'general').replace('_',' ')} />
             <Chip size="small" label={(split || 'upper').replace('_',' ')} />
           </Box>
         </Box>
 
-        {/* Goal-aware split picker */}
-        <WorkoutTypePicker
-          intent={trainingIntent}
-          value={split}
-          onChange={onPickSplit}
-        />
+        <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 
         <Typography variant="subtitle1" gutterBottom sx={{ mt: 1 }}>
           {localWorkout.name}
@@ -278,7 +310,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
         <Divider sx={{ my: 2 }} />
 
         <Box sx={{ display:'flex', gap:1 }}>
-          <Button variant="outlined" onClick={handleRefresh}>Refresh</Button>
+          <Button variant="outlined" onClick={handleRefresh}>
+            Refresh
+          </Button>
           <Button
             variant="contained"
             onClick={() => { if (typeof onAccept === 'function') onAccept(localWorkout); }}
@@ -288,7 +322,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_',' ')}</strong>) and today’s split (<strong>{(split || 'upper').replace('_',' ')}</strong>). Sets/reps are auto-biased to your style.
+          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_',' ')}</strong>) and today’s split (<strong>{(split || 'upper').replace('_',' ')}</strong>).
         </Typography>
       </CardContent>
 

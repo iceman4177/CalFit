@@ -1,5 +1,4 @@
 // src/hooks/useAiQuota.js
-
 import { useState, useEffect, useMemo } from 'react';
 import { useUserData } from '../UserDataContext.jsx';
 
@@ -18,24 +17,43 @@ function getClientId() {
 }
 
 /**
+ * Centralized per-day free limits (client UX hint).
+ * Server is still source of truth for real enforcement.
+ */
+const LIMITS = {
+  meal: 3,     // AI Meal Suggestions
+  workout: 3,  // AI Workouts
+  food: 3,     // AI Food Assist / Food Lookup (beta)
+  coach: 3,    // Daily Recap Coach "Generate/Refresh"
+};
+
+function getLimit(feature) {
+  const k = String(feature || '').toLowerCase();
+  return Number(LIMITS[k]) || 0;
+}
+
+/**
  * useAiQuota
- * Lightweight local quota tracker (3/day) for a given feature.
- * NOTE: Pro/Trial bypass is enforced server-side by /api/ai/generate.
+ * Lightweight local quota tracker (per-day) for a given feature.
  *
- * @param {string} feature one of 'workout' | 'meal' | 'coach' (default: 'coach')
+ * @param {string} feature one of 'workout' | 'meal' | 'food' | 'coach'
  */
 export default function useAiQuota(feature = 'coach') {
   const { dailyGoal, goalType, recentMeals /*, isPremium*/ } = useUserData();
-  // We do NOT rely on isPremium here to avoid a hard dependency; server is source of truth.
-
   const [quota, setQuota] = useState(0);
 
   const todayKey = useMemo(() => {
-    try { return new Date().toLocaleDateString('en-US'); }
-    catch { return String(Date.now()).slice(0, 10); }
+    try {
+      return new Date().toLocaleDateString('en-US');
+    } catch {
+      return String(Date.now()).slice(0, 10);
+    }
   }, []);
 
-  const storageKey = useMemo(() => `aiQuota:${feature}`, [feature]);
+  const key = String(feature || 'coach').toLowerCase();
+  const limit = useMemo(() => getLimit(key), [key]);
+
+  const storageKey = useMemo(() => `aiQuota:${key}`, [key]);
 
   useEffect(() => {
     try {
@@ -51,11 +69,13 @@ export default function useAiQuota(feature = 'coach') {
     try {
       const rec = JSON.parse(localStorage.getItem(storageKey) || '{}');
       const next = rec.date === todayKey ? (rec.count || 0) + 1 : 1;
-      localStorage.setItem(storageKey, JSON.stringify({ date: todayKey, count: next, clientId: getClientId() }));
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ date: todayKey, count: next, clientId: getClientId() })
+      );
       setQuota(next);
       return next;
     } catch {
-      // best effort
       const next = (quota || 0) + 1;
       setQuota(next);
       return next;
@@ -63,21 +83,29 @@ export default function useAiQuota(feature = 'coach') {
   };
 
   const resetToday = () => {
-    localStorage.setItem(storageKey, JSON.stringify({ date: todayKey, count: 0, clientId: getClientId() }));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ date: todayKey, count: 0, clientId: getClientId() }));
+    } catch {}
     setQuota(0);
   };
 
+  const remaining = Math.max(0, limit - (quota || 0));
+  const canUse = remaining > 0;
+
   return {
-    // data your components have been using
+    // user context values (back-compat for callers)
     dailyGoal,
     goalType,
     recentMeals,
 
     // quota info
-    quota,           // number used today (local-only)
-    limit: 3,        // UI hint; real enforcement is on the server
-    increment,       // call this after a successful free use (non-Pro path)
-    resetToday,      // optional helper
+    feature: key,
+    quota,       // used today
+    limit,       // per-day limit for this feature
+    remaining,   // remaining free uses today
+    canUse,      // whether user has a free use remaining
+    increment,   // call after a successful free use
+    resetToday,  // helper
     clientId: getClientId(),
   };
 }
