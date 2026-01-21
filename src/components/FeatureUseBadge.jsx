@@ -66,6 +66,11 @@ export function getDailyRemaining(featureKey) {
   return Math.max(0, limit - used);
 }
 
+// ✅ FIX: this is what WorkoutPage.jsx + MealTracker.jsx import
+export function canUseDailyFeature(featureKey) {
+  return getDailyRemaining(featureKey) > 0;
+}
+
 export function registerDailyFeatureUse(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
   if (!limit) return 0;
