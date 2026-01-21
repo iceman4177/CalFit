@@ -13,7 +13,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Tooltip,
+  LinearProgress,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import UpgradeModal from "./components/UpgradeModal";
@@ -27,23 +27,159 @@ import {
   getMealItemsForMealIds,
 } from "./lib/db";
 
-// ---- Helpers ----------------------------------------------------------------
-const SCALE = 0.1; // kcal per (lb * rep) proxy; tune/replace with MET later
+// ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
+const XP_KEY = "slimcal:xp:v1";
+const QUESTS_KEY = "slimcal:quests:v1";
 
-function isoDay(d = new Date()) {
-  // Local-day safe ISO string (prevents UTC rollover showing the wrong date in PST evenings)
+// ----------------------------------------------------------------------------
+// Helpers
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function safeNum(n, fallback = 0) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function round(n) {
+  return Math.round(safeNum(n, 0));
+}
+
+function computeLevel(xp) {
+  let level = 1;
+  let remaining = Math.max(0, safeNum(xp, 0));
+  let req = 100;
+  while (remaining >= req) {
+    remaining -= req;
+    level += 1;
+    req = Math.round(req * 1.35);
+    if (level > 99) break;
+  }
+  return { level, progress: remaining, next: req };
+}
+
+function readJsonLS(key, fallback) {
   try {
-    const dd = new Date(d);
-    const localMidnight = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
-    return localMidnight.toISOString().slice(0, 10);
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
   } catch {
-    return d;
+    return fallback;
+  }
+}
+
+function writeJsonLS(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function seededRng(seedStr) {
+  // deterministic pseudo-random (mulberry32)
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+function buildQuestPool({ proteinTarget }) {
+  const lunchProtein = Math.min(
+    60,
+    Math.max(30, Math.round((proteinTarget * 0.35) || 40))
+  );
+  return [
+    {
+      id: "breakfast_before_11",
+      label: "Log breakfast before 11am",
+      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
+      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+    },
+    {
+      id: "protein_by_lunch",
+      label: `Hit ${lunchProtein}g protein by lunch`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
+    },
+    {
+      id: "log_3_meals",
+      label: "Log 3 meals today",
+      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
+      complete: ({ mealsCount }) => mealsCount >= 3,
+    },
+    {
+      id: "burn_150",
+      label: "Burn 150+ cals",
+      progress: ({ burned }) => ({ value: burned, goal: 150 }),
+      complete: ({ burned }) => burned >= 150,
+    },
+    {
+      id: "burn_300",
+      label: "Burn 300+ cals",
+      progress: ({ burned }) => ({ value: burned, goal: 300 }),
+      complete: ({ burned }) => burned >= 300,
+    },
+    {
+      id: "hit_protein_goal",
+      label: `Hit protein goal (${proteinTarget || 170}g)`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
+    },
+  ];
+}
+
+function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
+  const rng = seededRng(`${dayKey}|quests`);
+  const pool = buildQuestPool({ proteinTarget });
+  const shuffled = [...pool].sort(() => rng() - 0.5);
+  const freeUnlocked = 2;
+  const maxShown = Math.min(6, shuffled.length);
+
+  return shuffled.slice(0, maxShown).map((q, idx) => ({
+    ...q,
+    locked: !isPro && idx >= freeUnlocked,
+  }));
+}
+
+function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) {
+  const base = 10;
+  const mealXp = mealsCount * 25;
+  const workoutXp = workoutsCount * 40;
+  const proteinXp = hitProtein ? 60 : 0;
+  const caloriesXp = hitCalories ? 40 : 0;
+  return base + mealXp + workoutXp + proteinXp + caloriesXp;
+}
+
+// ✅ FIX: formatClock declared ONCE (Rollup/Vite build error was from duplicate declaration)
+function formatClock(date) {
+  try {
+    return new Date(date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
   }
 }
 
 function usDay(d = new Date()) {
   try {
     return new Date(d).toLocaleDateString("en-US");
+  } catch {
+    return d;
+  }
+}
+
+// Local calendar-day as YYYY-MM-DD (stable across timezones)
+function localISODay(d = new Date()) {
+  try {
+    const dt = new Date(d);
+    const localMidnight = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return localMidnight.toISOString().slice(0, 10);
   } catch {
     return d;
   }
@@ -59,26 +195,6 @@ function toTimeLabel(ts) {
   }
 }
 
-function safeNum(n, fallback = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : fallback;
-}
-
-function round(n) {
-  return Math.round(safeNum(n, 0));
-}
-
-function calcCaloriesFromSets(sets) {
-  if (!Array.isArray(sets) || sets.length === 0) return 0;
-  let vol = 0;
-  for (const s of sets) {
-    const w = safeNum(s.weight, 0);
-    const r = safeNum(s.reps, 0);
-    vol += w * r;
-  }
-  return Math.round(vol * SCALE);
-}
-
 function sumMacros(items = []) {
   const totals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
   for (const it of items) {
@@ -92,74 +208,93 @@ function sumMacros(items = []) {
   return totals;
 }
 
-function estimateMacrosFromName({ name, qty = 0, unit = "", calories = 0 }) {
-  const n = String(name || "").toLowerCase();
-  let q = Math.max(0, Number(qty) || 0);
-
-  // If qty wasn't stored, try to infer it from the name: "Eggs (6 eggs)" or "Eggs — 6 eggs"
-  if (q <= 0) {
-    const match = n.match(/(\d+)\s*egg/);
-    if (match) q = Number(match[1]) || 0;
-  }
-
-  // If still unknown, infer from calories for eggs (70 kcal per egg)
-  if (q <= 0 && n.includes("egg") && !n.includes("white")) {
-    const c = Math.max(0, Number(calories) || 0);
-    if (c > 0) q = Math.max(1, Math.round(c / 70));
-  }
-
-  // Large egg ~= 6g protein, 5g fat, 0.6g carbs
-  if (n.includes("egg") && !n.includes("white")) {
-    return {
-      protein_g: Math.round(q * 6),
-      fat_g: Math.round(q * 5),
-      carbs_g: Math.round(q * 0.6),
-    };
-  }
-
-  // Egg white ~= 3.6g protein
-  if (n.includes("egg") && n.includes("white")) {
-    return {
-      protein_g: Math.round(q * 3.6),
-      fat_g: Math.round(q * 0.1),
-      carbs_g: Math.round(q * 0.2),
-    };
-  }
-
-  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+function parseQtyFromText(text) {
+  const m = String(text || "").match(/\b(\d+(?:\.\d+)?)\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
 }
 
-function mergeEstimatedMacros(existing, estimate) {
-  const ex = existing || {};
-  const est = estimate || {};
+function clampNonNeg(n) {
+  const x = Number(n);
+  return Number.isFinite(x) && x > 0 ? x : 0;
+}
+
+function estimateMacrosFallbackFromCalories(calories) {
+  const cals = clampNonNeg(calories);
+  if (cals <= 0) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  // Very rough default split for unknown foods
+  const p = Math.round((cals * 0.25) / 4);
+  const c = Math.round((cals * 0.45) / 4);
+  const f = Math.round((cals * 0.3) / 9);
   return {
-    protein_g: safeNum(ex.protein_g, 0) > 0 ? safeNum(ex.protein_g, 0) : safeNum(est.protein_g, 0),
-    carbs_g: safeNum(ex.carbs_g, 0) > 0 ? safeNum(ex.carbs_g, 0) : safeNum(est.carbs_g, 0),
-    fat_g: safeNum(ex.fat_g, 0) > 0 ? safeNum(ex.fat_g, 0) : safeNum(est.fat_g, 0),
+    protein_g: clampNonNeg(p),
+    carbs_g: clampNonNeg(c),
+    fat_g: clampNonNeg(f),
   };
 }
 
+function estimateMacrosForFood({ name, qty, unit, calories }) {
+  const text = String(name || "").toLowerCase();
+  const q = Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : (parseQtyFromText(text) || 1);
+  const cals = clampNonNeg(calories);
 
-function estimateLocalMacrosForMeal(meal) {
-  // Fallback when mealHistory doesn't include macros.
-  // Keep this small + safe. Expand later.
-  const name = String(meal?.name || "").toLowerCase();
-  const qty = Number(meal?.qty ?? 0) || 0;
-
-  // Eggs: ~6g protein, ~5g fat per large egg
-  if (name.includes("egg")) {
-    const q = qty > 0 ? qty : 1;
-    return { protein_g: Math.round(q * 6), carbs_g: 0, fat_g: Math.round(q * 5) };
+  // Eggs (most common)
+  if (text.includes("egg")) {
+    // per large egg: 6P, 0.5C, 5F, ~70 kcal
+    const base = { protein_g: 6 * q, carbs_g: 0.5 * q, fat_g: 5 * q };
+    const expectedCals = 70 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
   }
 
-  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  // Oats (dry)
+  if (text.includes("oat")) {
+    // ~150 cals per 1/2 cup dry: 5P 27C 3F
+    const base = { protein_g: 5 * q, carbs_g: 27 * q, fat_g: 3 * q };
+    const expectedCals = 150 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
+  }
+
+  // Peanut butter (1 tbsp)
+  if (text.includes("peanut butter") || text.includes("pb")) {
+    // ~95 cals per tbsp: 4P 3C 8F
+    const base = { protein_g: 4 * q, carbs_g: 3 * q, fat_g: 8 * q };
+    const expectedCals = 95 * q;
+    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
+  }
+
+  return estimateMacrosFallbackFromCalories(cals);
 }
 
-
-function fmtDelta(n) {
-  const v = round(n);
-  if (v === 0) return "0";
-  return v > 0 ? `+${v}` : `${v}`;
+// Convert a local calendar day (YYYY-MM-DD) into a UTC range [from, to] (inclusive)
+function localDayToUtcRangeInclusive(dayISO) {
+  try {
+    const [y, m, d] = String(dayISO).split("-").map(Number);
+    const startLocal = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+    const endLocalExclusive = new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
+    const to = new Date(endLocalExclusive.getTime() - 1).toISOString();
+    return { from: startLocal.toISOString(), to };
+  } catch {
+    return {
+      from: `${dayISO}T00:00:00.000Z`,
+      to: `${dayISO}T23:59:59.999Z`,
+    };
+  }
 }
 
 function getUserTargets() {
@@ -167,8 +302,7 @@ function getUserTargets() {
     const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
     const dailyGoal = safeNum(ud.dailyGoal, 0);
     const goalType = ud.goalType || localStorage.getItem("fitness_goal") || "";
-    const dietPreference =
-      ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
+    const dietPreference = ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
 
     const proteinDaily =
       safeNum(ud?.proteinTargets?.daily_g, 0) ||
@@ -178,12 +312,8 @@ function getUserTargets() {
       safeNum(ud?.proteinTargets?.per_meal_g, 0) ||
       safeNum(localStorage.getItem("protein_target_meal_g"), 0);
 
-    const trainingIntent =
-      ud.trainingIntent || localStorage.getItem("training_intent") || "general";
-
-    const trainingSplit =
-      ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
-
+    const trainingIntent = ud.trainingIntent || localStorage.getItem("training_intent") || "general";
+    const trainingSplit = ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
     const lastFocus = ud.lastFocus || localStorage.getItem("last_focus") || "upper";
 
     return {
@@ -234,34 +364,29 @@ function buildLocalContext(todayISO) {
   const mealsRec = mh.find((m) => m.date === todayUS);
   const localMeals = mealsRec?.meals || [];
 
-  // Try to use createdAt/time if present; otherwise “Unknown time”
   const meals = localMeals.map((m, idx) => {
     const eaten_at = m.createdAt || m.eaten_at || null;
-
-    const est = estimateLocalMacrosForMeal(m);
-    const proteinRaw = m.protein_g ?? m.protein;
-    const carbsRaw = m.carbs_g ?? m.carbs;
-    const fatRaw = m.fat_g ?? m.fat;
+    const est = estimateMacrosForFood({
+      name: m.food_name || m.name || "Meal",
+      qty: m.qty ?? 1,
+      unit: m.unit || "serving",
+      calories: m.calories || 0,
+    });
 
     const items = [
       {
-        food_name: m.name || "Meal",
-        qty: m.qty ?? 0,
+        food_name: m.food_name || m.name || "Meal",
+        qty: m.qty ?? 1,
         unit: m.unit || "serving",
         calories: round(m.calories || 0),
-        protein: proteinRaw != null ? proteinRaw : est.protein_g,
-        carbs: carbsRaw != null ? carbsRaw : est.carbs_g,
-        fat: fatRaw != null ? fatRaw : est.fat_g,
+        protein: safeNum(m.protein_g ?? m.protein, est.protein_g || 0),
+        carbs: safeNum(m.carbs_g ?? m.carbs, est.carbs_g || 0),
+        fat: safeNum(m.fat_g ?? m.fat, est.fat_g || 0),
+        _estimated_macros: !((m.protein_g ?? m.protein) || (m.carbs_g ?? m.carbs) || (m.fat_g ?? m.fat)),
       },
     ];
 
-    const macros = sumMacros([
-      {
-        protein_g: safeNum(proteinRaw, 0) || est.protein_g,
-        carbs_g: safeNum(carbsRaw, 0) || est.carbs_g,
-        fat_g: safeNum(fatRaw, 0) || est.fat_g,
-      },
-    ]);
+    const macros = sumMacros(items);
 
     return {
       id: `local_${todayISO}_${idx}`,
@@ -276,16 +401,7 @@ function buildLocalContext(todayISO) {
 
   const burned = todayWorkouts.reduce((s, w) => s + round(w.totalCalories || 0), 0);
   const consumed = meals.reduce((s, m) => s + round(m.total_calories || 0), 0);
-
-  const macroTotals = sumMacros(
-    meals.flatMap((m) => [
-      {
-        protein_g: m.macros?.protein_g || 0,
-        carbs_g: m.macros?.carbs_g || 0,
-        fat_g: m.macros?.fat_g || 0,
-      },
-    ])
-  );
+  const macroTotals = sumMacros(meals.flatMap((m) => m.items || []));
 
   return { burned, consumed, meals, workouts, macroTotals, source: "local" };
 }
@@ -315,10 +431,7 @@ function suggestionSnippets({ goalType, dietPreference, calorieRemaining, protei
   const cList = carbFoods[goal] || carbFoods.maintenance;
 
   const recs = [];
-
-  if (proteinRemaining > 0) {
-    recs.push(`Protein boost: ${pList.slice(0, 3).join(", ")}`);
-  }
+  if (proteinRemaining > 0) recs.push(`Protein boost: ${pList.slice(0, 3).join(", ")}`);
 
   if (calorieRemaining > 0) {
     if (goal === "cutting") {
@@ -330,8 +443,91 @@ function suggestionSnippets({ goalType, dietPreference, calorieRemaining, protei
       recs.push(`Balanced add-on: ${cList.slice(0, 3).join(", ")}`);
     }
   }
-
   return recs.slice(0, 4);
+}
+
+function missedBreakfastLine({
+  now,
+  meals = [],
+  workoutsCount = 0,
+  consumed = 0,
+  burned = 0,
+  proteinTotal = 0,
+  calorieGoal = 0,
+  proteinGoal = 0,
+}) {
+  const h = now.getHours();
+  const mealsCount = Array.isArray(meals) ? meals.length : 0;
+
+  const firstMeal =
+    mealsCount > 0
+      ? meals
+          .slice()
+          .sort((a, b) =>
+            (a?.eatenAt || a?.createdAt || 0) > (b?.eatenAt || b?.createdAt || 0) ? 1 : -1
+          )[0]
+      : null;
+
+  const firstTime = firstMeal?.eatenAt || firstMeal?.createdAt || null;
+  const firstTimeStr = firstTime ? formatClock(firstTime) : null;
+
+  const calRem = Math.max(0, (Number(calorieGoal) || 0) - (Number(consumed) || 0));
+  const proRem = Math.max(0, (Number(proteinGoal) || 0) - (Number(proteinTotal) || 0));
+
+  if (mealsCount === 0 && workoutsCount === 0) {
+    if (h >= 12) {
+      return "No logs yet and we’re past noon 😅. Do one small win: log a meal *or* knock out a quick lift. Momentum > motivation.";
+    }
+    return "Fresh day. Log your first meal early and you’ll cruise the rest of the day.";
+  }
+
+  if (mealsCount > 0 && firstTimeStr && h >= 18) {
+    if (firstMeal && new Date(firstTime).getHours() >= 15) {
+      return `First meal was at ${firstTimeStr}. Late start — not a problem, just go **protein-first** the rest of the night.`;
+    }
+  }
+
+  if (proteinGoal > 0 && h >= 14) {
+    const pct = proteinGoal ? proteinTotal / proteinGoal : 0;
+    if (pct < 0.35) {
+      return `Protein is low (${Math.round(proteinTotal)}g). You’ve got ~${Math.round(
+        proRem
+      )}g left — next meal should be **lean protein + carbs**.`;
+    }
+  }
+
+  if (calorieGoal > 0 && h >= 16 && calRem > 800) {
+    return `You’ve got ${Math.round(calRem)} calories left. Keep it simple: **2 meals** (protein + carbs) and you’re back on track.`;
+  }
+
+  if (workoutsCount === 0 && h >= 17) {
+    return "Food is in ✅. Now earn it: even 20–30 minutes of lifting or a long walk keeps the day productive.";
+  }
+
+  return "Solid progress today. Keep stacking small wins.";
+}
+
+// kcal proxy; tune/replace with MET later
+const SCALE = 0.1;
+
+function calcCaloriesFromSets(sets) {
+  if (!Array.isArray(sets) || sets.length === 0) return 0;
+  let vol = 0;
+  for (const s of sets) {
+    const w = safeNum(s.weight, 0);
+    const r = safeNum(s.reps, 0);
+    vol += w * r;
+  }
+  return Math.round(vol * SCALE);
+}
+
+function Feature({ text }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Chip label="✓" size="small" variant="outlined" />
+      <Typography variant="caption">{text}</Typography>
+    </Stack>
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -355,14 +551,32 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   const [history, setHistory] = useState([]);
 
   const todayUS = useMemo(() => usDay(), []);
-  const todayISO = useMemo(() => isoDay(), []);
+  const todayISO = useMemo(() => localISODay(), []);
   const storageKey = `recapUsage`;
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
 
   const targets = useMemo(() => getUserTargets(), []);
 
-  // Load saved recap + history
+  const [dayCtx, setDayCtx] = useState(null);
+  const [dayCtxLoading, setDayCtxLoading] = useState(true);
+
+  const [xpState, setXpState] = useState(() =>
+    readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 })
+  );
+
+  const [quests, setQuests] = useState(() => {
+    const cached = readJsonLS(QUESTS_KEY, null);
+    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
+    const picked = pickDailyQuests({
+      dayKey: todayISO,
+      isPro,
+      proteinTarget: targets.proteinDaily || 170,
+    });
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    return picked;
+  });
+
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
@@ -380,10 +594,38 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     }
   }, [recapKeyToday]);
 
-  // Load or reset today’s count on mount and whenever entitlement changes
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setDayCtxLoading(true);
+      try {
+        const ctx = await buildContext();
+        if (mounted) setDayCtx(ctx);
+      } catch {
+        if (mounted) setDayCtx(null);
+      } finally {
+        if (mounted) setDayCtxLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, todayISO]);
+
+  useEffect(() => {
+    const picked = pickDailyQuests({
+      dayKey: todayISO,
+      isPro,
+      proteinTarget: targets.proteinDaily || 170,
+    });
+    setQuests(picked);
+    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, todayISO]);
+
   useEffect(() => {
     if (isPro) {
-      // Pro/Trial: clear any client-side cap for today
       try {
         const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
         if (stored.date === todayUS && stored.count) {
@@ -393,12 +635,10 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       setCount(0);
       return;
     }
-    // Free users: load today’s usage
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     setCount(stored.date === todayUS ? stored.count || 0 : 0);
   }, [isPro, todayUS]);
 
-  // Keep an eye on Pro refresh events (login/logout, billing changes)
   useEffect(() => {
     const onRefresh = () => {
       if (localStorage.getItem("isPro") === "true") {
@@ -410,7 +650,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   }, []);
 
   const incrementCount = () => {
-    if (isPro) return 0; // never increment for Pro/Trial
+    if (isPro) return 0;
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const newCount = stored.date === todayUS ? (stored.count || 0) + 1 : 1;
     localStorage.setItem(storageKey, JSON.stringify({ date: todayUS, count: newCount }));
@@ -442,16 +682,14 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     setSavedAt(entry.createdAt);
   };
 
-  // Build the recap context (Supabase if signed in; otherwise local)
   async function buildContext() {
-    const now = new Date();
     if (!user) {
       return buildLocalContext(todayISO);
     }
 
-    // 1) Today’s daily metrics
     let burned = 0;
     let consumed = 0;
+
     try {
       const dm = await getDailyMetricsRange(user.id, todayISO, todayISO);
       const row = dm?.[0];
@@ -461,7 +699,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       console.warn("[DailyRecapCoach] getDailyMetricsRange failed, continuing", e);
     }
 
-    // 2) Today’s workouts → sets → kcal proxy
     const workouts = [];
     try {
       const ws = await getWorkouts(user.id, { limit: 30 });
@@ -471,7 +708,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
         const kcal = calcCaloriesFromSets(sets);
 
         if (Array.isArray(sets) && sets.length > 0) {
-          // group by exercise_name to show cleaner summary
           const byEx = new Map();
           for (const s of sets) {
             const k = s.exercise_name || "Exercise";
@@ -505,14 +741,15 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       console.warn("[DailyRecapCoach] workouts fetch failed, continuing", e);
     }
 
-    // 3) Today’s meals + meal items (macros + timing)
     const meals = [];
     let macroTotals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
 
     try {
+      const { from: mealsFrom, to: mealsTo } = localDayToUtcRangeInclusive(todayISO);
+
       const mealsAll = await getMeals(user.id, {
-        from: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString(),
-        to: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString(),
+        from: mealsFrom,
+        to: mealsTo,
         limit: 200,
       });
 
@@ -520,46 +757,42 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       const itemsMap = await getMealItemsForMealIds(user.id, ids);
 
       for (const m of mealsAll) {
-        const itemsRaw = itemsMap?.[m.id] || [];
-        const items = itemsRaw.map((it) => {
-          const base = {
+        const itemsRaw = (itemsMap?.[m.id] || []).filter(Boolean);
+
+        const baseItems = itemsRaw.length
+          ? itemsRaw
+          : [
+              {
+                food_name: m.title || "Meal",
+                qty: 1,
+                unit: "serving",
+                calories: m.total_calories,
+                protein: null,
+                carbs: null,
+                fat: null,
+              },
+            ];
+
+        const items = baseItems.map((it) => {
+          const est = estimateMacrosForFood({
+            name: it.food_name,
+            qty: it.qty,
+            unit: it.unit,
+            calories: it.calories,
+          });
+
+          return {
             food_name: it.food_name,
-            qty: it.qty ?? null,
-            unit: it.unit ?? null,
-            calories: round(it.calories || 0),
-            protein: it.protein ?? null,
-            carbs: it.carbs ?? null,
-            fat: it.fat ?? null,
+            qty: it.qty || 1,
+            unit: it.unit || "serving",
+            calories: round(it.calories),
+            protein: safeNum(it.protein, safeNum(est.protein_g, 0)),
+            carbs: safeNum(it.carbs, safeNum(est.carbs_g, 0)),
+            fat: safeNum(it.fat, safeNum(est.fat_g, 0)),
           };
-
-          const needsEst =
-            safeNum(base.protein, 0) === 0 &&
-            safeNum(base.carbs, 0) === 0 &&
-            safeNum(base.fat, 0) === 0 &&
-            safeNum(base.calories, 0) > 0;
-
-          if (needsEst) {
-            const est = estimateMacrosFromName({
-              name: base.food_name,
-              qty: base.qty ?? 0,
-              unit: base.unit || "",
-              calories: base.calories,
-            });
-            base.protein = est.protein_g || 0;
-            base.carbs = est.carbs_g || 0;
-            base.fat = est.fat_g || 0;
-          }
-
-          return base;
         });
 
-        const macros = sumMacros(
-          itemsRaw.map((it) => ({
-            protein_g: it.protein,
-            carbs_g: it.carbs,
-            fat_g: it.fat,
-          }))
-        );
+        const macros = sumMacros(items);
 
         meals.push({
           id: m.id,
@@ -572,36 +805,36 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
         });
       }
 
-      
-      /* FALLBACK_LOCAL_MEALS */
-      // If we have server totals (daily metrics) but no meal rows, use localStorage mealHistory
-      if ((!meals || meals.length === 0) && (consumed > 0)) {
-        try {
-          const local = buildLocalContext(todayISO);
-          if (Array.isArray(local?.meals) && local.meals.length > 0) {
-            meals = local.meals;
-          }
-        } catch {}
-      }
+      macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
 
-// totals
-      macroTotals = sumMacros(
-        meals.flatMap((mm) => [
-          {
-            protein_g: mm.macros?.protein_g || 0,
-            carbs_g: mm.macros?.carbs_g || 0,
-            fat_g: mm.macros?.fat_g || 0,
-          },
-        ])
-      );
-
-      // If daily_metrics was missing, compute consumed from meals
       if (!consumed) {
         consumed = meals.reduce((s, mm) => s + round(mm.total_calories || 0), 0);
       }
     } catch (e) {
       console.warn("[DailyRecapCoach] meals fetch failed, continuing", e);
     }
+
+    // Merge local offline meals to avoid mismatch between Coach + Meal History UI
+    try {
+      const localCtx = buildLocalContext(todayISO);
+      const localMeals = localCtx?.meals || [];
+      if (localMeals.length) {
+        const keyOf = (m) => `${m.title}|${round(m.total_calories || 0)}|${m.time_label || ""}`;
+        const existing = new Set(meals.map(keyOf));
+
+        for (const lm of localMeals) {
+          const key = keyOf(lm);
+          if (!existing.has(key)) {
+            existing.add(key);
+            meals.push({ ...lm, id: lm.id || `local-${btoa(key).slice(0, 10)}` });
+          }
+        }
+
+        consumed = Math.max(consumed || 0, localCtx?.consumed || 0);
+        burned = Math.max(burned || 0, localCtx?.burned || 0);
+        macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
+      }
+    } catch {}
 
     return { burned, consumed, meals, workouts, macroTotals, source: "cloud" };
   }
@@ -622,11 +855,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       const prev = withTime[i - 1];
       const cur = withTime[i];
       const mins = Math.round((cur._t - prev._t) / 60000);
-      gaps.push({
-        from: prev.time_label,
-        to: cur.time_label,
-        minutes: mins,
-      });
+      gaps.push({ from: prev.time_label, to: cur.time_label, minutes: mins });
     }
 
     return {
@@ -636,8 +865,44 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     };
   }
 
+  useEffect(() => {
+    if (xpState?.lastAwardDay === todayISO) return;
+
+    const mealsCount = (dayCtx?.meals || []).length;
+    const workoutsCount = (dayCtx?.workouts || []).length;
+
+    const goal = targets.dailyGoal || 0;
+    const eaten = round(dayCtx?.consumed || 0);
+    const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+
+    const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
+    const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+
+    const earned = computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories });
+    const next = {
+      totalXp: Math.max(0, safeNum(xpState?.totalXp, 0) + earned),
+      lastAwardDay: todayISO,
+      lastEarned: earned,
+      updatedAt: Date.now(),
+    };
+    setXpState(next);
+    writeJsonLS(XP_KEY, next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayISO, dayCtxLoading]);
+
+  useEffect(() => {
+    if (!isPro) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
+      if (saved?.content) return;
+    } catch {}
+    if (!loading && !recap) {
+      if (!dayCtxLoading) handleGetRecap();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro, recapKeyToday, dayCtxLoading]);
+
   const handleGetRecap = async () => {
-    // Non-Pro users are limited to 3/day
     if (!isPro && count >= 3) {
       setModalOpen(true);
       return;
@@ -651,43 +916,27 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     try {
       const ctx = await buildContext();
 
-      const goal = targets.dailyGoal || 0;
-      const net = round((ctx.consumed || 0) - (ctx.burned || 0));
-      const caloriesRemaining = goal ? round(goal - (ctx.consumed || 0)) : 0;
+      const goalCalories = targets.dailyGoal || 0;
+      const goalProtein = targets.proteinDaily || 0;
 
-      const proteinTarget = targets.proteinDaily || 0;
+      const net = round((ctx.consumed || 0) - (ctx.burned || 0));
+      const caloriesRemaining = goalCalories ? round(goalCalories - (ctx.consumed || 0)) : 0;
+
       const proteinSoFar = round(ctx.macroTotals?.protein_g || 0);
-      const proteinRemaining = proteinTarget ? round(proteinTarget - proteinSoFar) : 0;
+      const proteinRemaining = goalProtein ? round(goalProtein - proteinSoFar) : 0;
 
       const timing = computeTimingNotes(ctx.meals || []);
 
-      
-      const topNudge = (() => {
-        const now = new Date();
-        const h = now.getHours();
-        const mealsCount = (ctx.meals || []).length;
-        const burned = round(ctx.burned || 0);
-        const p = round(ctx.macroTotals?.protein_g || 0);
-        const goalCals = goal || 3000;
-        const remaining = Math.max(0, goalCals - round(ctx.consumed || 0));
-
-        if (mealsCount === 0 && h >= 10) return "First meal wins the day. Get 30–40g protein in ASAP.";
-        if (p < 60 && h >= 14) return "Protein is behind. Next meal: +40g protein. Easy win.";
-        if (burned < 100 && h >= 16) return "Quick momentum: 10–15 min walk right now.";
-        if (remaining > 900 && h >= 18) return "Big calories left. Keep it simple: protein + carbs x2 meals.";
-        return "Solid. Keep logging and stack small wins.";
-      })();
-
-const coachFacts = {
+      const coachFacts = {
         day: todayISO,
         goals: {
-          daily_calorie_goal: goal || null,
+          daily_calorie_goal: goalCalories || null,
           fitness_goal: targets.goalType || null,
           diet_preference: targets.dietPreference || null,
           training_intent: targets.trainingIntent || null,
           training_split: targets.trainingSplit || null,
           last_focus: targets.lastFocus || null,
-          protein_target_g: proteinTarget || null,
+          protein_target_g: goalProtein || null,
           protein_per_meal_g: targets.proteinMeal || null,
         },
         totals: {
@@ -697,8 +946,8 @@ const coachFacts = {
           protein_g: round(ctx.macroTotals?.protein_g || 0),
           carbs_g: round(ctx.macroTotals?.carbs_g || 0),
           fat_g: round(ctx.macroTotals?.fat_g || 0),
-          calories_remaining: goal ? caloriesRemaining : null,
-          protein_remaining_g: proteinTarget ? proteinRemaining : null,
+          calories_remaining: goalCalories ? caloriesRemaining : null,
+          protein_remaining_g: goalProtein ? proteinRemaining : null,
         },
         meals: (ctx.meals || []).map((m) => ({
           time: m.time_label || null,
@@ -731,10 +980,7 @@ const coachFacts = {
           last_meal_time: timing.last,
           gaps_minutes: (timing.gaps || []).slice(0, 8),
         },
-        client_context: {
-          app: "slimcal.ai",
-          source: ctx.source,
-        },
+        client_context: { app: "slimcal.ai", source: ctx.source },
       };
 
       const autoSuggestions = suggestionSnippets({
@@ -744,20 +990,13 @@ const coachFacts = {
         proteinRemaining: Math.max(0, proteinRemaining),
       });
 
-      const system = `You are Slimcal Coach — a sharp, funny, no-BS fitness coach.
-
-Your job: based on TODAY'S DATA, tell the user the next best move (eat / train / recover) to hit their goal.
-
-Style:
-- Confident, concise, slightly witty. No corny catchphrases, no "bestie" vibe.
-- Light humor is OK, but keep it purposeful and motivating.
-- Short punchy sections. If you roast, roast the *situation*, not the person.
+      const system = `You are Slimcal Coach — an authentically fun, motivating, psychologically addicting fitness coach.
 
 Rules:
-- Use ONLY the provided data. Do NOT invent foods or workouts.
-- If something is missing (like macros/times), say what’s missing and give a practical fix.
-- Be realistic about time of day. Late-day advice should be simple + doable.
-- Always finish with 2–4 specific actions the user can do right now.
+- Be specific and grounded in today's data.
+- If any data is missing, say what is missing and give a best-effort alternative.
+- Use short punchy sections, emojis (tastefully), and coach-like energy.
+- Do NOT invent foods or workouts that are not in the provided data.
 
 Output format (use these headings):
 1) "Today’s Scoreboard" (calories eaten/burned/net + macro totals)
@@ -766,7 +1005,7 @@ Output format (use these headings):
 4) "Goal Progress" (daily kcal goal + how far off + protein target progress)
 5) "Timing & Consistency" (comments on meal timing & gaps; practical fix)
 6) "Next Move" (2–4 actionable steps + 2–3 foods to hit targets)
-7) "Tomorrow’s Challenge" (one simple, winnable challenge)
+7) "Coach Challenge" (a fun micro-challenge for tomorrow)
 `;
 
       const userMsg = `Here is my structured day data as JSON. Use it exactly:\n\n${JSON.stringify(
@@ -777,7 +1016,6 @@ Output format (use these headings):
         "\n- "
       )}`;
 
-      // Call OpenAI-backed API
       const res = await fetch("/api/openai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -802,13 +1040,12 @@ Output format (use these headings):
       saveRecapLocal(msg);
     } catch (err) {
       console.error("Recap error:", err);
-      setError(err.message || "Sorry, I couldn’t generate your daily recap right now.");
+      setError(err?.message || "Sorry, I couldn’t generate your daily recap right now.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
       Free recaps used today: <strong>{count}</strong>/3
@@ -837,7 +1074,8 @@ Output format (use these headings):
               variant="subtitle1"
               sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}
             >
-              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
+              Unlock AI Daily Recaps{" "}
+              <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Detailed breakdowns, goals tracking, meal timing tips, and better recommendations.
@@ -850,7 +1088,6 @@ Output format (use these headings):
               sx={{ fontWeight: 800 }}
               onClick={async () => {
                 if (!user) {
-                  // open sign in
                   window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
                 } else {
                   setModalOpen(true);
@@ -894,12 +1131,7 @@ Output format (use these headings):
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
-            <Chip
-              label="3/day Free"
-              size="small"
-              variant="outlined"
-              sx={{ fontWeight: 700 }}
-            />
+            <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />
           )}
         </Stack>
 
@@ -935,11 +1167,7 @@ Output format (use these headings):
           {history.slice(0, 7).map((h, idx) => (
             <Box
               key={`${h?.dateISO || idx}-${idx}`}
-              sx={{
-                p: 1,
-                border: "1px solid rgba(2,6,23,0.08)",
-                borderRadius: 2,
-              }}
+              sx={{ p: 1, border: "1px solid rgba(2,6,23,0.08)", borderRadius: 2 }}
             >
               <Typography variant="caption" color="text.secondary">
                 {h?.dateUS || h?.dateISO || ""}
@@ -994,20 +1222,161 @@ Output format (use these headings):
     );
   }
 
+  // Coach homepage stats
+  const now = useMemo(() => new Date(), []);
+  const mealsCount = (dayCtx?.meals || []).length;
+  const workoutsCount = (dayCtx?.workouts || []).length;
+
+  const goalCalories = targets.dailyGoal || 0;
+  const goalProtein = targets.proteinDaily || 0;
+
+  const eaten = round(dayCtx?.consumed || 0);
+  const burned = round(dayCtx?.burned || 0);
+  const net = round(eaten - burned);
+  const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
+
+  const lvl = useMemo(() => computeLevel(xpState.totalXp || 0), [xpState.totalXp]);
+
+  const roastLine = missedBreakfastLine({
+    now,
+    meals: dayCtx?.meals || [],
+    workoutsCount: dayCtx?.workouts?.length || 0,
+    consumed: dayCtx?.consumed || 0,
+    burned: dayCtx?.burned || 0,
+    proteinTotal: dayCtx?.macroTotals?.protein_g || 0,
+    calorieGoal: goalCalories,
+    proteinGoal: goalProtein,
+  });
+
   return (
     <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
+      <Box sx={{ mb: 2.2 }}>
+        <Typography variant={embedded ? "h6" : "h4"} sx={{ fontWeight: 900, letterSpacing: "-0.02em" }}>
+          🧠 Coach
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.3 }}>
+          Open app → Coach reacts to your day → you log meals/workouts → come back for the recap.
+        </Typography>
+      </Box>
+
+      {roastLine && (
+        <Card
+          elevation={0}
+          sx={{
+            mb: 2.0,
+            border: "1px solid rgba(2,6,23,0.10)",
+            borderRadius: 2,
+            background: "rgba(2,6,23,0.03)",
+          }}
+        >
+          <CardContent>
+            <Typography sx={{ fontWeight: 900, lineHeight: 1.35 }}>{roastLine}</Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card data-testid="coach-xp" elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ xs: "stretch", sm: "center" }}
+            justifyContent="space-between"
+          >
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
+                Level {lvl.level}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                +{xpState.lastEarned || 0} XP earned today
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 220 }}>
+              <LinearProgress
+                variant="determinate"
+                value={lvl.next ? clamp((lvl.progress / lvl.next) * 100, 0, 100) : 0}
+                sx={{ height: 10, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
+              />
+              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
+                <Chip size="small" label={`🍽️ Meals: ${mealsCount}`} />
+                <Chip size="small" label={`🔥 Burned: ${burned}`} />
+                <Chip size="small" label={`🥩 Protein: ${proteinSoFar}g`} />
+                <Chip size="small" label={`⚖️ Net: ${net > 0 ? `+${net}` : net}`} />
+              </Stack>
+            </Box>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
+        <CardContent>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            justifyContent="space-between"
+            sx={{ mb: 1.5 }}
+          >
+            <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
+              🎯 Daily Quests
+            </Typography>
+            {!isPro && (
+              <Button size="small" variant="outlined" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                🔥 Unlock 5 Quests + smarter coaching
+              </Button>
+            )}
+          </Stack>
+
+          <Stack spacing={1.1}>
+            {quests.map((q) => {
+              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
+              const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
+              const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+              return (
+                <Box
+                  key={q.id}
+                  sx={{
+                    p: 1.2,
+                    borderRadius: 1.5,
+                    border: "1px solid rgba(2,6,23,0.08)",
+                    background: q.locked ? "rgba(2,6,23,0.03)" : done ? "rgba(2,6,23,0.04)" : "white",
+                  }}
+                >
+                  <Stack direction="row" spacing={1.2} alignItems="center">
+                    <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>
+                      {q.locked ? "🔒" : done ? "✅" : "🎯"}
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 800, opacity: q.locked ? 0.65 : 1 }}>{q.label}</Typography>
+                      <LinearProgress
+                        variant="determinate"
+                        value={q.locked ? 0 : pct}
+                        sx={{ mt: 0.9, height: 8, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
+                        {q.locked ? "Pro quest (locked)" : `${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                      </Typography>
+                    </Box>
+                    {q.locked && (
+                      <Button size="small" variant="contained" sx={{ fontWeight: 900 }} onClick={() => setModalOpen(true)}>
+                        Unlock
+                      </Button>
+                    )}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+
+          {!isPro && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.2 }}>
+              Free gets 1–2 quests. Pro gets 5–7 quests + streak multipliers + card export.
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
+
       {Inner}
     </Box>
-  );
-}
-
-function Feature({ text }) {
-  return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <Chip label="✓" size="small" variant="outlined" />
-      <Typography variant="caption">{text}</Typography>
-    
-      {History}
-</Stack>
   );
 }
