@@ -29,10 +29,8 @@ import {
 
 // ---- Coach-first: XP + Quests (localStorage, no backend) ----------------------
 const XP_KEY = "slimcal:xp:v1";
-const QUESTS_KEY = "slimcal:quests:v1";
+const QUESTS_KEY = "slimcal:quests:v2"; // bump version so old broken cache won't load
 
-// ----------------------------------------------------------------------------
-// Helpers
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -44,19 +42,6 @@ function safeNum(n, fallback = 0) {
 
 function round(n) {
   return Math.round(safeNum(n, 0));
-}
-
-function computeLevel(xp) {
-  let level = 1;
-  let remaining = Math.max(0, safeNum(xp, 0));
-  let req = 100;
-  while (remaining >= req) {
-    remaining -= req;
-    level += 1;
-    req = Math.round(req * 1.35);
-    if (level > 99) break;
-  }
-  return { level, progress: remaining, next: req };
 }
 
 function readJsonLS(key, fallback) {
@@ -75,8 +60,20 @@ function writeJsonLS(key, value) {
   } catch {}
 }
 
+function computeLevel(xp) {
+  let level = 1;
+  let remaining = Math.max(0, safeNum(xp, 0));
+  let req = 100;
+  while (remaining >= req) {
+    remaining -= req;
+    level += 1;
+    req = Math.round(req * 1.35);
+    if (level > 99) break;
+  }
+  return { level, progress: remaining, next: req };
+}
+
 function seededRng(seedStr) {
-  // deterministic pseudo-random (mulberry32)
   let h = 1779033703 ^ seedStr.length;
   for (let i = 0; i < seedStr.length; i++) {
     h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
@@ -90,64 +87,6 @@ function seededRng(seedStr) {
   };
 }
 
-function buildQuestPool({ proteinTarget }) {
-  const lunchProtein = Math.min(
-    60,
-    Math.max(30, Math.round((proteinTarget * 0.35) || 40))
-  );
-  return [
-    {
-      id: "breakfast_before_11",
-      label: "Log breakfast before 11am",
-      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
-      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
-    },
-    {
-      id: "protein_by_lunch",
-      label: `Hit ${lunchProtein}g protein by lunch`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
-    },
-    {
-      id: "log_3_meals",
-      label: "Log 3 meals today",
-      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
-      complete: ({ mealsCount }) => mealsCount >= 3,
-    },
-    {
-      id: "burn_150",
-      label: "Burn 150+ cals",
-      progress: ({ burned }) => ({ value: burned, goal: 150 }),
-      complete: ({ burned }) => burned >= 150,
-    },
-    {
-      id: "burn_300",
-      label: "Burn 300+ cals",
-      progress: ({ burned }) => ({ value: burned, goal: 300 }),
-      complete: ({ burned }) => burned >= 300,
-    },
-    {
-      id: "hit_protein_goal",
-      label: `Hit protein goal (${proteinTarget || 170}g)`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
-    },
-  ];
-}
-
-function pickDailyQuests({ dayKey, isPro, proteinTarget }) {
-  const rng = seededRng(`${dayKey}|quests`);
-  const pool = buildQuestPool({ proteinTarget });
-  const shuffled = [...pool].sort(() => rng() - 0.5);
-  const freeUnlocked = 2;
-  const maxShown = Math.min(6, shuffled.length);
-
-  return shuffled.slice(0, maxShown).map((q, idx) => ({
-    ...q,
-    locked: !isPro && idx >= freeUnlocked,
-  }));
-}
-
 function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) {
   const base = 10;
   const mealXp = mealsCount * 25;
@@ -157,7 +96,6 @@ function computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories }) 
   return base + mealXp + workoutXp + proteinXp + caloriesXp;
 }
 
-// ✅ FIX: formatClock declared ONCE (Rollup/Vite build error was from duplicate declaration)
 function formatClock(date) {
   try {
     return new Date(date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -166,6 +104,87 @@ function formatClock(date) {
   }
 }
 
+// --- Macro inference helpers ---------------------------------------------------
+function parseQtyFromText(text) {
+  const m = String(text || "").match(/\b(\d+(?:\.\d+)?)\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function clampNonNeg(n) {
+  const x = Number(n);
+  return Number.isFinite(x) && x > 0 ? x : 0;
+}
+
+function estimateMacrosFallbackFromCalories(calories) {
+  const cals = clampNonNeg(calories);
+  if (cals <= 0) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  const p = Math.round((cals * 0.25) / 4);
+  const c = Math.round((cals * 0.45) / 4);
+  const f = Math.round((cals * 0.30) / 9);
+  return { protein_g: clampNonNeg(p), carbs_g: clampNonNeg(c), fat_g: clampNonNeg(f) };
+}
+
+function estimateMacrosForFood({ name, qty, unit, calories }) {
+  const text = String(name || "").toLowerCase();
+  const q =
+    Number.isFinite(Number(qty)) && Number(qty) > 0
+      ? Number(qty)
+      : parseQtyFromText(text) || 1;
+
+  const cals = clampNonNeg(calories);
+
+  if (text.includes("egg")) {
+    const base = { protein_g: 6 * q, carbs_g: 0.5 * q, fat_g: 5 * q };
+    const expectedCals = 70 * q;
+    const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
+  }
+
+  if (text.includes("oat")) {
+    const base = { protein_g: 5 * q, carbs_g: 27 * q, fat_g: 3 * q };
+    const expectedCals = 150 * q;
+    const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
+  }
+
+  if (text.includes("peanut butter") || text.includes("pb")) {
+    const base = { protein_g: 4 * q, carbs_g: 3 * q, fat_g: 8 * q };
+    const expectedCals = 95 * q;
+    const scale = expectedCals > 0 && cals > 0 ? cals / expectedCals : 1;
+    return {
+      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
+      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
+      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
+    };
+  }
+
+  return estimateMacrosFallbackFromCalories(cals);
+}
+
+function sumMacros(items = []) {
+  const totals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  for (const it of items) {
+    totals.protein_g += safeNum(it.protein_g ?? it.protein ?? 0, 0);
+    totals.carbs_g += safeNum(it.carbs_g ?? it.carbs ?? 0, 0);
+    totals.fat_g += safeNum(it.fat_g ?? it.fat ?? 0, 0);
+  }
+  totals.protein_g = Math.round(totals.protein_g);
+  totals.carbs_g = Math.round(totals.carbs_g);
+  totals.fat_g = Math.round(totals.fat_g);
+  return totals;
+}
+
+// --- Date helpers --------------------------------------------------------------
 function usDay(d = new Date()) {
   try {
     return new Date(d).toLocaleDateString("en-US");
@@ -174,7 +193,6 @@ function usDay(d = new Date()) {
   }
 }
 
-// Local calendar-day as YYYY-MM-DD (stable across timezones)
 function localISODay(d = new Date()) {
   try {
     const dt = new Date(d);
@@ -195,93 +213,6 @@ function toTimeLabel(ts) {
   }
 }
 
-function sumMacros(items = []) {
-  const totals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
-  for (const it of items) {
-    totals.protein_g += safeNum(it.protein_g ?? it.protein ?? 0, 0);
-    totals.carbs_g += safeNum(it.carbs_g ?? it.carbs ?? 0, 0);
-    totals.fat_g += safeNum(it.fat_g ?? it.fat ?? 0, 0);
-  }
-  totals.protein_g = Math.round(totals.protein_g);
-  totals.carbs_g = Math.round(totals.carbs_g);
-  totals.fat_g = Math.round(totals.fat_g);
-  return totals;
-}
-
-function parseQtyFromText(text) {
-  const m = String(text || "").match(/\b(\d+(?:\.\d+)?)\b/);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
-}
-
-function clampNonNeg(n) {
-  const x = Number(n);
-  return Number.isFinite(x) && x > 0 ? x : 0;
-}
-
-function estimateMacrosFallbackFromCalories(calories) {
-  const cals = clampNonNeg(calories);
-  if (cals <= 0) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
-  // Very rough default split for unknown foods
-  const p = Math.round((cals * 0.25) / 4);
-  const c = Math.round((cals * 0.45) / 4);
-  const f = Math.round((cals * 0.3) / 9);
-  return {
-    protein_g: clampNonNeg(p),
-    carbs_g: clampNonNeg(c),
-    fat_g: clampNonNeg(f),
-  };
-}
-
-function estimateMacrosForFood({ name, qty, unit, calories }) {
-  const text = String(name || "").toLowerCase();
-  const q = Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : (parseQtyFromText(text) || 1);
-  const cals = clampNonNeg(calories);
-
-  // Eggs (most common)
-  if (text.includes("egg")) {
-    // per large egg: 6P, 0.5C, 5F, ~70 kcal
-    const base = { protein_g: 6 * q, carbs_g: 0.5 * q, fat_g: 5 * q };
-    const expectedCals = 70 * q;
-    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
-    return {
-      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
-      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
-      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
-    };
-  }
-
-  // Oats (dry)
-  if (text.includes("oat")) {
-    // ~150 cals per 1/2 cup dry: 5P 27C 3F
-    const base = { protein_g: 5 * q, carbs_g: 27 * q, fat_g: 3 * q };
-    const expectedCals = 150 * q;
-    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
-    return {
-      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
-      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
-      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
-    };
-  }
-
-  // Peanut butter (1 tbsp)
-  if (text.includes("peanut butter") || text.includes("pb")) {
-    // ~95 cals per tbsp: 4P 3C 8F
-    const base = { protein_g: 4 * q, carbs_g: 3 * q, fat_g: 8 * q };
-    const expectedCals = 95 * q;
-    const scale = (expectedCals > 0 && cals > 0) ? (cals / expectedCals) : 1;
-    return {
-      protein_g: clampNonNeg(Math.round(base.protein_g * scale)),
-      carbs_g: clampNonNeg(Math.round(base.carbs_g * scale)),
-      fat_g: clampNonNeg(Math.round(base.fat_g * scale)),
-    };
-  }
-
-  return estimateMacrosFallbackFromCalories(cals);
-}
-
-// Convert a local calendar day (YYYY-MM-DD) into a UTC range [from, to] (inclusive)
 function localDayToUtcRangeInclusive(dayISO) {
   try {
     const [y, m, d] = String(dayISO).split("-").map(Number);
@@ -290,13 +221,11 @@ function localDayToUtcRangeInclusive(dayISO) {
     const to = new Date(endLocalExclusive.getTime() - 1).toISOString();
     return { from: startLocal.toISOString(), to };
   } catch {
-    return {
-      from: `${dayISO}T00:00:00.000Z`,
-      to: `${dayISO}T23:59:59.999Z`,
-    };
+    return { from: `${dayISO}T00:00:00.000Z`, to: `${dayISO}T23:59:59.999Z` };
   }
 }
 
+// --- Targets ------------------------------------------------------------------
 function getUserTargets() {
   try {
     const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
@@ -305,12 +234,10 @@ function getUserTargets() {
     const dietPreference = ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
 
     const proteinDaily =
-      safeNum(ud?.proteinTargets?.daily_g, 0) ||
-      safeNum(localStorage.getItem("protein_target_daily_g"), 0);
+      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0);
 
     const proteinMeal =
-      safeNum(ud?.proteinTargets?.per_meal_g, 0) ||
-      safeNum(localStorage.getItem("protein_target_meal_g"), 0);
+      safeNum(ud?.proteinTargets?.per_meal_g, 0) || safeNum(localStorage.getItem("protein_target_meal_g"), 0);
 
     const trainingIntent = ud.trainingIntent || localStorage.getItem("training_intent") || "general";
     const trainingSplit = ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
@@ -342,7 +269,7 @@ function getUserTargets() {
   }
 }
 
-// Build local fallback context for today (works offline)
+// --- Local fallback context ----------------------------------------------------
 function buildLocalContext(todayISO) {
   const todayUS = usDay();
   const wh = JSON.parse(localStorage.getItem("workoutHistory") || "[]");
@@ -406,46 +333,7 @@ function buildLocalContext(todayISO) {
   return { burned, consumed, meals, workouts, macroTotals, source: "local" };
 }
 
-function suggestionSnippets({ goalType, dietPreference, calorieRemaining, proteinRemaining }) {
-  const diet = (dietPreference || "omnivore").toLowerCase();
-  const goal = (goalType || "").toLowerCase();
-
-  const proteinFoods = {
-    vegan: ["tofu", "tempeh", "lentils", "edamame", "vegan protein shake"],
-    vegetarian: ["greek yogurt", "eggs", "cottage cheese", "lentils", "protein shake"],
-    pescatarian: ["salmon", "tuna", "shrimp", "greek yogurt", "protein shake"],
-    keto: ["steak", "chicken", "salmon", "eggs", "cheese"],
-    mediterranean: ["fish", "chicken", "greek yogurt", "chickpeas", "lentils"],
-    omnivore: ["chicken", "lean beef", "eggs", "greek yogurt", "protein shake"],
-  };
-
-  const carbFoods = {
-    bulking: ["rice", "oats", "potatoes", "pasta", "fruit"],
-    cutting: ["berries", "vegetables", "sweet potatoes", "beans", "oats"],
-    maintenance: ["rice", "oats", "potatoes", "fruit", "whole grains"],
-  };
-
-  const fats = ["olive oil", "avocado", "nuts", "peanut butter"];
-
-  const pList = proteinFoods[diet] || proteinFoods.omnivore;
-  const cList = carbFoods[goal] || carbFoods.maintenance;
-
-  const recs = [];
-  if (proteinRemaining > 0) recs.push(`Protein boost: ${pList.slice(0, 3).join(", ")}`);
-
-  if (calorieRemaining > 0) {
-    if (goal === "cutting") {
-      recs.push(`Stay full while cutting: ${cList.slice(0, 3).join(", ")}`);
-    } else if (goal === "bulking") {
-      recs.push(`Easy calories for bulking: ${cList.slice(0, 3).join(", ")}`);
-      recs.push(`Add fats if you need quick calories: ${fats.slice(0, 3).join(", ")}`);
-    } else {
-      recs.push(`Balanced add-on: ${cList.slice(0, 3).join(", ")}`);
-    }
-  }
-  return recs.slice(0, 4);
-}
-
+// --- Missed breakfast line -----------------------------------------------------
 function missedBreakfastLine({
   now,
   meals = [],
@@ -507,27 +395,158 @@ function missedBreakfastLine({
   return "Solid progress today. Keep stacking small wins.";
 }
 
-// kcal proxy; tune/replace with MET later
-const SCALE = 0.1;
+// --- Quests: DO NOT persist functions -----------------------------------------
+// We store only { dayKey, ids:[], lockedIds:[] } and rebuild function defs each load.
+function buildQuestDefs({ proteinTarget }) {
+  const lunchProtein = Math.min(
+    60,
+    Math.max(30, Math.round((proteinTarget || 170) * 0.35 || 40))
+  );
 
-function calcCaloriesFromSets(sets) {
-  if (!Array.isArray(sets) || sets.length === 0) return 0;
-  let vol = 0;
-  for (const s of sets) {
-    const w = safeNum(s.weight, 0);
-    const r = safeNum(s.reps, 0);
-    vol += w * r;
-  }
-  return Math.round(vol * SCALE);
+  const defs = [
+    {
+      id: "breakfast_before_11",
+      label: "Log breakfast before 11am",
+      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
+      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+    },
+    {
+      id: "protein_by_lunch",
+      label: `Hit ${lunchProtein}g protein by lunch`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
+    },
+    {
+      id: "log_3_meals",
+      label: "Log 3 meals today",
+      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
+      complete: ({ mealsCount }) => mealsCount >= 3,
+    },
+    {
+      id: "burn_150",
+      label: "Burn 150+ cals",
+      progress: ({ burned }) => ({ value: burned, goal: 150 }),
+      complete: ({ burned }) => burned >= 150,
+    },
+    {
+      id: "burn_300",
+      label: "Burn 300+ cals",
+      progress: ({ burned }) => ({ value: burned, goal: 300 }),
+      complete: ({ burned }) => burned >= 300,
+    },
+    {
+      id: "hit_protein_goal",
+      label: `Hit protein goal (${proteinTarget || 170}g)`,
+      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: proteinTarget || 170 }),
+      complete: ({ proteinSoFar }) => proteinSoFar >= (proteinTarget || 170),
+    },
+  ];
+
+  const map = {};
+  for (const d of defs) map[d.id] = d;
+  return map;
 }
 
-function Feature({ text }) {
-  return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <Chip label="✓" size="small" variant="outlined" />
-      <Typography variant="caption">{text}</Typography>
-    </Stack>
-  );
+function pickDailyQuestIds({ dayKey, proteinTarget }) {
+  const rng = seededRng(`${dayKey}|quests`);
+  const defsMap = buildQuestDefs({ proteinTarget });
+  const ids = Object.keys(defsMap);
+  const shuffled = [...ids].sort(() => rng() - 0.5);
+  return shuffled.slice(0, Math.min(6, shuffled.length));
+}
+
+function buildDailyQuests({ dayKey, isPro, proteinTarget }) {
+  const ids = pickDailyQuestIds({ dayKey, proteinTarget });
+  const freeUnlocked = 2;
+  const defsMap = buildQuestDefs({ proteinTarget });
+
+  return ids
+    .map((id, idx) => {
+      const def = defsMap[id];
+      if (!def) return null;
+      return { ...def, locked: !isPro && idx >= freeUnlocked };
+    })
+    .filter(Boolean);
+}
+
+function persistDailyQuestState({ dayKey, quests }) {
+  const ids = quests.map((q) => q.id);
+  const lockedIds = quests.filter((q) => q.locked).map((q) => q.id);
+  writeJsonLS(QUESTS_KEY, { dayKey, ids, lockedIds });
+}
+
+function loadDailyQuestState({ dayKey, isPro, proteinTarget }) {
+  const cached = readJsonLS(QUESTS_KEY, null);
+
+  // If cache is missing or for another day, rebuild
+  if (!cached || cached.dayKey !== dayKey || !Array.isArray(cached.ids)) {
+    const rebuilt = buildDailyQuests({ dayKey, isPro, proteinTarget });
+    persistDailyQuestState({ dayKey, quests: rebuilt });
+    return rebuilt;
+  }
+
+  // Rebuild function defs and apply locked status from cache (but also respect current isPro)
+  const defsMap = buildQuestDefs({ proteinTarget });
+  const freeUnlocked = 2;
+  const lockedSet = new Set(Array.isArray(cached.lockedIds) ? cached.lockedIds : []);
+
+  const rebuilt = cached.ids
+    .map((id, idx) => {
+      const def = defsMap[id];
+      if (!def) return null;
+      const cachedLocked = lockedSet.has(id);
+      const locked = isPro ? false : idx >= freeUnlocked || cachedLocked;
+      return { ...def, locked };
+    })
+    .filter(Boolean);
+
+  // Guard: if something went wrong, rebuild cleanly
+  if (!rebuilt.length || typeof rebuilt[0]?.progress !== "function") {
+    const clean = buildDailyQuests({ dayKey, isPro, proteinTarget });
+    persistDailyQuestState({ dayKey, quests: clean });
+    return clean;
+  }
+
+  // Keep storage in sync with latest lock rules
+  persistDailyQuestState({ dayKey, quests: rebuilt });
+  return rebuilt;
+}
+
+function suggestionSnippets({ goalType, dietPreference, calorieRemaining, proteinRemaining }) {
+  const diet = (dietPreference || "omnivore").toLowerCase();
+  const goal = (goalType || "").toLowerCase();
+
+  const proteinFoods = {
+    vegan: ["tofu", "tempeh", "lentils", "edamame", "vegan protein shake"],
+    vegetarian: ["greek yogurt", "eggs", "cottage cheese", "lentils", "protein shake"],
+    pescatarian: ["salmon", "tuna", "shrimp", "greek yogurt", "protein shake"],
+    keto: ["steak", "chicken", "salmon", "eggs", "cheese"],
+    mediterranean: ["fish", "chicken", "greek yogurt", "chickpeas", "lentils"],
+    omnivore: ["chicken", "lean beef", "eggs", "greek yogurt", "protein shake"],
+  };
+
+  const carbFoods = {
+    bulking: ["rice", "oats", "potatoes", "pasta", "fruit"],
+    cutting: ["berries", "vegetables", "sweet potatoes", "beans", "oats"],
+    maintenance: ["rice", "oats", "potatoes", "fruit", "whole grains"],
+  };
+
+  const fats = ["olive oil", "avocado", "nuts", "peanut butter"];
+  const pList = proteinFoods[diet] || proteinFoods.omnivore;
+  const cList = carbFoods[goal] || carbFoods.maintenance;
+
+  const recs = [];
+  if (proteinRemaining > 0) recs.push(`Protein boost: ${pList.slice(0, 3).join(", ")}`);
+
+  if (calorieRemaining > 0) {
+    if (goal === "cutting") recs.push(`Stay full while cutting: ${cList.slice(0, 3).join(", ")}`);
+    else if (goal === "bulking") {
+      recs.push(`Easy calories for bulking: ${cList.slice(0, 3).join(", ")}`);
+      recs.push(`Add fats if you need quick calories: ${fats.slice(0, 3).join(", ")}`);
+    } else recs.push(`Balanced add-on: ${cList.slice(0, 3).join(", ")}`);
+  }
+
+  return recs.slice(0, 4);
 }
 
 // -----------------------------------------------------------------------------
@@ -536,7 +555,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   const { user } = useAuth();
   const ent = useEntitlements();
 
-  // True for active, trialing, or past_due (matches server logic)
   const isPro =
     !!ent?.isProActive ||
     (typeof window !== "undefined" && localStorage.getItem("isPro") === "true");
@@ -558,6 +576,9 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   const targets = useMemo(() => getUserTargets(), []);
 
+  const goalCalories = targets.dailyGoal || 0;
+  const goalProtein = targets.proteinDaily || 0;
+
   const [dayCtx, setDayCtx] = useState(null);
   const [dayCtxLoading, setDayCtxLoading] = useState(true);
 
@@ -565,18 +586,15 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 })
   );
 
-  const [quests, setQuests] = useState(() => {
-    const cached = readJsonLS(QUESTS_KEY, null);
-    if (cached?.dayKey === todayISO && Array.isArray(cached?.quests)) return cached.quests;
-    const picked = pickDailyQuests({
+  const [quests, setQuests] = useState(() =>
+    loadDailyQuestState({
       dayKey: todayISO,
       isPro,
       proteinTarget: targets.proteinDaily || 170,
-    });
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
-    return picked;
-  });
+    })
+  );
 
+  // Load saved recap + history
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
@@ -594,36 +612,18 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     }
   }, [recapKeyToday]);
 
+  // Keep quests in sync with Pro status + day
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setDayCtxLoading(true);
-      try {
-        const ctx = await buildContext();
-        if (mounted) setDayCtx(ctx);
-      } catch {
-        if (mounted) setDayCtx(null);
-      } finally {
-        if (mounted) setDayCtxLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, todayISO]);
-
-  useEffect(() => {
-    const picked = pickDailyQuests({
+    const q = loadDailyQuestState({
       dayKey: todayISO,
       isPro,
       proteinTarget: targets.proteinDaily || 170,
     });
-    setQuests(picked);
-    writeJsonLS(QUESTS_KEY, { dayKey: todayISO, quests: picked });
+    setQuests(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro, todayISO]);
 
+  // Load or reset today’s count on mount and whenever entitlement changes
   useEffect(() => {
     if (isPro) {
       try {
@@ -641,9 +641,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   useEffect(() => {
     const onRefresh = () => {
-      if (localStorage.getItem("isPro") === "true") {
-        setCount(0);
-      }
+      if (localStorage.getItem("isPro") === "true") setCount(0);
     };
     window.addEventListener("slimcal:pro:refresh", onRefresh);
     return () => window.removeEventListener("slimcal:pro:refresh", onRefresh);
@@ -682,10 +680,29 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     setSavedAt(entry.createdAt);
   };
 
+  // Prefetch today context so Coach can show XP/Quests instantly
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setDayCtxLoading(true);
+      try {
+        const ctx = await buildContext();
+        if (mounted) setDayCtx(ctx);
+      } catch {
+        if (mounted) setDayCtx(null);
+      } finally {
+        if (mounted) setDayCtxLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, todayISO]);
+
+  // Build the recap context (Supabase if signed in; otherwise local)
   async function buildContext() {
-    if (!user) {
-      return buildLocalContext(todayISO);
-    }
+    if (!user) return buildLocalContext(todayISO);
 
     let burned = 0;
     let consumed = 0;
@@ -699,7 +716,20 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       console.warn("[DailyRecapCoach] getDailyMetricsRange failed, continuing", e);
     }
 
+    // workouts (keep your proxy approach)
     const workouts = [];
+    const SCALE = 0.1;
+    function calcCaloriesFromSets(sets) {
+      if (!Array.isArray(sets) || sets.length === 0) return 0;
+      let vol = 0;
+      for (const s of sets) {
+        const w = safeNum(s.weight, 0);
+        const r = safeNum(s.reps, 0);
+        vol += w * r;
+      }
+      return Math.round(vol * SCALE);
+    }
+
     try {
       const ws = await getWorkouts(user.id, { limit: 30 });
       const todays = ws.filter((w) => (w.started_at || "").slice(0, 10) === todayISO);
@@ -717,7 +747,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
             prev.weight_max = Math.max(prev.weight_max, safeNum(s.weight, 0));
             byEx.set(k, prev);
           }
-
           for (const v of byEx.values()) {
             workouts.push({
               exercise_name: v.exercise_name,
@@ -741,24 +770,19 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       console.warn("[DailyRecapCoach] workouts fetch failed, continuing", e);
     }
 
+    // meals
     const meals = [];
     let macroTotals = { protein_g: 0, carbs_g: 0, fat_g: 0 };
 
     try {
       const { from: mealsFrom, to: mealsTo } = localDayToUtcRangeInclusive(todayISO);
 
-      const mealsAll = await getMeals(user.id, {
-        from: mealsFrom,
-        to: mealsTo,
-        limit: 200,
-      });
-
+      const mealsAll = await getMeals(user.id, { from: mealsFrom, to: mealsTo, limit: 200 });
       const ids = mealsAll.map((m) => m.id);
       const itemsMap = await getMealItemsForMealIds(user.id, ids);
 
       for (const m of mealsAll) {
         const itemsRaw = (itemsMap?.[m.id] || []).filter(Boolean);
-
         const baseItems = itemsRaw.length
           ? itemsRaw
           : [
@@ -806,22 +830,18 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       }
 
       macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
-
-      if (!consumed) {
-        consumed = meals.reduce((s, mm) => s + round(mm.total_calories || 0), 0);
-      }
+      if (!consumed) consumed = meals.reduce((s, mm) => s + round(mm.total_calories || 0), 0);
     } catch (e) {
       console.warn("[DailyRecapCoach] meals fetch failed, continuing", e);
     }
 
-    // Merge local offline meals to avoid mismatch between Coach + Meal History UI
+    // Merge local unsynced meals
     try {
       const localCtx = buildLocalContext(todayISO);
       const localMeals = localCtx?.meals || [];
       if (localMeals.length) {
         const keyOf = (m) => `${m.title}|${round(m.total_calories || 0)}|${m.time_label || ""}`;
         const existing = new Set(meals.map(keyOf));
-
         for (const lm of localMeals) {
           const key = keyOf(lm);
           if (!existing.has(key)) {
@@ -829,7 +849,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
             meals.push({ ...lm, id: lm.id || `local-${btoa(key).slice(0, 10)}` });
           }
         }
-
         consumed = Math.max(consumed || 0, localCtx?.consumed || 0);
         burned = Math.max(burned || 0, localCtx?.burned || 0);
         macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
@@ -858,25 +877,21 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       gaps.push({ from: prev.time_label, to: cur.time_label, minutes: mins });
     }
 
-    return {
-      first: withTime[0].time_label,
-      last: withTime[withTime.length - 1].time_label,
-      gaps,
-    };
+    return { first: withTime[0].time_label, last: withTime[withTime.length - 1].time_label, gaps };
   }
 
+  // Award XP once per day based on current day state
   useEffect(() => {
     if (xpState?.lastAwardDay === todayISO) return;
 
     const mealsCount = (dayCtx?.meals || []).length;
     const workoutsCount = (dayCtx?.workouts || []).length;
 
-    const goal = targets.dailyGoal || 0;
     const eaten = round(dayCtx?.consumed || 0);
     const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
 
-    const hitProtein = (targets.proteinDaily || 0) ? proteinSoFar >= (targets.proteinDaily || 0) : false;
-    const hitCalories = goal ? eaten >= Math.round(goal * 0.95) : false;
+    const hitProtein = goalProtein ? proteinSoFar >= goalProtein : false;
+    const hitCalories = goalCalories ? eaten >= Math.round(goalCalories * 0.95) : false;
 
     const earned = computeTodayXp({ mealsCount, workoutsCount, hitProtein, hitCalories });
     const next = {
@@ -890,12 +905,14 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayISO, dayCtxLoading]);
 
+  // Auto-generate recap on open (Pro only)
   useEffect(() => {
     if (!isPro) return;
     try {
       const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
       if (saved?.content) return;
     } catch {}
+
     if (!loading && !recap) {
       if (!dayCtxLoading) handleGetRecap();
     }
@@ -915,9 +932,6 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
     try {
       const ctx = await buildContext();
-
-      const goalCalories = targets.dailyGoal || 0;
-      const goalProtein = targets.proteinDaily || 0;
 
       const net = round((ctx.consumed || 0) - (ctx.burned || 0));
       const caloriesRemaining = goalCalories ? round(goalCalories - (ctx.consumed || 0)) : 0;
@@ -1040,12 +1054,13 @@ Output format (use these headings):
       saveRecapLocal(msg);
     } catch (err) {
       console.error("Recap error:", err);
-      setError(err?.message || "Sorry, I couldn’t generate your daily recap right now.");
+      setError(err.message || "Sorry, I couldn’t generate your daily recap right now.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
       Free recaps used today: <strong>{count}</strong>/3
@@ -1070,12 +1085,8 @@ Output format (use these headings):
           justifyContent="space-between"
         >
           <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
-            <Typography
-              variant="subtitle1"
-              sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}
-            >
-              Unlock AI Daily Recaps{" "}
-              <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}>
+              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Detailed breakdowns, goals tracking, meal timing tips, and better recommendations.
@@ -1087,11 +1098,8 @@ Output format (use these headings):
               variant="contained"
               sx={{ fontWeight: 800 }}
               onClick={async () => {
-                if (!user) {
-                  window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
-                } else {
-                  setModalOpen(true);
-                }
+                if (!user) window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
+                else setModalOpen(true);
               }}
             >
               Start Free Trial
@@ -1222,16 +1230,10 @@ Output format (use these headings):
     );
   }
 
-  // Coach homepage stats
   const now = useMemo(() => new Date(), []);
   const mealsCount = (dayCtx?.meals || []).length;
-  const workoutsCount = (dayCtx?.workouts || []).length;
-
-  const goalCalories = targets.dailyGoal || 0;
-  const goalProtein = targets.proteinDaily || 0;
-
-  const eaten = round(dayCtx?.consumed || 0);
   const burned = round(dayCtx?.burned || 0);
+  const eaten = round(dayCtx?.consumed || 0);
   const net = round(eaten - burned);
   const proteinSoFar = round(dayCtx?.macroTotals?.protein_g || 0);
 
@@ -1240,10 +1242,10 @@ Output format (use these headings):
   const roastLine = missedBreakfastLine({
     now,
     meals: dayCtx?.meals || [],
-    workoutsCount: dayCtx?.workouts?.length || 0,
-    consumed: dayCtx?.consumed || 0,
-    burned: dayCtx?.burned || 0,
-    proteinTotal: dayCtx?.macroTotals?.protein_g || 0,
+    workoutsCount: (dayCtx?.workouts || []).length,
+    consumed: eaten,
+    burned,
+    proteinTotal: proteinSoFar,
     calorieGoal: goalCalories,
     proteinGoal: goalProtein,
   });
@@ -1277,12 +1279,7 @@ Output format (use these headings):
 
       <Card data-testid="coach-xp" elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
         <CardContent>
-          <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={2}
-            alignItems={{ xs: "stretch", sm: "center" }}
-            justifyContent="space-between"
-          >
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
                 Level {lvl.level}
@@ -1310,13 +1307,7 @@ Output format (use these headings):
 
       <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 2 }}>
         <CardContent>
-          <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={1.5}
-            alignItems={{ xs: "flex-start", sm: "center" }}
-            justifyContent="space-between"
-            sx={{ mb: 1.5 }}
-          >
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" sx={{ mb: 1.5 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
               🎯 Daily Quests
             </Typography>
@@ -1332,6 +1323,7 @@ Output format (use these headings):
               const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
               const done = !q.locked && q.complete({ mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+
               return (
                 <Box
                   key={q.id}
@@ -1378,5 +1370,14 @@ Output format (use these headings):
 
       {Inner}
     </Box>
+  );
+}
+
+function Feature({ text }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Chip label="✓" size="small" variant="outlined" />
+      <Typography variant="caption">{text}</Typography>
+    </Stack>
   );
 }
