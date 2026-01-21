@@ -2,37 +2,55 @@
 import React from 'react';
 import { Chip, Tooltip } from '@mui/material';
 
-/**
- * Centralized free daily limits (client-side UX).
- * Server remains the source of truth (402 responses) but this keeps UI consistent.
- *
- * ✅ Requested: 3 uses/day for every AI feature.
- */
+// -----------------------------------------------------------------------------
+// Daily Free-tier usage tracking (client-side)
+// -----------------------------------------------------------------------------
+
 const STORAGE_KEY = 'slimcal_usage_v1';
 
-function todayKey() {
-  try {
-    return new Date().toLocaleDateString('en-US');
-  } catch {
-    return String(Date.now()).slice(0, 10);
-  }
+// ✅ Free tier limits (per day) — ALL FEATURES = 3/day
+export const FREE_DAILY_LIMITS = {
+  ai_meal: 3,
+  ai_workout: 3,
+  ai_food_lookup: 3,
+  daily_recap: 3,
+
+  // (Optional aliases, harmless if unused elsewhere)
+  coach: 3,
+  meal: 3,
+  workout: 3,
+  food: 3
+};
+
+function getTodayISO() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    .toISOString()
+    .slice(0, 10);
 }
 
 function safeParseJSON(val, fallback) {
   try {
-    return JSON.parse(val);
+    const p = JSON.parse(val);
+    return p ?? fallback;
   } catch {
     return fallback;
   }
 }
 
 function readState() {
+  const today = getTodayISO();
   const raw = localStorage.getItem(STORAGE_KEY);
-  const st = safeParseJSON(raw, null) || {};
-  const t = todayKey();
+  const st = safeParseJSON(raw, null);
 
-  if (st.date !== t) return { date: t, counts: {} };
-  if (!st.counts || typeof st.counts !== 'object') st.counts = {};
+  if (!st || st.date !== today || typeof st !== 'object') {
+    return { date: today, counts: {} };
+  }
+
+  if (!st.counts || typeof st.counts !== 'object') {
+    return { date: today, counts: {} };
+  }
+
   return st;
 }
 
@@ -44,80 +62,84 @@ function writeState(st) {
   }
 }
 
-export const FREE_DAILY_LIMITS = {
-  ai_meal: 3,         // AI meal suggestions
-  ai_workout: 3,      // AI workout suggestions
-  ai_food_lookup: 3,  // AI food lookup
-  daily_recap: 3,     // Daily Recap Coach
-};
+// -------------------- Named exports used across the app -----------------------
 
 export function getFreeDailyLimit(featureKey) {
   return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
 }
 
-export function getDailyFeatureCount(featureKey) {
+export function getDailyUsed(featureKey) {
   const st = readState();
-  return Number(st.counts?.[featureKey]) || 0;
+  return Math.max(0, Number(st.counts?.[featureKey]) || 0);
 }
 
-export function getDailyFeatureRemaining(featureKey) {
+// ✅ FIX: this MUST be exported (DailyRecapCoach imports it)
+export function getDailyRemaining(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
-  const used = getDailyFeatureCount(featureKey);
+  const used = getDailyUsed(featureKey);
   return Math.max(0, limit - used);
 }
 
 export function canUseDailyFeature(featureKey) {
-  return getDailyFeatureRemaining(featureKey) > 0;
+  return getDailyRemaining(featureKey) > 0;
 }
 
 export function registerDailyFeatureUse(featureKey) {
   const st = readState();
-  const used = Number(st.counts?.[featureKey]) || 0;
-
+  const used = Math.max(0, Number(st.counts?.[featureKey]) || 0);
   st.counts = st.counts || {};
   st.counts[featureKey] = used + 1;
-
   writeState(st);
-  return st.counts[featureKey];
+  return getDailyRemaining(featureKey);
 }
 
-/**
- * FeatureUseBadge
- * Displays remaining uses for a feature.
- *
- * Usage:
- *   <FeatureUseBadge featureKey="ai_meal" isPro={isPro} />
- */
+export function resetDailyUsageCache() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// -----------------------------------------------------------------------------
+// UI Badge
+// -----------------------------------------------------------------------------
+
 export default function FeatureUseBadge({
   featureKey,
   isPro = false,
   sx = {},
-  size = 'small',
-  label = 'Free',
+  proLabel = 'PRO',
+  freePrefix = 'Free left',
+  showWhenPro = true
 }) {
+  const remaining = getDailyRemaining(featureKey);
   const limit = getFreeDailyLimit(featureKey);
-  if (!limit) return null;
+
+  if (isPro && !showWhenPro) return null;
 
   if (isPro) {
     return (
       <Chip
-        size={size}
+        size="small"
         color="success"
-        label="PRO ∞"
+        label={proLabel}
         sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
       />
     );
   }
 
-  const remaining = getDailyFeatureRemaining(featureKey);
-  const chipLabel = `${label}: ${remaining}/${limit}`;
+  // If limit is 0, hide badge (feature not configured)
+  if (!limit) return null;
+
+  const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
     <Tooltip title="Free daily uses. Upgrade for unlimited." arrow>
       <Chip
-        size={size}
+        size="small"
         variant="outlined"
-        label={chipLabel}
+        label={label}
         sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
       />
     </Tooltip>

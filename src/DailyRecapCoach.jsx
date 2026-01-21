@@ -25,6 +25,12 @@ import FeatureUseBadge, {
 } from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  registerDailyFeatureUse,
+  getDailyRemaining,
+  getFreeDailyLimit,
+} from "./components/FeatureUseBadge.jsx";
 import {
   getWorkouts,
   getWorkoutSetsFor,
