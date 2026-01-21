@@ -62,8 +62,6 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-// Daily Free-tier usage for AI meals is handled via FeatureUseBadge helpers.
-
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
   const P = Number(p) || 0,
@@ -149,13 +147,12 @@ function findPortion(food, portion_id) {
  * Expects portion macros fields:
  *   protein_g, carbs_g, fat_g  (numbers per 1 portion)
  */
-function getMacrosForEntry(fd, { macros, meta, name, calories }) {
+function getMacrosForEntry(fd, { macros, meta, name }) {
   // If macros were already provided and non-zero-ish, respect them.
   const p0 = Number(macros?.protein_g);
   const c0 = Number(macros?.carbs_g);
   const f0 = Number(macros?.fat_g);
-  const hasProvided =
-    Number.isFinite(p0) || Number.isFinite(c0) || Number.isFinite(f0);
+  const hasProvided = Number.isFinite(p0) || Number.isFinite(c0) || Number.isFinite(f0);
 
   if (hasProvided) {
     return {
@@ -276,12 +273,18 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
   }, [open]);
 
   const addRow = () => setRows(prev => [...prev, { name: '', calories: '' }]);
-  const update = (i, key, val) => setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
+  const update = (i, key, val) =>
+    setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
   const remove = i => setRows(prev => prev.filter((_, idx) => idx !== i));
 
-  const total = useMemo(() => rows.reduce((s, r) => s + (parseInt(r.calories, 10) || 0), 0), [rows]);
+  const total = useMemo(
+    () => rows.reduce((s, r) => s + (parseInt(r.calories, 10) || 0), 0),
+    [rows]
+  );
 
-  const hasValid = rows.every(r => r.name.trim().length > 0 && (parseInt(r.calories, 10) || 0) > 0);
+  const hasValid = rows.every(
+    r => r.name.trim().length > 0 && (parseInt(r.calories, 10) || 0) > 0
+  );
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -293,8 +296,19 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
             <Stack key={i} direction="row" spacing={1}>
-              <TextField label={`Ingredient ${i + 1}`} value={r.name} onChange={e => update(i, 'name', e.target.value)} fullWidth />
-              <TextField label="Calories" type="number" value={r.calories} onChange={e => update(i, 'calories', e.target.value)} sx={{ width: 140 }} />
+              <TextField
+                label={`Ingredient ${i + 1}`}
+                value={r.name}
+                onChange={e => update(i, 'name', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Calories"
+                type="number"
+                value={r.calories}
+                onChange={e => update(i, 'calories', e.target.value)}
+                sx={{ width: 140 }}
+              />
               <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
                 <DeleteIcon />
               </IconButton>
@@ -392,7 +406,9 @@ export default function MealTracker({ onMealUpdate }) {
 
   const emitConsumed = total => {
     try {
-      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: total } }));
+      window.dispatchEvent(
+        new CustomEvent('slimcal:consumed:update', { detail: { date: todayISO, consumed: total } })
+      );
     } catch {}
   };
 
@@ -462,14 +478,18 @@ export default function MealTracker({ onMealUpdate }) {
   const logOne = async ({ name, calories, macros, meta }) => {
     const baseCalories = Math.max(0, Number(calories) || 0);
 
-    // ✅ NEW: If macros missing, hydrate from foodData using meta or name
-    const hydrated = getMacrosForEntry(foodData, { macros, meta, name, calories: baseCalories });
+    // ✅ If macros missing, hydrate from foodData using meta or name
+    const hydrated = getMacrosForEntry(foodData, { macros, meta, name });
 
-    const finalMacros = hydrated || (macros ? {
-      protein_g: normMacro(macros?.protein_g),
-      carbs_g: normMacro(macros?.carbs_g),
-      fat_g: normMacro(macros?.fat_g)
-    } : null);
+    const finalMacros =
+      hydrated ||
+      (macros
+        ? {
+            protein_g: normMacro(macros?.protein_g),
+            carbs_g: normMacro(macros?.carbs_g),
+            fat_g: normMacro(macros?.fat_g)
+          }
+        : null);
 
     const safe = {
       name,
@@ -553,9 +573,10 @@ export default function MealTracker({ onMealUpdate }) {
         name: displayName,
         calories: c,
         macros: {
-          // if foodData has portion macros, logOne will hydrate anyway; but keep this for clarity
-          protein_g: selectedPortion.protein_g != null ? Number(selectedPortion.protein_g) * q : undefined,
-          carbs_g: selectedPortion.carbs_g != null ? Number(selectedPortion.carbs_g) * q : undefined,
+          protein_g:
+            selectedPortion.protein_g != null ? Number(selectedPortion.protein_g) * q : undefined,
+          carbs_g:
+            selectedPortion.carbs_g != null ? Number(selectedPortion.carbs_g) * q : undefined,
           fat_g: selectedPortion.fat_g != null ? Number(selectedPortion.fat_g) * q : undefined
         },
         meta: {
@@ -690,17 +711,32 @@ export default function MealTracker({ onMealUpdate }) {
       <Card
         sx={{
           borderRadius: 3,
+          overflow: 'visible', // ✅ critical: allow the top-right badge to render fully
           boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
         }}
       >
-        <CardContent sx={{ pb: 2, position: 'relative' }}>
+        <CardContent
+          sx={{
+            pb: 2,
+            pt: 3, // ✅ adds breathing room so the badge never touches/clips on rounded top
+            position: 'relative',
+            overflow: 'visible' // ✅ critical: avoid clipping in CardContent
+          }}
+        >
           {!isProUser() && (
             <FeatureUseBadge
               featureKey="ai_meal"
               isPro={false}
-              sx={{ position: 'absolute', top: 12, right: 12 }}
+              sx={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                zIndex: 3,
+                pointerEvents: 'none' // ✅ purely informational; prevents odd click overlap
+              }}
             />
           )}
+
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             alignItems={{ xs: 'flex-start', sm: 'center' }}
@@ -730,18 +766,24 @@ export default function MealTracker({ onMealUpdate }) {
       </Card>
 
       {/* ------------------- ACCORDION: Quick Actions ------------------- */}
-      <Accordion disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Accordion disableGutters sx={{ overflow: 'visible' }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ overflow: 'visible' }}>
           <Typography sx={{ fontWeight: 700 }}>Quick Actions</Typography>
         </AccordionSummary>
-        <AccordionDetails>
+        <AccordionDetails sx={{ overflow: 'visible' }}>
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
             <Button
               onClick={() => setOpenCustom(true)}
               startIcon={<AddCircleOutlineIcon />}
               variant="outlined"
               size="small"
-              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
+              sx={{
+                flexGrow: 1,
+                textTransform: 'none',
+                fontWeight: 600,
+                borderRadius: 999,
+                px: 2
+              }}
             >
               Custom Food
             </Button>
@@ -750,7 +792,13 @@ export default function MealTracker({ onMealUpdate }) {
               startIcon={<RestaurantIcon />}
               variant="outlined"
               size="small"
-              sx={{ flexGrow: 1, textTransform: 'none', fontWeight: 600, borderRadius: 999, px: 2 }}
+              sx={{
+                flexGrow: 1,
+                textTransform: 'none',
+                fontWeight: 600,
+                borderRadius: 999,
+                px: 2
+              }}
             >
               Build a Bowl
             </Button>
@@ -759,11 +807,11 @@ export default function MealTracker({ onMealUpdate }) {
       </Accordion>
 
       {/* ------------------- ACCORDION: Manual Entry (default open) ------------------- */}
-      <Accordion defaultExpanded disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Accordion defaultExpanded disableGutters sx={{ overflow: 'visible' }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ overflow: 'visible' }}>
           <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
         </AccordionSummary>
-        <AccordionDetails>
+        <AccordionDetails sx={{ overflow: 'visible' }}>
           <Box sx={{ mb: 2 }}>
             <Autocomplete
               freeSolo
@@ -795,7 +843,8 @@ export default function MealTracker({ onMealUpdate }) {
                 setSelectedFood(v);
                 setFoodInput(v.name);
 
-                const firstPortion = Array.isArray(v.portions) && v.portions.length ? v.portions[0] : null;
+                const firstPortion =
+                  Array.isArray(v.portions) && v.portions.length ? v.portions[0] : null;
                 setSelectedPortionId(firstPortion?.id ? String(firstPortion.id) : '');
                 setQty('1');
                 setCaloriesManualOverride(false);
@@ -831,7 +880,7 @@ export default function MealTracker({ onMealUpdate }) {
                     labelId="portion-label"
                     label="Portion"
                     value={selectedPortionId || (portions[0]?.id ? String(portions[0].id) : '')}
-                    onChange={(e) => {
+                    onChange={e => {
                       setSelectedPortionId(String(e.target.value || ''));
                       setCaloriesManualOverride(false);
                     }}
@@ -849,7 +898,7 @@ export default function MealTracker({ onMealUpdate }) {
                   type="number"
                   fullWidth
                   value={qty}
-                  onChange={(e) => {
+                  onChange={e => {
                     setQty(e.target.value);
                     setCaloriesManualOverride(false);
                   }}
@@ -871,9 +920,7 @@ export default function MealTracker({ onMealUpdate }) {
                 if (selectedFood) setCaloriesManualOverride(true);
               }}
               helperText={
-                selectedFood && selectedPortion
-                  ? `Auto: ${autoCalories ?? 0} kcal (edit to override)`
-                  : ''
+                selectedFood && selectedPortion ? `Auto: ${autoCalories ?? 0} kcal (edit to override)` : ''
               }
             />
 
@@ -886,11 +933,7 @@ export default function MealTracker({ onMealUpdate }) {
 
             {/* Explicit custom item button (keeps old behavior but cleaner) */}
             {customAction && (
-              <Button
-                onClick={() => setOpenCustom(true)}
-                variant="text"
-                sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}
-              >
+              <Button onClick={() => setOpenCustom(true)} variant="text" sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}>
                 + Custom Food (macros)
               </Button>
             )}
@@ -932,30 +975,44 @@ export default function MealTracker({ onMealUpdate }) {
       </Accordion>
 
       {/* ------------------- ACCORDION: AI Assist (open) ------------------- */}
-      <Accordion defaultExpanded disableGutters ref={suggestRef}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Accordion defaultExpanded disableGutters ref={suggestRef} sx={{ overflow: 'visible' }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ overflow: 'visible' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography sx={{ fontWeight: 700 }}>AI Assist</Typography>
             <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 500, height: 20 }} />
           </Box>
         </AccordionSummary>
-        <AccordionDetails>
+
+        <AccordionDetails sx={{ overflow: 'visible' }}>
           {!isProUser() && (
-            <Box sx={{ position: 'relative', mb: 1 }}>
+            <Box
+              sx={{
+                position: 'relative',
+                mb: 1,
+                overflow: 'visible',
+                pt: 2 // ✅ creates room so the absolute badge can't clip in this section either
+              }}
+            >
               <FeatureUseBadge
                 featureKey="ai_food_lookup"
                 isPro={false}
-                sx={{ position: 'absolute', top: 0, right: 0 }}
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  zIndex: 3,
+                  pointerEvents: 'none'
+                }}
               />
             </Box>
           )}
+
           <AIFoodLookupBox
             canUseLookup={() => isProUser() || canUseDailyFeature('ai_food_lookup')}
             registerLookupUse={() => {
               if (!isProUser()) registerDailyFeatureUse('ai_food_lookup');
             }}
             onAddFood={payload => {
-              // ✅ payload may or may not include macros or food_id/portion_id
               logOne({
                 name: payload.name,
                 calories: payload.calories,
@@ -990,11 +1047,11 @@ export default function MealTracker({ onMealUpdate }) {
       </Accordion>
 
       {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
-      <Accordion defaultExpanded disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Accordion defaultExpanded disableGutters sx={{ overflow: 'visible' }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ overflow: 'visible' }}>
           <Typography sx={{ fontWeight: 700 }}>Meals Logged Today ({todayUS})</Typography>
         </AccordionSummary>
-        <AccordionDetails>
+        <AccordionDetails sx={{ overflow: 'visible' }}>
           {mealLog.length === 0 ? (
             <Typography color="text.secondary">No meals added yet.</Typography>
           ) : (
@@ -1040,7 +1097,9 @@ export default function MealTracker({ onMealUpdate }) {
               </Typography>
 
               <Typography variant="body2" align="right" sx={{ mt: 0.5, color: 'text.secondary' }}>
-                Totals — P {mealLog.reduce((s, m) => s + (Number(m.protein_g) || 0), 0)}g • C {mealLog.reduce((s, m) => s + (Number(m.carbs_g) || 0), 0)}g • F {mealLog.reduce((s, m) => s + (Number(m.fat_g) || 0), 0)}g
+                Totals — P {mealLog.reduce((s, m) => s + (Number(m.protein_g) || 0), 0)}g • C{' '}
+                {mealLog.reduce((s, m) => s + (Number(m.carbs_g) || 0), 0)}g • F{' '}
+                {mealLog.reduce((s, m) => s + (Number(m.fat_g) || 0), 0)}g
               </Typography>
             </>
           )}

@@ -1,3 +1,4 @@
+// src/MealSuggestion.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
@@ -7,7 +8,6 @@ import {
   Button,
   Box,
   Chip,
-  CircularProgress,
   Skeleton,
   Stack
 } from '@mui/material';
@@ -103,44 +103,32 @@ function coerceMeals(data) {
 
   const list = Array.isArray(arr) ? arr : [];
   return list.map(m => {
-    const name =
-      m?.title ||
-      m?.name ||
-      m?.label ||
-      'Suggested meal';
+    const name = m?.title || m?.name || m?.label || 'Suggested meal';
 
     // pick calories from any of the known fields
     const kcal =
       (Number.isFinite(+m?.calories) ? +m.calories : null) ??
       (Number.isFinite(+m?.kcal) ? +m.kcal : null) ??
       (Number.isFinite(+m?.energy_kcal) ? +m.energy_kcal : null) ??
-      (Number.isFinite(+m?.nutrition?.calories)
-        ? +m.nutrition.calories
-        : null) ??
+      (Number.isFinite(+m?.nutrition?.calories) ? +m.nutrition.calories : null) ??
       0;
 
     const p =
       (Number.isFinite(+m?.protein_g) ? +m.protein_g : null) ??
       (Number.isFinite(+m?.protein) ? +m.protein : null) ??
-      (Number.isFinite(+m?.nutrition?.protein_g)
-        ? +m.nutrition.protein_g
-        : null) ??
+      (Number.isFinite(+m?.nutrition?.protein_g) ? +m.nutrition.protein_g : null) ??
       (m?.macros?.p ?? 0);
 
     const c =
       (Number.isFinite(+m?.carbs_g) ? +m.carbs_g : null) ??
       (Number.isFinite(+m?.carbs) ? +m.carbs : null) ??
-      (Number.isFinite(+m?.nutrition?.carbs_g)
-        ? +m.nutrition.carbs_g
-        : null) ??
+      (Number.isFinite(+m?.nutrition?.carbs_g) ? +m.nutrition.carbs_g : null) ??
       (m?.macros?.c ?? 0);
 
     const f =
       (Number.isFinite(+m?.fat_g) ? +m.fat_g : null) ??
       (Number.isFinite(+m?.fat) ? +m.fat : null) ??
-      (Number.isFinite(+m?.nutrition?.fat_g)
-        ? +m.nutrition.fat_g
-        : null) ??
+      (Number.isFinite(+m?.nutrition?.fat_g) ? +m.nutrition.fat_g : null) ??
       (m?.macros?.f ?? 0);
 
     const prepMinutes = m?.prepMinutes ?? m?.prep_min ?? null;
@@ -148,7 +136,11 @@ function coerceMeals(data) {
     return {
       name,
       calories: Math.max(0, Math.round(kcal || 0)),
-      macros: { p: Math.max(0, Math.round(p || 0)), c: Math.max(0, Math.round(c || 0)), f: Math.max(0, Math.round(f || 0)) },
+      macros: {
+        p: Math.max(0, Math.round(p || 0)),
+        c: Math.max(0, Math.round(c || 0)),
+        f: Math.max(0, Math.round(f || 0))
+      },
       prepMinutes
     };
   });
@@ -163,10 +155,11 @@ function SkeletonCard() {
         width: '100%',
         maxWidth: 480,
         mx: 'auto',
-        borderRadius: 2
+        borderRadius: 2,
+        overflow: 'visible' // ✅ prevent any clipping in skeleton state
       }}
     >
-      <CardContent sx={{ pb: 1 }}>
+      <CardContent sx={{ pb: 1, overflow: 'visible' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Skeleton variant="text" width="60%" height={24} />
           <Skeleton variant="rounded" width={60} height={22} />
@@ -217,8 +210,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
   // time-of-day label
   const hour = new Date().getHours();
-  const period =
-    hour < 10 ? 'Breakfast' : hour < 14 ? 'Lunch' : hour < 17 ? 'Snack' : 'Dinner';
+  const period = hour < 10 ? 'Breakfast' : hour < 14 ? 'Lunch' : hour < 17 ? 'Snack' : 'Dinner';
 
   // fetch from server
   const fetchSuggestions = useCallback(async () => {
@@ -226,24 +218,13 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
     setErrMsg(null);
 
     try {
-      const dietPreference =
-        localStorage.getItem('diet_preference') || 'omnivore';
-      const trainingIntent =
-        localStorage.getItem('training_intent') || 'general';
-      const proteinMealG = parseInt(
-        localStorage.getItem('protein_target_meal_g') || '0',
-        10
-      );
-      const calorieBias = parseInt(
-        localStorage.getItem('calorie_bias') || '0',
-        10
-      );
+      const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
+      const trainingIntent = localStorage.getItem('training_intent') || 'general';
+      const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
+      const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
       // meal budget snapshot (based on calories already eaten when panel opened)
-      const remaining = Math.max(
-        0,
-        (dailyGoal || 0) + (calorieBias || 0) - (baseConsumed || 0)
-      );
+      const remaining = Math.max(0, (dailyGoal || 0) + (calorieBias || 0) - (baseConsumed || 0));
       const mealBudget = Math.max(250, Math.round(remaining / 3));
 
       const basePayload = {
@@ -282,9 +263,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       }
 
       if (!resp.ok) {
-        throw new Error(
-          `Server responded ${resp.status}${raw ? ' - ' + raw : ''}`
-        );
+        throw new Error(`Server responded ${resp.status}${raw ? ' - ' + raw : ''}`);
       }
 
       let meals = coerceMeals(json);
@@ -294,12 +273,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         const p = m.macros?.p ?? 0;
         const c = m.macros?.c ?? 0;
         const f = m.macros?.f ?? 0;
-        const ok = withinSoftMacroRanges({
-          kcal: m.calories,
-          p,
-          c,
-          f
-        });
+        const ok = withinSoftMacroRanges({ kcal: m.calories, p, c, f });
 
         const why = [
           proteinMealG
@@ -400,7 +374,11 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         <Typography color="error" sx={{ mb: 1 }}>
           {errMsg}
         </Typography>
-        <Button onClick={handleRefreshClick} variant="contained" sx={{ textTransform: 'none', fontWeight: 600 }}>
+        <Button
+          onClick={handleRefreshClick}
+          variant="contained"
+          sx={{ textTransform: 'none', fontWeight: 600 }}
+        >
           Retry
         </Button>
       </Box>
@@ -411,10 +389,12 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   if (!suggestions.length) {
     return (
       <Box sx={{ textAlign: 'center', mt: 3 }}>
-        <Typography sx={{ mb: 1 }}>
-          No more ideas right now.
-        </Typography>
-        <Button onClick={handleRefreshClick} variant="contained" sx={{ textTransform: 'none', fontWeight: 600 }}>
+        <Typography sx={{ mb: 1 }}>No more ideas right now.</Typography>
+        <Button
+          onClick={handleRefreshClick}
+          variant="contained"
+          sx={{ textTransform: 'none', fontWeight: 600 }}
+        >
           Get New Ideas
         </Button>
 
@@ -491,12 +471,12 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
             maxWidth: 480,
             mx: 'auto',
             borderRadius: 2,
+            overflow: 'visible', // ✅ allow any nested badge/chips to render safely
             border: '1px solid rgba(0,0,0,0.04)',
-            boxShadow:
-              '0 16px 40px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03)'
+            boxShadow: '0 16px 40px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03)'
           }}
         >
-          <CardContent sx={{ pb: 1 }}>
+          <CardContent sx={{ pb: 1, overflow: 'visible' }}>
             <Box
               sx={{
                 display: 'flex',
@@ -537,11 +517,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
             </Box>
 
             {s._why && (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ lineHeight: 1.4 }}
-              >
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.4 }}>
                 💡 {s._why}
               </Typography>
             )}
@@ -564,7 +540,10 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
             >
               Refresh
               {!proOrTrial && (
-                <Typography component="span" sx={{ ml: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
+                <Typography
+                  component="span"
+                  sx={{ ml: 1, fontSize: '0.8rem', color: 'text.secondary' }}
+                >
                   {freeRefreshesLeft} left
                 </Typography>
               )}

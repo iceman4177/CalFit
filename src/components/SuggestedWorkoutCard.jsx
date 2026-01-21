@@ -66,14 +66,14 @@ async function buildAuthHeaders() {
     ]);
     token = sessionData?.session?.access_token || null;
     userId = userData?.user?.id || null;
-    email  = userData?.user?.email || null;
+    email = userData?.user?.email || null;
   } catch {}
 
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(userId ? { 'x-supabase-user-id': userId } : {}),
-    ...(email  ? { 'x-user-email': email } : {}),
+    ...(email ? { 'x-user-email': email } : {}),
     'x-client-id': getClientId()
   };
 }
@@ -121,7 +121,7 @@ const isProUser = () => {
 };
 
 export default function SuggestedWorkoutCard({ userData, onAccept }) {
-  const [pack, setPack] = useState([]);   // array of AI suggestions
+  const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -135,8 +135,8 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const trainingIntent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
   const initialSplit = normalizeFocus(
     localStorage.getItem('training_split') ||
-    localStorage.getItem('last_focus') ||
-    'upper'
+      localStorage.getItem('last_focus') ||
+      'upper'
   );
 
   const [split, setSplit] = useState(initialSplit);
@@ -147,9 +147,13 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
     setErr(null);
 
     try {
-      const intentLS      = localStorage.getItem('training_intent') || 'general';
-      const fitnessGoal   = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
-      const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
+      const intentLS = localStorage.getItem('training_intent') || 'general';
+      const fitnessGoal =
+        localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+      const equipmentList = JSON.parse(
+        localStorage.getItem('equipment_list') ||
+          '["dumbbell","barbell","machine","bodyweight"]'
+      );
 
       const focus = normalizeFocus(focusOverride || split || 'upper');
 
@@ -185,7 +189,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       const data = raw ? JSON.parse(raw) : {};
       const suggestions = Array.isArray(data?.suggestions)
         ? data.suggestions
-        : Array.isArray(data) ? data : [];
+        : Array.isArray(data)
+          ? data
+          : [];
 
       if (!suggestions.length) throw new Error('No workout suggestions returned');
 
@@ -204,7 +210,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   }
 
   // Fetch on mount and when userData changes — counts as a use (unless Pro)
-  useEffect(() => { fetchAI(undefined, { countAsUse: true }); /* eslint-disable-next-line */ }, [userData]);
+  useEffect(() => {
+    fetchAI(undefined, { countAsUse: true });
+    // eslint-disable-next-line
+  }, [userData]);
 
   const handleRefresh = () => {
     // ✅ If we have extra suggestions already, cycling does NOT consume a use
@@ -236,8 +245,8 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (loading) {
     return (
-      <Card sx={{ mb: 4 }}>
-        <CardContent>
+      <Card sx={{ mb: 4, overflow: 'visible' }}>
+        <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6">Generating a plan…</Typography>
           <Typography variant="body2" color="text.secondary">
             Personalizing based on your goal, intent, equipment, and split.
@@ -249,10 +258,16 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (err) {
     return (
-      <Card sx={{ mb: 4 }}>
-        <CardContent>
-          <Typography variant="h6" color="error">{err}</Typography>
-          <Button variant="outlined" sx={{ mt: 1 }} onClick={() => fetchAI(undefined, { countAsUse: true })}>
+      <Card sx={{ mb: 4, overflow: 'visible' }}>
+        <CardContent sx={{ overflow: 'visible' }}>
+          <Typography variant="h6" color="error">
+            {err}
+          </Typography>
+          <Button
+            variant="outlined"
+            sx={{ mt: 1 }}
+            onClick={() => fetchAI(undefined, { countAsUse: true })}
+          >
             Try Again
           </Button>
         </CardContent>
@@ -276,20 +291,51 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const localWorkout = toLocalWorkout(current);
 
   return (
-    <Card sx={{ mb: 4 }}>
-      <CardContent>
-        <Box sx={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <Typography variant="h5">Suggested Workout</Typography>
+    <Card sx={{ mb: 4, overflow: 'visible' }}>
+      <CardContent sx={{ overflow: 'visible' }}>
+        {/* Header */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 1,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Typography variant="h5" sx={{ lineHeight: 1.2 }}>
+            Suggested Workout
+          </Typography>
 
-          <Box sx={{ display:'flex', gap:1, flexWrap:'wrap', justifyContent:'flex-end' }}>
+          {/* Badges/Chips row */}
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              flexWrap: 'wrap',
+              justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+              alignItems: 'center',
+              // give a little room so top-right chips don't feel cramped
+              mt: { xs: 0.5, sm: 0 },
+            }}
+          >
             <AiQuotaBadge
               isPro={pro}
               remaining={quota.remaining}
               limit={quota.limit}
               label="Free"
+              sx={{ flexShrink: 0 }}
             />
-            <Chip size="small" label={(trainingIntent || 'general').replace('_',' ')} />
-            <Chip size="small" label={(split || 'upper').replace('_',' ')} />
+            <Chip
+              size="small"
+              label={(trainingIntent || 'general').replace('_', ' ')}
+              sx={{ flexShrink: 0 }}
+            />
+            <Chip
+              size="small"
+              label={(split || 'upper').replace('_', ' ')}
+              sx={{ flexShrink: 0 }}
+            />
           </Box>
         </Box>
 
@@ -309,20 +355,23 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
         <Divider sx={{ my: 2 }} />
 
-        <Box sx={{ display:'flex', gap:1 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           <Button variant="outlined" onClick={handleRefresh}>
             Refresh
           </Button>
           <Button
             variant="contained"
-            onClick={() => { if (typeof onAccept === 'function') onAccept(localWorkout); }}
+            onClick={() => {
+              if (typeof onAccept === 'function') onAccept(localWorkout);
+            }}
           >
             Accept Workout
           </Button>
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_',' ')}</strong>) and today’s split (<strong>{(split || 'upper').replace('_',' ')}</strong>).
+          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_', ' ')}</strong>)
+          and today’s split (<strong>{(split || 'upper').replace('_', ' ')}</strong>).
         </Typography>
       </CardContent>
 
