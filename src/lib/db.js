@@ -1,15 +1,27 @@
 // src/lib/db.js
-import { supabase } from './supabaseClient';
+import { supabase } from "./supabaseClient";
 
 /** Ensure 'YYYY-MM-DD' (local day best-effort) */
 function toIsoDay(day) {
   if (!day) return new Date().toISOString().slice(0, 10);
   try {
-    if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+    if (typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
     const d = new Date(day);
     if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   } catch {}
   return new Date().toISOString().slice(0, 10);
+}
+
+function isOnConflictSchemaError(err) {
+  const msg = String(err?.message || "");
+  // Common cases: no unique constraint, invalid on_conflict target, etc.
+  return (
+    err?.status === 400 ||
+    /on_conflict/i.test(msg) ||
+    /no unique/i.test(msg) ||
+    /there is no unique constraint/i.test(msg) ||
+    /constraint/i.test(msg)
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -18,32 +30,21 @@ function toIsoDay(day) {
 export async function getOrCreateProfile(user) {
   if (!user) return null;
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .maybeSingle();
+  const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (error) throw error;
   if (data) return data;
 
-  const { data: created, error: upErr } = await supabase
-    .from('profiles')
-    .insert({ id: user.id })
-    .select()
-    .single();
+  const { data: created, error: upErr } = await supabase.from("profiles").insert({ id: user.id }).select().single();
   if (upErr) throw upErr;
   return created;
 }
 
 // -----------------------------------------------------------------------------
 // Workouts (write)
-//   - Idempotency via client-generated UUID: workout.client_id
-//   - Requires UNIQUE constraint on (client_id) OR (user_id, client_id)
-//   - Falls back to insert if onConflict key not present in schema
 // -----------------------------------------------------------------------------
 export async function saveWorkout(userId, workout, sets = []) {
-  if (!userId) throw new Error('saveWorkout: missing userId');
-  if (!workout?.started_at) throw new Error('saveWorkout: missing started_at');
+  if (!userId) throw new Error("saveWorkout: missing userId");
+  if (!workout?.started_at) throw new Error("saveWorkout: missing started_at");
 
   const wRow = {
     user_id: userId,
@@ -55,24 +56,22 @@ export async function saveWorkout(userId, workout, sets = []) {
     total_calories: workout.total_calories ?? null,
   };
 
-  let w, upsertErr;
+  let w = null;
 
+  // Try upsert only if client_id exists; fall back if schema doesn't support onConflict
   if (wRow.client_id) {
-    const res = await supabase
-      .from('workouts')
-      .upsert(wRow, { onConflict: 'client_id' })
-      .select()
-      .single();
-    upsertErr = res.error;
-    w = res.data;
+    const res = await supabase.from("workouts").upsert(wRow, { onConflict: "client_id" }).select().maybeSingle();
+    if (!res.error && res.data) {
+      w = res.data;
+    } else if (res.error && !isOnConflictSchemaError(res.error)) {
+      // real error -> throw
+      throw res.error;
+    }
+    // if schema error -> fall through to insert
   }
 
-  if (!w || upsertErr) {
-    const { data, error } = await supabase
-      .from('workouts')
-      .insert(wRow)
-      .select()
-      .single();
+  if (!w) {
+    const { data, error } = await supabase.from("workouts").insert(wRow).select().single();
     if (error) throw error;
     w = data;
   }
@@ -89,7 +88,7 @@ export async function saveWorkout(userId, workout, sets = []) {
       tempo: s.tempo ?? null,
       volume: s.volume ?? null,
     }));
-    const { error: setErr } = await supabase.from('workout_sets').insert(rows);
+    const { error: setErr } = await supabase.from("workout_sets").insert(rows);
     if (setErr) throw setErr;
   }
 
@@ -103,7 +102,7 @@ export async function upsertDailyMetrics(userId, day, deltaBurned = 0, deltaEate
   if (!userId) return;
   const isoDay = toIsoDay(day);
 
-  const { error } = await supabase.rpc('bump_daily_metrics', {
+  const { error } = await supabase.rpc("bump_daily_metrics", {
     p_user_id: userId,
     p_day: isoDay,
     p_burn: Number(deltaBurned) || 0,
@@ -113,13 +112,10 @@ export async function upsertDailyMetrics(userId, day, deltaBurned = 0, deltaEate
 }
 
 /**
- * Set/merge absolute daily totals (not deltas). Uses onConflict='user_id,local_day'.
- * Requires a UNIQUE constraint on (user_id, local_day).
- * Fields: { calories_burned?, calories_eaten?, net_calories? } (new schema)
- *         or { cals_burned?, cals_eaten?, net_cals? } (legacy schema)
+ * Set/merge absolute daily totals (not deltas).
  */
 export async function upsertDailyTotals(userId, day, patch = {}) {
-  if (!userId) throw new Error('upsertDailyTotals: missing userId');
+  if (!userId) throw new Error("upsertDailyTotals: missing userId");
   const isoDay = toIsoDay(day);
 
   const rowNew = {
@@ -131,13 +127,9 @@ export async function upsertDailyTotals(userId, day, patch = {}) {
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('daily_metrics')
-    .upsert(rowNew, { onConflict: 'user_id,local_day' })
-    .select()
-    .maybeSingle();
+  const { data, error } = await supabase.from("daily_metrics").upsert(rowNew, { onConflict: "user_id,local_day" }).select().maybeSingle();
 
-  if (error && /column .* does not exist/i.test(error.message || '')) {
+  if (error && /column .* does not exist/i.test(error.message || "")) {
     const rowLegacy = {
       user_id: userId,
       day: isoDay,
@@ -146,11 +138,7 @@ export async function upsertDailyTotals(userId, day, patch = {}) {
       net_cals: patch.net_cals ?? patch.net_calories ?? null,
       updated_at: new Date().toISOString(),
     };
-    const res2 = await supabase
-      .from('daily_metrics')
-      .upsert(rowLegacy, { onConflict: 'user_id,day' })
-      .select()
-      .maybeSingle();
+    const res2 = await supabase.from("daily_metrics").upsert(rowLegacy, { onConflict: "user_id,day" }).select().maybeSingle();
     if (res2.error) throw res2.error;
     return res2.data ?? null;
   }
@@ -163,14 +151,14 @@ export async function upsertDailyTotals(userId, day, patch = {}) {
 // Meals (write)
 // -----------------------------------------------------------------------------
 export async function saveMeal(userId, meal, items = []) {
-  if (!userId) throw new Error('saveMeal: missing userId');
-  if (!meal?.eaten_at) throw new Error('saveMeal: missing eaten_at');
+  if (!userId) throw new Error("saveMeal: missing userId");
+  if (!meal?.eaten_at) throw new Error("saveMeal: missing eaten_at");
 
   const { data: m, error } = await supabase
-    .from('meals')
+    .from("meals")
     .insert({
       user_id: userId,
-      eaten_at: meal.eaten_at,                // ISO timestamp
+      eaten_at: meal.eaten_at,
       title: meal.title ?? null,
       total_calories: meal.total_calories ?? null,
     })
@@ -179,7 +167,7 @@ export async function saveMeal(userId, meal, items = []) {
   if (error) throw error;
 
   if (items?.length) {
-    const rows = items.map(it => ({
+    const rows = items.map((it) => ({
       meal_id: m.id,
       user_id: userId,
       food_name: it.food_name,
@@ -190,7 +178,7 @@ export async function saveMeal(userId, meal, items = []) {
       carbs: it.carbs ?? null,
       fat: it.fat ?? null,
     }));
-    const { error: itErr } = await supabase.from('meal_items').insert(rows);
+    const { error: itErr } = await supabase.from("meal_items").insert(rows);
     if (itErr) throw itErr;
   }
 
@@ -198,40 +186,36 @@ export async function saveMeal(userId, meal, items = []) {
 }
 
 // -----------------------------------------------------------------------------
-// Meals (read)  ✅ restored export to fix build
+// Meals (read)
 // -----------------------------------------------------------------------------
 export async function getMeals(userId, { from, to, limit = 500 } = {}) {
   if (!userId) return [];
   let q = supabase
-    .from('meals')
-    .select('id, eaten_at, title, total_calories')
-    .eq('user_id', userId)
-    .order('eaten_at', { ascending: false })
+    .from("meals")
+    .select("id, eaten_at, title, total_calories")
+    .eq("user_id", userId)
+    .order("eaten_at", { ascending: false })
     .limit(limit);
 
-  if (from) q = q.gte('eaten_at', from);
-  if (to)   q = q.lte('eaten_at', to);
+  if (from) q = q.gte("eaten_at", from);
+  if (to) q = q.lte("eaten_at", to);
 
   const { data, error } = await q;
   if (error) throw error;
   return data || [];
 }
 
-/**
- * Fetch meal_items for a list of meal IDs.
- * Returns a map: { [meal_id]: mealItem[] }
- */
 export async function getMealItemsForMealIds(userId, mealIds = []) {
   if (!userId) return {};
   const ids = Array.isArray(mealIds) ? mealIds.filter(Boolean) : [];
   if (ids.length === 0) return {};
 
   const { data, error } = await supabase
-    .from('meal_items')
-    .select('meal_id, food_name, qty, unit, calories, protein, carbs, fat')
-    .eq('user_id', userId)
-    .in('meal_id', ids)
-    .order('meal_id', { ascending: true });
+    .from("meal_items")
+    .select("meal_id, food_name, qty, unit, calories, protein, carbs, fat")
+    .eq("user_id", userId)
+    .in("meal_id", ids)
+    .order("meal_id", { ascending: true });
 
   if (error) throw error;
 
@@ -250,59 +234,55 @@ export async function getMealItemsForMealIds(userId, mealIds = []) {
 export async function getWorkouts(userId, { limit = 100 } = {}) {
   if (!userId) return [];
   const { data, error } = await supabase
-    .from('workouts')
-    .select('id, started_at, ended_at, goal, notes, total_calories')
-    .eq('user_id', userId)
-    .order('started_at', { ascending: false })
+    .from("workouts")
+    .select("id, started_at, ended_at, goal, notes, total_calories")
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return data || [];
 }
 
 export async function getWorkoutSetsFor(workoutId, userId) {
-  // Safe variant: do not reference 'idx' column (not guaranteed to exist)
   const { data, error } = await supabase
-    .from('workout_sets')
-    .select('exercise_name, reps, weight, tempo, volume, created_at')
-    .eq('workout_id', workoutId)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+    .from("workout_sets")
+    .select("exercise_name, reps, weight, tempo, volume, created_at")
+    .eq("workout_id", workoutId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
   if (error) throw error;
   return data || [];
 }
 
-/**
- * Read daily metrics in a schema-agnostic way and normalize the output:
- * returns [{ day: 'YYYY-MM-DD', burned: number|null, eaten: number|null, net: number|null }]
- */
 export async function getDailyMetricsRange(userId, from, to) {
   if (!userId) return [];
 
-  // Prefer new naming
   let q = supabase
-    .from('daily_metrics')
-    .select('local_day, calories_burned, calories_eaten, net_calories')
-    .eq('user_id', userId)
-    .order('local_day', { ascending: false });
+    .from("daily_metrics")
+    .select("local_day, calories_burned, calories_eaten, net_calories")
+    .eq("user_id", userId)
+    .order("local_day", { ascending: false });
 
-  if (from) q = q.gte('local_day', toIsoDay(from));
-  if (to)   q = q.lte('local_day', toIsoDay(to));
+  if (from) q = q.gte("local_day", toIsoDay(from));
+  if (to) q = q.lte("local_day", toIsoDay(to));
 
   let { data, error } = await q;
 
-  // Fallback to legacy names if needed
-  if (error && /column .* does not exist/i.test(error.message || '')) {
+  if (error && /column .* does not exist/i.test(error.message || "")) {
     let q2 = supabase
-      .from('daily_metrics')
-      .select('day, cals_burned, cals_eaten, net_cals')
-      .eq('user_id', userId)
-      .order('day', { ascending: false });
-    if (from) q2 = q2.gte('day', toIsoDay(from));
-    if (to)   q2 = q2.lte('day', toIsoDay(to));
+      .from("daily_metrics")
+      .select("day, cals_burned, cals_eaten, net_cals")
+      .eq("user_id", userId)
+      .order("day", { ascending: false });
+
+    if (from) q2 = q2.gte("day", toIsoDay(from));
+    if (to) q2 = q2.lte("day", toIsoDay(to));
+
     const res2 = await q2;
     if (res2.error) throw res2.error;
+
     const rows2 = res2.data || [];
-    return rows2.map(r => ({
+    return rows2.map((r) => ({
       day: r.day,
       burned: r.cals_burned ?? null,
       eaten: r.cals_eaten ?? null,
@@ -311,8 +291,9 @@ export async function getDailyMetricsRange(userId, from, to) {
   }
 
   if (error) throw error;
+
   const rows = data || [];
-  return rows.map(r => ({
+  return rows.map((r) => ({
     day: r.local_day,
     burned: r.calories_burned ?? null,
     eaten: r.calories_eaten ?? null,
