@@ -12,12 +12,11 @@ import {
   Chip
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
+import FeatureUseBadge, { canUseDailyFeature, registerDailyFeatureUse } from './FeatureUseBadge.jsx';
 import WorkoutTypePicker from './WorkoutTypePicker';
 import { supabase } from '../lib/supabaseClient';
 
 // ✅ ADD
-import useAiQuota from '../hooks/useAiQuota';
-import AiQuotaBadge from './AiQuotaBadge';
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -128,7 +127,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   // ✅ quota for this feature
-  const quota = useAiQuota('workout');
   const pro = isProUser();
 
   // derive intent/goal/split defaults
@@ -199,7 +197,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       setIdx(0);
 
       // ✅ only consume a free use when we truly generated from server successfully
-      if (!pro && countAsUse) quota.increment();
+      if (!pro && countAsUse) {
+        try { registerDailyFeatureUse('ai_workout'); } catch {}
+      }
     } catch (e) {
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
       setErr('Could not fetch a workout suggestion. Try again.');
@@ -319,14 +319,8 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
               mt: { xs: 0.5, sm: 0 },
             }}
           >
-            <AiQuotaBadge
-              isPro={pro}
-              remaining={quota.remaining}
-              limit={quota.limit}
-              label="Free"
-              sx={{ flexShrink: 0 }}
-            />
-            <Chip
+            <FeatureUseBadge featureKey="ai_workout" isPro={pro} />
+<Chip
               size="small"
               label={(trainingIntent || 'general').replace('_', ' ')}
               sx={{ flexShrink: 0 }}

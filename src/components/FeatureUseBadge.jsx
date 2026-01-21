@@ -2,48 +2,37 @@
 import React from 'react';
 import { Chip, Tooltip } from '@mui/material';
 
-// -----------------------------------------------------------------------------
-// Daily Free-tier usage tracking (client-side)
-// -----------------------------------------------------------------------------
-
+/**
+ * Centralized free daily limits (client-side UX).
+ * Server remains the source of truth (402 responses) but this keeps UI consistent.
+ *
+ * ✅ Requested: 3 uses/day for every AI feature.
+ */
 const STORAGE_KEY = 'slimcal_usage_v1';
 
-// Free tier limits (per day)
-// Adjust here to tune upgrade psychology.
-export const FREE_DAILY_LIMITS = {
-  ai_meal: 3,
-  ai_workout: 3,
-  ai_food_lookup: 1,
-  daily_recap: 1
-};
-
-function getTodayISO() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+function todayKey() {
+  try {
+    return new Date().toLocaleDateString('en-US');
+  } catch {
+    return String(Date.now()).slice(0, 10);
+  }
 }
 
 function safeParseJSON(val, fallback) {
   try {
-    const p = JSON.parse(val);
-    return p ?? fallback;
+    return JSON.parse(val);
   } catch {
     return fallback;
   }
 }
 
 function readState() {
-  const today = getTodayISO();
   const raw = localStorage.getItem(STORAGE_KEY);
-  const st = safeParseJSON(raw, null);
+  const st = safeParseJSON(raw, null) || {};
+  const t = todayKey();
 
-  if (!st || st.date !== today || typeof st !== 'object') {
-    return { date: today, counts: {} };
-  }
-
-  if (!st.counts || typeof st.counts !== 'object') {
-    return { date: today, counts: {} };
-  }
-
+  if (st.date !== t) return { date: t, counts: {} };
+  if (!st.counts || typeof st.counts !== 'object') st.counts = {};
   return st;
 }
 
@@ -55,78 +44,80 @@ function writeState(st) {
   }
 }
 
+export const FREE_DAILY_LIMITS = {
+  ai_meal: 3,         // AI meal suggestions
+  ai_workout: 3,      // AI workout suggestions
+  ai_food_lookup: 3,  // AI food lookup
+  daily_recap: 3,     // Daily Recap Coach
+};
+
 export function getFreeDailyLimit(featureKey) {
   return Number(FREE_DAILY_LIMITS[featureKey]) || 0;
 }
 
-export function getDailyUsed(featureKey) {
+export function getDailyFeatureCount(featureKey) {
   const st = readState();
-  return Math.max(0, Number(st.counts?.[featureKey]) || 0);
+  return Number(st.counts?.[featureKey]) || 0;
 }
 
-export function getDailyRemaining(featureKey) {
+export function getDailyFeatureRemaining(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
-  const used = getDailyUsed(featureKey);
+  const used = getDailyFeatureCount(featureKey);
   return Math.max(0, limit - used);
 }
 
 export function canUseDailyFeature(featureKey) {
-  return getDailyRemaining(featureKey) > 0;
+  return getDailyFeatureRemaining(featureKey) > 0;
 }
 
 export function registerDailyFeatureUse(featureKey) {
   const st = readState();
-  const used = Math.max(0, Number(st.counts?.[featureKey]) || 0);
+  const used = Number(st.counts?.[featureKey]) || 0;
+
   st.counts = st.counts || {};
   st.counts[featureKey] = used + 1;
+
   writeState(st);
-  return getDailyRemaining(featureKey);
+  return st.counts[featureKey];
 }
 
-export function resetDailyUsageCache() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-// -----------------------------------------------------------------------------
-// UI Badge
-// -----------------------------------------------------------------------------
-
+/**
+ * FeatureUseBadge
+ * Displays remaining uses for a feature.
+ *
+ * Usage:
+ *   <FeatureUseBadge featureKey="ai_meal" isPro={isPro} />
+ */
 export default function FeatureUseBadge({
   featureKey,
   isPro = false,
   sx = {},
-  proLabel = 'PRO',
-  freePrefix = 'Free left',
-  showWhenPro = true
+  size = 'small',
+  label = 'Free',
 }) {
-  const remaining = getDailyRemaining(featureKey);
   const limit = getFreeDailyLimit(featureKey);
-
-  if (isPro && !showWhenPro) return null;
+  if (!limit) return null;
 
   if (isPro) {
     return (
       <Chip
-        size="small"
+        size={size}
         color="success"
-        label={proLabel}
+        label="PRO ∞"
         sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
       />
     );
   }
 
-  const label = `${freePrefix}: ${remaining}/${limit}`;
+  const remaining = getDailyFeatureRemaining(featureKey);
+  const chipLabel = `${label}: ${remaining}/${limit}`;
 
   return (
     <Tooltip title="Free daily uses. Upgrade for unlimited." arrow>
       <Chip
-        size="small"
+        size={size}
         variant="outlined"
-        label={label}
+        label={chipLabel}
         sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
       />
     </Tooltip>

@@ -27,10 +27,7 @@ import { EXERCISE_ROM } from './exerciseConstants';
 import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
-import FeatureUseBadge, {
-  canUseDailyFeature,
-  registerDailyFeatureUse
-} from './components/FeatureUseBadge.jsx';
+import FeatureUseBadge, { canUseDailyFeature } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
@@ -455,10 +452,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }
         console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
       }
-      if (!isProUser()) {
-        registerDailyFeatureUse('ai_workout');
-      }
-      setShowSuggestCard(true);
+setShowSuggestCard(true);
       return;
     }
     setShowSuggestCard(false);
@@ -639,12 +633,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       <Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
           <Stack spacing={2}>
-            <Box sx={{ position: 'relative' }}>
+            <Box sx={{ position: 'relative', overflow: 'visible', pt: 2, pr: 2 }}>
               {!isProUser() && (
                 <FeatureUseBadge
                   featureKey="ai_workout"
                   isPro={false}
-                  sx={{ position: 'absolute', top: -10, right: -10 }}
+                  sx={{ position: 'absolute', top: 0, right: 0 }}
                 />
               )}
               <Button

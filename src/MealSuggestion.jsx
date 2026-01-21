@@ -1,5 +1,5 @@
 // src/MealSuggestion.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Card,
   CardContent,
@@ -12,6 +12,7 @@ import {
   Stack
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
+import { canUseDailyFeature, registerDailyFeatureUse, getDailyFeatureRemaining, getFreeDailyLimit } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 
 // ---- entitlement helpers for refresh button ----
@@ -39,24 +40,6 @@ function getClientId() {
     return 'anon';
   }
 }
-
-const getMealAIRefreshCount = () => {
-  const today = new Date().toLocaleDateString('en-US');
-  const savedDate = localStorage.getItem('aiMealRefreshDate');
-  if (savedDate !== today) {
-    localStorage.setItem('aiMealRefreshDate', today);
-    localStorage.setItem('aiMealRefreshCount', '0');
-    return 0;
-  }
-  return parseInt(localStorage.getItem('aiMealRefreshCount') || '0', 10);
-};
-
-const incMealAIRefreshCount = () => {
-  const today = new Date().toLocaleDateString('en-US');
-  localStorage.setItem('aiMealRefreshDate', today);
-  const newCount = getMealAIRefreshCount() + 1;
-  localStorage.setItem('aiMealRefreshCount', String(newCount));
-};
 
 // macro balance helper
 function withinSoftMacroRanges({ kcal, p, c, f }) {
@@ -198,14 +181,17 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
+  // counts only when we actually request a new AI generation
+  const shouldCountRef = useRef(true);
+
   // computed: entitlement to interact (Pro or active trial). We still allow initial fetch (to tease),
   // but we will blur/disable actions if not entitled and free refreshes are exhausted.
   const proOrTrial = isProUser() || isTrialActive();
-  const freeRefreshesUsed = getMealAIRefreshCount();
-  const freeRefreshesLeft = Math.max(0, 3 - freeRefreshesUsed);
+    const freeLimit = getFreeDailyLimit('ai_meal') || 3;
+  const freeLeft = getDailyFeatureRemaining('ai_meal');
   const lockInteractions = useMemo(
-    () => !proOrTrial && freeRefreshesLeft <= 0,
-    [proOrTrial, freeRefreshesLeft]
+    () => !proOrTrial && freeLeft <= 0,
+    [proOrTrial, freeLeft]
   );
 
   // time-of-day label
@@ -216,6 +202,14 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const fetchSuggestions = useCallback(async () => {
     setLoading(true);
     setErrMsg(null);
+
+    // If free user is out of uses, block the fetch (server will also enforce)
+    if (!proOrTrial && shouldCountRef.current && !canUseDailyFeature('ai_meal')) {
+      setShowUpgrade(true);
+      setSuggestions([]);
+      setLoading(false);
+      return;
+    }
 
     try {
       const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
@@ -295,6 +289,14 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       }
 
       setSuggestions(meals);
+
+      // Count this successful AI generation (free tier)
+      if (!proOrTrial && shouldCountRef.current) {
+        try {
+          registerDailyFeatureUse('ai_meal');
+        } catch {}
+      }
+      shouldCountRef.current = false;
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
       setErrMsg('Couldn’t fetch meal suggestions. Please try again.');
@@ -311,14 +313,11 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
   // refresh button logic with 3 free/day
   const handleRefreshClick = () => {
-    if (!isProUser() && !isTrialActive()) {
-      const used = getMealAIRefreshCount();
-      if (used >= 3) {
-        setShowUpgrade(true);
-        return;
-      }
-      incMealAIRefreshCount();
+    if (!proOrTrial && !canUseDailyFeature('ai_meal')) {
+      setShowUpgrade(true);
+      return;
     }
+    shouldCountRef.current = true;
     setRefreshKey(k => k + 1);
   };
 
@@ -544,7 +543,7 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
                   component="span"
                   sx={{ ml: 1, fontSize: '0.8rem', color: 'text.secondary' }}
                 >
-                  {freeRefreshesLeft} left
+                  {freeLeft} left
                 </Typography>
               )}
             </Button>

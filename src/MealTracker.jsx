@@ -669,10 +669,7 @@ export default function MealTracker({ onMealUpdate }) {
       console.warn('[MealTracker] gateway probe failed', e);
     }
 
-    if (!isProUser()) {
-      registerDailyFeatureUse('ai_meal');
-    }
-
+    
     setShowSuggest(true);
 
     setTimeout(() => {
@@ -723,20 +720,6 @@ export default function MealTracker({ onMealUpdate }) {
             overflow: 'visible' // ✅ critical: avoid clipping in CardContent
           }}
         >
-          {!isProUser() && (
-            <FeatureUseBadge
-              featureKey="ai_meal"
-              isPro={false}
-              sx={{
-                position: 'absolute',
-                top: 10,
-                right: 10,
-                zIndex: 3,
-                pointerEvents: 'none' // ✅ purely informational; prevents odd click overlap
-              }}
-            />
-          )}
-
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             alignItems={{ xs: 'flex-start', sm: 'center' }}
@@ -752,15 +735,26 @@ export default function MealTracker({ onMealUpdate }) {
               </Typography>
             </Box>
 
-            <Button
-              onClick={handleToggleMealIdeas}
-              variant={showSuggest ? 'outlined' : 'contained'}
-              startIcon={<SmartToyOutlinedIcon />}
-              size="large"
-              sx={{ fontWeight: 700, borderRadius: 999 }}
+            <Stack
+              direction="column"
+              alignItems="flex-end"
+              spacing={0.75}
+              sx={{ width: { xs: '100%', sm: 'auto' } }}
             >
-              {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
-            </Button>
+              {!isProUser() && (
+                <FeatureUseBadge featureKey="ai_meal" isPro={false} />
+              )}
+
+              <Button
+                onClick={handleToggleMealIdeas}
+                variant={showSuggest ? 'outlined' : 'contained'}
+                startIcon={<SmartToyOutlinedIcon />}
+                size="large"
+                sx={{ fontWeight: 700, borderRadius: 999, width: { xs: '100%', sm: 'auto' } }}
+              >
+                {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
+              </Button>
+            </Stack>
           </Stack>
         </CardContent>
       </Card>

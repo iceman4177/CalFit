@@ -1130,6 +1130,7 @@ Output format (use these headings):
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />}
+          {!embedded && !isPro && <FeatureUseBadge featureKey="daily_recap" isPro={false} />}
         </Stack>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
