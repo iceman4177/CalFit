@@ -74,12 +74,10 @@ function pluralizeUnit(unit, qty) {
   if (!unit) return '';
   if (q === 1) return unit;
 
-  // common irregular-ish
   if (unit === 'slice') return 'slices';
   if (unit === 'clove') return 'cloves';
   if (unit === 'egg') return 'eggs';
 
-  // units that generally shouldn't pluralize
   const noPlural = new Set(['g', 'oz', 'tbsp', 'tsp', 'cup', 'serving', 'item', 'scoop']);
   if (noPlural.has(unit)) return unit;
 
@@ -97,17 +95,125 @@ function fmt0(n) {
   return Math.round(x);
 }
 
-// Render "420 cals • P 36g • C 3g • F 30g" when macros exist
-function formatMealSecondary(meal) {
-  const cals = fmt0(meal?.calories);
-  const p = meal?.protein_g;
-  const c = meal?.carbs_g;
-  const f = meal?.fat_g;
+// Pull qty from the display string if needed: "Eggs — 6 eggs (1 large egg)"
+function parseQtyFromName(name) {
+  try {
+    if (!name || typeof name !== 'string') return null;
+    const m = name.match(/—\s*([0-9]+(?:\.[0-9]+)?)\s+/);
+    if (!m) return null;
+    const q = Number(m[1]);
+    return Number.isFinite(q) ? q : null;
+  } catch {
+    return null;
+  }
+}
 
-  const hasAnyMacro =
-    p != null || c != null || f != null;
+// Try match food by id first, else by name prefix "Eggs — ..."
+function findFoodForMeal(meal, foods) {
+  if (!meal) return null;
 
-  // Keep legacy display for old entries that don't have macros at all
+  const foodId = meal.food_id || meal.foodId || meal.foodID || null;
+  if (foodId) {
+    const byId = foods.find(f => String(f.id) === String(foodId));
+    if (byId) return byId;
+  }
+
+  // fallback by name prefix (before " —")
+  const rawName = typeof meal.name === 'string' ? meal.name : '';
+  const prefix = rawName.split('—')[0]?.trim();
+  if (!prefix) return null;
+
+  const byName = foods.find(f => String(f.name).toLowerCase() === String(prefix).toLowerCase());
+  return byName || null;
+}
+
+function findPortionForMeal(meal, food) {
+  if (!food || !Array.isArray(food.portions)) return null;
+  const pid = meal.portion_id || meal.portionId || null;
+  if (pid) {
+    const byId = food.portions.find(p => String(p.id) === String(pid));
+    if (byId) return byId;
+  }
+  return null;
+}
+
+// read macros from portion in a flexible way
+function getPortionMacros(portion) {
+  if (!portion) return null;
+
+  // preferred
+  if (portion.macros && typeof portion.macros === 'object') {
+    const p = portion.macros.protein_g ?? portion.macros.protein ?? 0;
+    const c = portion.macros.carbs_g ?? portion.macros.carbs ?? 0;
+    const f = portion.macros.fat_g ?? portion.macros.fat ?? 0;
+    return { protein_g: Number(p) || 0, carbs_g: Number(c) || 0, fat_g: Number(f) || 0 };
+  }
+
+  // flat fields
+  if (
+    portion.protein_g != null ||
+    portion.carbs_g != null ||
+    portion.fat_g != null ||
+    portion.protein != null ||
+    portion.carbs != null ||
+    portion.fat != null
+  ) {
+    const p = portion.protein_g ?? portion.protein ?? 0;
+    const c = portion.carbs_g ?? portion.carbs ?? 0;
+    const f = portion.fat_g ?? portion.fat ?? 0;
+    return { protein_g: Number(p) || 0, carbs_g: Number(c) || 0, fat_g: Number(f) || 0 };
+  }
+
+  return null;
+}
+
+// Compute macros for a meal:
+// 1) use stored macros if present
+// 2) else derive from foodData (food_id + portion_id + qty)
+// If we can’t compute, returns nulls.
+function computeMealMacros(meal, foods) {
+  const storedHasAny =
+    meal?.protein_g != null || meal?.carbs_g != null || meal?.fat_g != null;
+
+  if (storedHasAny) {
+    return {
+      protein_g: Number(meal.protein_g) || 0,
+      carbs_g: Number(meal.carbs_g) || 0,
+      fat_g: Number(meal.fat_g) || 0,
+      source: 'stored'
+    };
+  }
+
+  const food = findFoodForMeal(meal, foods);
+  if (!food) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+
+  const portion = findPortionForMeal(meal, food);
+  if (!portion) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+
+  const per = getPortionMacros(portion);
+  if (!per) return { protein_g: null, carbs_g: null, fat_g: null, source: 'none' };
+
+  const q =
+    (meal.qty != null && Number(meal.qty)) ||
+    parseQtyFromName(meal.name) ||
+    1;
+
+  return {
+    protein_g: (Number(per.protein_g) || 0) * (Number(q) || 1),
+    carbs_g: (Number(per.carbs_g) || 0) * (Number(q) || 1),
+    fat_g: (Number(per.fat_g) || 0) * (Number(q) || 1),
+    source: 'derived'
+  };
+}
+
+function formatMealSecondary(calories, macros) {
+  const cals = fmt0(calories);
+  const p = macros?.protein_g;
+  const c = macros?.carbs_g;
+  const f = macros?.fat_g;
+
+  const hasAnyMacro = p != null || c != null || f != null;
+
   if (!hasAnyMacro) return `${cals} cals`;
 
   return `${cals} cals • P ${fmt0(p)}g • C ${fmt0(c)}g • F ${fmt0(f)}g`;
@@ -219,8 +325,19 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
             <Stack key={i} direction="row" spacing={1}>
-              <TextField label={`Ingredient ${i + 1}`} value={r.name} onChange={e => update(i, 'name', e.target.value)} fullWidth />
-              <TextField label="Calories" type="number" value={r.calories} onChange={e => update(i, 'calories', e.target.value)} sx={{ width: 140 }} />
+              <TextField
+                label={`Ingredient ${i + 1}`}
+                value={r.name}
+                onChange={e => update(i, 'name', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Calories"
+                type="number"
+                value={r.calories}
+                onChange={e => update(i, 'calories', e.target.value)}
+                sx={{ width: 140 }}
+              />
               <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
                 <DeleteIcon />
               </IconButton>
@@ -255,13 +372,11 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
 
 // ---------- Main ----------
 export default function MealTracker({ onMealUpdate }) {
-  // onboarding tips
   const [FoodTip, triggerFoodTip] = useFirstTimeTip('tip_food', 'Search or type a food name.');
   const [CalTip, triggerCalTip] = useFirstTimeTip('tip_cal', 'Enter calories.');
   const [AddTip, triggerAddTip] = useFirstTimeTip('tip_add', 'Tap to add this meal.');
   const [ClearTip, triggerClearTip] = useFirstTimeTip('tip_clear', 'Tap to clear today’s meals.');
 
-  // manual entry state
   const [foodInput, setFoodInput] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
 
@@ -271,28 +386,22 @@ export default function MealTracker({ onMealUpdate }) {
   const [calories, setCalories] = useState('');
   const [caloriesManualOverride, setCaloriesManualOverride] = useState(false);
 
-  // logged meals
   const [mealLog, setMealLog] = useState([]);
 
-  // AI panel state
   const [showSuggest, setShowSuggest] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // dialogs
   const [openCustom, setOpenCustom] = useState(false);
   const [openBowl, setOpenBowl] = useState(false);
 
   const { user } = useAuth();
 
-  // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
 
-  // canonical "today"
   const now = new Date();
   const todayUS = now.toLocaleDateString('en-US');
   const todayISO = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
 
-  // streak + initial data load
   useEffect(() => {
     hydrateStreakOnStartup();
   }, []);
@@ -307,7 +416,6 @@ export default function MealTracker({ onMealUpdate }) {
     onMealUpdate?.(totalInit);
   }, [onMealUpdate, todayUS]);
 
-  // ------------ persistence helpers ------------
   const persistToday = meals => {
     const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
     rest.push({ date: todayUS, meals });
@@ -355,7 +463,6 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(total);
   };
 
-  // Helpers for selected food/portion
   const portions = useMemo(() => {
     return Array.isArray(selectedFood?.portions) ? selectedFood.portions : [];
   }, [selectedFood]);
@@ -374,7 +481,6 @@ export default function MealTracker({ onMealUpdate }) {
     return Math.round(q * per);
   }, [selectedFood, selectedPortion, qty]);
 
-  // When food/portion/qty changes, update calories unless user overrode it manually
   useEffect(() => {
     if (!selectedFood || !selectedPortion) return;
     if (caloriesManualOverride) return;
@@ -382,12 +488,10 @@ export default function MealTracker({ onMealUpdate }) {
     setCalories(String(autoCalories));
   }, [selectedFood, selectedPortion, qty, autoCalories, caloriesManualOverride]);
 
-  // core logger for any meal object (local + optional cloud)
   const logOne = async ({ name, calories, macros, meta }) => {
     const safe = {
       name,
       calories: Math.max(0, Number(calories) || 0),
-      // Persist macros locally when available so Daily Recap Coach can be more detailed offline
       protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
       carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
       fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
@@ -407,7 +511,6 @@ export default function MealTracker({ onMealUpdate }) {
       if (user?.id) {
         const eatenISO = new Date().toISOString();
 
-        // Build one "meal item" line with qty/unit if present
         const qtyNum = meta?.qty != null ? Number(meta.qty) : 1;
         const unitStr = meta?.unit || 'serving';
 
@@ -436,11 +539,9 @@ export default function MealTracker({ onMealUpdate }) {
     }
   };
 
-  // manual "Add Meal" button
   const handleAdd = async () => {
     const nameText = foodInput.trim();
 
-    // Structured path: selectedFood + portion + qty
     if (selectedFood && selectedPortion) {
       const q = safeNumber(qty, 0);
       if (!Number.isFinite(q) || q <= 0) {
@@ -457,17 +558,15 @@ export default function MealTracker({ onMealUpdate }) {
       const unit = selectedPortion.unit || 'serving';
       const unitPretty = pluralizeUnit(unit, q);
 
-      // Nice display name: "Eggs — 6 eggs (1 large egg)"
       const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
 
-      // If your foodData.json includes macros per-portion, pass them here the same way
-      // your recap already expects (protein_g / carbs_g / fat_g).
-      const portionMacros = selectedPortion?.macros || selectedPortion?.macro || null;
-      const macros = portionMacros
+      // If foodData portions contain macros, store them at log-time too.
+      const per = getPortionMacros(selectedPortion);
+      const macros = per
         ? {
-            protein_g: (Number(portionMacros.protein_g) || 0) * q,
-            carbs_g: (Number(portionMacros.carbs_g) || 0) * q,
-            fat_g: (Number(portionMacros.fat_g) || 0) * q
+            protein_g: (Number(per.protein_g) || 0) * q,
+            carbs_g: (Number(per.carbs_g) || 0) * q,
+            fat_g: (Number(per.fat_g) || 0) * q
           }
         : undefined;
 
@@ -494,7 +593,6 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
-    // Legacy/freeSolo path: requires manual calories
     const c = Number.parseInt(calories, 10);
     if (!nameText || !Number.isFinite(c) || c <= 0) {
       alert('Enter a valid food & calories.');
@@ -527,7 +625,6 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  // toggle meal ideas panel — identity-aware probe to avoid false 402s
   const handleToggleMealIdeas = useCallback(async () => {
     if (showSuggest) {
       setShowSuggest(false);
@@ -574,27 +671,36 @@ export default function MealTracker({ onMealUpdate }) {
     }, 50);
   }, [showSuggest, user?.id]);
 
-  const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+  const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
+  const customAction = useMemo(() => {
+    return Array.isArray(foodData) ? foodData.find(f => f.action === 'open_custom_nutrition') : null;
+  }, []);
+
+  // ✅ Rehydrate macros for display using foodData when missing
+  const displayMeals = useMemo(() => {
+    const foods = options; // only real foods
+    return (mealLog || []).map(m => {
+      const macros = computeMealMacros(m, foods);
+      return { ...m, _displayMacros: macros };
+    });
+  }, [mealLog, options]);
+
+  const totalCalories = useMemo(() => {
+    return (mealLog || []).reduce((s, m) => s + (Number(m.calories) || 0), 0);
+  }, [mealLog]);
 
   const totalMacros = useMemo(() => {
-    return mealLog.reduce(
+    return displayMeals.reduce(
       (acc, m) => {
-        acc.protein += Number(m.protein_g) || 0;
-        acc.carbs += Number(m.carbs_g) || 0;
-        acc.fat += Number(m.fat_g) || 0;
+        const mm = m._displayMacros;
+        acc.protein += Number(mm?.protein_g) || 0;
+        acc.carbs += Number(mm?.carbs_g) || 0;
+        acc.fat += Number(mm?.fat_g) || 0;
         return acc;
       },
       { protein: 0, carbs: 0, fat: 0 }
     );
-  }, [mealLog]);
-
-  // Autocomplete options: foods only (portions handled separately)
-  const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
-
-  // Handle special custom action row (kept as a "pseudo option" below)
-  const customAction = useMemo(() => {
-    return Array.isArray(foodData) ? foodData.find(f => f.action === 'open_custom_nutrition') : null;
-  }, []);
+  }, [displayMeals]);
 
   return (
     <Container
@@ -611,7 +717,6 @@ export default function MealTracker({ onMealUpdate }) {
       <AddTip />
       <ClearTip />
 
-      {/* ------------------- HERO: Title + Single AI CTA ------------------- */}
       <Card
         sx={{
           borderRadius: 3,
@@ -647,7 +752,6 @@ export default function MealTracker({ onMealUpdate }) {
         </CardContent>
       </Card>
 
-      {/* ------------------- ACCORDION: Quick Actions ------------------- */}
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Quick Actions</Typography>
@@ -676,7 +780,6 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
-      {/* ------------------- ACCORDION: Manual Entry (default open) ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Manual Entry</Typography>
@@ -690,7 +793,6 @@ export default function MealTracker({ onMealUpdate }) {
               value={selectedFood}
               inputValue={foodInput}
               onChange={(_, v) => {
-                // If user types freeSolo string
                 if (!v) {
                   setSelectedFood(null);
                   setSelectedPortionId('');
@@ -709,7 +811,6 @@ export default function MealTracker({ onMealUpdate }) {
                   return;
                 }
 
-                // Selected structured food
                 setSelectedFood(v);
                 setFoodInput(v.name);
 
@@ -726,7 +827,6 @@ export default function MealTracker({ onMealUpdate }) {
               }}
               onInputChange={(_, v) => {
                 setFoodInput(v);
-                // If user starts typing, treat it as freeSolo unless they re-select an option
                 if (!selectedFood) return;
                 if (v !== selectedFood?.name) {
                   setSelectedFood(null);
@@ -740,7 +840,6 @@ export default function MealTracker({ onMealUpdate }) {
               )}
             />
 
-            {/* Portion + Quantity only if a structured food is selected */}
             {selectedFood && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
                 <FormControl fullWidth>
@@ -785,7 +884,6 @@ export default function MealTracker({ onMealUpdate }) {
               onFocus={triggerCalTip}
               onChange={e => {
                 setCalories(e.target.value);
-                // Mark manual override only if a structured food is selected
                 if (selectedFood) setCaloriesManualOverride(true);
               }}
               helperText={
@@ -847,7 +945,6 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
-      {/* ------------------- ACCORDION: AI Assist (open) ------------------- */}
       <Accordion defaultExpanded disableGutters ref={suggestRef}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -873,7 +970,7 @@ export default function MealTracker({ onMealUpdate }) {
           {showSuggest && (
             <Box sx={{ mt: 2 }}>
               <MealSuggestion
-                consumedCalories={total}
+                consumedCalories={totalCalories}
                 onAddMeal={async meal => {
                   const safeCalories = Number.isFinite(meal.calories) ? Number(meal.calories) : 0;
                   await logOne({ name: meal.name, calories: safeCalories });
@@ -884,7 +981,7 @@ export default function MealTracker({ onMealUpdate }) {
         </AccordionDetails>
       </Accordion>
 
-      {/* ------------------- ACCORDION: Logged Meals (open) ------------------- */}
+      {/* ------------------- Logged Meals ------------------- */}
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography sx={{ fontWeight: 700 }}>Meals Logged Today ({todayUS})</Typography>
@@ -902,12 +999,17 @@ export default function MealTracker({ onMealUpdate }) {
                   boxShadow: '0 8px 24px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.02)'
                 }}
               >
-                {mealLog.map((m, i) => (
+                {displayMeals.map((m, i) => (
                   <Box key={`${m.name}-${i}`}>
                     <ListItem
                       secondaryAction={
                         <Tooltip title="Delete this meal">
-                          <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
+                          <IconButton
+                            edge="end"
+                            aria-label="delete meal"
+                            onClick={() => handleDeleteMeal(i)}
+                            size="small"
+                          >
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -915,19 +1017,18 @@ export default function MealTracker({ onMealUpdate }) {
                     >
                       <ListItemText
                         primary={<Typography fontWeight={500}>{m.name}</Typography>}
-                        secondary={formatMealSecondary(m)}
+                        secondary={formatMealSecondary(m.calories, m._displayMacros)}
                       />
                     </ListItem>
-                    {i < mealLog.length - 1 && <Divider />}
+                    {i < displayMeals.length - 1 && <Divider />}
                   </Box>
                 ))}
               </List>
 
               <Typography variant="h6" align="right" sx={{ mt: 2, fontWeight: 600 }}>
-                Total Calories: {total}
+                Total Calories: {fmt0(totalCalories)}
               </Typography>
 
-              {/* Optional: show totals macros if any meal has macros */}
               <Typography variant="body2" align="right" color="text.secondary" sx={{ mt: 0.5 }}>
                 Totals — P {fmt0(totalMacros.protein)}g • C {fmt0(totalMacros.carbs)}g • F {fmt0(totalMacros.fat)}g
               </Typography>
