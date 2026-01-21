@@ -1,180 +1,526 @@
 [
-  { "id": "apple", "name": "Apple", "portions": [{ "id": "medium", "label": "1 medium", "unit": "item", "calories": 95 }] },
-  { "id": "banana", "name": "Banana", "portions": [{ "id": "medium", "label": "1 medium", "unit": "item", "calories": 105 }] },
+  {
+    "id": "apple",
+    "name": "Apple",
+    "portions": [
+      { "id": "medium", "label": "1 medium", "unit": "item", "calories": 95, "protein_g": 0.5, "carbs_g": 25, "fat_g": 0.3 }
+    ]
+  },
+  {
+    "id": "banana",
+    "name": "Banana",
+    "portions": [
+      { "id": "medium", "label": "1 medium", "unit": "item", "calories": 105, "protein_g": 1.3, "carbs_g": 27, "fat_g": 0.3 }
+    ]
+  },
 
-  { "id": "chicken_breast", "name": "Chicken Breast", "portions": [
-    { "id": "100g", "label": "100 g", "unit": "g", "calories": 165 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115 }
-  ] },
+  {
+    "id": "chicken_breast",
+    "name": "Chicken Breast",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 165, "protein_g": 31, "carbs_g": 0, "fat_g": 3.6 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115, "protein_g": 22, "carbs_g": 0, "fat_g": 2.6 }
+    ]
+  },
 
-  { "id": "eggs", "name": "Eggs", "portions": [
-    { "id": "1_large", "label": "1 large egg", "unit": "egg", "calories": 70 }
-  ] },
+  {
+    "id": "eggs",
+    "name": "Eggs",
+    "portions": [
+      { "id": "1_large", "label": "1 large egg", "unit": "egg", "calories": 70, "protein_g": 6, "carbs_g": 0.5, "fat_g": 5 }
+    ]
+  },
 
-  { "id": "egg_whites", "name": "Egg Whites", "portions": [
-    { "id": "3_tbsp", "label": "3 tbsp", "unit": "tbsp", "calories": 51 },
-    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 120 }
-  ] },
+  {
+    "id": "egg_whites",
+    "name": "Egg Whites",
+    "portions": [
+      { "id": "3_tbsp", "label": "3 tbsp", "unit": "tbsp", "calories": 51, "protein_g": 11, "carbs_g": 0.7, "fat_g": 0.1 },
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 120, "protein_g": 26, "carbs_g": 1.5, "fat_g": 0.3 }
+    ]
+  },
 
-  { "id": "oatmeal", "name": "Oatmeal", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 150 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 75 }
-  ] },
+  {
+    "id": "oatmeal",
+    "name": "Oatmeal",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 150, "protein_g": 5, "carbs_g": 27, "fat_g": 3 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 75, "protein_g": 2.5, "carbs_g": 13.5, "fat_g": 1.5 }
+    ]
+  },
 
-  { "id": "oats", "name": "Oats", "portions": [
-    { "id": "half_cup_dry", "label": "1/2 cup dry", "unit": "cup", "calories": 150 }
-  ] },
+  {
+    "id": "oats",
+    "name": "Oats",
+    "portions": [
+      { "id": "half_cup_dry", "label": "1/2 cup dry", "unit": "cup", "calories": 150, "protein_g": 5, "carbs_g": 27, "fat_g": 3 }
+    ]
+  },
 
-  { "id": "white_rice", "name": "White Rice", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 205 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 102 }
-  ] },
+  {
+    "id": "white_rice",
+    "name": "White Rice",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 205, "protein_g": 4.3, "carbs_g": 45, "fat_g": 0.4 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 102, "protein_g": 2.1, "carbs_g": 22.5, "fat_g": 0.2 }
+    ]
+  },
 
-  { "id": "brown_rice", "name": "Brown Rice", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 215 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 108 }
-  ] },
+  {
+    "id": "brown_rice",
+    "name": "Brown Rice",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 215, "protein_g": 5, "carbs_g": 45, "fat_g": 1.8 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 108, "protein_g": 2.5, "carbs_g": 22.5, "fat_g": 0.9 }
+    ]
+  },
 
-  { "id": "broccoli", "name": "Broccoli", "portions": [
-    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 55 },
-    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 28 }
-  ] },
+  {
+    "id": "broccoli",
+    "name": "Broccoli",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 55, "protein_g": 3.7, "carbs_g": 11.2, "fat_g": 0.6 },
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 28, "protein_g": 1.9, "carbs_g": 5.6, "fat_g": 0.3 }
+    ]
+  },
 
-  { "id": "avocado", "name": "Avocado", "portions": [
-    { "id": "whole", "label": "1 whole", "unit": "item", "calories": 240 },
-    { "id": "half", "label": "1/2 avocado", "unit": "item", "calories": 120 },
-    { "id": "quarter", "label": "1/4 avocado", "unit": "item", "calories": 60 }
-  ] },
+  {
+    "id": "avocado",
+    "name": "Avocado",
+    "portions": [
+      { "id": "whole", "label": "1 whole", "unit": "item", "calories": 240, "protein_g": 3, "carbs_g": 12.8, "fat_g": 22 },
+      { "id": "half", "label": "1/2 avocado", "unit": "item", "calories": 120, "protein_g": 1.5, "carbs_g": 6.4, "fat_g": 11 },
+      { "id": "quarter", "label": "1/4 avocado", "unit": "item", "calories": 60, "protein_g": 0.8, "carbs_g": 3.2, "fat_g": 5.5 }
+    ]
+  },
 
-  { "id": "peanut_butter", "name": "Peanut Butter", "portions": [
-    { "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 190 },
-    { "id": "half_tbsp", "label": "1/2 tbsp", "unit": "tbsp", "calories": 48 }
-  ] },
+  {
+    "id": "peanut_butter",
+    "name": "Peanut Butter",
+    "portions": [
+      { "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 190, "protein_g": 8, "carbs_g": 7, "fat_g": 16 },
+      { "id": "half_tbsp", "label": "1/2 tbsp", "unit": "tbsp", "calories": 48, "protein_g": 2, "carbs_g": 1.8, "fat_g": 4 }
+    ]
+  },
 
-  { "id": "almonds", "name": "Almonds", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 165 }] },
+  {
+    "id": "almonds",
+    "name": "Almonds",
+    "portions": [
+      { "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 165, "protein_g": 6, "carbs_g": 6, "fat_g": 14 }
+    ]
+  },
 
-  { "id": "greek_yogurt", "name": "Greek Yogurt (plain)", "portions": [
-    { "id": "6_oz", "label": "6 oz", "unit": "oz", "calories": 100 },
-    { "id": "150g", "label": "150 g / 5.3 oz", "unit": "g", "calories": 90 },
-    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 70 }
-  ] },
+  {
+    "id": "greek_yogurt",
+    "name": "Greek Yogurt (plain)",
+    "portions": [
+      { "id": "6_oz", "label": "6 oz", "unit": "oz", "calories": 100, "protein_g": 17, "carbs_g": 6, "fat_g": 0 },
+      { "id": "150g", "label": "150 g / 5.3 oz", "unit": "g", "calories": 90, "protein_g": 15, "carbs_g": 6, "fat_g": 0 },
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 70, "protein_g": 12, "carbs_g": 4, "fat_g": 0 }
+    ]
+  },
 
-  { "id": "protein_shake", "name": "Protein Shake", "portions": [
-    { "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120 },
-    { "id": "2_scoops", "label": "2 scoops", "unit": "scoop", "calories": 240 }
-  ] },
+  {
+    "id": "protein_shake",
+    "name": "Protein Shake",
+    "portions": [
+      { "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1.5 },
+      { "id": "2_scoops", "label": "2 scoops", "unit": "scoop", "calories": 240, "protein_g": 48, "carbs_g": 6, "fat_g": 3 }
+    ]
+  },
 
-  { "id": "whey_protein", "name": "Whey Protein (water)", "portions": [{ "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120 }] },
+  {
+    "id": "whey_protein",
+    "name": "Whey Protein (water)",
+    "portions": [
+      { "id": "1_scoop", "label": "1 scoop", "unit": "scoop", "calories": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1.5 }
+    ]
+  },
 
-  { "id": "granola_bar", "name": "Granola Bar", "portions": [{ "id": "1_bar", "label": "1 bar", "unit": "item", "calories": 130 }] },
-  { "id": "cheddar_cheese", "name": "Cheddar Cheese", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 115 }] },
-  { "id": "pepper_jack_stick", "name": "Pepper Jack Cheese Stick", "portions": [{ "id": "1_stick", "label": "1 stick", "unit": "item", "calories": 90 }] },
+  {
+    "id": "granola_bar",
+    "name": "Granola Bar",
+    "portions": [
+      { "id": "1_bar", "label": "1 bar", "unit": "item", "calories": 130, "protein_g": 3, "carbs_g": 22, "fat_g": 4 }
+    ]
+  },
+  {
+    "id": "cheddar_cheese",
+    "name": "Cheddar Cheese",
+    "portions": [
+      { "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 115, "protein_g": 7, "carbs_g": 0.4, "fat_g": 9.4 }
+    ]
+  },
+  {
+    "id": "pepper_jack_stick",
+    "name": "Pepper Jack Cheese Stick",
+    "portions": [
+      { "id": "1_stick", "label": "1 stick", "unit": "item", "calories": 90, "protein_g": 6, "carbs_g": 1, "fat_g": 7 }
+    ]
+  },
 
-  { "id": "turkey_sandwich", "name": "Turkey Sandwich", "portions": [{ "id": "1", "label": "1 sandwich", "unit": "item", "calories": 320 }] },
+  {
+    "id": "turkey_sandwich",
+    "name": "Turkey Sandwich",
+    "portions": [
+      { "id": "1", "label": "1 sandwich", "unit": "item", "calories": 320, "protein_g": 22, "carbs_g": 34, "fat_g": 10 }
+    ]
+  },
 
-  { "id": "pasta", "name": "Pasta", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 200 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 100 }
-  ] },
+  {
+    "id": "pasta",
+    "name": "Pasta",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 200, "protein_g": 7, "carbs_g": 42, "fat_g": 1.2 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 100, "protein_g": 3.5, "carbs_g": 21, "fat_g": 0.6 }
+    ]
+  },
 
-  { "id": "salmon", "name": "Salmon", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 208 }] },
-  { "id": "ground_beef_8020", "name": "Ground Beef (80/20)", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 254 }] },
-  { "id": "bison", "name": "Bison", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 143 }] },
-  { "id": "beef_steak_diced", "name": "Beef Steak, diced", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 210 }] },
-  { "id": "ground_turkey_93", "name": "Ground Turkey (93% lean)", "portions": [{ "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 120 }] },
+  {
+    "id": "salmon",
+    "name": "Salmon",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 208, "protein_g": 20, "carbs_g": 0, "fat_g": 13 }
+    ]
+  },
+  {
+    "id": "ground_beef_8020",
+    "name": "Ground Beef (80/20)",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 254, "protein_g": 17, "carbs_g": 0, "fat_g": 20 }
+    ]
+  },
+  {
+    "id": "bison",
+    "name": "Bison",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 143, "protein_g": 28, "carbs_g": 0, "fat_g": 2.4 }
+    ]
+  },
+  {
+    "id": "beef_steak_diced",
+    "name": "Beef Steak, diced",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 210, "protein_g": 26, "carbs_g": 0, "fat_g": 12 }
+    ]
+  },
+  {
+    "id": "ground_turkey_93",
+    "name": "Ground Turkey (93% lean)",
+    "portions": [
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 120, "protein_g": 19, "carbs_g": 0, "fat_g": 5 }
+    ]
+  },
 
-  { "id": "sweet_potato", "name": "Sweet Potato", "portions": [
-    { "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 103 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 90 }
-  ] },
+  {
+    "id": "sweet_potato",
+    "name": "Sweet Potato",
+    "portions": [
+      { "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 103, "protein_g": 2.3, "carbs_g": 24, "fat_g": 0.2 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 90, "protein_g": 2, "carbs_g": 21, "fat_g": 0.2 }
+    ]
+  },
 
-  { "id": "carrots", "name": "Carrots", "portions": [
-    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50 },
-    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 25 }
-  ] },
+  {
+    "id": "carrots",
+    "name": "Carrots",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50, "protein_g": 1.2, "carbs_g": 12, "fat_g": 0.3 },
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 25, "protein_g": 0.6, "carbs_g": 6, "fat_g": 0.2 }
+    ]
+  },
 
-  { "id": "cucumber", "name": "Cucumber", "portions": [{ "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 45 }] },
+  {
+    "id": "cucumber",
+    "name": "Cucumber",
+    "portions": [
+      { "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 45, "protein_g": 2, "carbs_g": 11, "fat_g": 0.3 }
+    ]
+  },
 
-  { "id": "tuna_canned", "name": "Tuna (canned)", "portions": [{ "id": "3_oz", "label": "3 oz", "unit": "oz", "calories": 100 }] },
+  {
+    "id": "tuna_canned",
+    "name": "Tuna (canned)",
+    "portions": [
+      { "id": "3_oz", "label": "3 oz", "unit": "oz", "calories": 100, "protein_g": 22, "carbs_g": 0, "fat_g": 1 }
+    ]
+  },
 
-  { "id": "milk_whole", "name": "Milk (whole)", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 150 }] },
+  {
+    "id": "milk_whole",
+    "name": "Milk (whole)",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 150, "protein_g": 8, "carbs_g": 12, "fat_g": 8 }
+    ]
+  },
 
-  { "id": "orange", "name": "Orange", "portions": [{ "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 62 }] },
-  { "id": "strawberries", "name": "Strawberries", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50 }] },
-  { "id": "blueberries", "name": "Blueberries", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 85 }] },
+  {
+    "id": "orange",
+    "name": "Orange",
+    "portions": [
+      { "id": "1_medium", "label": "1 medium", "unit": "item", "calories": 62, "protein_g": 1.2, "carbs_g": 15.4, "fat_g": 0.2 }
+    ]
+  },
+  {
+    "id": "strawberries",
+    "name": "Strawberries",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 50, "protein_g": 1, "carbs_g": 12, "fat_g": 0.5 }
+    ]
+  },
+  {
+    "id": "blueberries",
+    "name": "Blueberries",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 85, "protein_g": 1.1, "carbs_g": 21.4, "fat_g": 0.5 }
+    ]
+  },
 
-  { "id": "toast", "name": "Toast", "portions": [{ "id": "1_slice", "label": "1 slice", "unit": "slice", "calories": 80 }] },
-  { "id": "bagel", "name": "Bagel (plain)", "portions": [{ "id": "1", "label": "1 bagel", "unit": "item", "calories": 280 }] },
+  {
+    "id": "toast",
+    "name": "Toast",
+    "portions": [
+      { "id": "1_slice", "label": "1 slice", "unit": "slice", "calories": 80, "protein_g": 3, "carbs_g": 15, "fat_g": 1 }
+    ]
+  },
+  {
+    "id": "bagel",
+    "name": "Bagel (plain)",
+    "portions": [
+      { "id": "1", "label": "1 bagel", "unit": "item", "calories": 280, "protein_g": 10, "carbs_g": 56, "fat_g": 2 }
+    ]
+  },
 
-  { "id": "butter", "name": "Butter", "portions": [{ "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 100 }] },
+  {
+    "id": "butter",
+    "name": "Butter",
+    "portions": [
+      { "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 100, "protein_g": 0.1, "carbs_g": 0, "fat_g": 11 }
+    ]
+  },
 
-  { "id": "olive_oil", "name": "Olive Oil", "portions": [
-    { "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 119 },
-    { "id": "1_tsp", "label": "1 tsp", "unit": "tsp", "calories": 40 }
-  ] },
+  {
+    "id": "olive_oil",
+    "name": "Olive Oil",
+    "portions": [
+      { "id": "1_tbsp", "label": "1 tbsp", "unit": "tbsp", "calories": 119, "protein_g": 0, "carbs_g": 0, "fat_g": 13.5 },
+      { "id": "1_tsp", "label": "1 tsp", "unit": "tsp", "calories": 40, "protein_g": 0, "carbs_g": 0, "fat_g": 4.5 }
+    ]
+  },
 
-  { "id": "cereal", "name": "Cereal", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 110 }] },
+  {
+    "id": "cereal",
+    "name": "Cereal",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 110, "protein_g": 2, "carbs_g": 24, "fat_g": 1 }
+    ]
+  },
 
-  { "id": "pizza_slice_cheese", "name": "Pizza Slice (cheese)", "portions": [{ "id": "1", "label": "1 slice", "unit": "slice", "calories": 285 }] },
-  { "id": "burger_single", "name": "Burger (single patty)", "portions": [{ "id": "1", "label": "1 burger", "unit": "item", "calories": 354 }] },
-  { "id": "fries_small", "name": "French Fries", "portions": [{ "id": "small", "label": "Small", "unit": "serving", "calories": 230 }] },
+  {
+    "id": "pizza_slice_cheese",
+    "name": "Pizza Slice (cheese)",
+    "portions": [
+      { "id": "1", "label": "1 slice", "unit": "slice", "calories": 285, "protein_g": 12, "carbs_g": 36, "fat_g": 10 }
+    ]
+  },
+  {
+    "id": "burger_single",
+    "name": "Burger (single patty)",
+    "portions": [
+      { "id": "1", "label": "1 burger", "unit": "item", "calories": 354, "protein_g": 20, "carbs_g": 29, "fat_g": 17 }
+    ]
+  },
+  {
+    "id": "fries_small",
+    "name": "French Fries",
+    "portions": [
+      { "id": "small", "label": "Small", "unit": "serving", "calories": 230, "protein_g": 3, "carbs_g": 30, "fat_g": 11 }
+    ]
+  },
 
-  { "id": "ice_cream", "name": "Ice Cream", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 137 }] },
-  { "id": "soda", "name": "Soda", "portions": [{ "id": "12_oz", "label": "12 oz can", "unit": "oz", "calories": 150 }] },
+  {
+    "id": "ice_cream",
+    "name": "Ice Cream",
+    "portions": [
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 137, "protein_g": 2.3, "carbs_g": 16, "fat_g": 7.3 }
+    ]
+  },
+  {
+    "id": "soda",
+    "name": "Soda",
+    "portions": [
+      { "id": "12_oz", "label": "12 oz can", "unit": "oz", "calories": 150, "protein_g": 0, "carbs_g": 39, "fat_g": 0 }
+    ]
+  },
 
-  { "id": "coffee_black", "name": "Coffee (black)", "portions": [{ "id": "1", "label": "1 cup", "unit": "cup", "calories": 2 }] },
-  { "id": "latte", "name": "Latte", "portions": [{ "id": "medium", "label": "Medium", "unit": "serving", "calories": 190 }] },
+  {
+    "id": "coffee_black",
+    "name": "Coffee (black)",
+    "portions": [
+      { "id": "1", "label": "1 cup", "unit": "cup", "calories": 2, "protein_g": 0.3, "carbs_g": 0, "fat_g": 0 }
+    ]
+  },
+  {
+    "id": "latte",
+    "name": "Latte",
+    "portions": [
+      { "id": "medium", "label": "Medium", "unit": "serving", "calories": 190, "protein_g": 12, "carbs_g": 18, "fat_g": 7 }
+    ]
+  },
 
-  { "id": "smoothie", "name": "Smoothie", "portions": [{ "id": "16_oz", "label": "16 oz", "unit": "oz", "calories": 250 }] },
-  { "id": "chocolate_bar", "name": "Chocolate Bar", "portions": [{ "id": "1_5_oz", "label": "1.5 oz", "unit": "oz", "calories": 210 }] },
+  {
+    "id": "smoothie",
+    "name": "Smoothie",
+    "portions": [
+      { "id": "16_oz", "label": "16 oz", "unit": "oz", "calories": 250, "protein_g": 5, "carbs_g": 55, "fat_g": 1 }
+    ]
+  },
+  {
+    "id": "chocolate_bar",
+    "name": "Chocolate Bar",
+    "portions": [
+      { "id": "1_5_oz", "label": "1.5 oz", "unit": "oz", "calories": 210, "protein_g": 2, "carbs_g": 24, "fat_g": 12 }
+    ]
+  },
 
-  { "id": "popcorn_air", "name": "Popcorn (air-popped)", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30 }] },
-  { "id": "trail_mix", "name": "Trail Mix", "portions": [{ "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 140 }] },
-  { "id": "mixed_nuts", "name": "Mixed Nuts", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 400 }] },
+  {
+    "id": "popcorn_air",
+    "name": "Popcorn (air-popped)",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30, "protein_g": 1, "carbs_g": 6, "fat_g": 0.4 }
+    ]
+  },
+  {
+    "id": "trail_mix",
+    "name": "Trail Mix",
+    "portions": [
+      { "id": "1_oz", "label": "1 oz", "unit": "oz", "calories": 140, "protein_g": 4, "carbs_g": 14, "fat_g": 8 }
+    ]
+  },
+  {
+    "id": "mixed_nuts",
+    "name": "Mixed Nuts",
+    "portions": [
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 400, "protein_g": 14, "carbs_g": 14, "fat_g": 36 }
+    ]
+  },
 
-  { "id": "tofu", "name": "Tofu", "portions": [{ "id": "100g", "label": "100 g", "unit": "g", "calories": 76 }] },
+  {
+    "id": "tofu",
+    "name": "Tofu",
+    "portions": [
+      { "id": "100g", "label": "100 g", "unit": "g", "calories": 76, "protein_g": 8, "carbs_g": 1.9, "fat_g": 4.8 }
+    ]
+  },
 
-  { "id": "quinoa", "name": "Quinoa", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 222 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 111 }
-  ] },
+  {
+    "id": "quinoa",
+    "name": "Quinoa",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 222, "protein_g": 8, "carbs_g": 39, "fat_g": 3.6 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 111, "protein_g": 4, "carbs_g": 19.5, "fat_g": 1.8 }
+    ]
+  },
 
-  { "id": "lentils", "name": "Lentils", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 230 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115 }
-  ] },
+  {
+    "id": "lentils",
+    "name": "Lentils",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 230, "protein_g": 18, "carbs_g": 40, "fat_g": 0.8 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 115, "protein_g": 9, "carbs_g": 20, "fat_g": 0.4 }
+    ]
+  },
 
-  { "id": "hummus", "name": "Hummus", "portions": [{ "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 70 }] },
+  {
+    "id": "hummus",
+    "name": "Hummus",
+    "portions": [
+      { "id": "2_tbsp", "label": "2 tbsp", "unit": "tbsp", "calories": 70, "protein_g": 2, "carbs_g": 4, "fat_g": 5 }
+    ]
+  },
 
-  { "id": "spinach", "name": "Spinach", "portions": [
-    { "id": "1_cup_raw", "label": "1 cup raw", "unit": "cup", "calories": 7 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 20 }
-  ] },
+  {
+    "id": "spinach",
+    "name": "Spinach",
+    "portions": [
+      { "id": "1_cup_raw", "label": "1 cup raw", "unit": "cup", "calories": 7, "protein_g": 0.9, "carbs_g": 1.1, "fat_g": 0.1 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 20, "protein_g": 2.6, "carbs_g": 3.2, "fat_g": 0.3 }
+    ]
+  },
 
-  { "id": "zucchini", "name": "Zucchini", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 17 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 9 }
-  ] },
+  {
+    "id": "zucchini",
+    "name": "Zucchini",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 17, "protein_g": 1.2, "carbs_g": 3.1, "fat_g": 0.3 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 9, "protein_g": 0.6, "carbs_g": 1.6, "fat_g": 0.2 }
+    ]
+  },
 
-  { "id": "orzo", "name": "Orzo", "portions": [
-    { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 210 },
-    { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 105 }
-  ] },
+  {
+    "id": "orzo",
+    "name": "Orzo",
+    "portions": [
+      { "id": "1_cup_cooked", "label": "1 cup cooked", "unit": "cup", "calories": 210, "protein_g": 7, "carbs_g": 41, "fat_g": 1.5 },
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 105, "protein_g": 3.5, "carbs_g": 20.5, "fat_g": 0.8 }
+    ]
+  },
 
-  { "id": "diced_tomatoes", "name": "Diced Tomatoes", "portions": [
-    { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 20 },
-    { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 40 }
-  ] },
+  {
+    "id": "diced_tomatoes",
+    "name": "Diced Tomatoes",
+    "portions": [
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 20, "protein_g": 1, "carbs_g": 4.5, "fat_g": 0.2 },
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 40, "protein_g": 2, "carbs_g": 9, "fat_g": 0.4 }
+    ]
+  },
 
-  { "id": "green_bell_pepper", "name": "Green Bell Pepper", "portions": [{ "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30 }] },
-  { "id": "onion_chopped", "name": "Onion (chopped)", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 32 }] },
-  { "id": "garlic", "name": "Garlic", "portions": [{ "id": "1_clove", "label": "1 clove", "unit": "clove", "calories": 4 }] },
+  {
+    "id": "green_bell_pepper",
+    "name": "Green Bell Pepper",
+    "portions": [
+      { "id": "1_cup", "label": "1 cup", "unit": "cup", "calories": 30, "protein_g": 1, "carbs_g": 7, "fat_g": 0.3 }
+    ]
+  },
+  {
+    "id": "onion_chopped",
+    "name": "Onion (chopped)",
+    "portions": [
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 32, "protein_g": 0.9, "carbs_g": 7.5, "fat_g": 0.1 }
+    ]
+  },
+  {
+    "id": "garlic",
+    "name": "Garlic",
+    "portions": [
+      { "id": "1_clove", "label": "1 clove", "unit": "clove", "calories": 4, "protein_g": 0.2, "carbs_g": 1, "fat_g": 0 }
+    ]
+  },
 
-  { "id": "bacon", "name": "Bacon", "portions": [{ "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 270 }] },
+  {
+    "id": "bacon",
+    "name": "Bacon",
+    "portions": [
+      { "id": "half_cup_cooked", "label": "1/2 cup cooked", "unit": "cup", "calories": 270, "protein_g": 18, "carbs_g": 0, "fat_g": 22 }
+    ]
+  },
 
-  { "id": "cottage_cheese", "name": "Cottage Cheese", "portions": [{ "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 110 }] },
+  {
+    "id": "cottage_cheese",
+    "name": "Cottage Cheese",
+    "portions": [
+      { "id": "half_cup", "label": "1/2 cup", "unit": "cup", "calories": 110, "protein_g": 14, "carbs_g": 5, "fat_g": 4.5 }
+    ]
+  },
 
-  { "id": "fairlife_core_power_elite", "name": "Fairlife Core Power Elite (42 g protein)", "portions": [{ "id": "1_bottle", "label": "1 bottle", "unit": "item", "calories": 240 }] },
+  {
+    "id": "fairlife_core_power_elite",
+    "name": "Fairlife Core Power Elite (42 g protein)",
+    "portions": [
+      { "id": "1_bottle", "label": "1 bottle", "unit": "item", "calories": 240, "protein_g": 42, "carbs_g": 8, "fat_g": 3 }
+    ]
+  },
 
   { "id": "custom_food", "name": "Custom Food (enter calories/macros)", "action": "open_custom_nutrition" }
 ]

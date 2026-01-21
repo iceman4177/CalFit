@@ -91,6 +91,106 @@ function safeNumber(val, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function clampNonNeg(n) {
+  const x = Number(n);
+  return Number.isFinite(x) && x > 0 ? x : 0;
+}
+
+/**
+ * Pull macros from the SAME place calories come from: foodData.json portions.
+ * If macros are missing in the portion (older foodData), we apply a small fallback
+ * for common foods so totals don’t show 0g (especially eggs).
+ *
+ * This keeps the “source of truth” aligned with your portion selection flow.
+ */
+function getPerPortionMacros({ food, portion }) {
+  const p = portion || {};
+  const foodId = String(food?.id || '').toLowerCase();
+  const foodName = String(food?.name || '').toLowerCase();
+  const unit = String(p?.unit || '').toLowerCase();
+
+  // 1) Preferred: explicit macros on the portion (future-proof once you add them to foodData)
+  const hasExplicit =
+    p?.protein != null || p?.carbs != null || p?.fat != null ||
+    p?.protein_g != null || p?.carbs_g != null || p?.fat_g != null;
+
+  if (hasExplicit) {
+    return {
+      protein_g: clampNonNeg(p.protein_g ?? p.protein ?? 0),
+      carbs_g: clampNonNeg(p.carbs_g ?? p.carbs ?? 0),
+      fat_g: clampNonNeg(p.fat_g ?? p.fat ?? 0)
+    };
+  }
+
+  // 2) Minimal fallback for common manual foods when macros aren’t stored in foodData yet
+  // Eggs: 1 large egg ~ 6P / 0.5C / 5F (and you already use 70 kcal/egg)
+  if (foodId === 'eggs' || (foodName.includes('egg') && unit === 'egg')) {
+    return { protein_g: 6, carbs_g: 0.5, fat_g: 5 };
+  }
+
+  // Oats (dry): per 1/2 cup dry ~ 5P / 27C / 3F (your baseline assumes 150 kcal)
+  if (foodId === 'oats' || foodName.includes('oat')) {
+    // This is “per portion”, not per 1 unit; your foodData portion represents “1/2 cup dry”
+    // so return the macros for that portion.
+    if (String(p?.id || '').toLowerCase().includes('half_cup_dry') || String(p?.label || '').toLowerCase().includes('1/2 cup')) {
+      return { protein_g: 5, carbs_g: 27, fat_g: 3 };
+    }
+  }
+
+  // Peanut butter: per 1/2 tbsp ~ 2P / 1.5C / 4F (scaled from 1 tbsp 4P/3C/8F)
+  if (foodId === 'peanut_butter' || foodName.includes('peanut butter') || foodName === 'pb') {
+    const pid = String(p?.id || '').toLowerCase();
+    if (pid.includes('half_tbsp') || String(p?.label || '').toLowerCase().includes('1/2 tbsp')) {
+      return { protein_g: 2, carbs_g: 1.5, fat_g: 4 };
+    }
+    if (pid.includes('2_tbsp') || String(p?.label || '').toLowerCase().includes('2 tbsp')) {
+      return { protein_g: 8, carbs_g: 6, fat_g: 16 };
+    }
+    // default to 1 tbsp
+    return { protein_g: 4, carbs_g: 3, fat_g: 8 };
+  }
+
+  // No macros available
+  return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+}
+
+function calcStructuredTotals({ food, portion, qty, caloriesOverride }) {
+  const q = Number.isFinite(Number(qty)) ? Number(qty) : 0;
+  const perCals = safeNumber(portion?.calories, 0);
+  const baseCals = Math.round(Math.max(0, q * perCals));
+
+  // If user overrides calories, keep calories overridden,
+  // but macros should still come from the same portion data.
+  const calories = Number.isFinite(Number(caloriesOverride)) && Number(caloriesOverride) > 0
+    ? Math.round(Number(caloriesOverride))
+    : baseCals;
+
+  const perMacros = getPerPortionMacros({ food, portion });
+  let protein = perMacros.protein_g * q;
+  let carbs = perMacros.carbs_g * q;
+  let fat = perMacros.fat_g * q;
+
+  // Optional: if calories are overridden and macros exist, proportionally scale macros
+  // so protein doesn’t lie when user overrides calories hugely.
+  // BUT: if macros are all zero (no data), don’t scale.
+  const macroCals = kcalFromMacros(protein, carbs, fat);
+  if (macroCals > 0 && baseCals > 0 && calories !== baseCals) {
+    const factor = calories / baseCals;
+    protein = protein * factor;
+    carbs = carbs * factor;
+    fat = fat * factor;
+  }
+
+  return {
+    calories: Math.max(0, Math.round(calories)),
+    macros: {
+      protein_g: Math.max(0, Math.round(protein)),
+      carbs_g: Math.max(0, Math.round(carbs)),
+      fat_g: Math.max(0, Math.round(fat))
+    }
+  };
+}
+
 // ---------- Dialogs ----------
 function CustomNutritionDialog({ open, onClose, onConfirm }) {
   const [name, setName] = useState('');
@@ -365,7 +465,7 @@ export default function MealTracker({ onMealUpdate }) {
     const safe = {
       name,
       calories: Math.max(0, Number(calories) || 0),
-      // Persist macros locally when available so Daily Recap Coach can be more detailed offline
+      // Persist macros locally so Daily Recap Coach totals match what you logged
       protein_g: macros?.protein_g != null ? Number(macros.protein_g) || 0 : undefined,
       carbs_g: macros?.carbs_g != null ? Number(macros.carbs_g) || 0 : undefined,
       fat_g: macros?.fat_g != null ? Number(macros.fat_g) || 0 : undefined,
@@ -438,9 +538,18 @@ export default function MealTracker({ onMealUpdate }) {
       // Nice display name: "Eggs — 6 eggs (1 large egg)"
       const displayName = `${selectedFood.name} — ${q} ${unitPretty} (${selectedPortion.label})`;
 
+      // ✅ Pull macros from the SAME flow as calories: foodData portion * qty
+      const totals = calcStructuredTotals({
+        food: selectedFood,
+        portion: selectedPortion,
+        qty: q,
+        caloriesOverride: caloriesManualOverride ? c : undefined
+      });
+
       await logOne({
         name: displayName,
-        calories: c,
+        calories: totals.calories,
+        macros: totals.macros,
         meta: {
           food_id: selectedFood.id,
           portion_id: selectedPortion.id,
