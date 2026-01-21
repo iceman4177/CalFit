@@ -1063,60 +1063,6 @@ Output format (use these headings):
     </Typography>
   ) : null;
 
-  const UpsellCard = !isPro ? (
-    <Card
-      elevation={0}
-      sx={{
-        mb: 2.5,
-        border: "1px solid rgba(2,6,23,0.08)",
-        background: "linear-gradient(180deg, #ffffff, #fbfdff)",
-        borderRadius: 2,
-      }}
-    >
-      <CardContent>
-        {!isPro && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-            <FeatureUseBadge featureKey="daily_recap" isPro={false} />
-          </Box>
-        )}
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
-          <Box sx={{ textAlign: { xs: "center", sm: "left" } }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 1 }}>
-              Unlock AI Daily Recaps <Chip label="PRO" size="small" color="primary" sx={{ ml: 0.5 }} />
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Detailed breakdowns, goals tracking, meal timing tips, and better recommendations.
-            </Typography>
-          </Box>
-
-          <Stack direction="row" spacing={1} justifyContent={{ xs: "center", sm: "flex-end" }}>
-            <Button
-              variant="contained"
-              sx={{ fontWeight: 800 }}
-              onClick={async () => {
-                if (!user) {
-                  window.dispatchEvent(new CustomEvent("slimcal:open-signin"));
-                } else {
-                  setModalOpen(true);
-                }
-              }}
-            >
-              Start Free Trial
-            </Button>
-          </Stack>
-        </Stack>
-
-        <Divider sx={{ my: 1.5 }} />
-
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent={{ xs: "center", sm: "flex-start" }}>
-          <Feature text="Macros + meal timing coaching" />
-          <Feature text="Saved recap history" />
-          <Feature text="Smarter food suggestions" />
-        </Stack>
-      </CardContent>
-    </Card>
-  ) : null;
-
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
   const RecapHeader = (
@@ -1174,8 +1120,7 @@ Output format (use these headings):
 
   const Inner = (
     <>
-      {!embedded && UpsellCard}
-      {RecapHeader}
+            {RecapHeader}
       {FreeUsageBanner}
 
       {error && (
@@ -1353,11 +1298,3 @@ Output format (use these headings):
   );
 }
 
-function Feature({ text }) {
-  return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <Chip label="✓" size="small" variant="outlined" />
-      <Typography variant="caption">{text}</Typography>
-    </Stack>
-  );
-}
