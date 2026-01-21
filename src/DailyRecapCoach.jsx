@@ -915,7 +915,8 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   }, [isPro, recapKeyToday, dayCtxLoading]);
 
   const handleGetRecap = async () => {
-    if (!isPro && count >= freeRecapLimit) {
+    // NOTE: the limit constant is `freeDailyRecapLimit` (defined above)
+    if (!isPro && count >= freeDailyRecapLimit) {
       setModalOpen(true);
       return;
     }
@@ -1058,7 +1059,7 @@ Output format (use these headings):
   // ---- UI --------------------------------------------------------------------
   const FreeUsageBanner = !isPro ? (
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-      Free recaps used today: <strong>{count}</strong>/{freeRecapLimit}
+      Free recaps used today: <strong>{count}</strong>/{freeDailyRecapLimit}
     </Typography>
   ) : null;
 
