@@ -639,13 +639,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       <Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
           <Stack spacing={2}>
-            <Box sx={{ position: 'relative' }}>
+            <Box>
               {!isProUser() && (
-                <FeatureUseBadge
-                  featureKey="ai_workout"
-                  isPro={false}
-                  sx={{ position: 'absolute', top: -10, right: -10 }}
-                />
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                  <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+                </Box>
               )}
               <Button
                 variant="contained"
