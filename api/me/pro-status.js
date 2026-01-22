@@ -18,7 +18,8 @@ function parseQuery(reqUrl) {
 }
 const OK = new Set(["active", "trialing", "past_due"]);
 const toDate = (v) => (v ? new Date(v) : null);
-const isFuture = (d) => d instanceof Date && !isNaN(d) && d.getTime() > Date.now();
+const isValidDate = (d) => d instanceof Date && !isNaN(d);
+const isFuture = (d) => isValidDate(d) && d.getTime() > Date.now();
 
 /* ------------------------------- handler -------------------------------- */
 export default async function handler(req, res) {
@@ -31,11 +32,12 @@ export default async function handler(req, res) {
   const emailHint = q.email || "";
 
   if (!user_id && !emailHint) {
+    // Keep 200 to avoid noisy console errors; client can treat as logged out
     return res.status(200).json({
       isProActive: false,
       isPro: false,
       reason: "missing_identity",
-      trial_eligible: true,
+      trial_eligible: true, // unknown user -> treat as eligible on client if desired
     });
   }
   if (!supabaseAdmin) {
@@ -50,7 +52,6 @@ export default async function handler(req, res) {
   try {
     // 1) app_users (authoritative for is_pro + trial dates)
     let userRow = null;
-
     if (user_id) {
       const { data } = await supabaseAdmin
         .from("app_users")
@@ -86,34 +87,55 @@ export default async function handler(req, res) {
     // 3) Derive truth
     const userTrialStart = toDate(userRow?.trial_start);
     const userTrialEnd = toDate(userRow?.trial_end);
-
     const subTrialEnd = toDate(subRow?.trial_end);
+
     const trialEnd = userTrialEnd || subTrialEnd || null;
     const trialActive = isFuture(trialEnd);
 
+    const subStatus = String(subRow?.status || "").toLowerCase();
     const subActive =
-      !!subRow?.status &&
-      OK.has(String(subRow.status).toLowerCase()) &&
+      !!subStatus &&
+      OK.has(subStatus) &&
       isFuture(toDate(subRow?.current_period_end));
 
-    // ✅ "One trial only" eligibility:
-    // Eligible ONLY if we have no record of trial ever starting/ending.
-    // (If you store trial history elsewhere, add it here too.)
-    const trialUsed = !!(userTrialStart || userTrialEnd);
-    const trialEligible = !trialUsed;
-
+    // IMPORTANT:
+    // - isProActive is "can use Pro features now" (active sub OR active trial)
+    // - is_pro_flag is "has pro flag" (may be used elsewhere as an indicator)
     const is_pro_flag = !!userRow?.is_pro;
     const isProActive = trialActive || subActive;
 
+    // One-time trial eligibility:
+    // If we've ever seen *any* trial signal in app_users or subscriptions, trial is NOT eligible anymore.
+    const sawAnyTrialSignal =
+      !!userTrialStart ||
+      !!userTrialEnd ||
+      !!subTrialEnd ||
+      subStatus === "trialing";
+
+    const trial_eligible = !sawAnyTrialSignal;
+
+    // Optional: surface a cleaner, UI-friendly "plan_status"
+    // - If Pro active now: return sub status if present else "trialing"
+    // - If not active: return "none"
+    const plan_status =
+      isProActive ? (subRow?.status || (trialActive ? "trialing" : null)) : "none";
+
+    // 4) Response (include both modern and legacy flags)
     return res.status(200).json({
       isProActive,
-      isPro: isProActive, // legacy compatibility
+      isPro: isProActive, // legacy compatibility for old callers expecting `isPro`
       source: (subActive || trialActive) ? "subscriptions" : "none",
 
+      // helpful details
       is_pro: is_pro_flag,
-      status: subRow?.status || null,
-      trial: { active: trialActive, end: trialEnd ? trialEnd.toISOString() : null },
-      trial_eligible: trialEligible,
+      status: subRow?.status || null, // raw subscription status (may be stale/old but kept for debugging)
+      plan_status, // derived, safer for UI
+
+      trial: {
+        active: trialActive,
+        end: trialEnd ? trialEnd.toISOString() : null,
+      },
+      trial_eligible,
 
       current_period_end: subRow?.current_period_end || null,
       email: userRow?.email || emailHint || null,
@@ -125,7 +147,7 @@ export default async function handler(req, res) {
       isPro: false,
       reason: "error",
       detail: e?.message || String(e),
-      trial_eligible: true,
+      trial_eligible: true, // fail-open on eligibility; UI can still choose to be conservative
     });
   }
 }
