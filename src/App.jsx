@@ -86,7 +86,7 @@ import {
 
 const routeTips = {
   '/':            'Daily Evaluation: swipe cards for verdict → stakes → diagnosis → insight.',
-  '/coach':        'Coach (retention): your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
+  '/coach':        'Recap Coach (retention): your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
@@ -662,57 +662,23 @@ export default function App() {
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
+        {/* ✅ New hero quick action: Evaluate */}
+        <Tooltip title="Daily Evaluation (Hero)">
+          <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
+            EVALUATE
+          </Button>
+        </Tooltip>
+
         <Tooltip title="Log Workout">
           <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
             WORKOUT
           </Button>
         </Tooltip>
+
         <Tooltip title="Log Meal">
           <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             MEALS
           </Button>
-        </Tooltip>
-
-        {/* ✅ Coach is now retention tab (separate route) */}
-        <Tooltip title="Coach (Retention)">
-          <span>
-            <Badge
-              invisible={!showCoachHint}
-              badgeContent="AI"
-              color="primary"
-              overlap="rectangular"
-              sx={{
-                '& .MuiBadge-badge': {
-                  fontWeight: 800,
-                  borderRadius: '10px',
-                  height: 18,
-                  minWidth: 22,
-                  px: 0.5,
-                  animation: 'sl-pulse 1.4s ease-in-out infinite',
-                },
-                '@keyframes sl-pulse': {
-                  '0%':   { transform: 'scale(1)' },
-                  '50%':  { transform: 'scale(1.12)' },
-                  '100%': { transform: 'scale(1)' },
-                },
-              }}
-            >
-              <Button
-                component={NavLink}
-                to="/coach"
-                variant="outlined"
-                startIcon={<ChatIcon />}
-                onClick={() => {
-                  if (showCoachHint) {
-                    try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
-                    setShowCoachHint(false);
-                  }
-                }}
-              >
-                COACH
-              </Button>
-            </Badge>
-          </span>
         </Tooltip>
 
         <Tooltip title="Invite Friends">
@@ -720,6 +686,7 @@ export default function App() {
             INVITE
           </Button>
         </Tooltip>
+
         <Tooltip title="More options">
           <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
             MORE
@@ -747,9 +714,36 @@ export default function App() {
           <InfoIcon fontSize="small"/> Edit Info
         </MenuItem>
 
-        {/* ✅ Optional: direct link to Coach in menu too */}
-        <MenuItem component={NavLink} to="/coach" onClick={closeMore}>
-          <ChatIcon fontSize="small"/> Coach
+        {/* ✅ Retention: Recap Coach lives in More now */}
+        <MenuItem
+          component={NavLink}
+          to="/coach"
+          onClick={() => {
+            closeMore();
+            if (showCoachHint) {
+              try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
+              setShowCoachHint(false);
+            }
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <ChatIcon fontSize="small" />
+            Recap Coach
+            <Chip
+              label="AI"
+              size="small"
+              color="primary"
+              sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
+            />
+            {showCoachHint && (
+              <Chip
+                label="NEW"
+                size="small"
+                color="warning"
+                sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
+              />
+            )}
+          </span>
         </MenuItem>
       </Menu>
     </Box>
@@ -939,7 +933,7 @@ export default function App() {
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={DailyEvaluationHome} />
 
-          {/* ✅ Retention side: keep current DailyRecapCoach intact */}
+          {/* ✅ Retention side: Recap Coach */}
           <Route
             path="/coach"
             render={() => (

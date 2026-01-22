@@ -213,24 +213,12 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
         {/* Primary nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
+            {/* ✅ Daily Eval is now the hero home */}
             <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-              Home
+              Evaluate
             </NavLink>
 
-            {/* Retention */}
-            <NavLink to="/coach" style={linkStyle} activeStyle={activeStyle}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                Coach
-                <Tooltip title="AI Daily Recap">
-                  <Chip
-                    label="AI"
-                    size="small"
-                    color="primary"
-                    sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
-                  />
-                </Tooltip>
-              </span>
-            </NavLink>
+            {/* ✅ Coach removed from top-centered nav (moved to More menu in App.jsx) */}
 
             <NavLink to="/meals" style={linkStyle} activeStyle={activeStyle}>
               Meals
