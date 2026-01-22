@@ -1,16 +1,8 @@
 // src/components/UpgradeModal.jsx
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Typography,
-  Chip,
-  Stack,
-  ToggleButton,
-  ToggleButtonGroup,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Button, Typography, Chip, Stack, ToggleButton, ToggleButtonGroup
 } from "@mui/material";
 import { supabase } from "../lib/supabaseClient";
 
@@ -42,26 +34,15 @@ function clearIntent() {
   } catch {}
 }
 
-async function fetchProStatus(userId, email) {
-  try {
-    const qs = new URLSearchParams();
-    if (userId) qs.set("user_id", userId);
-    if (email) qs.set("email", email);
-    const res = await fetch(`/api/me/pro-status?${qs.toString()}`, { credentials: "same-origin" });
-    const json = await res.json().catch(() => ({}));
-    return json || {};
-  } catch {
-    return {};
-  }
-}
-
 export default function UpgradeModal({
   open,
   onClose,
-  title = "Start your 7-Day Free Pro Trial",
-  description = "Unlimited AI workouts, meals & premium insights.",
+  title,
+  description,
   annual = false,
   defaultPlan,
+  // ✅ NEW: controlled by App.jsx from backend truth
+  trialEligible = true,
 }) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -69,14 +50,21 @@ export default function UpgradeModal({
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
   const pollingRef = useRef(false);
 
-  // Server-truth status snapshot (drives UI)
-  const [proStatus, setProStatus] = useState({
-    loading: false,
-    isProActive: false,
-    status: null,
-    trialEligible: null,
-    trialUsed: null,
-  });
+  const isProUser = localStorage.getItem("isPro") === "true";
+
+  const effectiveTitle =
+    title ||
+    (trialEligible
+      ? "Start your 7-Day Free Pro Trial"
+      : "Upgrade to Pro");
+
+  const effectiveDescription =
+    description ||
+    (trialEligible
+      ? "Unlimited AI workouts, meals & premium insights."
+      : "Unlock unlimited AI features, premium insights, and advanced tracking.");
+
+  const priceLine = plan === "annual" ? "$49.99/yr" : "$4.99/mo";
 
   // Sync default plan if props change
   useEffect(() => {
@@ -127,50 +115,6 @@ export default function UpgradeModal({
     };
   }, [open]);
 
-  // Fetch server-truth pro/trial eligibility whenever we have a user and modal is open
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-
-    (async () => {
-      if (!user?.id) {
-        setProStatus({
-          loading: false,
-          isProActive: false,
-          status: null,
-          trialEligible: null,
-          trialUsed: null,
-        });
-        return;
-      }
-
-      setProStatus((s) => ({ ...s, loading: true }));
-      const ps = await fetchProStatus(user.id, user.email);
-      if (cancelled) return;
-
-      setProStatus({
-        loading: false,
-        isProActive: !!ps?.isProActive,
-        status: ps?.status || null,
-        trialEligible: typeof ps?.trialEligible === "boolean" ? ps.trialEligible : null,
-        trialUsed: typeof ps?.trialUsed === "boolean" ? ps.trialUsed : null,
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, user?.id]);
-
-  // Restore plan if we came back from auth redirect
-  useEffect(() => {
-    if (!open) return;
-    const savedPlan = sessionStorage.getItem("upgradePlan");
-    if (savedPlan && (savedPlan === "monthly" || savedPlan === "annual")) {
-      setPlan(savedPlan);
-    }
-  }, [open]);
-
   // AUTO-CONTINUE: if user is present and intent=upgrade exists, jump straight to checkout
   useEffect(() => {
     if (!open || !user || loading) return;
@@ -192,6 +136,7 @@ export default function UpgradeModal({
     setApiError("");
     try {
       rememberIntent(); // <- persist intent BEFORE redirect
+      // persist current plan so we don't lose it
       sessionStorage.setItem("upgradePlan", plan);
 
       const redirectUrl = `${window.location.origin}${window.location.pathname}?intent=upgrade`;
@@ -220,25 +165,23 @@ export default function UpgradeModal({
 
       const clientId = getOrCreateClientId();
 
-      // Optional: pass trialEligible hint (backend must enforce)
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: data.user.id,
           email: data.user.email || null,
-          period: effectivePlan,
+          period: effectivePlan, // server decides price_id
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
-          // IMPORTANT: This is only a hint; backend must be the authority.
-          trial_eligible: proStatus?.trialEligible === true,
+          // ✅ NEW: backend will enforce anyway, but we pass intent
+          trial_eligible: !!trialEligible,
         }),
       });
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok || !json?.url) throw new Error(json?.error || "Checkout session failed");
-
       clearIntent();
       sessionStorage.removeItem("upgradePlan");
       window.location.assign(json.url);
@@ -247,60 +190,23 @@ export default function UpgradeModal({
       setApiError(err.message || "Something went wrong.");
       setLoading(false);
       if (fromAuto) {
-        // keep modal open for manual retry
+        // If auto-continue failed, keep the modal open for manual retry.
       }
     }
   };
 
-  // --- Server-truth derived UI mode ---
-  const isTrialing = String(proStatus.status || "").toLowerCase() === "trialing";
-  const isProActive = !!proStatus.isProActive;
-
-  // If trialEligible === false and trialUsed === true and not Pro -> PRO-only mode (no trial messaging)
-  const proOnlyMode =
-    user &&
-    !isProActive &&
-    proStatus.trialEligible === false &&
-    proStatus.trialUsed === true;
-
-  // Default trial mode if eligible; otherwise pro-only for used trials
-  const showTrialMessaging =
-    !user
-      ? true // pre-auth: can show generic trial headline
-      : (proStatus.trialEligible === true || isTrialing); // only if backend says eligible or currently trialing
-
-  // Override copy dynamically (but respect passed props when appropriate)
-  const computedTitle = user
-    ? (proOnlyMode ? "Upgrade to Pro" : title)
-    : title;
-
-  const computedDescription = user
-    ? (proOnlyMode
-        ? "Unlock unlimited AI recaps, workouts, meals & premium insights."
-        : description)
-    : description;
-
-  const actionLabel = user
-    ? (proOnlyMode ? "Upgrade to Pro" : "Start Free Trial")
-    : "Continue with Google";
-
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>{computedTitle}</DialogTitle>
-
+      <DialogTitle>{effectiveTitle}</DialogTitle>
       <DialogContent>
-        <Typography sx={{ mb: 2 }}>{computedDescription}</Typography>
+        <Typography sx={{ mb: 2 }}>{effectiveDescription}</Typography>
 
-        {/* Server-truth messaging */}
-        {user && proStatus.loading && (
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-            Checking your plan…
-          </Typography>
+        {!isProUser && trialEligible && (
+          <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
         )}
 
-        {/* Trial chip ONLY if eligible/trialing (not based on localStorage) */}
-        {showTrialMessaging && !proOnlyMode && (
-          <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
+        {!isProUser && !trialEligible && (
+          <Chip label="Trial already used" color="warning" size="small" sx={{ mb: 2 }} />
         )}
 
         {/* After sign-in: plan toggle */}
@@ -319,20 +225,14 @@ export default function UpgradeModal({
         )}
 
         <Typography>
-          <strong>{plan === "annual" ? "$49.99/yr" : "$4.99/mo"}</strong>{" "}
+          <strong>{priceLine}</strong>{" "}
           billed {plan === "annual" ? "yearly" : "monthly"}
-          {!proOnlyMode && showTrialMessaging ? " after trial." : "."}
+          {trialEligible ? " after trial." : "."}
         </Typography>
 
         <Typography variant="body2" color="textSecondary">
           Cancel anytime.
         </Typography>
-
-        {proOnlyMode && (
-          <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-            Trial already used on this account. No additional trials available.
-          </Typography>
-        )}
 
         {apiError && (
           <Typography sx={{ mt: 2 }} color="error" variant="body2">
@@ -343,7 +243,7 @@ export default function UpgradeModal({
         {/* Pre-auth: ONLY the Google sign-in button */}
         {!user && (
           <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 1 }}>
-            <Button variant="contained" onClick={signInWithGoogle} disabled={loading}>
+            <Button variant="contained" onClick={signInWithGoogle}>
               Continue with Google
             </Button>
           </Stack>
@@ -353,11 +253,11 @@ export default function UpgradeModal({
       <DialogActions>
         {user ? (
           <>
-            <Button onClick={onClose} disabled={loading}>
-              Maybe later
-            </Button>
+            <Button onClick={onClose} disabled={loading}>Maybe later</Button>
             <Button onClick={() => handleCheckout(false)} variant="contained" disabled={loading}>
-              {loading ? "Redirecting…" : actionLabel}
+              {loading
+                ? "Redirecting…"
+                : (trialEligible ? "Start Free Trial" : "Upgrade to Pro")}
             </Button>
           </>
         ) : (

@@ -18,25 +18,10 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 function absUrl(pathOrUrl, base) {
-  try {
-    return new URL(pathOrUrl).toString();
-  } catch {
-    return new URL(pathOrUrl, base).toString();
-  }
+  try { return new URL(pathOrUrl).toString(); }
+  catch { return new URL(pathOrUrl, base).toString(); }
 }
-function nowIso() {
-  return new Date().toISOString();
-}
-function toDate(v) {
-  try {
-    return v ? new Date(v) : null;
-  } catch {
-    return null;
-  }
-}
-function isValidDate(d) {
-  return d instanceof Date && !isNaN(d);
-}
+function nowIso() { return new Date().toISOString(); }
 
 /* ------------------------------- handler -------------------------------- */
 export default async function handler(req, res) {
@@ -67,7 +52,7 @@ export default async function handler(req, res) {
   try {
     const secretKey = useLive ? STRIPE_SECRET_KEY_LIVE : STRIPE_SECRET_KEY;
     const priceMonthly = useLive ? STRIPE_PRICE_ID_MONTHLY_LIVE : STRIPE_PRICE_ID_MONTHLY;
-    const priceAnnual = useLive ? STRIPE_PRICE_ID_ANNUAL_LIVE : STRIPE_PRICE_ID_ANNUAL;
+    const priceAnnual  = useLive ? STRIPE_PRICE_ID_ANNUAL_LIVE  : STRIPE_PRICE_ID_ANNUAL;
 
     if (!secretKey) throw new Error(`[${envLabel}] Missing Stripe secret key`);
     const { default: Stripe } = await import("stripe");
@@ -79,9 +64,8 @@ export default async function handler(req, res) {
       email,
       period, // "monthly" | "annual"
       success_path = "/pro-success",
-      cancel_path = "/",
-
-      // Optional hint from client — SERVER DOES NOT TRUST IT
+      cancel_path  = "/",
+      // client hint only — server enforces anyway
       trial_eligible: trialEligibleHint,
     } = body || {};
 
@@ -93,8 +77,7 @@ export default async function handler(req, res) {
     const priceId = period === "annual" ? priceAnnual : priceMonthly;
     if (!priceId) throw new Error(`[${envLabel}] Missing price for period='${period}'`);
 
-    // Try to find an existing Stripe customer mapping for this user.
-    // If found, we pass customer (only). If not found, we pass customer_email (only).
+    // Supabase admin (optional but used for trial enforcement + customer mapping)
     let supabaseAdmin = null;
     try {
       const mod = await import("./_lib/supabaseAdmin.js");
@@ -103,75 +86,30 @@ export default async function handler(req, res) {
       /* optional */
     }
 
-    // -------------------------------
-    // Enforce ONE TRIAL PER ACCOUNT (server-truth)
-    // -------------------------------
-    let trialUsed = false;
-    let trialEligible = false;
+    // ---- ONE-TRIAL-ONLY ENFORCEMENT (server-side) -------------------------
+    let trialEligibleServer = true;
 
     if (supabaseAdmin) {
-      try {
-        // app_users is authoritative for "has trial ever happened"
-        const { data: userRow, error: userErr } = await supabaseAdmin
-          .from("app_users")
-          .select("user_id, email, trial_start, trial_end")
-          .eq("user_id", user_id)
-          .maybeSingle();
+      const { data: userRow } = await supabaseAdmin
+        .from("app_users")
+        .select("trial_start, trial_end")
+        .eq("user_id", user_id)
+        .maybeSingle();
 
-        if (userErr && userErr.code !== "PGRST116") {
-          console.warn("[checkout] app_users select error:", userErr);
-        }
-
-        const userTrialStart = toDate(userRow?.trial_start);
-        const userTrialEnd = toDate(userRow?.trial_end);
-
-        // Also check latest subscription snapshot for trial_end (extra safety)
-        const { data: subRow, error: subErr } = await supabaseAdmin
-          .from("app_subscriptions")
-          .select("trial_end, updated_at")
-          .eq("user_id", user_id)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (subErr && subErr.code !== "PGRST116") {
-          console.warn("[checkout] app_subscriptions select error:", subErr);
-        }
-
-        const subTrialEnd = toDate(subRow?.trial_end);
-
-        trialUsed =
-          !!userTrialStart ||
-          !!userTrialEnd ||
-          (isValidDate(subTrialEnd) ? true : false);
-
-        trialEligible = !trialUsed;
-      } catch (e) {
-        // If we can't confirm, default to safest: do NOT grant a trial
-        console.warn("[checkout] trial eligibility check failed; defaulting trialEligible=false:", e?.message || e);
-        trialUsed = true;
-        trialEligible = false;
-      }
-    } else {
-      // No supabase admin available -> safest: no trial
-      trialUsed = true;
-      trialEligible = false;
+      const trialUsed = !!(userRow?.trial_start || userRow?.trial_end);
+      trialEligibleServer = !trialUsed;
     }
 
-    // Compute trial days we will ACTUALLY apply (server enforced)
-    const envTrialDays = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
-    const effectiveTrialDays = trialEligible ? envTrialDays : 0;
+    // Default trialDays from env, but only apply if eligible
+    const trialDaysEnv = Number.isFinite(Number(STRIPE_TRIAL_DAYS)) ? Number(STRIPE_TRIAL_DAYS) : 0;
+    const trialDaysEffective = (trialDaysEnv > 0 && trialEligibleServer) ? trialDaysEnv : 0;
 
-    // If client hinted trial_eligible but server disagrees, we ignore client
-    if (typeof trialEligibleHint === "boolean" && trialEligibleHint !== trialEligible) {
-      console.log(
-        `[checkout] trialEligible hint mismatch; client=${trialEligibleHint} server=${trialEligible} user_id=${user_id}`
-      );
-    }
+    // If client claims eligible but server says no, we ignore client.
+    // If server can't check (no supabaseAdmin), we fall back to client hint (best-effort).
+    const trialEligible =
+      supabaseAdmin ? trialEligibleServer : !!trialEligibleHint;
 
-    // -------------------------------
-    // Existing Stripe customer lookup
-    // -------------------------------
+    // Try to find an existing Stripe customer mapping for this user.
     let stripeCustomerId = null;
     if (supabaseAdmin) {
       const { data: rows, error: selectErr } = await supabaseAdmin
@@ -187,7 +125,6 @@ export default async function handler(req, res) {
       stripeCustomerId = rows?.[0]?.customer_id || null;
     }
 
-    // If we think we have a customer, verify it exists; otherwise, ignore it.
     if (stripeCustomerId) {
       try {
         await stripe.customers.retrieve(stripeCustomerId);
@@ -205,7 +142,7 @@ export default async function handler(req, res) {
     );
     const cancelUrl = absUrl(cancel_path, APP_BASE_URL);
 
-    // Base session payload (shared)
+    // Base session payload
     const sessionPayload = {
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
@@ -216,25 +153,17 @@ export default async function handler(req, res) {
         email: email || null,
         period,
         env: envLabel,
-        trial_used: String(trialUsed),
-        trial_eligible: String(trialEligible),
-        effective_trial_days: String(effectiveTrialDays),
+        trial_eligible: trialEligible ? "true" : "false",
       },
       success_url: successUrl,
       cancel_url: cancelUrl,
     };
 
-    // IMPORTANT: Only apply trial if eligible AND env trial days > 0
-    if (effectiveTrialDays > 0) {
+    // Apply trial only if eligible (and trial days configured)
+    if (trialDaysEffective > 0) {
       sessionPayload.subscription_data = {
-        trial_period_days: effectiveTrialDays,
-        metadata: {
-          user_id,
-          email: email || null,
-          env: envLabel,
-          trial_used: String(trialUsed),
-          trial_eligible: String(trialEligible),
-        },
+        trial_period_days: trialDaysEffective,
+        metadata: { user_id, email: email || null, env: envLabel },
       };
     }
 
@@ -248,9 +177,7 @@ export default async function handler(req, res) {
 
     const session = await stripe.checkout.sessions.create(sessionPayload);
 
-    // If this session already has a customer (happens when we passed 'customer'),
-    // we can ensure our mapping is up to date. For the customer_email path,
-    // we'll persist the created customer in the Stripe webhook after completion.
+    // Keep mapping up to date if we have customer immediately
     if (session.customer && typeof session.customer === "string" && supabaseAdmin) {
       try {
         await supabaseAdmin
@@ -272,17 +199,10 @@ export default async function handler(req, res) {
     console.log(
       `[checkout:${envLabel}] session ${session.id} created for ${
         stripeCustomerId ? `customer ${stripeCustomerId}` : (email || user_id)
-      } -> ${session.url} (trialEligible=${trialEligible}, trialDays=${effectiveTrialDays})`
+      } -> ${session.url} | trialEligible=${trialEligible} trialDays=${trialDaysEffective}`
     );
 
-    // Return server truth (useful for UI debugging)
-    return res.status(200).json({
-      id: session.id,
-      url: session.url,
-      trialEligible,
-      trialUsed,
-      effectiveTrialDays,
-    });
+    return res.status(200).json({ id: session.id, url: session.url, trialEligible, trialDays: trialDaysEffective });
   } catch (err) {
     console.error(`[checkout:${envLabel}] error`, err);
     return res.status(400).json({ error: err?.message || "Failed to create checkout session" });
