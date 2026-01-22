@@ -1,5 +1,5 @@
 // src/components/UpgradeModal.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Typography, Chip, Stack, ToggleButton, ToggleButtonGroup
@@ -34,6 +34,18 @@ function clearIntent() {
   } catch {}
 }
 
+function readUpgradeMode() {
+  try {
+    const m = localStorage.getItem("slimcal:upgradeMode");
+    return m === "upgrade" ? "upgrade" : "trial";
+  } catch {
+    return "trial";
+  }
+}
+function clearUpgradeMode() {
+  try { localStorage.removeItem("slimcal:upgradeMode"); } catch {}
+}
+
 export default function UpgradeModal({
   open,
   onClose,
@@ -41,8 +53,6 @@ export default function UpgradeModal({
   description,
   annual = false,
   defaultPlan,
-  // ✅ NEW: controlled by App.jsx from backend truth
-  trialEligible = true,
 }) {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -50,21 +60,30 @@ export default function UpgradeModal({
   const [plan, setPlan] = useState(defaultPlan || (annual ? "annual" : "monthly"));
   const pollingRef = useRef(false);
 
-  const isProUser = localStorage.getItem("isPro") === "true";
+  // Determine mode (trial vs upgrade-only)
+  const [mode, setMode] = useState("trial");
+  useEffect(() => {
+    if (!open) return;
+    setMode(readUpgradeMode());
+  }, [open]);
 
-  const effectiveTitle =
-    title ||
-    (trialEligible
-      ? "Start your 7-Day Free Pro Trial"
-      : "Upgrade to Pro");
+  const computedCopy = useMemo(() => {
+    const isUpgradeOnly = mode === "upgrade";
 
-  const effectiveDescription =
-    description ||
-    (trialEligible
-      ? "Unlimited AI workouts, meals & premium insights."
-      : "Unlock unlimited AI features, premium insights, and advanced tracking.");
+    const computedTitle =
+      title ||
+      (isUpgradeOnly ? "Upgrade to Pro" : "Start your 7-Day Free Pro Trial");
 
-  const priceLine = plan === "annual" ? "$49.99/yr" : "$4.99/mo";
+    const computedDescription =
+      description ||
+      (isUpgradeOnly
+        ? "Unlock unlimited AI recaps, meals & workouts."
+        : "Unlimited AI workouts, meals & premium insights.");
+
+    const primaryCta = isUpgradeOnly ? "Upgrade to Pro" : "Start Free Trial";
+
+    return { isUpgradeOnly, computedTitle, computedDescription, primaryCta };
+  }, [mode, title, description]);
 
   // Sync default plan if props change
   useEffect(() => {
@@ -101,18 +120,13 @@ export default function UpgradeModal({
     (async function poll() {
       while (!stopped && Date.now() - start < 8000) {
         const { data } = await supabase.auth.getUser();
-        if (data?.user) {
-          setUser(data.user);
-          break;
-        }
+        if (data?.user) { setUser(data.user); break; }
         await new Promise((r) => setTimeout(r, 300));
       }
       pollingRef.current = false;
     })();
 
-    return () => {
-      stopped = true;
-    };
+    return () => { stopped = true; };
   }, [open]);
 
   // AUTO-CONTINUE: if user is present and intent=upgrade exists, jump straight to checkout
@@ -124,19 +138,17 @@ export default function UpgradeModal({
       const ss = sessionStorage.getItem("intent");
       const intent = qp || ss;
       if (intent === "upgrade") {
-        (async () => {
-          await handleCheckout(true);
-        })();
+        (async () => { await handleCheckout(true); })();
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, user, loading, plan]);
+  }, [open, user, loading, plan, mode]);
 
   const signInWithGoogle = async () => {
     setApiError("");
     try {
-      rememberIntent(); // <- persist intent BEFORE redirect
-      // persist current plan so we don't lose it
+      rememberIntent(); // persist intent BEFORE redirect
+      // Also persist current plan so we don't lose it
       sessionStorage.setItem("upgradePlan", plan);
 
       const redirectUrl = `${window.location.origin}${window.location.pathname}?intent=upgrade`;
@@ -164,7 +176,6 @@ export default function UpgradeModal({
       if (savedPlan) setPlan(savedPlan);
 
       const clientId = getOrCreateClientId();
-
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -175,8 +186,6 @@ export default function UpgradeModal({
           client_reference_id: clientId,
           success_path: `/pro-success?cid=${encodeURIComponent(clientId)}`,
           cancel_path: `/`,
-          // ✅ NEW: backend will enforce anyway, but we pass intent
-          trial_eligible: !!trialEligible,
         }),
       });
 
@@ -190,23 +199,27 @@ export default function UpgradeModal({
       setApiError(err.message || "Something went wrong.");
       setLoading(false);
       if (fromAuto) {
-        // If auto-continue failed, keep the modal open for manual retry.
+        // keep modal open for manual retry
       }
     }
   };
 
+  const isProUser = localStorage.getItem("isPro") === "true";
+
+  const close = () => {
+    clearUpgradeMode();
+    onClose?.();
+  };
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>{effectiveTitle}</DialogTitle>
+    <Dialog open={open} onClose={close} maxWidth="xs" fullWidth>
+      <DialogTitle>{computedCopy.computedTitle}</DialogTitle>
       <DialogContent>
-        <Typography sx={{ mb: 2 }}>{effectiveDescription}</Typography>
+        <Typography sx={{ mb: 2 }}>{computedCopy.computedDescription}</Typography>
 
-        {!isProUser && trialEligible && (
+        {/* Trial chip only when we are in trial mode and user is not already pro */}
+        {!computedCopy.isUpgradeOnly && !isProUser && (
           <Chip label="7-day free trial" color="success" size="small" sx={{ mb: 2 }} />
-        )}
-
-        {!isProUser && !trialEligible && (
-          <Chip label="Trial already used" color="warning" size="small" sx={{ mb: 2 }} />
         )}
 
         {/* After sign-in: plan toggle */}
@@ -225,11 +238,11 @@ export default function UpgradeModal({
         )}
 
         <Typography>
-          <strong>{priceLine}</strong>{" "}
-          billed {plan === "annual" ? "yearly" : "monthly"}
-          {trialEligible ? " after trial." : "."}
+          <strong>{plan === "annual" ? "$49.99/yr" : "$4.99/mo"}</strong>{" "}
+          {computedCopy.isUpgradeOnly
+            ? `billed ${plan === "annual" ? "yearly" : "monthly"}.`
+            : `billed ${plan === "annual" ? "yearly" : "monthly"} after trial.`}
         </Typography>
-
         <Typography variant="body2" color="textSecondary">
           Cancel anytime.
         </Typography>
@@ -253,15 +266,13 @@ export default function UpgradeModal({
       <DialogActions>
         {user ? (
           <>
-            <Button onClick={onClose} disabled={loading}>Maybe later</Button>
+            <Button onClick={close} disabled={loading}>Maybe later</Button>
             <Button onClick={() => handleCheckout(false)} variant="contained" disabled={loading}>
-              {loading
-                ? "Redirecting…"
-                : (trialEligible ? "Start Free Trial" : "Upgrade to Pro")}
+              {loading ? "Redirecting…" : computedCopy.primaryCta}
             </Button>
           </>
         ) : (
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={close}>Close</Button>
         )}
       </DialogActions>
     </Dialog>

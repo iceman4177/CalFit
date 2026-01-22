@@ -58,6 +58,7 @@ import CalorieHistory    from './CalorieHistory';
 import CalorieSummary    from './CalorieSummary';
 import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
+import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
 import WaitlistSignup    from './components/WaitlistSignup';
@@ -84,7 +85,8 @@ import {
 } from './utils/streak';
 
 const routeTips = {
-  '/':            'Coach: your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
+  '/':            'Daily Evaluation: swipe cards for verdict → stakes → diagnosis → insight.',
+  '/coach':        'Coach (retention): your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
@@ -93,7 +95,7 @@ const routeTips = {
   '/achievements': 'Achievements: hit milestones to unlock badges!',
   '/calorie-log':  'Calorie Log: detailed daily breakdown of intake vs burn.',
   '/summary':      'Summary: quick overview of today’s net calories.',
-  '/recap':        'Coach (legacy route): redirects to the new homepage Coach.',
+  '/recap':        'Coach (legacy route): redirects to Coach tab.',
   '/waitlist':     'Join our waitlist for early access to new features!',
   '/preferences':  'Customize when you get meal reminders each day.'
 };
@@ -508,6 +510,7 @@ export default function App() {
     const hasHealth = hasHealthDataLocal(merged);
     const hasSeen = hasSeenHealthForm(userId);
 
+    // Only redirect from Acquisition Home (Daily Evaluation). Never loop.
     if (location.pathname === '/' && !hasHealth && !hasSeen) {
       markHealthFormSeen(userId);
       history.replace('/edit-info');
@@ -644,18 +647,18 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
-  // ===== AI Recap hint state (pulsing "AI" badge) =====
-  const [showRecapHint, setShowRecapHint] = useState(() => {
-    try { return localStorage.getItem('slimcal:recapHintSeen') !== '1'; } catch { return true; }
+  // ===== Coach hint state (pulsing "AI" badge) =====
+  const [showCoachHint, setShowCoachHint] = useState(() => {
+    try { return localStorage.getItem('slimcal:coachHintSeen') !== '1'; } catch { return true; }
   });
   useEffect(() => {
-    if (location.pathname === '/' && showRecapHint) {
-      try { localStorage.setItem('slimcal:recapHintSeen', '1'); } catch {}
-      setShowRecapHint(false);
+    if (location.pathname === '/coach' && showCoachHint) {
+      try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
+      setShowCoachHint(false);
     }
-  }, [location.pathname, showRecapHint]);
+  }, [location.pathname, showCoachHint]);
 
-  // === Quick Actions (AI forward) ===
+  // === Quick Actions (Acquisition-forward) ===
   const navBar = (
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
@@ -670,10 +673,11 @@ export default function App() {
           </Button>
         </Tooltip>
 
-        <Tooltip title="Coach">
+        {/* ✅ Coach is now retention tab (separate route) */}
+        <Tooltip title="Coach (Retention)">
           <span>
             <Badge
-              invisible={!showRecapHint}
+              invisible={!showCoachHint}
               badgeContent="AI"
               color="primary"
               overlap="rectangular"
@@ -695,13 +699,13 @@ export default function App() {
             >
               <Button
                 component={NavLink}
-                to="/"
+                to="/coach"
                 variant="outlined"
                 startIcon={<ChatIcon />}
                 onClick={() => {
-                  if (showRecapHint) {
-                    try { localStorage.setItem('slimcal:recapHintSeen', '1'); } catch {}
-                    setShowRecapHint(false);
+                  if (showCoachHint) {
+                    try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
+                    setShowCoachHint(false);
                   }
                 }}
               >
@@ -742,6 +746,11 @@ export default function App() {
         <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
           <InfoIcon fontSize="small"/> Edit Info
         </MenuItem>
+
+        {/* ✅ Optional: direct link to Coach in menu too */}
+        <MenuItem component={NavLink} to="/coach" onClick={closeMore}>
+          <ChatIcon fontSize="small"/> Coach
+        </MenuItem>
       </Menu>
     </Box>
   );
@@ -759,9 +768,7 @@ export default function App() {
 
   // ---- CTA logic (fixed): always show upgrade path when logged in and not Pro
   const effectiveIsPro = (proCheck.isPro || isProActive || localPro);
-
   const showLoggedInCta = !!authUser && !proCheck.loading && !effectiveIsPro;
-
   const loggedInCtaLabel = proCheck.trialEligible ? "TRY PRO FREE" : "UPGRADE TO PRO";
 
   useEffect(() => {
@@ -922,10 +929,25 @@ export default function App() {
           <Route path="/achievements" component={Achievements} />
           <Route path="/calorie-log"  component={CalorieHistory} />
           <Route path="/summary"      component={CalorieSummary} />
-          <Route path="/recap" render={() => <Redirect to="/" />} />
+
+          {/* ✅ Legacy recap route now redirects to Coach (retention) */}
+          <Route path="/recap" render={() => <Redirect to="/coach" />} />
+
           <Route path="/waitlist"     component={WaitlistSignup} />
           <Route path="/preferences"  component={AlertPreferences} />
-          <Route exact path="/" render={() => <DailyRecapCoach userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }} />} />
+
+          {/* ✅ NEW: Acquisition home is Daily Evaluation */}
+          <Route exact path="/" component={DailyEvaluationHome} />
+
+          {/* ✅ Retention side: keep current DailyRecapCoach intact */}
+          <Route
+            path="/coach"
+            render={() => (
+              <DailyRecapCoach
+                userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
+              />
+            )}
+          />
         </Switch>
 
         <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>

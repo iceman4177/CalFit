@@ -6,28 +6,38 @@ import BottomNavigation from '@mui/material/BottomNavigation';
 import BottomNavigationAction from '@mui/material/BottomNavigationAction';
 
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
-import RestaurantIcon    from '@mui/icons-material/Restaurant';
-import HistoryIcon       from '@mui/icons-material/History';
-import DashboardIcon     from '@mui/icons-material/Dashboard';
-import HomeIcon          from '@mui/icons-material/Home';
+import RestaurantIcon from '@mui/icons-material/Restaurant';
+import HistoryIcon from '@mui/icons-material/History';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import HomeIcon from '@mui/icons-material/Home';
+import ChatIcon from '@mui/icons-material/Chat';
 
 const tabs = [
-  { label: 'Coach',    value: '/',          icon: <HomeIcon /> },
-  { label: 'Workout',  value: '/workout',   icon: <FitnessCenterIcon /> },
-  { label: 'Meals',    value: '/meals',     icon: <RestaurantIcon /> },
-  { label: 'History',  value: '/history',   icon: <HistoryIcon /> },
-  { label: 'Dashboard',value: '/dashboard', icon: <DashboardIcon /> },
+  { label: 'Evaluate', value: '/', icon: <HomeIcon /> },
+  { label: 'Coach', value: '/coach', icon: <ChatIcon /> },
+  { label: 'Workout', value: '/workout', icon: <FitnessCenterIcon /> },
+  { label: 'Meals', value: '/meals', icon: <RestaurantIcon /> },
+  { label: 'History', value: '/history', icon: <HistoryIcon /> },
+  { label: 'Dashboard', value: '/dashboard', icon: <DashboardIcon /> },
 ];
+
+function pickActiveTab(pathname) {
+  // Prefer the longest matching route (avoids "/" matching everything).
+  const exact = tabs.find(t => pathname === t.value);
+  if (exact) return exact.value;
+
+  const candidates = tabs
+    .filter(t => t.value !== '/' && pathname.startsWith(t.value))
+    .sort((a, b) => b.value.length - a.value.length);
+
+  return candidates[0]?.value || '/';
+}
 
 export default function BottomNav() {
   const history = useHistory();
   const location = useLocation();
 
-  // pick the active tab based on current pathname
-  const current =
-    tabs.find(t => location.pathname === t.value)?.value
-    // if we're on a nested route like /recap, keep Home selected
-    || (tabs.some(t => location.pathname.startsWith(t.value)) ? location.pathname : '/');
+  const current = pickActiveTab(location.pathname);
 
   const handleChange = (_e, newValue) => {
     if (newValue && newValue !== location.pathname) {
@@ -48,7 +58,7 @@ export default function BottomNav() {
       }}
     >
       <BottomNavigation value={current} onChange={handleChange} showLabels>
-        {tabs.map(t => (
+        {tabs.map((t) => (
           <BottomNavigationAction
             key={t.value}
             label={t.label}
