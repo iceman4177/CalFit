@@ -16,6 +16,8 @@ function parseQuery(reqUrl) {
     return {};
   }
 }
+
+// NOTE: OK means “paid/pro access should be active if current_period_end is in the future”
 const OK = new Set(["active", "trialing", "past_due"]);
 const toDate = (v) => (v ? new Date(v) : null);
 const isValidDate = (d) => d instanceof Date && !isNaN(d);
@@ -38,6 +40,12 @@ export default async function handler(req, res) {
       isPro: false,
       reason: "missing_identity",
       trial_eligible: true, // unknown user -> treat as eligible on client if desired
+      status: null,
+      plan_status: "none",
+      trial: { active: false, end: null },
+      current_period_end: null,
+      email: emailHint || null,
+      user_id: user_id || null,
     });
   }
   if (!supabaseAdmin) {
@@ -46,6 +54,12 @@ export default async function handler(req, res) {
       isPro: false,
       reason: "server_config",
       trial_eligible: true,
+      status: null,
+      plan_status: "none",
+      trial: { active: false, end: null },
+      current_period_end: null,
+      email: emailHint || null,
+      user_id: user_id || null,
     });
   }
 
@@ -84,7 +98,7 @@ export default async function handler(req, res) {
       if (!error) subRow = data || null;
     }
 
-    // 3) Derive truth
+    // 3) Derive truth (trial)
     const userTrialStart = toDate(userRow?.trial_start);
     const userTrialEnd = toDate(userRow?.trial_end);
     const subTrialEnd = toDate(subRow?.trial_end);
@@ -92,17 +106,31 @@ export default async function handler(req, res) {
     const trialEnd = userTrialEnd || subTrialEnd || null;
     const trialActive = isFuture(trialEnd);
 
-    const subStatus = String(subRow?.status || "").toLowerCase();
+    // 3b) Derive truth (paid sub)
+    const rawSubStatus = subRow?.status ?? null;
+    const subStatus = String(rawSubStatus || "").toLowerCase();
+    const currentPeriodEnd = toDate(subRow?.current_period_end);
+
     const subActive =
       !!subStatus &&
       OK.has(subStatus) &&
-      isFuture(toDate(subRow?.current_period_end));
+      isFuture(currentPeriodEnd);
 
     // IMPORTANT:
     // - isProActive is "can use Pro features now" (active sub OR active trial)
     // - is_pro_flag is "has pro flag" (may be used elsewhere as an indicator)
     const is_pro_flag = !!userRow?.is_pro;
     const isProActive = trialActive || subActive;
+
+    // 3c) Normalize stale “trialing” status AFTER trial ends
+    // This prevents your UI from thinking someone is trialing forever.
+    let effectiveStatus = rawSubStatus ? String(rawSubStatus) : null;
+    const lowerEffective = String(effectiveStatus || "").toLowerCase();
+    if (lowerEffective === "trialing" && !trialActive) {
+      // Once trial_end is in the past, "trialing" should not remain the UI-driving status.
+      // Use "canceled" as a safe, schema-valid inactive state.
+      effectiveStatus = "canceled";
+    }
 
     // One-time trial eligibility:
     // If we've ever seen *any* trial signal in app_users or subscriptions, trial is NOT eligible anymore.
@@ -114,11 +142,19 @@ export default async function handler(req, res) {
 
     const trial_eligible = !sawAnyTrialSignal;
 
-    // Optional: surface a cleaner, UI-friendly "plan_status"
-    // - If Pro active now: return sub status if present else "trialing"
-    // - If not active: return "none"
-    const plan_status =
-      isProActive ? (subRow?.status || (trialActive ? "trialing" : null)) : "none";
+    // UI-safe plan_status:
+    // - If Pro active now: prefer sub status if present else "trialing"
+    // - If not active: "none"
+    // - If status was stale "trialing" but trial is over: plan_status should be "none"
+    let plan_status = "none";
+    if (isProActive) {
+      plan_status = rawSubStatus || (trialActive ? "trialing" : "active");
+    } else {
+      plan_status = "none";
+    }
+    if (!trialActive && String(plan_status || "").toLowerCase() === "trialing") {
+      plan_status = "none";
+    }
 
     // 4) Response (include both modern and legacy flags)
     return res.status(200).json({
@@ -128,8 +164,12 @@ export default async function handler(req, res) {
 
       // helpful details
       is_pro: is_pro_flag,
-      status: subRow?.status || null, // raw subscription status (may be stale/old but kept for debugging)
-      plan_status, // derived, safer for UI
+
+      // keep raw subscription status for debugging, but ALSO return an effective status for UI
+      status: rawSubStatus,
+      effective_status: effectiveStatus, // ✅ use this if your UI previously relied on status
+
+      plan_status, // ✅ derived, safer for UI
 
       trial: {
         active: trialActive,
@@ -148,6 +188,13 @@ export default async function handler(req, res) {
       reason: "error",
       detail: e?.message || String(e),
       trial_eligible: true, // fail-open on eligibility; UI can still choose to be conservative
+      status: null,
+      effective_status: null,
+      plan_status: "none",
+      trial: { active: false, end: null },
+      current_period_end: null,
+      email: emailHint || null,
+      user_id: user_id || null,
     });
   }
 }
