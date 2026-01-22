@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Container,
+  Divider,
   MenuItem,
   Paper,
   Select,
@@ -32,94 +33,86 @@ const activityOptions = [
 
 const goalTypes = [
   { value: 'cutting', label: 'Cutting (lose fat)' },
-  { value: 'maintain', label: 'Maintain (recomp)' },
-  { value: 'bulking', label: 'Bulking (gain muscle)' }
+  { value: 'bulking', label: 'Bulking (gain muscle)' },
+  { value: 'maintenance', label: 'Maintenance (recomp/hold)' }
 ];
 
-const dietPreferences = [
+const dietOptions = [
   { value: 'omnivore', label: 'Omnivore' },
-  { value: 'high_protein', label: 'High Protein' },
-  { value: 'low_carb', label: 'Low Carb' },
-  { value: 'keto', label: 'Keto' },
-  { value: 'paleo', label: 'Paleo' },
+  { value: 'pescatarian', label: 'Pescatarian' },
   { value: 'vegetarian', label: 'Vegetarian' },
-  { value: 'vegan', label: 'Vegan' }
+  { value: 'vegan', label: 'Vegan' },
+  { value: 'keto', label: 'Keto' },
+  { value: 'mediterranean', label: 'Mediterranean' }
 ];
 
-const trainingIntents = [
-  { value: 'general', label: 'General' },
+const trainingIntentOptions = [
+  { value: 'general', label: 'General fitness' },
   { value: 'strength', label: 'Strength' },
-  { value: 'hypertrophy', label: 'Hypertrophy' },
-  { value: 'endurance', label: 'Endurance' }
+  { value: 'hypertrophy', label: 'Hypertrophy (muscle gain)' },
+  { value: 'endurance', label: 'Endurance' },
+  { value: 'athletic', label: 'Athletic performance' }
 ];
 
-const trainingSplits = [
+const splitOptions = [
   { value: 'full_body', label: 'Full Body' },
-  { value: 'upper_lower', label: 'Upper / Lower' },
-  { value: 'push_pull_legs', label: 'Push / Pull / Legs' },
-  { value: 'bro_split', label: 'Bro Split' }
+  { value: 'upper_lower', label: 'Upper/Lower' },
+  { value: 'push_pull_legs', label: 'Push/Pull/Legs' },
+  { value: 'bro_split', label: 'Bro Split (1 body part/day)' },
+  { value: 'custom', label: 'Custom' }
 ];
 
 const focusOptions = [
-  { value: 'upper', label: 'Upper' },
-  { value: 'lower', label: 'Lower' },
-  { value: 'chest', label: 'Chest' },
-  { value: 'back', label: 'Back' },
-  { value: 'legs', label: 'Legs' },
+  { value: 'none', label: 'No specific focus' },
+  { value: 'upper_chest', label: 'Upper chest' },
   { value: 'shoulders', label: 'Shoulders' },
   { value: 'arms', label: 'Arms' },
-  { value: 'core', label: 'Core' }
+  { value: 'back', label: 'Back' },
+  { value: 'glutes', label: 'Glutes' },
+  { value: 'quads', label: 'Quads' },
+  { value: 'hamstrings', label: 'Hamstrings' },
+  { value: 'calves', label: 'Calves' },
+  { value: 'abs', label: 'Abs' }
 ];
 
 const equipmentOptions = [
-  'Dumbbells',
-  'Barbell',
+  'Full gym',
+  'Dumbbells only',
+  'Barbell only',
   'Machines',
-  'Cable Station',
-  'Pull-up Bar',
   'Bands',
-  'Kettlebells',
-  'Bodyweight Only'
+  'Bodyweight only'
 ];
 
+// --- Helpers for target preview ---
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-function estimateProteinTargets({ weightLbs, goalType }) {
-  const w = num(weightLbs);
-  if (!w) return { daily: 0, perMeal: 0 };
-
-  const perLb =
-    goalType === 'cutting' ? 1.0 :
-    goalType === 'bulking' ? 0.85 :
-    0.9;
-
-  const daily = Math.round(w * perLb);
-  const perMeal = Math.round(daily / 3);
-  return { daily, perMeal };
-}
-
 function goalToCalorieBias(goalType) {
-  const gt = String(goalType || '').toLowerCase();
-  if (gt === 'cutting') return -300;
-  if (gt === 'bulking') return 300;
+  if (goalType === 'cutting') return -300;
+  if (goalType === 'bulking') return 250;
   return 0;
 }
 
-export default function HealthDataForm() {
+function estimateProteinTargets({ weightLbs, goalType }) {
+  // Simple & stable. We just want something consistent for Eval/Coach.
+  // Cutting -> higher end; bulking -> mid-high; maintenance -> mid.
+  const w = num(weightLbs);
+  const base = goalType === 'cutting' ? 0.9 : goalType === 'bulking' ? 0.8 : 0.75;
+  const daily = Math.round(clamp(w * base, 90, 220));
+  const perMeal = Math.round(clamp(daily / 3, 25, 60));
+  return { daily, perMeal };
+}
+
+export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
 
-  const [userData, setUserData] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('userData') || '{}');
-    } catch {
-      return {};
-    }
-  });
-
-  // Dropdown open states (MUI)
+  // Dropdown open controls
   const [activityOpen, setActivityOpen] = useState(false);
   const [goalTypeOpen, setGoalTypeOpen] = useState(false);
   const [dietOpen, setDietOpen] = useState(false);
@@ -132,7 +125,7 @@ export default function HealthDataForm() {
   const [age, setAge] = useState('');
   const [gender, setGender] = useState(() => {
     try {
-      const ud = JSON.parse(localStorage.getItem('userData') || '{}');
+      const ud = JSON.parse(localStorage.getItem('userData') || '{}') || {};
       return ud?.gender || localStorage.getItem('gender') || '';
     } catch {
       return localStorage.getItem('gender') || '';
@@ -154,17 +147,21 @@ export default function HealthDataForm() {
   const [trainingSplit, setTrainingSplit] = useState(
     localStorage.getItem('training_split') || 'upper_lower'
   );
-  const [lastFocus, setLastFocus] = useState(localStorage.getItem('last_focus') || 'upper');
+  const [lastFocus, setLastFocus] = useState(
+    localStorage.getItem('last_focus') || 'none'
+  );
+
   const [equipment, setEquipment] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('equipment_list') || '[]');
-      return Array.isArray(saved) && saved.length ? saved : ['Dumbbells', 'Machines'];
+      const raw = localStorage.getItem('equipment_list');
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) && parsed.length ? parsed : ['Full gym'];
     } catch {
-      return ['Dumbbells', 'Machines'];
+      return ['Full gym'];
     }
   });
 
-  // Rehydrate on mount
+  // Load saved userData on mount
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
 
@@ -192,7 +189,7 @@ export default function HealthDataForm() {
   );
   const [GenderTip, triggerGenderTip] = useFirstTimeTip(
     'tip_gender_v1',
-    'Gender is used for BMR (calorie baseline) and more accurate Daily Evaluation guidance.',
+    'Gender is used for BMR (baseline calories) and more accurate Daily Evaluation guidance.',
     { auto: false }
   );
   const [WeightTip, triggerWeightTip] = useFirstTimeTip(
@@ -394,19 +391,17 @@ export default function HealthDataForm() {
             <Select
               value={gender}
               onFocus={triggerGenderTip}
-              onChange={e => setGender(e.target.value)}
+              onChange={(e) => setGender(e.target.value)}
               fullWidth
               displayEmpty
               required
             >
-              <MenuItem value="" disabled>
-                Select…
-              </MenuItem>
+              <MenuItem value="" disabled>Select your gender</MenuItem>
               <MenuItem value="male">Male</MenuItem>
               <MenuItem value="female">Female</MenuItem>
             </Select>
-            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, opacity: 0.8 }}>
-              This helps estimate your baseline calories (BMR) more accurately.
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              Used to estimate baseline calories (BMR).
             </Typography>
           </Box>
 
@@ -458,13 +453,9 @@ export default function HealthDataForm() {
               displayEmpty
               required
             >
-              <MenuItem value="" disabled>
-                Select…
-              </MenuItem>
+              <MenuItem value="" disabled>Select your activity level</MenuItem>
               {activityOptions.map(opt => (
-                <MenuItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </MenuItem>
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
@@ -493,18 +484,17 @@ export default function HealthDataForm() {
               onFocus={triggerGoalTypeTip}
               onChange={e => setGoalType(e.target.value)}
               fullWidth
+              displayEmpty
               required
             >
-              <MenuItem value="" disabled>
-                Select…
-              </MenuItem>
-              {goalTypes.map(g => (
-                <MenuItem key={g.value} value={g.value}>
-                  {g.label}
-                </MenuItem>
+              <MenuItem value="" disabled>Select your goal</MenuItem>
+              {goalTypes.map(opt => (
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
+
+          <Divider sx={{ my: 2 }} />
 
           <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" gutterBottom>
@@ -518,12 +508,9 @@ export default function HealthDataForm() {
               onFocus={triggerDietPrefTip}
               onChange={e => setDietPreference(e.target.value)}
               fullWidth
-              required
             >
-              {dietPreferences.map(d => (
-                <MenuItem key={d.value} value={d.value}>
-                  {d.label}
-                </MenuItem>
+              {dietOptions.map(opt => (
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
@@ -540,12 +527,9 @@ export default function HealthDataForm() {
               onFocus={triggerTrainingIntentTip}
               onChange={e => setTrainingIntent(e.target.value)}
               fullWidth
-              required
             >
-              {trainingIntents.map(t => (
-                <MenuItem key={t.value} value={t.value}>
-                  {t.label}
-                </MenuItem>
+              {trainingIntentOptions.map(opt => (
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
@@ -562,17 +546,15 @@ export default function HealthDataForm() {
               onChange={e => setTrainingSplit(e.target.value)}
               fullWidth
             >
-              {trainingSplits.map(s => (
-                <MenuItem key={s.value} value={s.value}>
-                  {s.label}
-                </MenuItem>
+              {splitOptions.map(opt => (
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
 
           <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" gutterBottom>
-              Last Focus
+              Current Focus
             </Typography>
             <Select
               open={focusOpen}
@@ -582,10 +564,8 @@ export default function HealthDataForm() {
               onChange={e => setLastFocus(e.target.value)}
               fullWidth
             >
-              {focusOptions.map(f => (
-                <MenuItem key={f.value} value={f.value}>
-                  {f.label}
-                </MenuItem>
+              {focusOptions.map(opt => (
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </Box>
@@ -600,9 +580,12 @@ export default function HealthDataForm() {
               onOpen={() => setEquipOpen(true)}
               onClose={() => setEquipOpen(false)}
               value={equipment}
-              onChange={e => setEquipment(e.target.value)}
-              fullWidth
+              onChange={(e) => {
+                const v = e.target.value;
+                setEquipment(typeof v === 'string' ? v.split(',') : v);
+              }}
               renderValue={(selected) => (Array.isArray(selected) ? selected.join(', ') : '')}
+              fullWidth
             >
               {equipmentOptions.map((name) => (
                 <MenuItem key={name} value={name}>
@@ -613,15 +596,32 @@ export default function HealthDataForm() {
             </Select>
           </Box>
 
-          <Box sx={{ mt: 3, textAlign: 'center' }}>
-            <Button type="submit" variant="contained" size="large">
-              Save & Continue
-            </Button>
-
-            <Typography variant="caption" sx={{ display: 'block', mt: 1.5, opacity: 0.8 }}>
-              Preview protein target: ~{previewProteinDailyG}g/day (~{previewProteinMealG}g/meal)
+          {/* Targets preview */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              mt: 2,
+              mb: 2,
+              borderRadius: 2,
+              bgcolor: 'rgba(2,6,23,0.04)',
+              border: '1px solid rgba(2,6,23,0.08)'
+            }}
+          >
+            <Typography sx={{ fontWeight: 800 }}>
+              Targets Preview
             </Typography>
-          </Box>
+            <Typography variant="body2" color="text.secondary">
+              Protein: ~{previewProteinDailyG}g/day (~{previewProteinMealG}g/meal)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Calorie bias (used by evaluation/coach): {goalToCalorieBias(goalType)} kcal
+            </Typography>
+          </Paper>
+
+          <Button type="submit" variant="contained" fullWidth sx={{ mt: 1 }}>
+            Save & Continue
+          </Button>
         </form>
       </Paper>
     </Container>
