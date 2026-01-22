@@ -14,6 +14,15 @@ import {
   ListItemText
 } from '@mui/material';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
+import { supabase } from './lib/supabaseClient';
+
+function getHealthSeenKeyForUser(userId) {
+  return userId ? `slimcal:healthFormSeen:user:${userId}:v1` : 'slimcal:healthFormSeen:anon:v1';
+}
+
+function getHealthSyncedKeyForUser(userId) {
+  return userId ? `slimcal:healthFormSynced:user:${userId}:v1` : '';
+}
 
 export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
@@ -168,7 +177,7 @@ export default function HealthDataForm({ setUserData }) {
     'bands'
   ];
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     // Base user data
@@ -219,6 +228,51 @@ export default function HealthDataForm({ setUserData }) {
     localStorage.setItem('calorie_bias', String(calorieBias));
     // Alias some components already read
     localStorage.setItem('fitness_goal', goalType);
+
+    // ✅ Mark the form "seen" once (anon OR per-user)
+    let authedUser = null;
+    try {
+      const { data } = await supabase.auth.getUser();
+      authedUser = data?.user ?? null;
+    } catch {}
+
+    const seenKey = getHealthSeenKeyForUser(authedUser?.id || null);
+    try { localStorage.setItem(seenKey, 'true'); } catch {}
+
+    // ✅ If logged in: sync health to Supabase user metadata (no DB schema needed)
+    if (authedUser?.id) {
+      const syncedKey = getHealthSyncedKeyForUser(authedUser.id);
+
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            slimcal_health_v1: {
+              age: enriched.age,
+              weight: enriched.weight,
+              height: enriched.height,
+              activityLevel: enriched.activityLevel,
+              dailyGoal: enriched.dailyGoal,
+              goalType: enriched.goalType,
+
+              dietPreference: enriched.dietPreference,
+              trainingIntent: enriched.trainingIntent,
+              trainingSplit: enriched.trainingSplit,
+              lastFocus: enriched.lastFocus,
+              equipment: enriched.equipment,
+
+              proteinTargets: enriched.proteinTargets,
+              calorieBias: enriched.calorieBias,
+            },
+          },
+        });
+
+        if (syncedKey) {
+          try { localStorage.setItem(syncedKey, 'true'); } catch {}
+        }
+      } catch (err) {
+        console.warn('[HealthDataForm] Failed to sync to Supabase metadata', err);
+      }
+    }
 
     setUserData(enriched);
     history.push('/');

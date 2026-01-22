@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Route,
@@ -265,6 +266,36 @@ function recomputeTodayBanners(setBurned, setConsumed) {
 }
 // -----------------------------------------------------------------------
 
+// ---- Health form "show once" helpers ----------------------------------
+function getHealthSeenKeyForUser(userId) {
+  return userId ? `slimcal:healthFormSeen:user:${userId}:v1` : 'slimcal:healthFormSeen:anon:v1';
+}
+function hasSeenHealthForm(userId) {
+  try {
+    const key = getHealthSeenKeyForUser(userId);
+    return localStorage.getItem(key) === 'true';
+  } catch {
+    return false;
+  }
+}
+function markHealthFormSeen(userId) {
+  try {
+    const key = getHealthSeenKeyForUser(userId);
+    localStorage.setItem(key, 'true');
+  } catch {}
+}
+function hasHealthDataLocal(saved) {
+  try {
+    const hasCompleted = localStorage.getItem('hasCompletedHealthData') === 'true';
+    if (hasCompleted) return true;
+    const age = saved?.age;
+    return !!age;
+  } catch {
+    return !!saved?.age;
+  }
+}
+// -----------------------------------------------------------------------
+
 export default function App() {
   const history      = useHistory();
   const location     = useLocation();
@@ -436,18 +467,43 @@ export default function App() {
 
   useEffect(() => {
     hydrateStreakOnStartup();
+
     const saved = JSON.parse(localStorage.getItem('userData') || '{}');
-    const normalized = { ...saved, isPremium: isProActive };
+
+    // If logged in and local health is missing, try to rehydrate from Supabase user metadata
+    const metaHealth =
+      authUser?.user_metadata?.slimcal_health_v1 ||
+      authUser?.user_metadata?.healthData ||
+      null;
+
+    let merged = saved;
+
+    if (!saved?.age && metaHealth && typeof metaHealth === 'object') {
+      merged = { ...saved, ...metaHealth };
+      try {
+        localStorage.setItem('userData', JSON.stringify(merged));
+        localStorage.setItem('hasCompletedHealthData', 'true');
+      } catch {}
+    }
+
+    const normalized = { ...merged, isPremium: isProActive };
     setUserDataState(normalized);
     localStorage.setItem('userData', JSON.stringify(normalized));
     refreshCalories();
 
-    if (!saved.age && location.pathname === '/') {
+    // ---- Show Health form only once per anon device OR once per user ----
+    const userId = authUser?.id || null;
+    const hasHealth = hasHealthDataLocal(merged);
+    const hasSeen = hasSeenHealthForm(userId);
+
+    // Only redirect from Coach home. Never loop.
+    if (location.pathname === '/' && !hasHealth && !hasSeen) {
+      markHealthFormSeen(userId); // mark immediately so refresh won't loop
       history.replace('/edit-info');
     }
 
     setStreak(getStreak());
-  }, [isProActive, location.pathname, history]);
+  }, [isProActive, location.pathname, history, authUser?.id]);
 
   useEffect(() => {
     const onStreakUpdate = () => {
