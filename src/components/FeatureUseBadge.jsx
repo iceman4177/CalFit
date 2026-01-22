@@ -1,12 +1,12 @@
 // src/components/FeatureUseBadge.jsx
-import React from 'react';
-import { Chip, Tooltip } from '@mui/material';
+import React from "react";
+import { Chip, Tooltip } from "@mui/material";
 
 // -----------------------------------------------------------------------------
 // Daily Free-tier usage tracking (client-side)
 // -----------------------------------------------------------------------------
 
-const STORAGE_KEY = 'slimcal_usage_v1';
+const STORAGE_KEY = "slimcal_usage_v1";
 
 // Free tier limits (per day)
 // Adjust here to tune upgrade psychology.
@@ -31,16 +31,21 @@ function safeParseJSON(val, fallback) {
 }
 
 function readState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  const st = safeParseJSON(raw, null);
+  let raw = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    raw = null;
+  }
 
+  const st = safeParseJSON(raw, null);
   const today = getTodayISO();
 
-  if (!st || typeof st !== 'object' || !st.date || st.date !== today) {
+  if (!st || typeof st !== "object" || !st.date || st.date !== today) {
     return { date: today, counts: {} };
   }
 
-  if (!st.counts || typeof st.counts !== 'object') {
+  if (!st.counts || typeof st.counts !== "object") {
     return { date: today, counts: {} };
   }
 
@@ -90,21 +95,11 @@ export function registerDailyFeatureUse(featureKey) {
 // -----------------------------------------------------------------------------
 // UI Badge
 // -----------------------------------------------------------------------------
-export default function FeatureUseBadge({
-  featureKey,
-  isPro,
-  sx = {},
-  labelPrefix,
-}) {
+export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
   if (isPro) {
     return (
       <Tooltip title="PRO: Unlimited" arrow>
-        <Chip
-          size="small"
-          color="success"
-          label="PRO ∞"
-          sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
-        />
+        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
       </Tooltip>
     );
   }
@@ -112,17 +107,12 @@ export default function FeatureUseBadge({
   const limit = getFreeDailyLimit(featureKey);
   const remaining = getDailyRemaining(featureKey);
 
-  const freePrefix = labelPrefix || 'Free';
+  const freePrefix = labelPrefix || "Free";
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
     <Tooltip title="Free daily uses. Upgrade for unlimited." arrow>
-      <Chip
-        size="small"
-        variant="outlined"
-        label={label}
-        sx={{ fontWeight: 800, borderRadius: 999, ...sx }}
-      />
+      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
     </Tooltip>
   );
 }
