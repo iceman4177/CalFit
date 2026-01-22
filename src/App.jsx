@@ -411,6 +411,22 @@ export default function App() {
     };
   }, [authUser?.id]);
 
+  // ✅ Single source of truth for "Premium" UI state:
+  // - logged out: never premium
+  // - logged in: premium only if server says Pro/trial active OR entitlements says Pro active
+  const effectiveIsPro = Boolean(authUser ? (proCheck.isPro || isProActive) : false);
+
+  // Keep userData.isPremium synced to effectiveIsPro (prevents stuck premium state after trial)
+  useEffect(() => {
+    try {
+      const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+      const next = { ...prev, isPremium: effectiveIsPro };
+      localStorage.setItem('userData', JSON.stringify(next));
+      setUserDataState(next);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveIsPro, authUser?.id]);
+
   const [userData, setUserDataState] = useState(null);
 
   useDailyNotification({
@@ -458,7 +474,7 @@ export default function App() {
 
   const setUserData = data => {
     const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-    const next = { ...prev, ...data, isPremium: isProActive };
+    const next = { ...prev, ...data, isPremium: effectiveIsPro };
     localStorage.setItem('userData', JSON.stringify(next));
     setUserDataState(next);
   };
@@ -486,7 +502,7 @@ export default function App() {
       } catch {}
     }
 
-    const normalized = { ...merged, isPremium: isProActive };
+    const normalized = { ...merged, isPremium: effectiveIsPro };
     setUserDataState(normalized);
     localStorage.setItem('userData', JSON.stringify(normalized));
     refreshCalories();
@@ -503,7 +519,7 @@ export default function App() {
     }
 
     setStreak(getStreak());
-  }, [isProActive, location.pathname, history, authUser?.id]);
+  }, [effectiveIsPro, location.pathname, history, authUser?.id]);
 
   useEffect(() => {
     const onStreakUpdate = () => {
@@ -533,22 +549,22 @@ export default function App() {
       lastIdentRef.current.path === path;
 
     if (!tooSoon) {
-      sendIdentity({ user: authUser, path, isProActive: proCheck.isPro || isProActive, planStatus: status });
+      sendIdentity({ user: authUser, path, isProActive: effectiveIsPro, planStatus: status });
       lastIdentRef.current = { path, ts: now };
     }
-  }, [authUser?.id, location.pathname, isProActive, status, proCheck.isPro]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authUser?.id, location.pathname, effectiveIsPro, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!authUser) return;
     const onFocus = () =>
-      sendIdentity({ user: authUser, path: location.pathname, isProActive: proCheck.isPro || isProActive, planStatus: status });
+      sendIdentity({ user: authUser, path: location.pathname, isProActive: effectiveIsPro, planStatus: status });
     window.addEventListener('focus', onFocus);
     const iv = setInterval(onFocus, 60_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(iv);
     };
-  }, [authUser?.id, location.pathname, isProActive, status, proCheck.isPro ]);
+  }, [authUser?.id, location.pathname, effectiveIsPro, status ]);
 
   useEffect(() => {
     let visHandler;
@@ -739,6 +755,7 @@ export default function App() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
 
+  // Keep localPro only as a UI fallback when logged OUT (storage sync)
   const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
   useEffect(() => {
     const onStorage = (e) => {
@@ -755,7 +772,7 @@ export default function App() {
   } else if (proCheck.loading) {
     showTryPro = false; // suppress while loading status
   } else {
-    showTryPro = !(proCheck.isPro || isProActive || localPro);
+    showTryPro = !effectiveIsPro;
   }
 
   useEffect(() => {
@@ -873,46 +890,55 @@ export default function App() {
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
 
-          <Route path="/edit-info" render={() =>
-            <HealthDataForm setUserData={data => {
-              const prev = JSON.parse(localStorage.getItem('userData') || '{}');
-              const next = { ...prev, ...data, isPremium: (proCheck.isPro || isProActive || localPro) };
-              localStorage.setItem('userData', JSON.stringify(next));
-              setUserDataState(next);
-              history.push('/');
-            }} />
-          }/>
-          <Route path="/workout" render={() =>
-            <WorkoutPage
-              userData={userData}
-              onWorkoutLogged={() => {
-                const today = new Date().toLocaleDateString('en-US');
-                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-                const todayRec = meals.find(m => m.date === today);
-                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+          <Route
+            path="/edit-info"
+            render={() =>
+              <HealthDataForm setUserData={data => {
+                const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+                const next = { ...prev, ...data, isPremium: effectiveIsPro };
+                localStorage.setItem('userData', JSON.stringify(next));
+                setUserDataState(next);
+                history.push('/');
+              }} />
+            }
+          />
+          <Route
+            path="/workout"
+            render={() =>
+              <WorkoutPage
+                userData={userData}
+                onWorkoutLogged={() => {
+                  const today = new Date().toLocaleDateString('en-US');
+                  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                  const todayRec = meals.find(m => m.date === today);
+                  setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                  setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                normalizeLocalData();
-                dedupLocalWorkouts();
-                updateStreak();
-              }}
-            />
-          }/>
-          <Route path="/meals" render={() =>
-            <MealTracker
-              onMealUpdate={() => {
-                const today = new Date().toLocaleDateString('en-US');
-                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-                const todayRec = meals.find(m => m.date === today);
-                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+                  normalizeLocalData();
+                  dedupLocalWorkouts();
+                  updateStreak();
+                }}
+              />
+            }
+          />
+          <Route
+            path="/meals"
+            render={() =>
+              <MealTracker
+                onMealUpdate={() => {
+                  const today = new Date().toLocaleDateString('en-US');
+                  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                  const todayRec = meals.find(m => m.date === today);
+                  setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                  setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                normalizeLocalData();
-              }}
-            />
-          }/>
+                  normalizeLocalData();
+                }}
+              />
+            }
+          />
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
           <Route path="/achievements" component={Achievements} />
@@ -921,7 +947,11 @@ export default function App() {
           <Route path="/recap" render={() => <Redirect to="/" />} />
           <Route path="/waitlist"     component={WaitlistSignup} />
           <Route path="/preferences"  component={AlertPreferences} />
-          <Route exact path="/" render={() => <DailyRecapCoach userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }} />} />
+          <Route
+            exact
+            path="/"
+            render={() => <DailyRecapCoach userData={{ ...userData, isPremium: effectiveIsPro }} />}
+          />
         </Switch>
 
         <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
