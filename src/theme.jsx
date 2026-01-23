@@ -2,66 +2,76 @@
 import { createTheme, responsiveFontSizes } from '@mui/material/styles';
 import { alpha } from '@mui/material/styles';
 
-// Slimcal palette (match Daily Evaluation vibes)
-// - Primary = Slimcal Green (main CTAs)
-// - Secondary = Slimcal Yellow (scores / verdict / highlights)
-// - Info = keep a clean blue for nav / links
-const SLIMCAL_GREEN  = '#22C55E'; // TW green-500
-const SLIMCAL_YELLOW = '#FACC15'; // TW yellow-400
-const SLIMCAL_BLUE   = '#2563EB'; // TW blue-600
+// Slimcal.ai Brand Palette (system-first)
+const SLIMCAL_BLUE = '#2563EB';
+const SLIMCAL_BLUE_HOVER = '#1D4ED8';
+
+const SLIMCAL_GREEN = '#22C55E';
+const SLIMCAL_GREEN_SOFT = '#86EFAC';
+
+const SLIMCAL_RED = '#EF4444';
+
+// Neutral system (premium feel)
+const BG_DEFAULT = '#F8FAFC';
+const SURFACE = '#FFFFFF';
+const DIVIDER = '#E5E7EB';
+
+const TEXT_PRIMARY = '#111827';
+const TEXT_SECONDARY = '#6B7280';
+const TEXT_MUTED = '#9CA3AF';
 
 let theme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: SLIMCAL_GREEN,
-      light: '#4ADE80', // green-400
-      dark: '#16A34A',  // green-600
+      main: SLIMCAL_BLUE,         // Trust / Structure
+      light: '#4F83F1',
+      dark: SLIMCAL_BLUE_HOVER,
       contrastText: '#FFFFFF',
     },
     secondary: {
-      main: SLIMCAL_YELLOW,
-      light: '#FDE047', // yellow-300
-      dark: '#EAB308',  // yellow-500
-      contrastText: '#0F172A', // slate-900 for legibility on yellow
+      main: SLIMCAL_GREEN,        // Fitness success / dopamine
+      light: SLIMCAL_GREEN_SOFT,
+      dark: '#16A34A',
+      contrastText: '#FFFFFF',
     },
     success: { main: SLIMCAL_GREEN },
-    warning: { main: SLIMCAL_YELLOW },
-    error:   { main: '#EF4444' },
-    info:    { main: SLIMCAL_BLUE },
+    warning: { main: '#F59E0B' }, // keep as traditional warning if needed
+    error:   { main: SLIMCAL_RED },
+    info:    { main: SLIMCAL_BLUE }, // keep info aligned with brand trust
     background: {
-      default: '#F8FAFC',    // Soft slate-50
-      paper:   '#FFFFFF',
+      default: BG_DEFAULT,
+      paper: SURFACE,
     },
     text: {
-      primary: '#0F172A',    // slate-900
-      secondary: '#334155',  // slate-700
-      disabled: '#94A3B8',   // slate-400
+      primary: TEXT_PRIMARY,
+      secondary: TEXT_SECONDARY,
+      disabled: TEXT_MUTED,
     },
-    divider: alpha('#0F172A', 0.08),
+    divider: DIVIDER,
   },
 
   shape: {
-    borderRadius: 14,        // Rounded but not bubbly
+    borderRadius: 14,
   },
 
-  spacing: 8,                // 8pt baseline grid
+  spacing: 8,
 
   typography: {
     fontFamily: "'Roboto', system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-    h1: { fontSize: '2.25rem', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.15 }, // 36px
-    h2: { fontSize: '1.875rem', fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.2 }, // 30px
-    h3: { fontSize: '1.5rem', fontWeight: 600, lineHeight: 1.25 },                            // 24px
-    h4: { fontSize: '1.25rem', fontWeight: 600, lineHeight: 1.3 },                             // 20px
-    h5: { fontSize: '1.125rem', fontWeight: 600, lineHeight: 1.35 },                           // 18px
-    h6: { fontSize: '1rem', fontWeight: 600, lineHeight: 1.4 },                                // 16px
-    subtitle1: { fontSize: '1rem', fontWeight: 500, color: '#334155' },
-    subtitle2: { fontSize: '0.9rem', fontWeight: 500, color: '#475569' },
+    h1: { fontSize: '2.25rem', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.15 },
+    h2: { fontSize: '1.875rem', fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.2 },
+    h3: { fontSize: '1.5rem', fontWeight: 600, lineHeight: 1.25 },
+    h4: { fontSize: '1.25rem', fontWeight: 600, lineHeight: 1.3 },
+    h5: { fontSize: '1.125rem', fontWeight: 600, lineHeight: 1.35 },
+    h6: { fontSize: '1rem', fontWeight: 600, lineHeight: 1.4 },
+    subtitle1: { fontSize: '1rem', fontWeight: 500, color: TEXT_SECONDARY },
+    subtitle2: { fontSize: '0.9rem', fontWeight: 500, color: alpha(TEXT_PRIMARY, 0.65) },
     body1: { fontSize: '1rem', lineHeight: 1.6 },
-    body2: { fontSize: '0.95rem', lineHeight: 1.55, color: '#334155' },
+    body2: { fontSize: '0.95rem', lineHeight: 1.55, color: TEXT_SECONDARY },
     button: { textTransform: 'none', fontWeight: 800, letterSpacing: 0 },
     overline: { textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.08em' },
-    caption: { color: '#64748B' },
+    caption: { color: alpha(TEXT_PRIMARY, 0.55) },
   },
 
   transitions: {
@@ -81,26 +91,23 @@ let theme = createTheme({
       styleOverrides: (t) => ({
         'html, body, #root': {
           height: '100%',
-          // Swap the old blue glow for a green->yellow glow like Eval
+          // Blue trust glow (subtle) — keep premium, not loud
           background:
-            `linear-gradient(180deg, ${alpha(SLIMCAL_GREEN, 0.06)} 0%, rgba(255,255,255,0) 18%),` +
-            `radial-gradient(900px 380px at 20% 0%, ${alpha(SLIMCAL_YELLOW, 0.10)} 0%, rgba(255,255,255,0) 55%),` +
-            `${t.palette.background.default}`,
+            `linear-gradient(180deg, ${alpha(SLIMCAL_BLUE, 0.05)} 0%, rgba(255,255,255,0) 22%), ${t.palette.background.default}`,
         },
         body: {
           WebkitFontSmoothing: 'antialiased',
           MozOsxFontSmoothing: 'grayscale',
         },
-        // Subtle, nice scrollbars
         '*::-webkit-scrollbar': { width: 10, height: 10 },
         '*::-webkit-scrollbar-thumb': {
-          backgroundColor: alpha('#0F172A', 0.15),
+          backgroundColor: alpha(TEXT_PRIMARY, 0.15),
           borderRadius: 999,
           border: '2px solid transparent',
           backgroundClip: 'content-box',
         },
         '*::-webkit-scrollbar-thumb:hover': {
-          backgroundColor: alpha('#0F172A', 0.25),
+          backgroundColor: alpha(TEXT_PRIMARY, 0.25),
         },
       }),
     },
@@ -123,19 +130,19 @@ let theme = createTheme({
           },
           '&:active': { transform: 'translateY(0)' },
         }),
-        containedSecondary: ({ theme }) => ({
-          // Yellow buttons need a more subtle shadow + keep contrast crisp
-          color: theme.palette.secondary.contrastText,
+
+        // Make Primary (blue) hover use your exact hover blue
+        containedPrimary: ({ theme }) => ({
           '&:hover': {
-            boxShadow: `0 6px 16px ${alpha(theme.palette.secondary.main, 0.22)}`,
+            backgroundColor: SLIMCAL_BLUE_HOVER,
+            boxShadow: `0 6px 16px ${alpha(SLIMCAL_BLUE, 0.22)}`,
           },
         }),
-        outlinedSecondary: ({ theme }) => ({
-          color: theme.palette.secondary.dark,
-          borderColor: alpha(theme.palette.secondary.dark, 0.35),
+
+        // Secondary (green) hover uses green shadow (success feel)
+        containedSecondary: ({ theme }) => ({
           '&:hover': {
-            borderColor: alpha(theme.palette.secondary.dark, 0.6),
-            backgroundColor: alpha(theme.palette.secondary.main, 0.12),
+            boxShadow: `0 6px 16px ${alpha(theme.palette.secondary.main, 0.20)}`,
           },
         }),
       },
@@ -146,8 +153,8 @@ let theme = createTheme({
       styleOverrides: {
         root: ({ theme }) => ({
           borderRadius: theme.shape.borderRadius + 2,
-          boxShadow: `0 8px 24px ${alpha('#0F172A', 0.06)}`,
-          border: `1px solid ${alpha('#0F172A', 0.06)}`,
+          boxShadow: `0 8px 24px ${alpha(TEXT_PRIMARY, 0.06)}`,
+          border: `1px solid ${alpha(TEXT_PRIMARY, 0.06)}`,
         }),
       },
     },
@@ -164,7 +171,7 @@ let theme = createTheme({
           borderRadius: theme.shape.borderRadius + 2,
         }),
         elevation1: {
-          boxShadow: `0 6px 20px ${alpha('#0F172A', 0.08)}`,
+          boxShadow: `0 6px 20px ${alpha(TEXT_PRIMARY, 0.08)}`,
         },
       },
     },
@@ -176,8 +183,8 @@ let theme = createTheme({
           backgroundColor: alpha('#FFFFFF', 0.7),
           backdropFilter: 'blur(8px)',
           color: theme.palette.text.primary,
-          boxShadow: `0 6px 20px ${alpha('#0F172A', 0.06)}`,
-          borderBottom: `1px solid ${alpha('#0F172A', 0.06)}`,
+          boxShadow: `0 6px 20px ${alpha(TEXT_PRIMARY, 0.06)}`,
+          borderBottom: `1px solid ${alpha(TEXT_PRIMARY, 0.06)}`,
         }),
       },
     },
@@ -197,14 +204,14 @@ let theme = createTheme({
           borderRadius: theme.shape.borderRadius,
         }),
         notchedOutline: ({ theme }) => ({
-          borderColor: alpha('#0F172A', 0.18),
+          borderColor: alpha(TEXT_PRIMARY, 0.18),
         }),
       },
     },
     MuiInputLabel: {
       styleOverrides: {
         root: ({ theme }) => ({
-          color: alpha('#0F172A', 0.7),
+          color: alpha(TEXT_PRIMARY, 0.7),
           '&.Mui-focused': { color: theme.palette.primary.main },
         }),
       },
@@ -217,10 +224,6 @@ let theme = createTheme({
           borderRadius: theme.shape.borderRadius,
           fontWeight: 800,
         }),
-        filledSecondary: ({ theme }) => ({
-          // Yellow chips need legible text
-          color: theme.palette.secondary.contrastText,
-        }),
       },
     },
 
@@ -228,17 +231,15 @@ let theme = createTheme({
     MuiDivider: {
       styleOverrides: {
         root: {
-          backgroundColor: alpha('#0F172A', 0.08),
+          backgroundColor: DIVIDER,
         },
       },
     },
 
-    // Container defaults
     MuiContainer: {
       defaultProps: { maxWidth: 'lg' },
     },
 
-    // Tooltips nicer rounding
     MuiTooltip: {
       styleOverrides: {
         tooltip: ({ theme }) => ({
@@ -249,7 +250,7 @@ let theme = createTheme({
       },
     },
 
-    // Tabs / Tab for nav polish (if you use them)
+    // Tabs / Tab for nav polish
     MuiTab: {
       styleOverrides: {
         root: ({ theme }) => ({
@@ -266,6 +267,21 @@ let theme = createTheme({
         indicator: ({ theme }) => ({
           height: 3,
           borderRadius: 3,
+          backgroundColor: theme.palette.primary.main,
+        }),
+      },
+    },
+
+    // Progress: default blue (trust). Components can opt-in to green for “winning”.
+    MuiLinearProgress: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          height: 10,
+          borderRadius: 999,
+          backgroundColor: alpha(TEXT_PRIMARY, 0.08),
+        }),
+        bar: ({ theme }) => ({
+          borderRadius: 999,
           backgroundColor: theme.palette.primary.main,
         }),
       },
