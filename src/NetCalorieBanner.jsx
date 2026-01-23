@@ -1,173 +1,202 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Box, Paper, Typography, Chip, Stack } from '@mui/material';
+// src/components/NetCalorieBanner.jsx
+import React, { useMemo } from "react";
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Stack,
+  Chip,
+  CircularProgress,
+  Divider,
+} from "@mui/material";
 
-const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
-const todayUS = () => new Date().toLocaleDateString('en-US');
+/**
+ * NetCalorieBanner (Enhanced MFP-style)
+ *
+ * Primary number: Remaining calories (Goal - Food + Exercise)
+ * Slimcal net calories: Food - Exercise (your canonical definition)
+ *
+ * Props are intentionally flexible for backwards compatibility.
+ */
+export default function NetCalorieBanner({
+  goalCalories = 0,
+  caloriesEaten = 0,
+  caloriesBurned = 0,
+  // optional: if caller already computed net, we’ll use it; otherwise compute
+  netCalories,
+  // optional: allow a tiny title override if needed later
+  title = "Today",
+}) {
+  const goal = Number(goalCalories) || 0;
+  const eaten = Number(caloriesEaten) || 0;
+  const burned = Number(caloriesBurned) || 0;
 
-function readLocal() {
-  const d = todayUS();
-  try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const burned = wh
-      .filter(w => w.date === d)
-      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
-    const meals = mh.find(m => m.date === d);
-    const consumed = meals
-      ? (meals.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)
-      : 0;
-    return { burned, consumed };
-  } catch {
-    return { burned: 0, consumed: 0 };
-  }
-}
+  // MFP-style remaining
+  const remaining = useMemo(() => Math.round(goal - eaten + burned), [goal, eaten, burned]);
 
-export default function NetCalorieBanner() {
-  const [burned, setBurned] = useState(0);
-  const [consumed, setConsumed] = useState(0);
+  // Slimcal canonical net
+  const net = useMemo(() => {
+    if (Number.isFinite(Number(netCalories))) return Math.round(Number(netCalories));
+    return Math.round(eaten - burned);
+  }, [netCalories, eaten, burned]);
 
-  const recompute = useCallback(() => {
-    const { burned: b, consumed: c } = readLocal();
-    setBurned(Math.round(b || 0));
-    setConsumed(Math.round(c || 0));
-  }, []);
+  const isOver = remaining < 0;
+  const remainingAbs = Math.abs(remaining);
 
-  useEffect(() => {
-    recompute();
-  }, [recompute]);
+  // Progress ring: percent of goal "used" after exercise credit (eaten - burned)
+  const effectiveUsed = useMemo(() => Math.max(0, eaten - burned), [eaten, burned]);
 
-  useEffect(() => {
-    const kick = () => recompute();
-    const onStorage = e => {
-      if (!e || !e.key || ['mealHistory', 'workoutHistory'].includes(e.key)) recompute();
-    };
-    const onVisOrFocus = () => recompute();
+  const pct = useMemo(() => {
+    if (!goal) return 0;
+    return Math.max(0, Math.min(100, (effectiveUsed / goal) * 100));
+  }, [goal, effectiveUsed]);
 
-    window.addEventListener('slimcal:consumed:update', kick);
-    window.addEventListener('slimcal:burned:update', kick);
-    window.addEventListener('storage', onStorage);
-    document.addEventListener('visibilitychange', onVisOrFocus);
-    window.addEventListener('focus', onVisOrFocus);
+  const formatInt = (n) => {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return "0";
+    return String(Math.round(x));
+  };
 
-    return () => {
-      window.removeEventListener('slimcal:consumed:update', kick);
-      window.removeEventListener('slimcal:burned:update', kick);
-      window.removeEventListener('storage', onStorage);
-      document.removeEventListener('visibilitychange', onVisOrFocus);
-      window.removeEventListener('focus', onVisOrFocus);
-    };
-  }, [recompute]);
-
-  const net = (consumed || 0) - (burned || 0);
-  const status =
-    net > 0 ? { label: 'Surplus', color: 'error' } :
-    net < 0 ? { label: 'Deficit', color: 'success' } :
-              { label: 'Balanced', color: 'info' };
+  const labelPrimary = isOver ? "Over by" : "Remaining";
 
   return (
-    <Paper
-      elevation={3}
+    <Card
+      elevation={0}
       sx={{
-        p: { xs: 2, sm: 3 },
-        mb: { xs: 3, sm: 4 },
+        border: "1px solid rgba(2,6,23,0.10)",
         borderRadius: 3,
-        textAlign: 'center',
-        // subtle “premium” background that works in light or dark themes
-        background:
-          'linear-gradient(180deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.06) 100%)',
-        backdropFilter: 'blur(2px)'
+        overflow: "hidden",
+        background: "white",
       }}
-      aria-label="Today's net calories summary"
     >
-      <Typography
-        variant="subtitle2"
-        sx={{
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          color: 'text.secondary',
-          mb: 1
-        }}
-      >
-        Today’s Net Calories
-      </Typography>
+      <CardContent sx={{ p: 2 }}>
+        {/* Header */}
+        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 700 }}>
+              {title}
+            </Typography>
+            <Typography variant="h6" sx={{ fontWeight: 900, lineHeight: 1.1 }}>
+              Calories
+            </Typography>
+          </Box>
 
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1,
-          mb: { xs: 1.25, sm: 1.5 }
-        }}
-      >
-        {/* Big, responsive number */}
-        <Typography
-          component="div"
-          sx={{
-            lineHeight: 1,
-            fontWeight: 800,
-            fontSize: { xs: '2.25rem', sm: '2.75rem', md: '3.25rem' },
-            transition: 'transform 120ms ease',
-          }}
-        >
-          {nf0.format(net)}
+          {/* Net chip (Slimcal differentiator) */}
+          <Chip
+            size="small"
+            label={`Net: ${net > 0 ? `+${formatInt(net)}` : formatInt(net)} kcal`}
+            sx={{ fontWeight: 800 }}
+          />
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        {/* Main row: Ring + Remaining */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Box sx={{ position: "relative", width: 72, height: 72, flex: "0 0 auto" }}>
+            {/* Track */}
+            <CircularProgress
+              variant="determinate"
+              value={100}
+              size={72}
+              thickness={5}
+              sx={{ color: "rgba(2,6,23,0.08)" }}
+            />
+            {/* Fill */}
+            <CircularProgress
+              variant="determinate"
+              value={pct}
+              size={72}
+              thickness={5}
+              sx={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+              }}
+            />
+            {/* Center text */}
+            <Box
+              sx={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "column",
+              }}
+            >
+              <Typography sx={{ fontWeight: 900, fontSize: 12, lineHeight: 1 }}>
+                {labelPrimary}
+              </Typography>
+              <Typography sx={{ fontWeight: 900, fontSize: 14, lineHeight: 1.1 }}>
+                {formatInt(remainingAbs)}
+              </Typography>
+            </Box>
+          </Box>
+
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+              Remaining = Goal − Food + Exercise
+            </Typography>
+
+            <Typography
+              variant="h5"
+              sx={{
+                mt: 0.5,
+                fontWeight: 950,
+                letterSpacing: "-0.02em",
+                lineHeight: 1.1,
+              }}
+            >
+              {isOver ? `Over by ${formatInt(remainingAbs)}` : `${formatInt(remainingAbs)} left`}
+              <Typography component="span" sx={{ fontWeight: 800, ml: 0.75 }} color="text.secondary">
+                kcal
+              </Typography>
+            </Typography>
+
+            {!!goal && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4 }}>
+                Based on your goal of {formatInt(goal)} kcal
+              </Typography>
+            )}
+          </Box>
+        </Stack>
+
+        {/* Breakdown row */}
+        <Stack direction="row" spacing={1} sx={{ mt: 1.75, flexWrap: "wrap" }}>
+          <BreakPill icon="🎯" label="Goal" value={`${formatInt(goal)} kcal`} />
+          <BreakPill icon="🍽️" label="Food" value={`${formatInt(eaten)} kcal`} />
+          <BreakPill icon="🔥" label="Exercise" value={`${formatInt(burned)} kcal`} />
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BreakPill({ icon, label, value }) {
+  return (
+    <Box
+      sx={{
+        px: 1.25,
+        py: 0.75,
+        borderRadius: 2,
+        border: "1px solid rgba(2,6,23,0.08)",
+        background: "rgba(2,6,23,0.02)",
+        display: "flex",
+        alignItems: "center",
+        gap: 0.8,
+      }}
+    >
+      <Box sx={{ width: 20, textAlign: "center" }}>{icon}</Box>
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, lineHeight: 1 }}>
+          {label}
         </Typography>
-
-        {/* Status pill with strong contrast */}
-        <Chip
-          label={status.label}
-          color={status.color}
-          sx={{
-            color: '#fff',
-            fontWeight: 700,
-            borderRadius: 999,
-            height: 28,
-            '& .MuiChip-label': { px: 1.25, py: 0.25 }
-          }}
-          aria-label={`Calorie status: ${status.label}`}
-        />
+        <Typography variant="body2" sx={{ fontWeight: 900, lineHeight: 1.1 }}>
+          {value}
+        </Typography>
       </Box>
-
-      {/* Secondary stats row */}
-      <Stack
-        direction="row"
-        spacing={2}
-        justifyContent="center"
-        alignItems="center"
-        sx={{ flexWrap: 'wrap', rowGap: 1 }}
-      >
-        <Chip
-          variant="outlined"
-          label={
-            <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'baseline' }}>
-              <Typography component="span" sx={{ fontWeight: 700 }}>
-                {nf0.format(consumed || 0)}
-              </Typography>
-              <Typography component="span" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                eaten
-              </Typography>
-            </Box>
-          }
-          sx={{ borderRadius: 2 }}
-          aria-label={`Calories eaten: ${nf0.format(consumed || 0)}`}
-        />
-
-        <Chip
-          variant="outlined"
-          label={
-            <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'baseline' }}>
-              <Typography component="span" sx={{ fontWeight: 700 }}>
-                {nf0.format(burned || 0)}
-              </Typography>
-              <Typography component="span" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                burned
-              </Typography>
-            </Box>
-          }
-          sx={{ borderRadius: 2 }}
-          aria-label={`Calories burned: ${nf0.format(burned || 0)}`}
-        />
-      </Stack>
-    </Paper>
+    </Box>
   );
 }
