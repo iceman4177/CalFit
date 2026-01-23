@@ -162,11 +162,15 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
   const net = eaten - burned;
   const remaining = goal ? (goal - eaten + burned) : 0;
 
+  // ✅ UPDATED PER YOUR REQUEST:
+  // surplus (net > 0) = GREEN
+  // deficit (net < 0) = RED
+  // neutral (net == 0) = BLUE
   const netPill =
     net > 0
-      ? { label: `Net: +${nf0.format(net)} kcal`, color: 'error' }
+      ? { label: `Net: +${nf0.format(net)} kcal`, color: 'success' }
       : net < 0
-        ? { label: `Net: -${nf0.format(Math.abs(net))} kcal`, color: 'success' }
+        ? { label: `Net: -${nf0.format(Math.abs(net))} kcal`, color: 'error' }
         : { label: 'Net: 0 kcal', color: 'info' };
 
   const ringPct = useMemo(() => {
