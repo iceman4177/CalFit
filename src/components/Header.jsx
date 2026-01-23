@@ -149,6 +149,13 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
   };
   const activeStyle = { ...linkStyle, background: 'rgba(37, 99, 235, 0.08)' };
 
+  // ✅ Make "Try Pro Free" GREEN (and keep "Manage Billing" as outlined blue)
+  const ctaColor = useMemo(() => {
+    if (pro) return 'primary';
+    if (!trialEligible) return 'primary'; // upgrade-only mode should feel "trust/structure"
+    return 'success'; // try-pro CTA should be green
+  }, [pro, trialEligible]);
+
   return (
     <AppBar
       position="sticky"
@@ -239,7 +246,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
         <Stack direction="row" spacing={1} alignItems="center">
           <Button
             variant={pro ? 'outlined' : 'contained'}
-            color={pro ? 'primary' : 'error'}
+            color={ctaColor}
             onClick={handlePrimaryCta}
             disabled={!pro && trialEligLoading}
             sx={{ borderRadius: 10, textTransform: 'none', fontWeight: 800 }}
