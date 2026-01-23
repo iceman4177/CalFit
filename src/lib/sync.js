@@ -81,8 +81,10 @@ function mapDailyMetricsLegacy(payload) {
 
 // ---------- processors ----------
 async function upsertWorkout(op) {
+  if (!supabase) return;
   const p = op.payload || {};
   if (!p.user_id) return; // skip cloud for anonymous
+
   const total_calories =
     Number.isFinite(p.total_calories) ? p.total_calories
     : Number.isFinite(p.totalCalories) ? p.totalCalories
@@ -112,6 +114,7 @@ async function upsertWorkout(op) {
 }
 
 async function deleteWorkout(op) {
+  if (!supabase) return;
   const { client_id } = op.payload || {};
   if (!client_id) return;
   const { error } = await supabase.from('workouts').delete().eq('client_id', client_id);
@@ -119,6 +122,7 @@ async function deleteWorkout(op) {
 }
 
 async function upsertDailyMetrics(op) {
+  if (!supabase) return;
   const p = op.payload || {};
   const rowNew = mapDailyMetricsNew(p);
   if (!rowNew.user_id) return; // skip cloud for anonymous
@@ -145,15 +149,24 @@ async function upsertDailyMetrics(op) {
 }
 
 async function upsertMeal(op) {
+  if (!supabase) return;
   const p = op.payload || {};
+  if (!p.user_id) return; // ✅ IMPORTANT: don't try cloud writes when anonymous
+
   const row = {
     client_id: p.client_id,
-    user_id: p.user_id ?? null,
+    user_id: p.user_id,
     eaten_at: p.eaten_at,
     title: p.title ?? null,
     total_calories: Number(p.total_calories) || 0,
   };
-  const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' }).select().maybeSingle();
+
+  const { error } = await supabase
+    .from('meals')
+    .upsert(row, { onConflict: 'client_id' })
+    .select()
+    .maybeSingle();
+
   if (error) throw error;
 }
 
@@ -174,6 +187,7 @@ export async function flushPending({ maxTries = 1 } = {}) {
   if (!isOnline()) return { ok: false, reason: 'offline' };
   const q = readQueue();
   if (!q.length) return { ok: true, flushed: 0 };
+  if (!supabase) return { ok: false, reason: 'no-supabase-client' };
 
   const remain = [];
   let flushed = 0;
