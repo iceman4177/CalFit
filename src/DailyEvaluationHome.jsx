@@ -23,11 +23,10 @@ import FeatureUseBadge, {
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 
 /**
- * DailyEvaluationHome (simplified)
- * Goal: make this feel like a clean “daily verdict” experience:
- *  1) Scoreboard (calories, net, protein)
- *  2) Your #1 Fix (limiter)
- *  3) Tomorrow Plan + optional AI Coach Verdict (gated 3/day)
+ * DailyEvaluationHome (simplified + BMR/TDEE aware)
+ *  1) Scoreboard
+ *  2) Your #1 Fix
+ *  3) Tomorrow Plan + gated AI Coach Verdict (3/day free)
  */
 
 // ----------------------------- helpers ---------------------------------------
@@ -107,8 +106,20 @@ function normalizeGoalType(raw) {
   return "maintain";
 }
 
-function pickPrimaryLimiter({ hasProfile, hasMeals, hasWorkout, score, proteinDelta, calorieDelta }) {
-  if (!hasProfile) return "missing_profile";
+function hasBmrInputs(profile = {}) {
+  const age = Number(profile?.age || 0);
+  const gender = String(profile?.gender || "").toLowerCase();
+  const w = Number(profile?.weight || 0);
+  const ft = Number(profile?.height?.feet || 0);
+  const inch = Number(profile?.height?.inches || 0);
+  const act = String(profile?.activityLevel || "");
+  const okGender = gender === "male" || gender === "female";
+  const okHeight = (ft > 0) || (inch > 0);
+  return age > 0 && okGender && w > 0 && okHeight && !!act;
+}
+
+function pickPrimaryLimiter({ profileComplete, hasMeals, hasWorkout, score, proteinDelta, calorieDelta }) {
+  if (!profileComplete) return "missing_profile";
   if (!hasMeals) return "missing_meals";
   if (!hasWorkout) return "missing_training";
   if (proteinDelta < -25) return "protein";
@@ -121,8 +132,8 @@ function limiterCopy(key) {
   switch (key) {
     case "missing_profile":
       return {
-        title: "Finish your setup.",
-        body: "Without your targets, I can’t judge the day accurately.",
+        title: "Your targets aren’t personalized yet.",
+        body: "Finish Health Setup so I can judge the day using your BMR/TDEE baseline.",
       };
     case "missing_meals":
       return {
@@ -159,7 +170,8 @@ function limiterCopy(key) {
 
 function verdictFromSignals({ hasLogs, confidenceLabel, score }) {
   if (!hasLogs) return { headline: "No signal yet.", sub: "Log meals + a workout. Then I’ll judge the day.", tag: "no data" };
-  if (confidenceLabel !== "High") return { headline: "Directionally true…", sub: "Log a bit more for a sharper verdict.", tag: "low signal" };
+  if (confidenceLabel === "Low") return { headline: "Directionally true…", sub: "Add a bit more logging for a sharper verdict.", tag: "low signal" };
+  if (confidenceLabel === "Medium") return { headline: "Pretty clear day.", sub: "You’re close — tighten one lever.", tag: "medium signal" };
   if (score >= 88) return { headline: "This day compounds.", sub: "Repeat this pattern.", tag: "elite" };
   if (score >= 74) return { headline: "Good day — one leak.", sub: "Fix the limiter.", tag: "close" };
   return { headline: "Loose pattern.", sub: "Tighten signal → tighten plan.", tag: "needs work" };
@@ -169,7 +181,6 @@ function verdictFromSignals({ hasLogs, confidenceLabel, score }) {
 function goalAwareCalorieScore({ goalType, calorieTarget, consumed, netKcal }) {
   const g = normalizeGoalType(goalType);
   const err = calorieTarget ? Math.abs(consumed - calorieTarget) : Math.abs(netKcal);
-
   const delta = calorieTarget ? consumed - calorieTarget : netKcal;
 
   const tight = 220;
@@ -242,11 +253,12 @@ function buildTomorrowPlan({ goalType, limiterKey, proteinTarget, proteinG, prof
       ? "Add 1–2 protein servings: tofu/tempeh + a protein shake."
       : "Add 1–2 protein anchors: greek yogurt + whey OR chicken/lean beef.";
 
-  const calFix = g === "bulk"
-    ? "Add a controlled +300–400 kcal block (clean carbs + protein)."
-    : g === "cut"
-    ? "Remove one hidden calorie item (oil/sauce/snack) and keep dinner simple."
-    : "Keep calories within ±250 by planning one meal ahead.";
+  const calFix =
+    g === "bulk"
+      ? "Add a controlled +300–400 kcal block (clean carbs + protein)."
+      : g === "cut"
+      ? "Remove one hidden calorie item (oil/sauce/snack) and keep dinner simple."
+      : "Keep calories within ±250 by planning one meal ahead.";
 
   const trainFix =
     trainingIntent.includes("strength")
@@ -259,7 +271,7 @@ function buildTomorrowPlan({ goalType, limiterKey, proteinTarget, proteinG, prof
 
   if (limiterKey === "missing_profile") {
     return [
-      { title: "Finish Health Setup (60 sec).", detail: "Set goal + targets so this becomes personal." },
+      { title: "Finish Health Setup (60 sec).", detail: "Add age, gender, height, weight, activity, and goal." },
       { title: "Log 2 meals + 1 workout.", detail: "Minimum signal for a real verdict." },
     ];
   }
@@ -305,7 +317,7 @@ function CardShell({ title, subtitle, children, chip }) {
       elevation={0}
       sx={{
         minWidth: { xs: 310, sm: 360 },
-        maxWidth: 420,
+        maxWidth: 440,
         scrollSnapAlign: "start",
         borderRadius: 3,
         border: "1px solid rgba(2,6,23,0.10)",
@@ -380,13 +392,18 @@ export default function DailyEvaluationHome() {
 
     const goalType = normalizeGoalType(userData?.goalType);
 
-    const hasProfile =
-      !!userData?.goalType ||
-      !!userData?.dailyGoal ||
-      !!userData?.weight ||
-      !!userData?.height ||
-      !!userData?.age ||
-      !!userData?.gender;
+    // NEW: BMR/TDEE from HealthDataForm (persisted)
+    const bmrEst =
+      Number(userData?.bmr_est) ||
+      Number(localStorage.getItem("bmr_est") || 0) ||
+      0;
+
+    const tdeeEst =
+      Number(userData?.tdee_est) ||
+      Number(localStorage.getItem("tdee_est") || 0) ||
+      0;
+
+    const profileComplete = hasBmrInputs(userData) && !!userData?.goalType;
 
     const hasMeals = consumedFinal > 0 || (dayMealsRec?.meals?.length || 0) > 0;
     const hasWorkout = burnedFinal > 0;
@@ -397,8 +414,14 @@ export default function DailyEvaluationHome() {
     const pTarget = Number(proteinTarget) || fallbackProteinTarget;
     const proteinDelta = macros.protein_g - pTarget;
 
-    const confidenceScore = (hasProfile ? 0.45 : 0) + (hasMeals ? 0.35 : 0) + (hasWorkout ? 0.20 : 0);
-    const confidenceLabel = confidenceScore >= 0.85 ? "High" : confidenceScore >= 0.55 ? "Medium" : "Low";
+    // Confidence now explicitly rewards: profile complete + meals + workout
+    const confidenceScore =
+      (profileComplete ? 0.50 : 0) +
+      (hasMeals ? 0.32 : 0) +
+      (hasWorkout ? 0.18 : 0);
+
+    const confidenceLabel =
+      confidenceScore >= 0.86 ? "High" : confidenceScore >= 0.58 ? "Medium" : "Low";
 
     const { score, components } = computeScore({
       goalType,
@@ -412,7 +435,7 @@ export default function DailyEvaluationHome() {
     });
 
     const limiterKey = pickPrimaryLimiter({
-      hasProfile,
+      profileComplete,
       hasMeals,
       hasWorkout,
       score,
@@ -420,14 +443,18 @@ export default function DailyEvaluationHome() {
       calorieDelta,
     });
 
+    // How close the chosen target is to estimated TDEE (+/- bias)
+    const tdeeDelta = tdeeEst ? Math.round(calorieTarget - tdeeEst) : 0;
+
     return {
       dayUS,
       dayISO,
       profile: userData,
       targets: { calorieTarget, proteinTarget: pTarget, goalType },
       totals: { consumed: consumedFinal, burned: burnedFinal, netKcal, macros },
+      est: { bmr_est: bmrEst || 0, tdee_est: tdeeEst || 0, tdee_delta: tdeeDelta },
       derived: {
-        hasProfile,
+        profileComplete,
         hasMeals,
         hasWorkout,
         hasLogs,
@@ -507,15 +534,19 @@ export default function DailyEvaluationHome() {
       const p1 = tomorrowPlan?.[0];
       const p2 = tomorrowPlan?.[1];
 
+      const hasEst = !!bundle.est.tdee_est && !!bundle.est.bmr_est;
+
       const payload = {
         feature: "daily_eval_verdict",
         prompt: `
 You are SlimCal Coach. Write a short, punchy verdict for today's day.
+
 Rules:
 - 2–4 sentences max.
 - confident, slightly confrontational but supportive.
 - MUST use numbers: calories consumed, burned, net, protein grams, and targets if available.
 - Mention the user's goal type (${goalType}) and the #1 limiter.
+- If BMR/TDEE are provided, mention that the target is grounded in metabolism (authority).
 - End with 2 bullet points for tomorrow (based on the plan).
 
 Data:
@@ -525,10 +556,19 @@ Consumed: ${Math.round(bundle.totals.consumed)} kcal
 Burned: ${Math.round(bundle.totals.burned)} kcal
 Net: ${Math.round(bundle.totals.netKcal)} kcal
 Protein: ${Math.round(bundle.totals.macros.protein_g)} g
+
 Targets:
 - Calories target: ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "not set"}
 - Protein target: ${bundle.targets.proteinTarget ? Math.round(bundle.targets.proteinTarget) : "not set"}
+
+Metabolism (if available):
+- BMR: ${hasEst ? Math.round(bundle.est.bmr_est) : "n/a"} kcal/day
+- TDEE: ${hasEst ? Math.round(bundle.est.tdee_est) : "n/a"} kcal/day
+- Target vs TDEE: ${hasEst && bundle.targets.calorieTarget ? `${Math.round(bundle.est.tdee_delta)} kcal` : "n/a"}
+
+Confidence: ${bundle.derived.confidenceLabel}
 Limiter: ${bundle.derived.limiterKey}
+
 Tomorrow Plan:
 1) ${p1?.title || ""} — ${p1?.detail || ""}
 2) ${p2?.title || ""} — ${p2?.detail || ""}
@@ -575,6 +615,12 @@ Tomorrow Plan:
     return <Chip size="small" label={x.label} color={x.color} sx={{ fontWeight: 950 }} />;
   })();
 
+  const confidenceChip = (() => {
+    const c = bundle.derived.confidenceLabel;
+    const color = c === "High" ? "success" : c === "Medium" ? "primary" : "warning";
+    return <Chip size="small" label={`Confidence: ${c}`} color={color} sx={{ fontWeight: 900 }} />;
+  })();
+
   const proteinPct = bundle.targets.proteinTarget
     ? clamp((bundle.totals.macros.protein_g / Math.max(1, bundle.targets.proteinTarget)) * 100, 0, 130)
     : 0;
@@ -585,9 +631,26 @@ Tomorrow Plan:
 
   const calQuality = clamp(100 - (calErr / 700) * 100, 0, 100);
 
+  const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
+
+  const metabolismLine = hasEstimates
+    ? `BMR ${Math.round(bundle.est.bmr_est)} • TDEE ${Math.round(bundle.est.tdee_est)}`
+    : "Set up Health Data to unlock BMR/TDEE";
+
+  const targetLine = bundle.targets.calorieTarget
+    ? hasEstimates
+      ? `Target ${Math.round(bundle.targets.calorieTarget)} (vs TDEE ${Math.round(bundle.est.tdee_delta)})`
+      : `Target ${Math.round(bundle.targets.calorieTarget)}`
+    : "Set a calorie target";
+
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1100, mx: "auto" }}>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
+    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={1}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+      >
         <Box>
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22 }}>
             Daily Evaluation
@@ -597,8 +660,9 @@ Tomorrow Plan:
           </Typography>
         </Box>
 
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
           {goalChip}
+          {confidenceChip}
           {!pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={false} labelPrefix="AI Verdict" />}
           {pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={true} labelPrefix="AI Verdict" />}
         </Stack>
@@ -643,6 +707,34 @@ Tomorrow Plan:
               <Chip size="small" label={`⚖️ Net: ${Math.round(bundle.totals.netKcal)} kcal`} />
               <Chip size="small" label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
             </Stack>
+
+            <Box
+              sx={{
+                p: 1.1,
+                borderRadius: 2,
+                border: "1px solid rgba(2,6,23,0.08)",
+                background: "rgba(2,6,23,0.02)",
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                Metabolism baseline
+              </Typography>
+              <Typography sx={{ fontWeight: 900 }}>{metabolismLine}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4 }}>
+                {targetLine}
+              </Typography>
+
+              {!bundle.derived.profileComplete && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={() => history.push("/health")}
+                  sx={{ mt: 1, fontWeight: 900, borderRadius: 999 }}
+                >
+                  Finish Health Setup
+                </Button>
+              )}
+            </Box>
 
             <Box>
               <Typography variant="caption" color="text.secondary">
@@ -700,22 +792,39 @@ Tomorrow Plan:
             <Typography variant="caption" color="text.secondary">
               Quick read:
             </Typography>
+
             <Typography variant="body2">
               {bundle.derived.limiterKey === "protein" && (
-                <>Your protein is <strong>{Math.round(bundle.derived.proteinDelta)}</strong>g under target.</>
+                <>
+                  Your protein is <strong>{Math.round(bundle.derived.proteinDelta)}</strong>g under target.
+                </>
               )}
               {bundle.derived.limiterKey === "energy_balance" && bundle.targets.calorieTarget > 0 && (
-                <>You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs target.</>
+                <>
+                  You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs target.
+                </>
               )}
-              {bundle.derived.limiterKey === "missing_meals" && <>You need at least <strong>2 meals</strong> logged for a real verdict.</>}
-              {bundle.derived.limiterKey === "missing_training" && <>Log <strong>one workout</strong> and your day becomes measurable.</>}
-              {bundle.derived.limiterKey === "missing_profile" && <>Finish Health Setup so this becomes <strong>personal</strong>.</>}
-              {bundle.derived.limiterKey === "execution" && <>Make tomorrow <strong>repeatable</strong>: pick one non-negotiable.</>}
+              {bundle.derived.limiterKey === "missing_meals" && (
+                <>You need at least <strong>2 meals</strong> logged for a real verdict.</>
+              )}
+              {bundle.derived.limiterKey === "missing_training" && (
+                <>Log <strong>one workout</strong> and your day becomes measurable.</>
+              )}
+              {bundle.derived.limiterKey === "missing_profile" && (
+                <>Finish setup so your target is grounded in <strong>BMR/TDEE</strong>.</>
+              )}
+              {bundle.derived.limiterKey === "execution" && (
+                <>Make tomorrow <strong>repeatable</strong>: pick one non-negotiable.</>
+              )}
               {bundle.derived.limiterKey === "tighten_one_leak" && <>You’re close — tighten one thing and repeat.</>}
             </Typography>
 
-            {!bundle.derived.hasProfile && (
-              <Button variant="contained" onClick={() => history.push("/health")} sx={{ fontWeight: 950, borderRadius: 999, mt: 0.5 }}>
+            {!bundle.derived.profileComplete && (
+              <Button
+                variant="contained"
+                onClick={() => history.push("/health")}
+                sx={{ fontWeight: 950, borderRadius: 999, mt: 0.5 }}
+              >
                 Finish Health Setup
               </Button>
             )}
