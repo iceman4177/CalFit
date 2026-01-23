@@ -10,7 +10,7 @@ import { getStreak } from '../utils/streak';
  * - If `streak` prop is provided, uses it; otherwise reads from utils/streak
  * - Subscribes to 'slimcal:streak:update' to stay in sync with the app
  */
-export default function StreakBanner({ streak: streakProp }) {
+export default function StreakBanner({ streak: streakProp, sx = {} }) {
   const [streak, setStreak] = useState(
     typeof streakProp === 'number' ? streakProp : getStreak()
   );
@@ -32,10 +32,20 @@ export default function StreakBanner({ streak: streakProp }) {
   if (!streak) return null;
 
   return (
-    <Paper elevation={2} sx={{ p: 2, mb: 2 }}>
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2,
+        mb: 2,
+        borderRadius: 3,
+        border: '1px solid rgba(2,6,23,0.10)',
+        background: 'rgba(2,6,23,0.02)',
+        ...sx,
+      }}
+    >
       <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
         <EmojiEventsIcon />
-        <Typography variant="h6" component="span">
+        <Typography variant="subtitle1" component="span" sx={{ fontWeight: 900 }}>
           {streak}-day streak! Keep it going 🔥
         </Typography>
       </Box>
