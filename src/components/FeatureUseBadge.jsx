@@ -15,6 +15,9 @@ export const FREE_DAILY_LIMITS = {
   ai_workout: 3,
   ai_food_lookup: 1,
   daily_recap: 3,
+  // Daily Evaluation (AI verdict) — keep naming flexible for older imports.
+  daily_eval: 3,
+  daily_eval_ai_verdict: 3,
 };
 
 function getTodayISO() {

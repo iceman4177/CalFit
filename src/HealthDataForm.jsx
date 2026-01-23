@@ -1,5 +1,5 @@
 // src/HealthDataForm.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useHistory } from 'react-router-dom';
 import {
   Box,
@@ -25,10 +25,10 @@ function getHealthSyncedKeyForUser(userId) {
 }
 
 const activityOptions = [
-  { value: 'sedentary', label: 'Sedentary (little to no exercise)' },
-  { value: 'light', label: 'Light (1-3 days/week)' },
-  { value: 'moderate', label: 'Moderate (3-5 days/week)' },
-  { value: 'active', label: 'Active (6-7 days/week)' }
+  { value: 'sedentary', label: 'Sedentary (little to no exercise)', mult: 1.2 },
+  { value: 'light', label: 'Light (1-3 days/week)', mult: 1.375 },
+  { value: 'moderate', label: 'Moderate (3-5 days/week)', mult: 1.55 },
+  { value: 'active', label: 'Active (6-7 days/week)', mult: 1.725 }
 ];
 
 const goalTypes = [
@@ -84,7 +84,7 @@ const equipmentOptions = [
   'Bodyweight only'
 ];
 
-// --- Helpers for target preview ---
+// --- Helpers ---
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -100,13 +100,42 @@ function goalToCalorieBias(goalType) {
 }
 
 function estimateProteinTargets({ weightLbs, goalType }) {
-  // Simple & stable. We just want something consistent for Eval/Coach.
-  // Cutting -> higher end; bulking -> mid-high; maintenance -> mid.
   const w = num(weightLbs);
   const base = goalType === 'cutting' ? 0.9 : goalType === 'bulking' ? 0.8 : 0.75;
   const daily = Math.round(clamp(w * base, 90, 220));
   const perMeal = Math.round(clamp(daily / 3, 25, 60));
   return { daily, perMeal };
+}
+
+function getActivityMultiplier(activityLevel) {
+  const opt = activityOptions.find((a) => a.value === activityLevel);
+  return opt?.mult || 1.2;
+}
+
+// Mifflin–St Jeor (metric):
+// male:   BMR = 10*kg + 6.25*cm - 5*age + 5
+// female: BMR = 10*kg + 6.25*cm - 5*age - 161
+function estimateBmrMifflin({ gender, ageYears, weightLbs, heightFeet, heightInches }) {
+  const age = num(ageYears);
+  const lbs = num(weightLbs);
+  const ft = num(heightFeet);
+  const inch = num(heightInches);
+
+  if (!age || !lbs || (!ft && !inch) || !gender) return 0;
+
+  const kg = lbs * 0.45359237;
+  const cm = (ft * 12 + inch) * 2.54;
+
+  const base = 10 * kg + 6.25 * cm - 5 * age;
+  if (String(gender).toLowerCase() === 'male') return Math.round(base + 5);
+  if (String(gender).toLowerCase() === 'female') return Math.round(base - 161);
+  return 0;
+}
+
+function roundToNearest(n, step = 25) {
+  const x = num(n);
+  if (!x) return 0;
+  return Math.round(x / step) * step;
 }
 
 export default function HealthDataForm({ setUserData }) {
@@ -233,22 +262,50 @@ export default function HealthDataForm({ setUserData }) {
     { auto: false }
   );
 
-  // Preview targets (based on current inputs)
-  const { daily: previewProteinDailyG, perMeal: previewProteinMealG } = estimateProteinTargets({
-    weightLbs: weight,
-    goalType
-  });
+  // Preview protein targets
+  const { daily: previewProteinDailyG, perMeal: previewProteinMealG } = useMemo(() => {
+    return estimateProteinTargets({ weightLbs: weight, goalType });
+  }, [weight, goalType]);
+
+  // ✅ BMR / TDEE / Recommended calories (goal-adjusted)
+  const bmr = useMemo(() => {
+    return estimateBmrMifflin({
+      gender,
+      ageYears: age,
+      weightLbs: weight,
+      heightFeet,
+      heightInches
+    });
+  }, [gender, age, weight, heightFeet, heightInches]);
+
+  const tdee = useMemo(() => {
+    const mult = getActivityMultiplier(activityLevel);
+    if (!bmr) return 0;
+    return Math.round(bmr * mult);
+  }, [bmr, activityLevel]);
+
+  const recommendedDailyCalories = useMemo(() => {
+    if (!tdee) return 0;
+    const bias = goalToCalorieBias(goalType);
+    return roundToNearest(tdee + bias, 25);
+  }, [tdee, goalType]);
+
+  const showRecommendation = !!recommendedDailyCalories && !!gender && !!activityLevel && num(age) > 0 && num(weight) > 0;
+
+  const handleUseRecommendation = () => {
+    if (!recommendedDailyCalories) return;
+    setDailyGoal(String(recommendedDailyCalories));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Basic validation: age must exist
+    // Basic validation
     const ageN = num(age);
     if (!ageN || ageN < 13 || ageN > 99) {
       alert('Please enter a valid age (13–99).');
       return;
     }
-
     if (!gender) {
       alert('Please select a gender so we can estimate BMR accurately.');
       return;
@@ -265,7 +322,7 @@ export default function HealthDataForm({ setUserData }) {
       goalType
     };
 
-    // Derived targets (commit the preview numbers)
+    // Derived targets
     const calorieBias = goalToCalorieBias(goalType);
 
     const enriched = {
@@ -274,7 +331,6 @@ export default function HealthDataForm({ setUserData }) {
       currentStreak: 0,
       showFirstTimeTips: true,
       showMealReminders: true,
-      // New personalization fields
       dietPreference,
       trainingIntent,
       trainingSplit,
@@ -284,10 +340,13 @@ export default function HealthDataForm({ setUserData }) {
         daily_g: previewProteinDailyG,
         per_meal_g: previewProteinMealG
       },
-      calorieBias
+      calorieBias,
+      // Optional computed values (helpful later for coach/eval without recomputing)
+      bmr_est: bmr || null,
+      tdee_est: tdee || null
     };
 
-    // Persist for the rest of the app (meals/workouts/AI)
+    // Persist for the rest of the app
     localStorage.setItem('userData', JSON.stringify(enriched));
     localStorage.setItem('hasCompletedHealthData', 'true');
 
@@ -301,11 +360,13 @@ export default function HealthDataForm({ setUserData }) {
     localStorage.setItem('protein_target_daily_g', String(previewProteinDailyG));
     localStorage.setItem('protein_target_meal_g', String(previewProteinMealG));
     localStorage.setItem('calorie_bias', String(calorieBias));
-    // Alias some components already read
     localStorage.setItem('fitness_goal', goalType);
     localStorage.setItem('gender', gender);
 
-    // ✅ Mark the form "seen" once (anon OR per-user)
+    if (bmr) localStorage.setItem('bmr_est', String(bmr));
+    if (tdee) localStorage.setItem('tdee_est', String(tdee));
+
+    // Mark "seen" once
     let authedUser = null;
     try {
       const { data } = await supabase.auth.getUser();
@@ -315,7 +376,7 @@ export default function HealthDataForm({ setUserData }) {
     const seenKey = getHealthSeenKeyForUser(authedUser?.id || null);
     try { localStorage.setItem(seenKey, 'true'); } catch {}
 
-    // ✅ If logged in: sync health to Supabase user metadata (no DB schema needed)
+    // If logged in: sync to Supabase user metadata (no DB schema needed)
     if (authedUser?.id) {
       const syncedKey = getHealthSyncedKeyForUser(authedUser.id);
 
@@ -336,7 +397,9 @@ export default function HealthDataForm({ setUserData }) {
               lastFocus: enriched.lastFocus,
               equipment: enriched.equipment,
               proteinTargets: enriched.proteinTargets,
-              calorieBias: enriched.calorieBias
+              calorieBias: enriched.calorieBias,
+              bmr_est: enriched.bmr_est,
+              tdee_est: enriched.tdee_est
             }
           }
         });
@@ -375,7 +438,7 @@ export default function HealthDataForm({ setUserData }) {
               label="Age (years)"
               type="number"
               inputProps={{ min: 13, max: 99, step: 1 }}
-              helperText="Used for calorie/protein targets and daily evaluation context."
+              helperText="Used for calorie/protein targets and Daily Evaluation context."
               value={age}
               onFocus={triggerAgeTip}
               onChange={e => setAge(e.target.value)}
@@ -461,18 +524,6 @@ export default function HealthDataForm({ setUserData }) {
           </Box>
 
           <Box sx={{ mb: 2 }}>
-            <TextField
-              label="Daily Calorie Goal"
-              type="number"
-              value={dailyGoal}
-              onFocus={triggerGoalTip}
-              onChange={e => setDailyGoal(e.target.value)}
-              fullWidth
-              required
-            />
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" gutterBottom>
               Goal Type
             </Typography>
@@ -492,6 +543,62 @@ export default function HealthDataForm({ setUserData }) {
                 <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
+          </Box>
+
+          {/* ✅ Recommendation card */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              mt: 1,
+              mb: 2,
+              borderRadius: 2,
+              bgcolor: 'rgba(2,6,23,0.04)',
+              border: '1px solid rgba(2,6,23,0.10)'
+            }}
+          >
+            <Typography sx={{ fontWeight: 900 }}>
+              Recommended Daily Calories
+            </Typography>
+
+            {showRecommendation ? (
+              <>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Estimated BMR: <strong>{bmr}</strong> kcal/day • Estimated TDEE: <strong>{tdee}</strong> kcal/day
+                </Typography>
+                <Typography sx={{ mt: 0.8, fontWeight: 950, fontSize: 20 }}>
+                  {recommendedDailyCalories} kcal/day
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.4 }}>
+                  Includes your activity level + a {goalType === 'cutting' ? 'deficit' : goalType === 'bulking' ? 'surplus' : 'neutral'} adjustment.
+                </Typography>
+
+                <Button
+                  variant="contained"
+                  onClick={handleUseRecommendation}
+                  sx={{ mt: 1.2, fontWeight: 950, borderRadius: 999 }}
+                >
+                  Use Recommendation
+                </Button>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.6 }}>
+                Fill out age, gender, height, weight, activity, and goal type to see a recommendation.
+              </Typography>
+            )}
+          </Paper>
+
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              label="Daily Calorie Goal"
+              type="number"
+              value={dailyGoal}
+              onFocus={triggerGoalTip}
+              onChange={e => setDailyGoal(e.target.value)}
+              fullWidth
+              required
+              helperText="You can use the recommendation above or set your own target."
+            />
           </Box>
 
           <Divider sx={{ my: 2 }} />
@@ -604,11 +711,11 @@ export default function HealthDataForm({ setUserData }) {
               mt: 2,
               mb: 2,
               borderRadius: 2,
-              bgcolor: 'rgba(2,6,23,0.04)',
+              bgcolor: 'rgba(2,6,23,0.03)',
               border: '1px solid rgba(2,6,23,0.08)'
             }}
           >
-            <Typography sx={{ fontWeight: 800 }}>
+            <Typography sx={{ fontWeight: 900 }}>
               Targets Preview
             </Typography>
             <Typography variant="body2" color="text.secondary">
@@ -619,7 +726,7 @@ export default function HealthDataForm({ setUserData }) {
             </Typography>
           </Paper>
 
-          <Button type="submit" variant="contained" fullWidth sx={{ mt: 1 }}>
+          <Button type="submit" variant="contained" fullWidth sx={{ mt: 1, fontWeight: 900 }}>
             Save & Continue
           </Button>
         </form>
