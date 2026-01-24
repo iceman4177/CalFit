@@ -54,10 +54,12 @@ export async function saveWorkoutLocalFirst(workout) {
   };
 
   const idx = history.findIndex(w => w.client_id === localRow.client_id);
-  if (idx >= 0) history[idx] = localRow; else history.unshift(localRow);
+  if (idx >= 0) history[idx] = localRow;
+  else history.unshift(localRow);
+
   writeLS('workoutHistory', history);
 
-  // Broadcast burned calories for banner
+  // Broadcast (single-session delta) — UI pages can recompute totals if needed
   try {
     window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
       detail: { date: localDayISO(), burned: localRow.totalCalories }
@@ -87,14 +89,13 @@ export async function saveWorkoutLocalFirst(workout) {
     const res = await supabase
       .from('workouts')
       .upsert(row, { onConflict: 'client_id' })
-      .select()
-      .maybeSingle();
+      .select();
 
     if (res.error) {
-      // fallback to insert if unique index not there yet
-      const ins = await supabase.from('workouts').insert(row).select().maybeSingle();
-      if (ins.error) throw ins.error;
+      enqueue({ type: 'workout.upsert', payload: { ...workout, total_calories: localRow.total_calories } });
+      return { ok: true, queued: true, error: res.error };
     }
+
     return { ok: true, queued: false };
   } catch (err) {
     enqueue({ type: 'workout.upsert', payload: { ...workout, total_calories: localRow.total_calories } });
@@ -140,7 +141,6 @@ export async function saveMealLocalFirst(meal) {
     name: meal.title,
     calories: num(meal.total_calories),
 
-    // Optional macros + meta (preserved for local UI + offline recap)
     protein_g: meal.protein_g != null ? num(meal.protein_g, undefined) : undefined,
     carbs_g: meal.carbs_g != null ? num(meal.carbs_g, undefined) : undefined,
     fat_g: meal.fat_g != null ? num(meal.fat_g, undefined) : undefined,
@@ -163,7 +163,6 @@ export async function saveMealLocalFirst(meal) {
   }
 
   try {
-    // Minimal schema-safe row (no extra columns)
     const row = {
       client_id: meal.client_id,
       user_id: meal.user_id ?? null,
@@ -184,24 +183,28 @@ export async function saveMealLocalFirst(meal) {
 }
 
 // ---------- DAILY METRICS ----------
-/**
- * Accepts either the new shape:
- *   { user_id, local_day, calories_eaten, calories_burned, net_calories }
- * or the legacy shape:
- *   { user_id, date_key, consumed, burned, net }
- */
 export async function upsertDailyMetricsLocalFirst(input) {
-  // Normalize inputs
   const local_day = input.local_day || input.date_key || localDayISO();
   const eaten = num(input.calories_eaten ?? input.consumed);
   const burned = num(input.calories_burned ?? input.burned);
   const net = num(input.net_calories ?? input.net ?? (eaten - burned));
   const user_id = input.user_id || null;
 
-  // 1) Local cache for immediate UI
+  // 1) Local cache
   const bag = readLS('dailyMetricsCache', {});
   bag[local_day] = { eaten, burned, net, updated_at: new Date().toISOString() };
   writeLS('dailyMetricsCache', bag);
+
+  // ✅ ALSO set the exact keys your UI reads most often
+  // (prevents “desktop shows 0” if UI is using these directly)
+  try {
+    const today = localDayISO();
+    if (local_day === today) {
+      localStorage.setItem('consumedToday', String(eaten));
+      localStorage.setItem('burnedToday', String(burned));
+      localStorage.setItem('netToday', String(net));
+    }
+  } catch {}
 
   try {
     window.dispatchEvent(new CustomEvent('slimcal:consumed:update', {
@@ -210,9 +213,12 @@ export async function upsertDailyMetricsLocalFirst(input) {
     window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
       detail: { date: local_day, burned }
     }));
+    window.dispatchEvent(new CustomEvent('slimcal:net:update', {
+      detail: { date: local_day, net }
+    }));
   } catch {}
 
-  // 2) Cloud upsert (best-effort)
+  // 2) Cloud write (best-effort)
   const payloadNew = {
     user_id,
     local_day,
@@ -231,28 +237,13 @@ export async function upsertDailyMetricsLocalFirst(input) {
     const res = await supabase
       .from('daily_metrics')
       .upsert(payloadNew, { onConflict: 'user_id,local_day' })
-      .select()
-      .maybeSingle();
+      .select();
 
-    // Legacy fallback if table still has old columns
-    if (res.error && /column .* does not exist/i.test(res.error.message || '')) {
-      const legacy = {
-        user_id,
-        day: local_day,
-        cals_eaten: eaten,
-        cals_burned: burned,
-        net_cals: net,
-        updated_at: new Date().toISOString(),
-      };
-      const res2 = await supabase
-        .from('daily_metrics')
-        .upsert(legacy, { onConflict: 'user_id,day' })
-        .select()
-        .maybeSingle();
-      if (res2.error) throw res2.error;
-    } else if (res.error) {
-      throw res.error;
+    if (res.error) {
+      enqueue({ type: 'daily_metrics.upsert', payload: payloadNew });
+      return { ok: true, queued: true, error: res.error };
     }
+
     return { ok: true, queued: false };
   } catch (err) {
     enqueue({ type: 'daily_metrics.upsert', payload: payloadNew });

@@ -64,6 +64,7 @@ function mapDailyMetricsNew(payload) {
     updated_at: nowIso(),
   };
 }
+
 function mapDailyMetricsLegacy(payload) {
   const day = payload.local_day || payload.date_key || toLocalDayISO();
   const cals_eaten  = asNum(payload.calories_eaten ?? payload.consumed);
@@ -100,15 +101,34 @@ async function upsertWorkout(op) {
     notes: p.notes ?? null,
   };
 
+  // Try upsert if constraint exists; otherwise fallback to update+insert
   const res = await supabase
     .from('workouts')
     .upsert(row, { onConflict: 'client_id' })
-    .select()
-    .maybeSingle();
+    .select();
 
   if (res.error) {
+    const msg = String(res.error.message || '');
+    const onConflictBad = /no unique|exclusion constraint|on conflict/i.test(msg);
+
+    if (onConflictBad) {
+      // update by client_id; if no rows affected, insert
+      const up = await supabase
+        .from('workouts')
+        .update(row)
+        .eq('client_id', row.client_id)
+        .select();
+
+      if (up.error) throw up.error;
+      if (!up.data || up.data.length === 0) {
+        const ins = await supabase.from('workouts').insert(row).select();
+        if (ins.error) throw ins.error;
+      }
+      return;
+    }
+
     // fallback insert if unique index not present yet
-    const ins = await supabase.from('workouts').insert(row).select().maybeSingle();
+    const ins = await supabase.from('workouts').insert(row).select();
     if (ins.error) throw ins.error;
   }
 }
@@ -128,24 +148,51 @@ async function upsertDailyMetrics(op) {
   if (!rowNew.user_id) return; // skip cloud for anonymous
 
   // Try new schema first (user_id, local_day)
-  let { error } = await supabase
+  let res = await supabase
     .from('daily_metrics')
     .upsert(rowNew, { onConflict: 'user_id,local_day' })
-    .select()
-    .maybeSingle();
+    .select();
 
-  // Fallback to legacy if the new columns don't exist yet
-  if (error && /column .* does not exist/i.test(error.message || '')) {
-    const rowLegacy = mapDailyMetricsLegacy(p);
-    const res2 = await supabase
-      .from('daily_metrics')
-      .upsert(rowLegacy, { onConflict: 'user_id,day' })
-      .select()
-      .maybeSingle();
-    if (res2.error) throw res2.error;
-    return;
+  if (res.error) {
+    const msg = String(res.error.message || '');
+
+    // ✅ Case 1: columns don't exist → legacy
+    if (/column .* does not exist/i.test(msg)) {
+      const rowLegacy = mapDailyMetricsLegacy(p);
+      const res2 = await supabase
+        .from('daily_metrics')
+        .upsert(rowLegacy, { onConflict: 'user_id,day' })
+        .select();
+      if (res2.error) throw res2.error;
+      return;
+    }
+
+    // ✅ Case 2: ON CONFLICT target invalid (NO UNIQUE CONSTRAINT) → manual update/insert
+    if (/no unique|exclusion constraint|on conflict/i.test(msg)) {
+      // try update by match
+      const up = await supabase
+        .from('daily_metrics')
+        .update(rowNew)
+        .eq('user_id', rowNew.user_id)
+        .eq('local_day', rowNew.local_day)
+        .select();
+
+      if (up.error) throw up.error;
+
+      // if nothing updated, insert new row
+      if (!up.data || up.data.length === 0) {
+        const ins = await supabase
+          .from('daily_metrics')
+          .insert(rowNew)
+          .select();
+        if (ins.error) throw ins.error;
+      }
+      return;
+    }
+
+    // other error
+    throw res.error;
   }
-  if (error) throw error;
 }
 
 async function upsertMeal(op) {
@@ -161,13 +208,32 @@ async function upsertMeal(op) {
     total_calories: Number(p.total_calories) || 0,
   };
 
-  const { error } = await supabase
+  const res = await supabase
     .from('meals')
     .upsert(row, { onConflict: 'client_id' })
-    .select()
-    .maybeSingle();
+    .select();
 
-  if (error) throw error;
+  if (res.error) {
+    const msg = String(res.error.message || '');
+    const onConflictBad = /no unique|exclusion constraint|on conflict/i.test(msg);
+
+    if (onConflictBad) {
+      const up = await supabase
+        .from('meals')
+        .update(row)
+        .eq('client_id', row.client_id)
+        .select();
+
+      if (up.error) throw up.error;
+      if (!up.data || up.data.length === 0) {
+        const ins = await supabase.from('meals').insert(row).select();
+        if (ins.error) throw ins.error;
+      }
+      return;
+    }
+
+    throw res.error;
+  }
 }
 
 async function processItem(op) {

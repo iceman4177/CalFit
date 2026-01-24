@@ -1,11 +1,10 @@
 // src/lib/hydrateCloudToLocal.js
 import { supabase } from './supabaseClient';
 
-// Local-day ISO helper (local midnight; avoids UTC off-by-one)
 function localDayISO(d = new Date()) {
   try {
     const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    return ld.toISOString().slice(0, 10); // YYYY-MM-DD
+    return ld.toISOString().slice(0, 10);
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
@@ -16,14 +15,6 @@ function num(n, d = 0) {
   return Number.isFinite(v) ? v : d;
 }
 
-/**
- * Pull today's cloud daily_metrics → write to localStorage keys used by UI:
- * - consumedToday
- * - burnedToday
- * - netToday
- *
- * Also dispatches events so any banner/UI updates immediately.
- */
 export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
   const alsoDispatch = opts?.alsoDispatch !== false;
 
@@ -33,18 +24,20 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
   const todayLocal = localDayISO(new Date());
 
   try {
-    // Try modern schema first: daily_metrics.local_day
+    // ✅ pull latest row (works even if duplicates exist)
     const { data, error } = await supabase
       .from('daily_metrics')
       .select('*')
       .eq('user_id', user_id)
       .eq('local_day', todayLocal)
-      .maybeSingle();
+      .order('updated_at', { ascending: false })
+      .limit(1);
 
     if (error) throw error;
 
-    if (!data) {
-      // If no row exists yet, default zeros
+    const row = Array.isArray(data) && data.length ? data[0] : null;
+
+    if (!row) {
       try {
         localStorage.setItem('consumedToday', String(0));
         localStorage.setItem('burnedToday', String(0));
@@ -53,36 +46,23 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
 
       if (alsoDispatch) {
         try {
-          window.dispatchEvent(
-            new CustomEvent('slimcal:consumed:update', {
-              detail: { date: todayLocal, consumed: 0 }
-            })
-          );
+          window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayLocal, consumed: 0 } }));
         } catch {}
         try {
-          window.dispatchEvent(
-            new CustomEvent('slimcal:burned:update', {
-              detail: { date: todayLocal, burned: 0 }
-            })
-          );
+          window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayLocal, burned: 0 } }));
         } catch {}
         try {
-          window.dispatchEvent(
-            new CustomEvent('slimcal:net:update', {
-              detail: { date: todayLocal, net: 0 }
-            })
-          );
+          window.dispatchEvent(new CustomEvent('slimcal:net:update', { detail: { date: todayLocal, net: 0 } }));
         } catch {}
       }
 
       return { ok: true, empty: true, local_day: todayLocal };
     }
 
-    const consumed = num(data.calories_eaten, 0);
-    const burned = num(data.calories_burned, 0);
-    const net = num(data.net_calories, consumed - burned);
+    const consumed = num(row.calories_eaten, 0);
+    const burned = num(row.calories_burned, 0);
+    const net = num(row.net_calories, consumed - burned);
 
-    // Write to localStorage so existing UI reads correct numbers immediately
     try {
       localStorage.setItem('consumedToday', String(consumed));
       localStorage.setItem('burnedToday', String(burned));
@@ -91,32 +71,19 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
       localStorage.setItem('slimcal:lastHydratedAt', String(Date.now()));
     } catch {}
 
-    // Dispatch events so any components listening update
     if (alsoDispatch) {
       try {
-        window.dispatchEvent(
-          new CustomEvent('slimcal:consumed:update', {
-            detail: { date: todayLocal, consumed }
-          })
-        );
+        window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayLocal, consumed } }));
       } catch {}
       try {
-        window.dispatchEvent(
-          new CustomEvent('slimcal:burned:update', {
-            detail: { date: todayLocal, burned }
-          })
-        );
+        window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayLocal, burned } }));
       } catch {}
       try {
-        window.dispatchEvent(
-          new CustomEvent('slimcal:net:update', {
-            detail: { date: todayLocal, net }
-          })
-        );
+        window.dispatchEvent(new CustomEvent('slimcal:net:update', { detail: { date: todayLocal, net } }));
       } catch {}
     }
 
-    return { ok: true, local_day: todayLocal, consumed, burned, net, raw: data };
+    return { ok: true, local_day: todayLocal, consumed, burned, net, raw: row };
   } catch (e) {
     console.warn('[hydrateTodayTotalsFromCloud] failed', e);
     return { ok: false, error: e };
