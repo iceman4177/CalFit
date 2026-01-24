@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
+import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
 
@@ -40,6 +41,13 @@ export default function useBootstrapSync(user) {
         await migrateLocalToCloudOneTime(user);
         // After bootstrap, try to flush any queued ops quietly
         await flushPending({ maxTries: 2 });
+
+        // ✅ PULL cloud truth into local caches (fixes cross-device totals)
+        try {
+          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        } catch (e) {
+          console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
+        }
       } finally {
         try {
           sessionStorage.setItem(sessionKey, '1');
