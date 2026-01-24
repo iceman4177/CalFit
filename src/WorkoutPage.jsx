@@ -36,7 +36,11 @@ import { calcExerciseCaloriesHybrid } from './analytics';
 import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
 // ✅ local-first wrappers (idempotent, queued sync, syncs to Supabase when signed in)
-import { saveWorkoutLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
+import {
+  saveWorkoutLocalFirst,
+  deleteWorkoutLocalFirst,
+  upsertDailyMetricsLocalFirst
+} from './lib/localFirst';
 
 // ---- Paywall helpers ----
 const isProUser = () => {
@@ -67,8 +71,8 @@ function formatExerciseLine(ex) {
 
   const vol =
     hasSets && hasReps ? `${setsNum}×${repsStr}` :
-    hasSets ? `${setsNum}×` :
-    hasReps ? `×${repsStr}` : '';
+      hasSets ? `${setsNum}×` :
+        hasReps ? `×${repsStr}` : '';
 
   const wt = hasWeight ? ` @ ${weight} lb` : '';
   const name = ex.exerciseName || ex.name || 'Exercise';
@@ -125,7 +129,7 @@ function getOrCreateActiveWorkoutSessionId() {
 function clearActiveWorkoutSessionId() {
   try {
     localStorage.removeItem('slimcal:activeWorkoutSessionId');
-  } catch {}
+  } catch { }
 }
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
@@ -166,13 +170,16 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
 
+  // ✅ stable "started_at" so autosaves don't constantly rewrite it
+  const startedAtRef = useRef(new Date().toISOString());
+
   // ✅ debounce autosave timer
   const autosaveTimerRef = useRef(null);
 
   const handleDismiss = (key, setter, cb) => {
     try {
       localStorage.setItem(key, 'true');
-    } catch {}
+    } catch { }
     setter(false);
     if (cb) cb();
   };
@@ -357,8 +364,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ build a draft workout session that gets upserted continuously
   const buildDraftWorkoutSession = useCallback(() => {
     const now = new Date();
-    const startedAt = now.toISOString();
-    const endedAt = startedAt;
+    const startedAt = startedAtRef.current || now.toISOString();
+    const endedAt = now.toISOString();
 
     const todayLocalIso = localDayISO(now);
     const todayDisplay = now.toLocaleDateString('en-US');
@@ -403,7 +410,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
       const burnedToday = workouts
         .filter(w => w.date === todayDisplay)
-        .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories ?? w.total_calories) || 0), 0);
+        .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
 
       const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
       const todayMealRec = meals.find(m => m.date === todayDisplay);
@@ -416,7 +423,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
           detail: { date: todayLocalIso, burned: burnedToday }
         }));
-      } catch {}
+      } catch { }
 
       await upsertDailyMetricsLocalFirst({
         user_id: user?.id || null,
@@ -432,7 +439,21 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ AUTOSAVE draft workout while logging (meal-style behavior)
   useEffect(() => {
-    if (!Array.isArray(cumulativeExercises) || cumulativeExercises.length === 0) return;
+    // If user removed everything, remove the draft workout so history isn't polluted
+    if (!Array.isArray(cumulativeExercises) || cumulativeExercises.length === 0) {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+
+      // best-effort: delete draft workout from local + cloud
+      (async () => {
+        try {
+          const cid = activeWorkoutSessionIdRef.current;
+          if (cid) await deleteWorkoutLocalFirst(cid);
+        } catch { }
+      })();
+
+      return;
+    }
 
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
 
@@ -488,6 +509,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     // ✅ start fresh next time
     clearActiveWorkoutSessionId();
     activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
+    startedAtRef.current = new Date().toISOString();
 
     history.push('/history');
   };
@@ -502,6 +524,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
     clearActiveWorkoutSessionId();
     activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
+    startedAtRef.current = new Date().toISOString();
   };
 
   const handleShareWorkout = () => setShareModalOpen(true);
