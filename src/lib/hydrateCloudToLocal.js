@@ -1,4 +1,6 @@
 // src/lib/hydrateCloudToLocal.js
+// Pull cloud "today totals" into localStorage caches so UI carries across devices.
+
 import { supabase } from './supabaseClient';
 
 function localDayISO(d = new Date()) {
@@ -10,103 +12,134 @@ function localDayISO(d = new Date()) {
   }
 }
 
-function num(n, d = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : d;
+function safeNum(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
-  const alsoDispatch = opts?.alsoDispatch !== false;
+function normalizeDailyMetricsRow(row) {
+  if (!row || typeof row !== 'object') return null;
 
-  const user_id = user?.id || null;
-  if (!user_id) return { ok: false, reason: 'no_user' };
+  // Accept new schema OR legacy schema
+  const local_day =
+    row.local_day ||
+    row.day ||
+    row.date_key ||
+    localDayISO();
 
-  const todayLocal = localDayISO(new Date());
+  const eaten =
+    safeNum(
+      row.calories_eaten ??
+      row.cals_eaten ??
+      row.consumed ??
+      row.eaten ??
+      0,
+      0
+    );
 
+  const burned =
+    safeNum(
+      row.calories_burned ??
+      row.cals_burned ??
+      row.burned ??
+      0,
+      0
+    );
+
+  const net =
+    safeNum(
+      row.net_calories ??
+      row.net_cals ??
+      row.net ??
+      (eaten - burned),
+      eaten - burned
+    );
+
+  return { local_day, eaten, burned, net };
+}
+
+async function fetchTodayDailyMetricsRow(userId, todayISO) {
+  if (!supabase) return null;
+
+  // ✅ Try new schema first (local_day)
   try {
-    const { data, error } = await supabase
+    const res = await supabase
       .from('daily_metrics')
       .select('*')
-      .eq('user_id', user_id)
-      .eq('local_day', todayLocal)
+      .eq('user_id', userId)
+      .eq('local_day', todayISO)
       .order('updated_at', { ascending: false })
-      .limit(1);
+      .limit(1)
+      .maybeSingle();
 
-    if (error) throw error;
+    if (!res?.error && res?.data) return res.data;
 
-    const row = Array.isArray(data) && data.length ? data[0] : null;
+    // If no data, continue to legacy fallback
+  } catch {}
 
-    if (!row) {
-      try {
-        localStorage.setItem('consumedToday', String(0));
-        localStorage.setItem('burnedToday', String(0));
-        localStorage.setItem('netToday', String(0));
-      } catch {}
+  // ✅ Legacy schema fallback (day)
+  try {
+    const res2 = await supabase
+      .from('daily_metrics')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('day', todayISO)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      // also keep dailyMetricsCache consistent
-      try {
-        const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-        cache[todayLocal] = { consumed: 0, burned: 0, net: 0, updated_at: new Date().toISOString() };
-        localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-      } catch {}
+    if (!res2?.error && res2?.data) return res2.data;
+  } catch {}
 
-      if (alsoDispatch) {
-        try {
-          window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayLocal, consumed: 0 } }));
-        } catch {}
-        try {
-          window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayLocal, burned: 0 } }));
-        } catch {}
-        try {
-          window.dispatchEvent(new CustomEvent('slimcal:net:update', { detail: { date: todayLocal, net: 0 } }));
-        } catch {}
-      }
+  // ✅ If neither worked, return null
+  return null;
+}
 
-      return { ok: true, empty: true, local_day: todayLocal };
-    }
+/**
+ * hydrateTodayTotalsFromCloud
+ * - Reads today's daily_metrics from Supabase
+ * - Writes it into localStorage.dailyMetricsCache[todayISO]
+ * - Dispatches update events so NetCalorieBanner refreshes instantly
+ */
+export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } = {}) {
+  const userId = user?.id || null;
+  if (!userId || !supabase) return { ok: false, reason: 'no-user-or-supabase' };
 
-    const consumed = num(row.calories_eaten, 0);
-    const burned = num(row.calories_burned, 0);
-    const net = num(row.net_calories, consumed - burned);
+  const todayISO = localDayISO();
+  const row = await fetchTodayDailyMetricsRow(userId, todayISO);
 
-    try {
-      localStorage.setItem('consumedToday', String(consumed));
-      localStorage.setItem('burnedToday', String(burned));
-      localStorage.setItem('netToday', String(net));
-      localStorage.setItem('slimcal:lastHydratedLocalDay', todayLocal);
-      localStorage.setItem('slimcal:lastHydratedAt', String(Date.now()));
-    } catch {}
-
-    // ✅ keep existing fallback cache in sync
-    try {
-      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-      cache[todayLocal] = {
-        consumed,
-        burned,
-        net,
-        calories_eaten: consumed,
-        calories_burned: burned,
-        net_calories: net,
-        updated_at: new Date().toISOString()
-      };
-      localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-    } catch {}
-
-    if (alsoDispatch) {
-      try {
-        window.dispatchEvent(new CustomEvent('slimcal:consumed:update', { detail: { date: todayLocal, consumed } }));
-      } catch {}
-      try {
-        window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayLocal, burned } }));
-      } catch {}
-      try {
-        window.dispatchEvent(new CustomEvent('slimcal:net:update', { detail: { date: todayLocal, net } }));
-      } catch {}
-    }
-
-    return { ok: true, local_day: todayLocal, consumed, burned, net, raw: row };
-  } catch (e) {
-    console.warn('[hydrateTodayTotalsFromCloud] failed', e);
-    return { ok: false, error: e };
+  if (!row) {
+    // No cloud row yet — do nothing
+    return { ok: true, hydrated: false, todayISO };
   }
+
+  const norm = normalizeDailyMetricsRow(row);
+  if (!norm) return { ok: false, reason: 'bad-row' };
+
+  // ✅ Write to local cache
+  try {
+    const bag = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    bag[todayISO] = {
+      eaten: safeNum(norm.eaten, 0),
+      burned: safeNum(norm.burned, 0),
+      net: safeNum(norm.net, safeNum(norm.eaten, 0) - safeNum(norm.burned, 0)),
+      updated_at: new Date().toISOString(),
+      _hydrated_from_cloud: true,
+    };
+    localStorage.setItem('dailyMetricsCache', JSON.stringify(bag));
+  } catch {}
+
+  // ✅ Dispatch events so UI updates immediately
+  if (alsoDispatch) {
+    try {
+      window.dispatchEvent(new CustomEvent('slimcal:consumed:update', {
+        detail: { date: todayISO, eaten: safeNum(norm.eaten, 0) }
+      }));
+      window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+        detail: { date: todayISO, burned: safeNum(norm.burned, 0) }
+      }));
+    } catch {}
+  }
+
+  return { ok: true, hydrated: true, todayISO, values: norm };
 }

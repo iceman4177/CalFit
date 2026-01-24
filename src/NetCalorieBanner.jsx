@@ -49,9 +49,9 @@ function readUserGoalCalories() {
 
 /**
  * Read today's totals from the local-first caches that the app already writes:
- * - mealHistory (todayUS key) from MealTracker.persistToday
- * - workoutHistory (todayUS key) from WorkoutPage/saveWorkoutLocalFirst
- * - dailyMetricsCache (todayISO) as an extra fallback
+ * - mealHistory (todayUS OR todayISO)
+ * - workoutHistory (todayUS OR todayISO)
+ * - dailyMetricsCache (todayISO) — ✅ this is what enables cross-device carry over
  */
 function readTodayTotals() {
   const dUS = todayUS();
@@ -60,53 +60,38 @@ function readTodayTotals() {
   let eaten = 0;
   let burned = 0;
 
-  // Meals: stored under mealHistory with date = todayUS
+  // Meals: stored under mealHistory with date = todayUS (older) OR todayISO (new localFirst)
   try {
     const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const rec = Array.isArray(mh) ? mh.find(m => m?.date === dUS) : null;
+    const rec = Array.isArray(mh)
+      ? mh.find(m => m?.date === dUS || m?.date === dISO)
+      : null;
     if (rec?.meals?.length) {
       eaten = rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
     }
   } catch {}
 
-  // Workouts: stored under workoutHistory with date = todayUS
+  // Workouts: stored under workoutHistory with date = todayUS (mostly)
   try {
     const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const arr = Array.isArray(wh) ? wh : [];
     burned = arr
-      .filter(w => w?.date === dUS)
+      .filter(w => w?.date === dUS || w?.date === dISO)
       .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
   } catch {}
 
-  // Fallback: dailyMetricsCache for todayISO if either side is missing
+  // ✅ Cross-device truth: dailyMetricsCache for todayISO
+  // Always prefer this when present (because it may have been hydrated from Supabase)
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
     if (row) {
-      if (!eaten) eaten = safeNum(row?.consumed ?? row?.eaten ?? row?.calories_eaten, eaten);
-      if (!burned) burned = safeNum(row?.burned ?? row?.calories_burned, burned);
-    }
-  } catch {}
+      const eatenFromCache = safeNum(row?.consumed ?? row?.eaten ?? row?.calories_eaten ?? row?.eaten, NaN);
+      const burnedFromCache = safeNum(row?.burned ?? row?.calories_burned, NaN);
 
-  // ✅ FIX: Cross-device hydrated totals (written by hydrateTodayTotalsFromCloud)
-  // If this device doesn't have local histories yet, these are the cloud truth.
-  try {
-    const ct = localStorage.getItem('consumedToday');
-    const bt = localStorage.getItem('burnedToday');
-    const nt = localStorage.getItem('netToday');
-
-    if (ct != null) {
-      const v = safeNum(ct, eaten);
-      if (!eaten || v > 0) eaten = v;
+      if (Number.isFinite(eatenFromCache)) eaten = eatenFromCache;
+      if (Number.isFinite(burnedFromCache)) burned = burnedFromCache;
     }
-    if (bt != null) {
-      const v = safeNum(bt, burned);
-      if (!burned || v > 0) burned = v;
-    }
-
-    // netToday is optional; we compute net below from eaten/burned
-    // but keeping it here makes future UI work easier and ensures storage changes trigger recompute.
-    void nt;
   } catch {}
 
   return {
@@ -147,28 +132,17 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     recompute();
   }, [recompute]);
 
-  // Stay in sync with meal/workout logging + local-first updates
+  // Stay in sync with meal/workout logging + hydration updates
   useEffect(() => {
     const kick = () => recompute();
     const onStorage = (e) => {
       if (!e || !e.key) return;
-      if ([
-        'mealHistory',
-        'workoutHistory',
-        'dailyMetricsCache',
-        'userData',
-        'dailyGoal',
-        // ✅ FIX: also listen for hydrated cloud totals
-        'consumedToday',
-        'burnedToday',
-        'netToday'
-      ].includes(e.key)) kick();
+      if (['mealHistory', 'workoutHistory', 'dailyMetricsCache', 'userData', 'dailyGoal'].includes(e.key)) kick();
     };
     const onVisOrFocus = () => recompute();
 
     window.addEventListener('slimcal:consumed:update', kick);
     window.addEventListener('slimcal:burned:update', kick);
-    window.addEventListener('slimcal:net:update', kick); // ✅ FIX: hydration dispatches this
     window.addEventListener('slimcal:streak:update', kick);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisOrFocus);
@@ -177,7 +151,6 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     return () => {
       window.removeEventListener('slimcal:consumed:update', kick);
       window.removeEventListener('slimcal:burned:update', kick);
-      window.removeEventListener('slimcal:net:update', kick);
       window.removeEventListener('slimcal:streak:update', kick);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisOrFocus);
@@ -195,10 +168,6 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
   const net = eaten - burned;
   const remaining = goal ? (goal - eaten + burned) : 0;
 
-  // ✅ UPDATED PER YOUR REQUEST:
-  // surplus (net > 0) = GREEN
-  // deficit (net < 0) = RED
-  // neutral (net == 0) = BLUE
   const netPill =
     net > 0
       ? { label: `Net: +${nf0.format(net)} kcal`, color: 'success' }
@@ -208,9 +177,6 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
 
   const ringPct = useMemo(() => {
     if (!goal) return 0;
-    // Progress should feel intuitive: show how close you are to "remaining == 0"
-    // remaining = goal - eaten + burned  => eaten - burned vs goal
-    // effective = eaten - burned (net-in)
     const effective = eaten - burned;
     const pct = goal > 0 ? (effective / goal) * 100 : 0;
     return clamp(pct, 0, 120);
@@ -253,7 +219,6 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
       <Divider sx={{ mb: 1.5 }} />
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="stretch">
-        {/* Remaining meter */}
         <Box
           sx={{
             flex: 1,
@@ -297,7 +262,6 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
           </Typography>
         </Box>
 
-        {/* Breakdown chips */}
         <Stack
           spacing={1}
           sx={{
