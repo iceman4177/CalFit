@@ -52,7 +52,7 @@ import FeatureUseBadge, {
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
-import { saveMeal, upsertDailyMetrics } from './lib/db';
+import { saveMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 import { callAIGenerate } from './lib/ai';
 
 // ---------- Pro / gating helpers ----------
@@ -433,7 +433,7 @@ export default function MealTracker({ onMealUpdate }) {
 
     try {
       if (user?.id) {
-        await upsertDailyMetrics(user.id, todayISO, burned, consumedTotal);
+        await upsertDailyMetricsLocalFirst({ user_id: user.id, local_day: todayISO, burned, consumed: consumedTotal });
       }
     } catch (err) {
       console.error('[MealTracker] upsertDailyMetrics failed', err);
@@ -492,6 +492,11 @@ export default function MealTracker({ onMealUpdate }) {
         : null);
 
     const safe = {
+      client_id:
+        (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `meal_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+
       name,
       calories: baseCalories,
 
@@ -520,25 +525,26 @@ export default function MealTracker({ onMealUpdate }) {
         const qtyNum = meta?.qty != null ? Number(meta.qty) : 1;
         const unitStr = meta?.unit || 'serving';
 
-        await saveMeal(
-          user.id,
-          {
-            eaten_at: eatenISO,
-            title: safe.name,
-            total_calories: safe.calories
-          },
-          [
-            {
-              food_name: meta?.food_name || safe.name,
-              qty: Number.isFinite(qtyNum) ? qtyNum : 1,
-              unit: unitStr,
-              calories: safe.calories,
-              protein: finalMacros?.protein_g ?? null,
-              carbs: finalMacros?.carbs_g ?? null,
-              fat: finalMacros?.fat_g ?? null
-            }
-          ]
-        );
+        await saveMealLocalFirst({
+          user_id: user.id,
+          client_id: safe.client_id,
+          eaten_at: eatenISO,
+          title: safe.name,
+          total_calories: safe.calories,
+          __day: todayUS,
+
+          // Preserve any optional macro/meta info for local UI + future hydration
+          protein_g: finalMacros?.protein_g ?? safe.protein_g ?? null,
+          carbs_g: finalMacros?.carbs_g ?? safe.carbs_g ?? null,
+          fat_g: finalMacros?.fat_g ?? safe.fat_g ?? null,
+
+          food_id: meta?.food_id ?? null,
+          portion_id: meta?.portion_id ?? null,
+          portion_label: meta?.portion_label ?? null,
+          qty: Number.isFinite(qtyNum) ? qtyNum : 1,
+          unit: unitStr,
+          food_name: meta?.food_name || safe.name
+        });
       }
     } catch (err) {
       console.error('[MealTracker] cloud save failed', err);

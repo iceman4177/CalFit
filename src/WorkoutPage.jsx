@@ -1,5 +1,5 @@
 // src/WorkoutPage.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Container,
   Typography,
@@ -76,7 +76,7 @@ function localDayISO(d = new Date()) {
   return ld.toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
-// ---- Stable client id for local entries ----
+// ---- Stable device id (not session id) ----
 function getOrCreateClientId() {
   let cid = localStorage.getItem('clientId');
   if (!cid) {
@@ -86,6 +86,30 @@ function getOrCreateClientId() {
     localStorage.setItem('clientId', cid);
   }
   return cid;
+}
+
+// ✅ NEW: stable workout SESSION id (draft that gets upserted as you log exercises)
+function getOrCreateActiveWorkoutSessionId() {
+  try {
+    let sid = localStorage.getItem('slimcal:activeWorkoutSessionId');
+    if (!sid) {
+      sid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `w_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem('slimcal:activeWorkoutSessionId', sid);
+    }
+    return sid;
+  } catch {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `w_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function clearActiveWorkoutSessionId() {
+  try {
+    localStorage.removeItem('slimcal:activeWorkoutSessionId');
+  } catch {}
 }
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
@@ -122,6 +146,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
+
+  // ✅ Draft session id (stable across edits; enables upsert instead of duplicates)
+  const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
+
+  // ✅ Debounce timer so we don't spam local-first writes
+  const autosaveTimerRef = useRef(null);
 
   const handleDismiss = (key, setter, cb) => {
     localStorage.setItem(key, 'true');
@@ -300,32 +330,20 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTemp('180');
   };
 
-  // 🔧 local-first save with exact totals + stable IDs and correct daily_metrics keys
-  const handleFinish = async () => {
-    // If user has a partially filled exercise, add it before finalize
-    if (
-      (newExercise.exerciseType === 'cardio' && parseFloat(newExercise.manualCalories) > 0) ||
-      (newExercise.exerciseName &&
-        parseFloat(newExercise.weight) > 0 &&
-        parseInt(newExercise.reps, 10) > 0)
-    ) {
-      handleAddExercise();
-    }
-
-    // Compute precise total locally (offline-safe)
-    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
-    const total = Math.round(totalRaw * 100) / 100;
-
-    const clientId = getOrCreateClientId();
+  // ✅ NEW: build the current draft workout session (idempotent by client_id)
+  const buildDraftWorkoutSession = useCallback(() => {
     const now = new Date();
     const startedAt = now.toISOString();
     const endedAt = startedAt;
     const todayLocalIso = localDayISO(now);               // "YYYY-MM-DD" for DB (local_day)
     const todayDisplay = now.toLocaleDateString('en-US'); // for local history display
 
-    const newSession = {
-      // idempotent fields for cloud sync
-      client_id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `w_${Date.now()}`,
+    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
+    const total = Math.round(totalRaw * 100) / 100;
+
+    return {
+      // ✅ Stable upsert key for device sync (THIS is the fix)
+      client_id: activeWorkoutSessionIdRef.current,
       user_id: user?.id || null,
 
       // required workout fields for DB
@@ -334,8 +352,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       total_calories: total,
 
       // optional local-first metadata
-      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `wf_${Date.now()}`,
-      localId: `w_${clientId}_${Date.now()}`,
+      id: activeWorkoutSessionIdRef.current,
+      localId: `w_${getOrCreateClientId()}_${Date.now()}`,
       createdAt: startedAt,
       uploaded: false,
 
@@ -349,38 +367,119 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         weight: ex.weight || null,
         calories: ex.calories
       })),
+
+      // helpers for local-first saving
+      __local_day: todayLocalIso
     };
+  }, [cumulativeExercises, user?.id]);
 
-    await saveWorkoutLocalFirst(newSession);
-
-    if (typeof onWorkoutLogged === 'function') onWorkoutLogged(total);
-    updateStreak();
-
-    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const burnedToday = workouts
-      .filter(w => w.date === todayDisplay)
-      .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
-
-    const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayMealRec = meals.find(m => m.date === todayDisplay);
-    const consumedToday = todayMealRec
-      ? todayMealRec.meals.reduce((s, m) => s + (Number(m.calories) || 0), 0)
-      : 0;
-
-    await upsertDailyMetricsLocalFirst({
-      user_id: user?.id || null,
-      local_day: todayLocalIso,
-      calories_eaten: consumedToday,
-      calories_burned: burnedToday,
-      net_calories: consumedToday - burnedToday
-    });
-
+  // ✅ NEW: live burned + daily metrics sync like MealTracker (keeps net up-to-date)
+  const syncBurnedTodayToDailyMetrics = useCallback(async (todayDisplay, todayLocalIso) => {
     try {
-      window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
-        detail: { date: todayLocalIso, burned: burnedToday }
-      }));
-    } catch {}
+      const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      const burnedToday = workouts
+        .filter(w => w.date === todayDisplay)
+        .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
 
+      const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+      const todayMealRec = meals.find(m => m.date === todayDisplay);
+      const consumedToday = todayMealRec
+        ? todayMealRec.meals.reduce((s, m) => s + (Number(m.calories) || 0), 0)
+        : 0;
+
+      // local UI update (banner)
+      try {
+        window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+          detail: { date: todayLocalIso, burned: burnedToday }
+        }));
+      } catch {}
+
+      // cloud daily metrics (best-effort, safe)
+      await upsertDailyMetricsLocalFirst({
+        user_id: user?.id || null,
+        local_day: todayLocalIso,
+        calories_eaten: consumedToday,
+        calories_burned: burnedToday,
+        net_calories: consumedToday - burnedToday
+      });
+    } catch (e) {
+      console.warn('[WorkoutPage] syncBurnedTodayToDailyMetrics failed', e);
+    }
+  }, [user?.id]);
+
+  // ✅ NEW: AUTOSAVE DRAFT WORKOUT INTO HISTORY (like meals)
+  useEffect(() => {
+    // If no exercises, don't autosave anything
+    if (!Array.isArray(cumulativeExercises) || cumulativeExercises.length === 0) return;
+
+    // debounce
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+
+    autosaveTimerRef.current = setTimeout(async () => {
+      try {
+        const session = buildDraftWorkoutSession();
+        const todayDisplay = session.date;
+        const todayLocalIso = session.__local_day;
+
+        // ✅ This is the main behavior change:
+        // Auto-populate workoutHistory immediately as user logs exercises.
+        await saveWorkoutLocalFirst(session);
+
+        // Keep daily metrics updated in real-time (net calories)
+        await syncBurnedTodayToDailyMetrics(todayDisplay, todayLocalIso);
+      } catch (e) {
+        console.warn('[WorkoutPage] autosave draft failed', e);
+      }
+    }, 450);
+
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [cumulativeExercises, buildDraftWorkoutSession, syncBurnedTodayToDailyMetrics]);
+
+  // ✅ SUBMIT button now just finalizes + navigates (draft is already saved)
+  const handleFinish = async () => {
+    // If user has a partially filled exercise, add it before finalize
+    if (
+      (newExercise.exerciseType === 'cardio' && parseFloat(newExercise.manualCalories) > 0) ||
+      (newExercise.exerciseName &&
+        parseFloat(newExercise.weight) > 0 &&
+        parseInt(newExercise.reps, 10) > 0)
+    ) {
+      handleAddExercise();
+      // allow state update to trigger autosave via effect
+    }
+
+    // If still no exercises, block
+    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
+    if (!cumulativeExercises.length || totalRaw <= 0) {
+      alert('Add at least 1 exercise before submitting.');
+      return;
+    }
+
+    // Save once more immediately (no debounce) to ensure latest state is in history
+    try {
+      const session = buildDraftWorkoutSession();
+      await saveWorkoutLocalFirst(session);
+
+      // Update the streak and daily metrics (like meals)
+      updateStreak();
+
+      if (typeof onWorkoutLogged === 'function') {
+        const total = Math.round(totalRaw * 100) / 100;
+        onWorkoutLogged(total);
+      }
+
+      await syncBurnedTodayToDailyMetrics(session.date, session.__local_day);
+    } catch (e) {
+      console.warn('[WorkoutPage] finalize save failed', e);
+    }
+
+    // ✅ clear active session id so next workout becomes a new entry (prevents overwriting)
+    clearActiveWorkoutSessionId();
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
+
+    // ✅ Go to history (workout is already prepopulated there)
     history.push('/history');
   };
 
@@ -391,6 +490,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     setSaunaTime('');
     setSaunaTemp('180');
     setCurrentStep(1);
+
+    // ✅ new draft session id
+    clearActiveWorkoutSessionId();
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
   };
 
   const handleShareWorkout = () => setShareModalOpen(true);
@@ -534,8 +637,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           <Button variant="contained" onClick={handleShareWorkout} fullWidth>
             Share
           </Button>
+
+          {/* ✅ This now just finalizes + goes to history (already prepopulated) */}
           <Button variant="contained" onClick={handleFinish} fullWidth>
-            Log Workout
+            Submit Workout
           </Button>
         </Stack>
 
@@ -569,8 +674,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           open={showLogHelp}
           onClose={() => handleDismiss('hasSeenLogHelp', setShowLogHelp, handleFinish)}
         >
-          <DialogTitle>Log Workout</DialogTitle>
-          <DialogContent>Saves your session to history.</DialogContent>
+          <DialogTitle>Submit Workout</DialogTitle>
+          <DialogContent>Sends you to history. Your workout is already saved.</DialogContent>
           <DialogActions>
             <Button onClick={() => handleDismiss('hasSeenLogHelp', setShowLogHelp, handleFinish)}>
               Got it
@@ -776,13 +881,14 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       </Grid>
 
       <Box textAlign="center" sx={{ mt: 4 }}>
+        {/* ✅ This now means: finalize + go to history (already saved while logging) */}
         <Button
           variant="contained"
           size="large"
           fullWidth
           onClick={handleFinish}
         >
-          FINISH WORKOUT
+          SUBMIT WORKOUT
         </Button>
       </Box>
 

@@ -135,7 +135,25 @@ export async function saveMealLocalFirst(meal) {
   if (!day) { day = { date: dayKey, meals: [] }; days.push(day); }
 
   const idx = day.meals.findIndex(m => m.client_id === meal.client_id);
-  const compact = { client_id: meal.client_id, name: meal.title, calories: num(meal.total_calories) };
+  const compact = {
+    client_id: meal.client_id,
+    name: meal.title,
+    calories: num(meal.total_calories),
+
+    // Optional macros + meta (preserved for local UI + offline recap)
+    protein_g: meal.protein_g != null ? num(meal.protein_g, undefined) : undefined,
+    carbs_g: meal.carbs_g != null ? num(meal.carbs_g, undefined) : undefined,
+    fat_g: meal.fat_g != null ? num(meal.fat_g, undefined) : undefined,
+
+    food_id: meal.food_id ?? undefined,
+    portion_id: meal.portion_id ?? undefined,
+    portion_label: meal.portion_label ?? undefined,
+    qty: meal.qty != null ? num(meal.qty, undefined) : undefined,
+    unit: meal.unit ?? undefined,
+    food_name: meal.food_name ?? undefined,
+
+    createdAt: meal.createdAt || meal.eaten_at || new Date().toISOString(),
+  };
   if (idx >= 0) day.meals[idx] = compact; else day.meals.push(compact);
   writeLS('mealHistory', days);
 
