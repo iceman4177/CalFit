@@ -211,8 +211,21 @@ export default function ProgressDashboard() {
     const today = localDayISO();
     const cBy = readConsumedByDay();
     const bBy = readBurnedByDay();
-    setConsumedToday(Number(cBy.get(today) || 0));
-    setBurnedToday(Number(bBy.get(today) || 0));
+
+    let eaten = Number(cBy.get(today) || 0);
+    let burned = Number(bBy.get(today) || 0);
+
+    // ✅ FIX: if this device has no local history yet, fall back to hydrated cloud totals
+    try {
+      const ct = localStorage.getItem('consumedToday');
+      const bt = localStorage.getItem('burnedToday');
+
+      if ((!eaten || eaten === 0) && ct != null) eaten = Number(ct) || eaten;
+      if ((!burned || burned === 0) && bt != null) burned = Number(bt) || burned;
+    } catch {}
+
+    setConsumedToday(eaten);
+    setBurnedToday(burned);
   }, []);
 
   useEffect(() => {
@@ -264,11 +277,14 @@ export default function ProgressDashboard() {
         const todayIso = localDayISO();
         const dm = await getDailyMetricsRange(user.id, todayIso, todayIso);
         const row = dm?.[0];
+
         if (!ignore && row) {
-          const burned = Number(row.cals_burned || 0);
-          const eaten = Number(row.cals_eaten || 0);
-          setBurnedToday((prev) => (burned > 0 ? burned : prev));
-          setConsumedToday((prev) => (eaten > 0 ? eaten : prev));
+          // ✅ FIX: support both new + legacy schemas
+          const burnedNew = Number(row.calories_burned ?? row.burned ?? row.cals_burned ?? 0);
+          const eatenNew = Number(row.calories_eaten ?? row.eaten ?? row.cals_eaten ?? 0);
+
+          setBurnedToday((prev) => (burnedNew > 0 ? burnedNew : prev));
+          setConsumedToday((prev) => (eatenNew > 0 ? eatenNew : prev));
         }
       } catch (err) {
         console.error('[ProgressDashboard] Supabase fetch failed, using local-only view', err);
@@ -315,6 +331,7 @@ export default function ProgressDashboard() {
 
     window.addEventListener('slimcal:consumed:update', refresh);
     window.addEventListener('slimcal:burned:update', refresh);
+    window.addEventListener('slimcal:net:update', refresh); // ✅ FIX: hydration dispatches this
     window.addEventListener('visibilitychange', refresh);
     window.addEventListener('focus', refresh);
     window.addEventListener('storage', refresh);
@@ -322,6 +339,7 @@ export default function ProgressDashboard() {
     return () => {
       window.removeEventListener('slimcal:consumed:update', refresh);
       window.removeEventListener('slimcal:burned:update', refresh);
+      window.removeEventListener('slimcal:net:update', refresh);
       window.removeEventListener('visibilitychange', refresh);
       window.removeEventListener('focus', refresh);
       window.removeEventListener('storage', refresh);

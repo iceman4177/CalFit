@@ -88,6 +88,27 @@ function readTodayTotals() {
     }
   } catch {}
 
+  // ✅ FIX: Cross-device hydrated totals (written by hydrateTodayTotalsFromCloud)
+  // If this device doesn't have local histories yet, these are the cloud truth.
+  try {
+    const ct = localStorage.getItem('consumedToday');
+    const bt = localStorage.getItem('burnedToday');
+    const nt = localStorage.getItem('netToday');
+
+    if (ct != null) {
+      const v = safeNum(ct, eaten);
+      if (!eaten || v > 0) eaten = v;
+    }
+    if (bt != null) {
+      const v = safeNum(bt, burned);
+      if (!burned || v > 0) burned = v;
+    }
+
+    // netToday is optional; we compute net below from eaten/burned
+    // but keeping it here makes future UI work easier and ensures storage changes trigger recompute.
+    void nt;
+  } catch {}
+
   return {
     dayUS: dUS,
     dayISO: dISO,
@@ -131,12 +152,23 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     const kick = () => recompute();
     const onStorage = (e) => {
       if (!e || !e.key) return;
-      if (['mealHistory', 'workoutHistory', 'dailyMetricsCache', 'userData', 'dailyGoal'].includes(e.key)) kick();
+      if ([
+        'mealHistory',
+        'workoutHistory',
+        'dailyMetricsCache',
+        'userData',
+        'dailyGoal',
+        // ✅ FIX: also listen for hydrated cloud totals
+        'consumedToday',
+        'burnedToday',
+        'netToday'
+      ].includes(e.key)) kick();
     };
     const onVisOrFocus = () => recompute();
 
     window.addEventListener('slimcal:consumed:update', kick);
     window.addEventListener('slimcal:burned:update', kick);
+    window.addEventListener('slimcal:net:update', kick); // ✅ FIX: hydration dispatches this
     window.addEventListener('slimcal:streak:update', kick);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisOrFocus);
@@ -145,6 +177,7 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     return () => {
       window.removeEventListener('slimcal:consumed:update', kick);
       window.removeEventListener('slimcal:burned:update', kick);
+      window.removeEventListener('slimcal:net:update', kick);
       window.removeEventListener('slimcal:streak:update', kick);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisOrFocus);

@@ -24,7 +24,6 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
   const todayLocal = localDayISO(new Date());
 
   try {
-    // ✅ pull latest row (works even if duplicates exist)
     const { data, error } = await supabase
       .from('daily_metrics')
       .select('*')
@@ -42,6 +41,13 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
         localStorage.setItem('consumedToday', String(0));
         localStorage.setItem('burnedToday', String(0));
         localStorage.setItem('netToday', String(0));
+      } catch {}
+
+      // also keep dailyMetricsCache consistent
+      try {
+        const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+        cache[todayLocal] = { consumed: 0, burned: 0, net: 0, updated_at: new Date().toISOString() };
+        localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
       } catch {}
 
       if (alsoDispatch) {
@@ -69,6 +75,21 @@ export async function hydrateTodayTotalsFromCloud(user, opts = {}) {
       localStorage.setItem('netToday', String(net));
       localStorage.setItem('slimcal:lastHydratedLocalDay', todayLocal);
       localStorage.setItem('slimcal:lastHydratedAt', String(Date.now()));
+    } catch {}
+
+    // ✅ keep existing fallback cache in sync
+    try {
+      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+      cache[todayLocal] = {
+        consumed,
+        burned,
+        net,
+        calories_eaten: consumed,
+        calories_burned: burned,
+        net_calories: net,
+        updated_at: new Date().toISOString()
+      };
+      localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
     } catch {}
 
     if (alsoDispatch) {
