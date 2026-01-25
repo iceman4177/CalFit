@@ -3,10 +3,8 @@ import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
 import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
-import { supabase } from '../lib/supabaseClient';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
-const HYDRATE_INTERVAL_MS = 25_000; // fallback safety poll
 
 export default function useBootstrapSync(user) {
   const listenersAttachedRef = useRef(false);
@@ -14,7 +12,8 @@ export default function useBootstrapSync(user) {
 
   // prevent spam hydrates
   const lastHydrateAtRef = useRef(0);
-  function shouldHydrateNow(ms = 2000) {
+
+  function shouldHydrateNow(ms = 3500) {
     const now = Date.now();
     if (now - lastHydrateAtRef.current < ms) return false;
     lastHydrateAtRef.current = now;
@@ -22,7 +21,6 @@ export default function useBootstrapSync(user) {
   }
 
   useEffect(() => {
-    // Attach listeners once (safe to call multiple times, but avoid stacking)
     if (!listenersAttachedRef.current) {
       try {
         attachSyncListeners?.();
@@ -31,124 +29,56 @@ export default function useBootstrapSync(user) {
     }
   }, []);
 
-  // ✅ MAIN: hydrate on focus + visibility + interval (backup)
+  // ✅ Hydrate on focus/visibility
   useEffect(() => {
     const userId = user?.id || null;
     if (!userId) return;
 
-    let alive = true;
-
-    const hydrateNow = async (reason = 'unknown') => {
-      if (!alive) return;
+    const onFocus = async () => {
       if (!shouldHydrateNow()) return;
-
       try {
         await flushPending({ maxTries: 1 });
       } catch {}
-
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
       } catch (e) {
-        console.warn(`[useBootstrapSync] hydrate failed (${reason})`, e);
+        console.warn('[useBootstrapSync] hydrate (focus) failed', e);
       }
     };
 
-    const onFocus = () => hydrateNow('focus');
-    const onVisibility = () => {
+    const onVisibility = async () => {
       if (document.visibilityState !== 'visible') return;
-      hydrateNow('visibility');
+      await onFocus();
     };
 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
 
-    const t = setInterval(() => hydrateNow('interval'), HYDRATE_INTERVAL_MS);
-
-    // hydrate once immediately
-    hydrateNow('mount');
-
     return () => {
-      alive = false;
-      clearInterval(t);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [user?.id]);
 
-  // ✅ NEW: REALTIME subscription so PC updates instantly when mobile logs
+  // ✅ IMPORTANT: Poll while logged in so PC updates when you log workouts on mobile
   useEffect(() => {
     const userId = user?.id || null;
     if (!userId) return;
-    if (!supabase?.channel) return;
 
-    let unsubscribed = false;
-
-    const safeHydrate = async (reason) => {
-      if (unsubscribed) return;
-      if (!shouldHydrateNow(1200)) return;
-
+    const t = setInterval(async () => {
+      if (!shouldHydrateNow(12000)) return; // throttle
+      try {
+        await flushPending({ maxTries: 1 });
+      } catch {}
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-      } catch (e) {
-        console.warn(`[useBootstrapSync] realtime hydrate failed (${reason})`, e);
-      }
-    };
-
-    let channel = null;
-
-    try {
-      channel = supabase
-        .channel(`slimcal-realtime-${userId}`)
-        // Any daily_metrics change → hydrate
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'daily_metrics',
-            filter: `user_id=eq.${userId}`,
-          },
-          () => safeHydrate('rt:daily_metrics')
-        )
-        // Any workouts change → hydrate
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'workouts',
-            filter: `user_id=eq.${userId}`,
-          },
-          () => safeHydrate('rt:workouts')
-        )
-        // Any meals change → hydrate (keeps eaten synced too)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'meals',
-            filter: `user_id=eq.${userId}`,
-          },
-          () => safeHydrate('rt:meals')
-        )
-        .subscribe((status) => {
-          // optional logging
-          // console.log('[useBootstrapSync] realtime status:', status);
-        });
-    } catch (e) {
-      console.warn('[useBootstrapSync] realtime setup failed', e);
-    }
-
-    return () => {
-      unsubscribed = true;
-      try {
-        if (channel) supabase.removeChannel(channel);
       } catch {}
-    };
+    }, 15000);
+
+    return () => clearInterval(t);
   }, [user?.id]);
 
-  // ✅ One-time bootstrap per session/tab for this user
+  // ✅ One-time bootstrap on login
   useEffect(() => {
     const userId = user?.id || null;
     if (!userId) return;
@@ -156,6 +86,14 @@ export default function useBootstrapSync(user) {
     const sessionKey = `${SESSION_FLAG_PREFIX}${userId}`;
     if (sessionStorage.getItem(sessionKey) === '1') {
       ranForUserRef.current = userId;
+
+      (async () => {
+        if (!shouldHydrateNow()) return;
+        try {
+          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        } catch {}
+      })();
+
       return;
     }
 
