@@ -425,12 +425,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }));
       } catch { }
 
+      // ✅ FIX: localFirst expects { consumed, burned }
       await upsertDailyMetricsLocalFirst({
         user_id: user?.id || null,
         local_day: todayLocalIso,
-        calories_eaten: consumedToday,
-        calories_burned: burnedToday,
-        net_calories: consumedToday - burnedToday
+        consumed: consumedToday,
+        burned: burnedToday
       });
     } catch (e) {
       console.warn('[WorkoutPage] syncBurnedTodayToDailyMetrics failed', e);
@@ -444,11 +444,14 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
 
-      // best-effort: delete draft workout from local + cloud
+      // best-effort: delete draft workout from cloud (if signed in)
       (async () => {
         try {
           const cid = activeWorkoutSessionIdRef.current;
-          if (cid) await deleteWorkoutLocalFirst(cid);
+          const userId = user?.id || null;
+          if (cid && userId) {
+            await deleteWorkoutLocalFirst({ user_id: userId, client_id: cid });
+          }
         } catch { }
       })();
 
@@ -470,7 +473,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
-  }, [cumulativeExercises, buildDraftWorkoutSession, syncBurnedTodayToDailyMetrics]);
+  }, [cumulativeExercises, buildDraftWorkoutSession, syncBurnedTodayToDailyMetrics, user?.id]);
 
   // ✅ Submit now just finalizes (draft already saved) + navigates to history
   const handleFinish = async () => {

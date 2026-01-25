@@ -12,51 +12,32 @@ import {
   CircularProgress,
   Paper,
   Stack,
-  Chip
+  Chip,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+
 import { useAuth } from './context/AuthProvider.jsx';
 import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
+// ✅ We use Supabase directly here to delete cloud rows safely
+import { supabase } from './lib/supabaseClient';
+
+// ✅ Update daily metrics after deletion so banner matches instantly
+import { upsertDailyMetricsLocalFirst } from './lib/localFirst';
+
 const SCALE = 0.1;
 
-// ---------------- Local-day helpers (avoid UTC drift) ----------------
-function localDayISO(d = new Date()) {
-  try {
-    const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    return ld.toISOString().slice(0, 10);
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
-function isoToLocalDayISO(isoLike) {
-  try {
-    const dt = new Date(isoLike);
-    return localDayISO(dt);
-  } catch {
-    return null;
-  }
-}
-function toUS(iso) {
-  try {
-    return new Date(iso).toLocaleDateString('en-US');
-  } catch {
-    return iso;
-  }
-}
-
-function safeNum(v, d = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-}
-
-// ---------------- Calories from sets ----------------
 function calcCaloriesFromSets(sets) {
   if (!Array.isArray(sets) || sets.length === 0) return 0;
   let vol = 0;
-
   for (const s of sets) {
-    // If per-set calories exist, sum them
     if (typeof s.calories === 'number' && Number.isFinite(s.calories)) {
       vol += s.calories;
       continue;
@@ -65,57 +46,72 @@ function calcCaloriesFromSets(sets) {
     const r = Number(s.reps) || 0;
     vol += w * r * SCALE;
   }
-
   return Number.isFinite(vol) ? vol : 0;
 }
 
-// ---------------- Formatting ----------------
-function formatDateTime(iso) {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
+function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
 function formatDateOnly(iso) {
+  try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
+  catch { return iso; }
+}
+function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; } }
+
+// ---- local-day helpers (avoid UTC drift) ----
+function localDayISO(d = new Date()) {
   try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
+    const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return ld.toISOString().slice(0, 10);
   } catch {
-    return iso;
+    return new Date().toISOString().slice(0, 10);
   }
 }
 
-// ---------------- Local matching helpers ----------------
-const normalizeName = s => (s || '').toLowerCase().trim();
+function safeNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
 
-function bestLocalMatch(candidates = [], supaSets = []) {
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
+function readTodayConsumedFromLocal() {
+  const todayUS = new Date().toLocaleDateString('en-US');
+  const todayISO = localDayISO(new Date());
 
-  const supaNames = new Set((supaSets || []).map(s => normalizeName(s.exercise_name)));
-  let best = null;
-  let bestScore = -1;
-
-  for (const sess of candidates) {
-    const locNames = new Set((sess.exercises || []).map(e => normalizeName(e.name)));
-    let overlap = 0;
-    for (const n of supaNames) if (n && locNames.has(n)) overlap++;
-
-    const score = overlap * 1000 + (Number(sess.totalCalories) || 0);
-    if (score > bestScore) {
-      best = sess;
-      bestScore = score;
+  // prefer dailyMetricsCache if present
+  try {
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    const row = cache?.[todayISO];
+    if (row) {
+      const consumed =
+        safeNum(row.consumed, NaN) ??
+        safeNum(row.eaten, NaN) ??
+        safeNum(row.calories_eaten, NaN);
+      if (Number.isFinite(consumed)) return consumed;
     }
-  }
+  } catch {}
 
-  return bestScore > 0 ? best : null;
+  // fallback to mealHistory
+  try {
+    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]') || [];
+    const rec = mh.find(m => m?.date === todayUS || m?.date === todayISO);
+    if (!rec?.meals?.length) return 0;
+    return rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
+  } catch {}
+
+  return 0;
 }
 
-// ---------------- Cross-device sync: write caches/events ----------------
+function writeDailyMetricsCache(dayISO, consumed, burned) {
+  try {
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    cache[dayISO] = {
+      eaten: safeNum(consumed, 0),
+      burned: safeNum(burned, 0),
+      net: safeNum(consumed, 0) - safeNum(burned, 0),
+      updated_at: new Date().toISOString()
+    };
+    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+  } catch {}
+}
+
 function dispatchBurnedUpdate(dayISO, burned) {
   try {
     window.dispatchEvent(
@@ -126,86 +122,53 @@ function dispatchBurnedUpdate(dayISO, burned) {
   } catch {}
 }
 
-function upsertDailyMetricsCacheBurned(dayISO, burned) {
-  try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-    const prev = cache[dayISO] || {};
-    const eaten = safeNum(prev.eaten ?? prev.consumed ?? 0, 0);
+// --- Better display: show per-exercise summary instead of set-by-set "12 cals"
+function summarizeExercisesFromSets(sets = []) {
+  if (!Array.isArray(sets) || sets.length === 0) return [];
 
-    cache[dayISO] = {
-      ...prev,
-      eaten,
-      burned: safeNum(burned, 0),
-      net: eaten - safeNum(burned, 0),
-      updated_at: new Date().toISOString()
-    };
+  // Aggregate by exercise name
+  const map = new Map();
+  for (const s of sets) {
+    const name = String(s.exercise_name || s.name || 'Exercise').trim();
+    const prev = map.get(name) || { name, reps: 0, sets: 0, calories: 0 };
 
-    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-  } catch {}
+    prev.sets += 1;
+    prev.reps += safeNum(s.reps, 0);
+
+    // calories: prefer explicit per-set calories, else proxy
+    const c =
+      (typeof s.calories === 'number' && Number.isFinite(s.calories))
+        ? s.calories
+        : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
+
+    prev.calories += safeNum(c, 0);
+
+    map.set(name, prev);
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => (b.calories || 0) - (a.calories || 0))
+    .map(x => ({
+      ...x,
+      calories: Math.round((x.calories || 0) * 100) / 100
+    }));
 }
 
-function mirrorServerWorkoutsToLocalHistory(serverRows) {
-  // We keep local workoutHistory format used elsewhere:
-  // [{ date: "M/D/YYYY", totalCalories, exercises:[{name,sets,reps,weight,calories}], ... }]
-  try {
-    const existing = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
-
-    // Build a map for quick merge by "id/client_id" if present, else by started_at string
-    const map = new Map();
-
-    for (const w of existing) {
-      const key = String(w?.id || w?.client_id || w?.started_at || `${w?.date || ''}-${w?.totalCalories || 0}`);
-      map.set(key, w);
-    }
-
-    for (const r of serverRows || []) {
-      const started = r.started_at || r.created_at || r.ended_at || new Date().toISOString();
-      const dayUS = toUS(started);
-
-      const exercises =
-        Array.isArray(r.exercisesForShare) && r.exercisesForShare.length
-          ? r.exercisesForShare.map(e => ({
-              name: e.exerciseName,
-              sets: e.sets ?? '',
-              reps: e.reps ?? 0,
-              weight: e.weight ?? 0,
-              calories: typeof e.calories === 'number' ? e.calories : undefined,
-              exerciseType: e.exerciseType || undefined
-            }))
-          : (Array.isArray(r.sets) ? r.sets : []).map(s => ({
-              name: s.exercise_name,
-              sets: '',
-              reps: s.reps ?? 0,
-              weight: s.weight ?? 0,
-              calories: typeof s.calories === 'number' ? s.calories : undefined,
-              exerciseType: s.exercise_type || undefined
-            }));
-
-      const key = String(r.id || r.client_id || started);
-
-      map.set(key, {
-        id: r.id || key,
-        client_id: r.client_id || undefined,
-        started_at: started,
-        date: dayUS,
-        totalCalories: safeNum(r.total_calories, 0),
-        exercises
-      });
-    }
-
-    const merged = Array.from(map.values());
-
-    // Sort newest first by started_at if present
-    merged.sort((a, b) => {
-      const da = new Date(a.started_at || a.date).getTime();
-      const db = new Date(b.started_at || b.date).getTime();
-      return db - da;
-    });
-
-    localStorage.setItem('workoutHistory', JSON.stringify(merged));
-  } catch (e) {
-    console.warn('[WorkoutHistory] mirrorServerWorkoutsToLocalHistory failed', e);
+const normalizeName = s => (s || '').toLowerCase().trim();
+function bestLocalMatch(candidates = [], supaSets = []) {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const supaNames = new Set((supaSets || []).map(s => normalizeName(s.exercise_name)));
+  let best = null;
+  let bestScore = -1;
+  for (const sess of candidates) {
+    const locNames = new Set((sess.exercises || []).map(e => normalizeName(e.name)));
+    let overlap = 0;
+    for (const n of supaNames) if (n && locNames.has(n)) overlap++;
+    const score = overlap * 1000 + (Number(sess.totalCalories) || 0);
+    if (score > bestScore) { best = sess; bestScore = score; }
   }
+  return bestScore > 0 ? best : null;
 }
 
 export default function WorkoutHistory({ onHistoryChange }) {
@@ -217,11 +180,11 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [shareExercises, setShareExercises] = useState([]);
   const [shareTotal, setShareTotal] = useState(0);
 
-  const sumTotals = useCallback(list => {
-    return (list || []).reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
-  }, []);
+  // delete confirm dialog
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Local index (used for guest fallback + matching)
   const localIdx = useMemo(() => {
     const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const byDay = new Map();
@@ -239,45 +202,138 @@ export default function WorkoutHistory({ onHistoryChange }) {
     [rows]
   );
 
-  // ✅ NEW: after rows load, ensure PC has burnedToday cached + event fired
-  const repairBurnedTodayFromRows = useCallback((withSetsRows) => {
-    try {
-      const todayISO = localDayISO(new Date());
-      const todayBurned = (withSetsRows || []).reduce((sum, r) => {
-        const started = r?.started_at || r?.created_at || r?.ended_at;
-        const day = isoToLocalDayISO(started);
-        if (day !== todayISO) return sum;
-        return sum + safeNum(r.total_calories, 0);
-      }, 0);
-
-      // write simple convenience key used by parts of app
-      try {
-        localStorage.setItem('burnedToday', String(Math.round(todayBurned || 0)));
-      } catch {}
-
-      // write dailyMetricsCache so banner updates immediately
-      upsertDailyMetricsCacheBurned(todayISO, todayBurned);
-
-      // dispatch event so UI updates without refresh
-      dispatchBurnedUpdate(todayISO, todayBurned);
-    } catch (e) {
-      console.warn('[WorkoutHistory] repairBurnedTodayFromRows failed', e);
-    }
+  const sumTotals = useCallback((list) => {
+    return (list || []).reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
   }, []);
+
+  const recomputeBurnedTodayAndSync = useCallback(async () => {
+    const todayUS = new Date().toLocaleDateString('en-US');
+    const todayISO = localDayISO(new Date());
+
+    // burned today from local history (source of truth for UI)
+    let burnedToday = 0;
+    try {
+      const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+      burnedToday = (wh || [])
+        .filter(w => w?.date === todayUS || w?.date === todayISO)
+        .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+    } catch {}
+
+    const consumedToday = readTodayConsumedFromLocal();
+
+    // write caches so banner updates instantly
+    writeDailyMetricsCache(todayISO, consumedToday, burnedToday);
+    try {
+      localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+    } catch {}
+
+    dispatchBurnedUpdate(todayISO, burnedToday);
+
+    // if logged in, also update daily_metrics cloud via localFirst wrapper
+    try {
+      if (user?.id) {
+        await upsertDailyMetricsLocalFirst({
+          user_id: user.id,
+          local_day: todayISO,
+          consumed: consumedToday,
+          burned: burnedToday
+        });
+      }
+    } catch (e) {
+      console.warn('[WorkoutHistory] upsertDailyMetricsLocalFirst failed after delete', e);
+    }
+  }, [user?.id]);
+
+  function openShareFor(row) {
+    const date = formatDateTime(row.started_at);
+    const total = Number(row.total_calories) || 0;
+
+    const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(2)} calories burned! #SlimcalAI`;
+
+    const body = (row.shareLines || []).join('\n');
+    setShareText(`${header}\n\n${body}`);
+    setShareTotal(total);
+    setShareExercises(row.exercisesForShare || []);
+    setShareOpen(true);
+  }
+
+  function askDeleteRow(row) {
+    setPendingDeleteRow(row);
+    setConfirmOpen(true);
+  }
+
+  async function performDeleteRow(row) {
+    if (!row) return;
+
+    setDeleting(true);
+    try {
+      // 1) Delete from Supabase if logged in
+      if (user?.id && supabase && row.id && String(row.id).startsWith('local-') === false) {
+        // safest: delete by workout "id" + user_id (RLS safe)
+        const res = await supabase
+          .from('workouts')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('id', row.id);
+
+        if (res?.error) {
+          console.warn('[WorkoutHistory] cloud delete failed', res.error);
+        }
+      }
+
+      // 2) Delete from localStorage workoutHistory
+      try {
+        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+
+        // match strategy:
+        // - if row has client_id -> remove matching local session id/client_id
+        // - else fallback by started day + total calories
+        const rowDayUS = toUS(row.started_at);
+        const rowTotal = safeNum(row.total_calories, 0);
+
+        const filtered = (wh || []).filter(sess => {
+          const sameId =
+            (row.client_id && (sess.id === row.client_id || sess.client_id === row.client_id)) ||
+            (row.id && (sess.id === row.id || sess.client_id === row.id));
+
+          if (sameId) return false;
+
+          const sameDay = sess?.date === rowDayUS;
+          const sameTotal = Math.abs(safeNum(sess?.totalCalories ?? sess?.total_calories, 0) - rowTotal) < 0.01;
+
+          // only remove by day+total if it's a clear match and there's no id
+          if (!row.client_id && !row.id && sameDay && sameTotal) return false;
+
+          return true;
+        });
+
+        localStorage.setItem('workoutHistory', JSON.stringify(filtered));
+      } catch (e) {
+        console.warn('[WorkoutHistory] local delete failed', e);
+      }
+
+      // 3) Update UI list
+      setRows(prev => prev.filter(r => r.id !== row.id));
+
+      // 4) Update banner totals instantly
+      await recomputeBurnedTodayAndSync();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     let ignore = false;
 
     (async () => {
-      // ---------------- Guest mode: local only ----------------
       if (!user) {
         const asRows = localIdx.raw
           .slice()
-          .sort((a, b) => new Date(b.started_at || b.date) - new Date(a.started_at || a.date))
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
           .map((h, idx) => ({
             id: `local-${idx}`,
-            started_at: new Date(h.started_at || h.date).toISOString(),
-            ended_at: new Date(h.started_at || h.date).toISOString(),
+            started_at: new Date(h.date).toISOString(),
+            ended_at: new Date(h.date).toISOString(),
             sets: (h.exercises || []).map(e => ({
               exercise_name: e.name,
               reps: e.reps ?? 0,
@@ -302,40 +358,30 @@ export default function WorkoutHistory({ onHistoryChange }) {
         if (!ignore) {
           setRows(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
-
-          // ✅ keep banner consistent in guest too
-          repairBurnedTodayFromRows(asRows);
         }
         return;
       }
 
-      // ---------------- Logged in: Supabase + sets ----------------
       setLoading(true);
-
       try {
-        const base = await getWorkouts(user.id, { limit: 150 });
+        const base = await getWorkouts(user.id, { limit: 200 });
 
         const withSets = await Promise.all(
-          (base || []).map(async w => {
+          base.map(async w => {
             const sets = await getWorkoutSetsFor(w.id, user.id);
 
-            // Try match with local day sessions (for fallback totals if needed)
-            const started = w.started_at || w.created_at || w.date || new Date().toISOString();
-            const dayUS = toUS(started);
+            const dayUS = toUS(w.started_at);
             const candidates = localIdx.byDay.get(dayUS) || [];
             const fallback = bestLocalMatch(candidates, sets);
 
-            // Compute total calories
             let total =
               (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
                 ? Number(w.total_calories)
-                : (typeof w.totalCalories === 'number' && Number.isFinite(w.totalCalories))
-                ? Number(w.totalCalories)
                 : (fallback && Number.isFinite(fallback.totalCalories))
-                ? Number(fallback.totalCalories)
-                : calcCaloriesFromSets(sets);
+                  ? Number(fallback.totalCalories)
+                  : calcCaloriesFromSets(sets);
 
-            // Build share payload
+            // clean share / list formatting
             let exercisesForShare = [];
             if (sets && sets.length > 0) {
               exercisesForShare = sets.map(s => ({
@@ -360,13 +406,12 @@ export default function WorkoutHistory({ onHistoryChange }) {
             const shareLines =
               exercisesForShare.length > 0
                 ? exercisesForShare.map(e =>
-                    `- ${e.exerciseName}${e.sets ? `: ${e.sets}×${e.reps || ''}` : e.reps ? `: ×${e.reps}` : ''}${e.weight ? ` @ ${e.weight} lb` : ''}${Number.isFinite(e.calories) ? ` (${Math.round(e.calories)} cal)` : ''}`
-                  )
+                  `- ${e.exerciseName}${e.sets ? `: ${e.sets}×${e.reps || ''}` : e.reps ? `: ×${e.reps}` : ''}${e.weight ? ` @ ${e.weight} lb` : ''}${Number.isFinite(e.calories) ? ` (${Math.round(e.calories)} cal)` : ''}`
+                )
                 : [];
 
             return {
               ...w,
-              started_at: started,
               sets,
               total_calories: total,
               shareLines,
@@ -376,19 +421,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
         );
 
         if (!ignore) {
-          // newest first
-          const sorted = withSets
-            .slice()
-            .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at));
-
-          setRows(sorted);
-          if (onHistoryChange) onHistoryChange(sumTotals(sorted));
-
-          // ✅ NEW: mirror Supabase history -> localStorage so other pages/banners can read it
-          mirrorServerWorkoutsToLocalHistory(sorted);
-
-          // ✅ NEW: recompute and broadcast today's burned calories so the banner updates on PC
-          repairBurnedTodayFromRows(sorted);
+          setRows(withSets);
+          if (onHistoryChange) onHistoryChange(sumTotals(withSets));
         }
       } catch (err) {
         console.error('[WorkoutHistory] fetch failed, falling back to local', err);
@@ -396,11 +430,11 @@ export default function WorkoutHistory({ onHistoryChange }) {
         if (!ignore) {
           const asRows = localIdx.raw
             .slice()
-            .sort((a, b) => new Date(b.started_at || b.date) - new Date(a.started_at || a.date))
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
             .map((h, idx) => ({
               id: `local-${idx}`,
-              started_at: new Date(h.started_at || h.date).toISOString(),
-              ended_at: new Date(h.started_at || h.date).toISOString(),
+              started_at: new Date(h.date).toISOString(),
+              ended_at: new Date(h.date).toISOString(),
               sets: (h.exercises || []).map(e => ({
                 exercise_name: e.name,
                 reps: e.reps ?? 0,
@@ -424,31 +458,14 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
           setRows(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
-          repairBurnedTodayFromRows(asRows);
         }
       } finally {
         if (!ignore) setLoading(false);
       }
     })();
 
-    return () => {
-      ignore = true;
-    };
-  }, [user, onHistoryChange, localIdx, sumTotals, repairBurnedTodayFromRows]);
-
-  function openShareFor(row) {
-    const date = formatDateTime(row.started_at);
-    const total = Number(row.total_calories) || 0;
-    const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(
-      2
-    )} calories burned! #SlimcalAI`;
-    const body = (row.shareLines || []).join('\n');
-
-    setShareText(`${header}\n\n${body}`);
-    setShareTotal(total);
-    setShareExercises(row.exercisesForShare || []);
-    setShareOpen(true);
-  }
+    return () => { ignore = true; };
+  }, [user, onHistoryChange, localIdx, sumTotals]);
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -459,9 +476,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
         spacing={1}
         sx={{ mb: 2 }}
       >
-        <Typography variant="h4" sx={{ fontWeight: 800 }}>
-          Workout History
-        </Typography>
+        <Typography variant="h4" sx={{ fontWeight: 800 }}>Workout History</Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap">
           <Chip label={`${totalSessions} sessions`} />
           <Chip label={`${totalCalories.toFixed(0)} total cals`} />
@@ -478,59 +493,78 @@ export default function WorkoutHistory({ onHistoryChange }) {
         <Typography>No workouts yet.</Typography>
       ) : (
         <List sx={{ pt: 0 }}>
-          {rows.map(w => (
-            <Paper
-              variant="outlined"
-              sx={{
-                mb: 2,
-                borderRadius: 2,
-                border: '1px solid rgba(0,0,0,0.06)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
-              }}
-              key={w.id}
-            >
-              <ListItem alignItems="flex-start" sx={{ alignItems: 'stretch' }}>
-                <ListItemText
-                  primary={
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                        {formatDateOnly(w.started_at)}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {(Number(w.total_calories) || 0).toFixed(2)} cals
-                      </Typography>
-                    </Stack>
-                  }
-                  secondary={
-                    <Box sx={{ mt: 1 }}>
-                      {(w.sets || []).length > 0 ? (
-                        w.sets.map((s, i) => (
-                          <Typography key={i} variant="body2">
-                            • {s.exercise_name}
-                            {s.reps ? ` × ${s.reps}` : ''}
-                            {s.weight ? ` @ ${s.weight} lb` : ''}
-                            {Number.isFinite(s.calories) ? ` (${Math.round(s.calories)} cal)` : ''}
-                          </Typography>
-                        ))
-                      ) : (
-                        (w.shareLines || []).map((line, i) => (
-                          <Typography key={i} variant="body2">
-                            • {line.replace(/^- /, '')}
-                          </Typography>
-                        ))
-                      )}
+          {rows.map(w => {
+            const exerciseSummary = summarizeExercisesFromSets(w.sets || []);
 
+            return (
+              <Paper
+                variant="outlined"
+                sx={{
+                  mb: 2,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.03)'
+                }}
+                key={w.id}
+              >
+                <ListItem alignItems="flex-start" sx={{ alignItems: 'stretch' }}>
+                  <ListItemText
+                    primary={
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                          {formatDateOnly(w.started_at)}
+                        </Typography>
+
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            {(Number(w.total_calories) || 0).toFixed(2)} cals
+                          </Typography>
+
+                          <Tooltip title="Delete workout">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => askDeleteRow(w)}
+                                disabled={deleting}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Stack>
+                      </Stack>
+                    }
+                    secondary={
                       <Box sx={{ mt: 1 }}>
-                        <Button size="small" variant="outlined" onClick={() => openShareFor(w)}>
-                          Share
-                        </Button>
+                        {/* ✅ FIX: show clean per-exercise summary instead of "12 cals" per set */}
+                        {exerciseSummary.length > 0 ? (
+                          exerciseSummary.map((e, i) => (
+                            <Typography key={i} variant="body2">
+                              • {e.name} — {Math.round(e.calories)} cal
+                              {e.sets ? ` (${e.sets} set${e.sets === 1 ? '' : 's'})` : ''}
+                            </Typography>
+                          ))
+                        ) : (
+                          (w.shareLines || []).map((line, i) => (
+                            <Typography key={i} variant="body2">
+                              • {line.replace(/^- /, '')}
+                            </Typography>
+                          ))
+                        )}
+
+                        <Box sx={{ mt: 1 }}>
+                          <Button size="small" variant="outlined" onClick={() => openShareFor(w)}>
+                            Share
+                          </Button>
+                        </Box>
                       </Box>
-                    </Box>
-                  }
-                />
-              </ListItem>
-            </Paper>
-          ))}
+                    }
+                  />
+                </ListItem>
+              </Paper>
+            );
+          })}
         </List>
       )}
 
@@ -542,6 +576,37 @@ export default function WorkoutHistory({ onHistoryChange }) {
         exercises={shareExercises}
         totalCalories={shareTotal}
       />
+
+      {/* ✅ Delete confirm dialog */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>Delete workout?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            This will remove the workout from your history and update today’s burned calories.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setConfirmOpen(false)}
+            disabled={deleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={deleting}
+            onClick={async () => {
+              const row = pendingDeleteRow;
+              setConfirmOpen(false);
+              setPendingDeleteRow(null);
+              await performDeleteRow(row);
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
