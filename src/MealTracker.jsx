@@ -55,6 +55,9 @@ import { useAuth } from './context/AuthProvider.jsx';
 import { saveMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 import { callAIGenerate } from './lib/ai';
 
+// ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
+import { supabase } from './lib/supabaseClient';
+
 // ---------- Pro / gating helpers ----------
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
@@ -182,6 +185,14 @@ function getMacrosForEntry(fd, { macros, meta, name }) {
   if (!any) return null;
 
   return { protein_g: P, carbs_g: C, fat_g: F };
+}
+
+// ✅ NEW: local midnight → tomorrow midnight range (so “today” matches user timezone)
+function getTodayRangeISOLocal() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
 // ---------- Dialogs ----------
@@ -385,18 +396,6 @@ export default function MealTracker({ onMealUpdate }) {
     hydrateStreakOnStartup();
   }, []);
 
-  useEffect(() => {
-    const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const todayLog = all.find(e => e.date === todayUS);
-    const meals = todayLog ? todayLog.meals || [] : [];
-
-    // IMPORTANT: do NOT rehydrate here; we want stored macros to already exist.
-    setMealLog(meals);
-
-    const totalInit = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
-    onMealUpdate?.(totalInit);
-  }, [onMealUpdate, todayUS]);
-
   // ------------ persistence helpers ------------
   const persistToday = meals => {
     const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
@@ -412,11 +411,21 @@ export default function MealTracker({ onMealUpdate }) {
     } catch {}
   };
 
+  const emitBurned = total => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: total } })
+      );
+    } catch {}
+  };
+
   const getBurnedTodayLocal = dateUS => {
     try {
       const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      const entry = all.find(e => e.date === dateUS);
-      return Number(entry?.totalCalories) || 0;
+      // Your workoutHistory can have multiple workouts per day, so SUM them
+      return (Array.isArray(all) ? all : [])
+        .filter(e => e.date === dateUS)
+        .reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0);
     } catch {
       return 0;
     }
@@ -430,10 +439,17 @@ export default function MealTracker({ onMealUpdate }) {
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
     localStorage.setItem('consumedToday', String(consumedTotal));
     emitConsumed(consumedTotal);
+    emitBurned(burned);
 
     try {
       if (user?.id) {
-        await upsertDailyMetricsLocalFirst({ user_id: user.id, local_day: todayISO, burned, consumed: consumedTotal });
+        await upsertDailyMetricsLocalFirst({
+          user_id: user.id,
+          local_day: todayISO,
+          calories_eaten: consumedTotal,
+          calories_burned: burned,
+          net_calories: consumedTotal - burned
+        });
       }
     } catch (err) {
       console.error('[MealTracker] upsertDailyMetrics failed', err);
@@ -446,6 +462,132 @@ export default function MealTracker({ onMealUpdate }) {
     onMealUpdate?.(total);
     syncDailyMetrics(total);
   };
+
+  // ✅ IMPORTANT FIX: when signed in on a NEW device, pull TODAY from Supabase
+  // and write it into the same local caches your banner already reads.
+  useEffect(() => {
+    let ignore = false;
+
+    // First: local load (keeps your existing behavior)
+    const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayLog = all.find(e => e.date === todayUS);
+    const meals = todayLog ? todayLog.meals || [] : [];
+
+    setMealLog(meals);
+
+    const totalInit = meals.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+    onMealUpdate?.(totalInit);
+
+    // Then: if logged in, hydrate from cloud → local
+    (async () => {
+      if (!user?.id || !supabase) return;
+
+      try {
+        const { startIso, endIso } = getTodayRangeISOLocal();
+
+        // 1) Pull TODAY meals from cloud
+        const mealsRes = await supabase
+          .from('meals')
+          .select('client_id,title,total_calories,eaten_at')
+          .eq('user_id', user.id)
+          .gte('eaten_at', startIso)
+          .lt('eaten_at', endIso)
+          .order('eaten_at', { ascending: true });
+
+        if (mealsRes?.error) {
+          console.warn('[MealTracker] cloud meals fetch error', mealsRes.error);
+        }
+
+        const cloudMealsRaw = Array.isArray(mealsRes?.data) ? mealsRes.data : [];
+
+        // Normalize into your local shape
+        const cloudMeals = cloudMealsRaw.map((m) => {
+          const cid =
+            m?.client_id ||
+            `cloud_${String(m?.eaten_at || '')}_${String(m?.title || '')}_${String(m?.total_calories || '')}`;
+          return {
+            client_id: cid,
+            name: m?.title || 'Meal',
+            calories: Number(m?.total_calories) || 0,
+            createdAt: m?.eaten_at || new Date().toISOString()
+          };
+        });
+
+        // 2) Merge into local without duplicates (client_id is the idempotent key)
+        const mergedMap = new Map();
+        for (const lm of meals || []) {
+          const cid = lm?.client_id || `local_${lm?.name || ''}_${lm?.createdAt || ''}_${lm?.calories || 0}`;
+          mergedMap.set(cid, { ...lm, client_id: cid });
+        }
+        for (const cm of cloudMeals) {
+          if (!mergedMap.has(cm.client_id)) mergedMap.set(cm.client_id, cm);
+        }
+
+        const merged = Array.from(mergedMap.values());
+
+        // 3) Persist merged into the SAME local history store
+        persistToday(merged);
+
+        // 4) Update UI totals immediately
+        const consumedTotal = merged.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+
+        if (!ignore) {
+          setMealLog(merged);
+          onMealUpdate?.(consumedTotal);
+          emitConsumed(consumedTotal);
+        }
+
+        // 5) Pull TODAY workouts burned (so banner & net calories are correct on new device)
+        const workoutsRes = await supabase
+          .from('workouts')
+          .select('total_calories,started_at,ended_at')
+          .eq('user_id', user.id)
+          .gte('started_at', startIso)
+          .lt('started_at', endIso);
+
+        let burnedToday = 0;
+        if (!workoutsRes?.error && Array.isArray(workoutsRes?.data)) {
+          burnedToday = workoutsRes.data.reduce((s, w) => s + (Number(w?.total_calories) || 0), 0);
+        }
+
+        if (!ignore) emitBurned(burnedToday);
+
+        // 6) Write dailyMetricsCache in the exact keys your UI reads
+        try {
+          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          cache[todayISO] = {
+            burned: burnedToday,
+            consumed: consumedTotal,
+            net: consumedTotal - burnedToday,
+            calories_burned: burnedToday,
+            calories_eaten: consumedTotal,
+            net_calories: consumedTotal - burnedToday,
+            updated_at: new Date().toISOString()
+          };
+          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+        } catch {}
+
+        // 7) Also upsert via local-first so it stays consistent everywhere
+        try {
+          await upsertDailyMetricsLocalFirst({
+            user_id: user.id,
+            local_day: todayISO,
+            calories_eaten: consumedTotal,
+            calories_burned: burnedToday,
+            net_calories: consumedTotal - burnedToday
+          });
+        } catch (e) {
+          console.warn('[MealTracker] upsertDailyMetricsLocalFirst hydrate failed', e);
+        }
+      } catch (err) {
+        console.warn('[MealTracker] hydrate today from cloud failed', err);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [onMealUpdate, todayUS, todayISO, user?.id]);
 
   // Helpers for selected food/portion
   const portions = useMemo(() => {
