@@ -49,10 +49,10 @@ function readUserGoalCalories() {
 
 /**
  * Read today's totals from the local-first caches that the app already writes:
- * - mealHistory (todayUS OR todayISO)
- * - workoutHistory (todayUS OR todayISO)
- * - dailyMetricsCache (todayISO) — ✅ enables cross-device carry over
- * - ✅ burnedToday / consumedToday — ✅ simplest "truth" keys (often hydrated from Supabase)
+ * - mealHistory
+ * - workoutHistory
+ * - dailyMetricsCache
+ * - burnedToday / consumedToday (hydrated truth keys)
  */
 function readTodayTotals() {
   const dUS = todayUS();
@@ -61,7 +61,7 @@ function readTodayTotals() {
   let eaten = 0;
   let burned = 0;
 
-  // Meals: stored under mealHistory with date = todayUS (older) OR todayISO (new localFirst)
+  // Meals
   try {
     const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const rec = Array.isArray(mh)
@@ -72,7 +72,7 @@ function readTodayTotals() {
     }
   } catch {}
 
-  // Workouts: stored under workoutHistory with date = todayUS (mostly)
+  // Workouts
   try {
     const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const arr = Array.isArray(wh) ? wh : [];
@@ -81,8 +81,7 @@ function readTodayTotals() {
       .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
   } catch {}
 
-  // ✅ Cross-device truth: dailyMetricsCache for todayISO
-  // Prefer this when present (because it may have been hydrated from Supabase)
+  // dailyMetricsCache
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
@@ -111,9 +110,7 @@ function readTodayTotals() {
     }
   } catch {}
 
-  // ✅ SUPER IMPORTANT:
-  // If burnedToday / consumedToday exist, they are the simplest "truth" keys.
-  // This is EXACTLY what you saw in console: localStorage.getItem("burnedToday") === "3020"
+  // ✅ burnedToday / consumedToday — strongest truth keys
   try {
     const eatenDirect = safeNum(localStorage.getItem('consumedToday'), NaN);
     if (Number.isFinite(eatenDirect)) eaten = eatenDirect;
@@ -137,14 +134,27 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
+// ✅ Only override local totals if prop is "meaningfully set"
+function preferProp(propVal, baseVal) {
+  if (typeof propVal !== 'number' || !Number.isFinite(propVal)) return baseVal;
+  const p = Math.round(propVal);
+
+  // If parent is still sitting at 0 but local storage has real data, trust local.
+  if (p === 0 && baseVal > 0) return baseVal;
+
+  return p;
+}
+
 export default function NetCalorieBanner({ burned: burnedProp, consumed: consumedProp, goal: goalProp } = {}) {
   const [state, setState] = useState(() => {
     const base = readTodayTotals();
     return {
       ...base,
-      eaten: (typeof consumedProp === 'number' && Number.isFinite(consumedProp)) ? Math.round(consumedProp) : base.eaten,
-      burned: (typeof burnedProp === 'number' && Number.isFinite(burnedProp)) ? Math.round(burnedProp) : base.burned,
-      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp)) ? Math.round(goalProp) : base.goal,
+      eaten: preferProp(consumedProp, base.eaten),
+      burned: preferProp(burnedProp, base.burned),
+      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
+        ? Math.round(goalProp)
+        : base.goal,
     };
   });
 
@@ -152,9 +162,11 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     const base = readTodayTotals();
     setState({
       ...base,
-      eaten: (typeof consumedProp === 'number' && Number.isFinite(consumedProp)) ? Math.round(consumedProp) : base.eaten,
-      burned: (typeof burnedProp === 'number' && Number.isFinite(burnedProp)) ? Math.round(burnedProp) : base.burned,
-      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp)) ? Math.round(goalProp) : base.goal,
+      eaten: preferProp(consumedProp, base.eaten),
+      burned: preferProp(burnedProp, base.burned),
+      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
+        ? Math.round(goalProp)
+        : base.goal,
     });
   }, [burnedProp, consumedProp, goalProp]);
 
@@ -174,12 +186,12 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
           'dailyMetricsCache',
           'userData',
           'dailyGoal',
-          // ✅ NEW: listen for the exact keys you proved exist in console
           'burnedToday',
           'consumedToday'
         ].includes(e.key)
       ) kick();
     };
+
     const onVisOrFocus = () => recompute();
 
     window.addEventListener('slimcal:consumed:update', kick);
@@ -203,9 +215,7 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
   const burned = state.burned || 0;
   const goal = state.goal || 0;
 
-  // Canonical math:
-  // - Net = eaten - burned
-  // - Remaining = goal - eaten + burned (MFP-style)
+  // Canonical math
   const net = eaten - burned;
   const remaining = goal ? (goal - eaten + burned) : 0;
 
