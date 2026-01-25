@@ -51,7 +51,8 @@ function readUserGoalCalories() {
  * Read today's totals from the local-first caches that the app already writes:
  * - mealHistory (todayUS OR todayISO)
  * - workoutHistory (todayUS OR todayISO)
- * - dailyMetricsCache (todayISO) — ✅ this is what enables cross-device carry over
+ * - dailyMetricsCache (todayISO) — ✅ enables cross-device carry over
+ * - ✅ burnedToday / consumedToday — ✅ simplest "truth" keys (often hydrated from Supabase)
  */
 function readTodayTotals() {
   const dUS = todayUS();
@@ -81,17 +82,46 @@ function readTodayTotals() {
   } catch {}
 
   // ✅ Cross-device truth: dailyMetricsCache for todayISO
-  // Always prefer this when present (because it may have been hydrated from Supabase)
+  // Prefer this when present (because it may have been hydrated from Supabase)
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
     if (row) {
-      const eatenFromCache = safeNum(row?.consumed ?? row?.eaten ?? row?.calories_eaten ?? row?.eaten, NaN);
-      const burnedFromCache = safeNum(row?.burned ?? row?.calories_burned, NaN);
+      const eatenFromCache = safeNum(
+        row?.consumed ??
+          row?.eaten ??
+          row?.calories_eaten ??
+          row?.cals_eaten ??
+          row?.food ??
+          row?.caloriesConsumed,
+        NaN
+      );
+
+      const burnedFromCache = safeNum(
+        row?.burned ??
+          row?.calories_burned ??
+          row?.cals_burned ??
+          row?.exercise ??
+          row?.caloriesBurned,
+        NaN
+      );
 
       if (Number.isFinite(eatenFromCache)) eaten = eatenFromCache;
       if (Number.isFinite(burnedFromCache)) burned = burnedFromCache;
     }
+  } catch {}
+
+  // ✅ SUPER IMPORTANT:
+  // If burnedToday / consumedToday exist, they are the simplest "truth" keys.
+  // This is EXACTLY what you saw in console: localStorage.getItem("burnedToday") === "3020"
+  try {
+    const eatenDirect = safeNum(localStorage.getItem('consumedToday'), NaN);
+    if (Number.isFinite(eatenDirect)) eaten = eatenDirect;
+  } catch {}
+
+  try {
+    const burnedDirect = safeNum(localStorage.getItem('burnedToday'), NaN);
+    if (Number.isFinite(burnedDirect)) burned = burnedDirect;
   } catch {}
 
   return {
@@ -137,7 +167,18 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
     const kick = () => recompute();
     const onStorage = (e) => {
       if (!e || !e.key) return;
-      if (['mealHistory', 'workoutHistory', 'dailyMetricsCache', 'userData', 'dailyGoal'].includes(e.key)) kick();
+      if (
+        [
+          'mealHistory',
+          'workoutHistory',
+          'dailyMetricsCache',
+          'userData',
+          'dailyGoal',
+          // ✅ NEW: listen for the exact keys you proved exist in console
+          'burnedToday',
+          'consumedToday'
+        ].includes(e.key)
+      ) kick();
     };
     const onVisOrFocus = () => recompute();
 
