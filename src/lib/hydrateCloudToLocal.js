@@ -14,13 +14,10 @@ function boundsForLocalDayISO(dayISO) {
   // dayISO like "2026-01-24"
   const [y, m, d] = String(dayISO).split('-').map(Number);
   const startLocal = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
-  const endLocal = new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
-  // We use "next day start" for < comparison
   const nextDayStartLocal = new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
 
   return {
     startISO: startLocal.toISOString(),
-    endISO: endLocal.toISOString(),
     nextStartISO: nextDayStartLocal.toISOString()
   };
 }
@@ -32,6 +29,7 @@ function safeNum(v, d = 0) {
 
 function readDailyMetricsNums(row) {
   if (!row || typeof row !== 'object') return { eaten: 0, burned: 0 };
+
   const eaten =
     safeNum(row.calories_eaten) ||
     safeNum(row.cals_eaten) ||
@@ -52,7 +50,9 @@ function writeDailyMetricsCache(dayISO, eaten, burned) {
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     cache[dayISO] = {
+      // ✅ include both naming styles so banner always finds it
       eaten: safeNum(eaten, 0),
+      consumed: safeNum(eaten, 0),
       burned: safeNum(burned, 0),
       net: safeNum(eaten, 0) - safeNum(burned, 0),
       updated_at: new Date().toISOString()
@@ -133,17 +133,17 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
 
   const { startISO, nextStartISO } = boundsForLocalDayISO(dayISO);
 
-  // We select the obvious calorie fields + timestamps
+  // Primary query: started_at bounds
   const { data, error } = await supabase
     .from('workouts')
-    .select('id, started_at, ended_at, total_calories, totalCalories, calories_burned, kcal, created_at')
+    .select('id, started_at, total_calories, totalCalories, calories_burned, kcal, created_at')
     .eq('user_id', userId)
     .gte('started_at', startISO)
     .lt('started_at', nextStartISO)
     .order('started_at', { ascending: false });
 
+  // Fallback if schema doesn't have started_at
   if (error) {
-    // If started_at doesn't exist in your schema yet, fallback to created_at bounds
     if (/column .*started_at.* does not exist/i.test(error.message || '')) {
       const fb = await supabase
         .from('workouts')
@@ -199,7 +199,6 @@ async function sumEatenFromMeals(userId, dayISO) {
     .order('eaten_at', { ascending: false });
 
   if (error) {
-    // fallback: if eaten_at doesn't exist in schema
     if (/column .*eaten_at.* does not exist/i.test(error.message || '')) {
       const fb = await supabase
         .from('meals')
@@ -254,7 +253,10 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
       const nums = readDailyMetricsNums(resNew.data);
       eaten = nums.eaten;
       burned = nums.burned;
-    } else if (resNew?.error && /column .*local_day.* does not exist/i.test(resNew.error.message || '')) {
+    } else if (
+      resNew?.error &&
+      /column .*local_day.* does not exist/i.test(resNew.error.message || '')
+    ) {
       // 2) Legacy schema fallback: day column
       const resOld = await supabase
         .from('daily_metrics')
@@ -300,12 +302,10 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
     dispatchTotals(dayISO, eaten, burned);
   }
 
-  // 7) Repair Supabase daily_metrics if it was missing burned (this makes future loads perfect)
+  // 7) Repair Supabase daily_metrics (important for future loads + consistency)
   try {
-    // Only repair if workouts gave us something meaningful
-    if ((burnedFromWorkouts || 0) > 0) {
-      await upsertDailyMetricsCloud(userId, dayISO, eaten, burned);
-    }
+    // repair whenever we have *any* signal, not only workouts
+    await upsertDailyMetricsCloud(userId, dayISO, eaten, burned);
   } catch (e) {
     console.warn('[hydrateCloudToLocal] repair upsert failed', e);
   }

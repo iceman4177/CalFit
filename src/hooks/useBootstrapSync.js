@@ -5,6 +5,7 @@ import { flushPending, attachSyncListeners } from '../lib/sync';
 import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
+const HYDRATE_INTERVAL_MS = 25_000; // ✅ keeps PC synced with mobile updates
 
 export default function useBootstrapSync(user) {
   const listenersAttachedRef = useRef(false);
@@ -30,38 +31,66 @@ export default function useBootstrapSync(user) {
     }
   }, []);
 
-  // ✅ Hydrate on focus/visibility so cross-device updates show up
+  /**
+   * ✅ ALWAYS keep device in sync while logged in:
+   * - hydrate on focus
+   * - hydrate on visibility
+   * - hydrate every X seconds (cross-device truth)
+   */
   useEffect(() => {
     const userId = user?.id || null;
     if (!userId) return;
 
-    const onFocus = async () => {
+    let alive = true;
+
+    const hydrateNow = async (reason = 'unknown') => {
+      if (!alive) return;
       if (!shouldHydrateNow()) return;
+
       try {
         // best-effort flush then pull truth
         await flushPending({ maxTries: 1 });
       } catch {}
+
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
       } catch (e) {
-        console.warn('[useBootstrapSync] hydrate (focus) failed', e);
+        console.warn(`[useBootstrapSync] hydrate failed (${reason})`, e);
       }
     };
 
+    const onFocus = async () => hydrateNow('focus');
+
     const onVisibility = async () => {
       if (document.visibilityState !== 'visible') return;
-      await onFocus();
+      await hydrateNow('visibility');
     };
 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
 
+    // ✅ light polling to pick up mobile updates without refresh
+    const t = setInterval(() => {
+      hydrateNow('interval');
+    }, HYDRATE_INTERVAL_MS);
+
+    // ✅ also hydrate once immediately when this effect attaches
+    hydrateNow('mount');
+
     return () => {
+      alive = false;
+      clearInterval(t);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user?.id]); // only reattach when user changes
+  }, [user?.id]);
 
+  /**
+   * ✅ One-time bootstrap per session:
+   * - migrate local → cloud
+   * - flush queue
+   * - hydrate cloud → local caches
+   */
   useEffect(() => {
     const userId = user?.id || null;
     if (!userId) return;
@@ -70,15 +99,6 @@ export default function useBootstrapSync(user) {
     const sessionKey = `${SESSION_FLAG_PREFIX}${userId}`;
     if (sessionStorage.getItem(sessionKey) === '1') {
       ranForUserRef.current = userId;
-
-      // Still do a quick hydrate once on mount if needed (new page load)
-      (async () => {
-        if (!shouldHydrateNow()) return;
-        try {
-          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-      })();
-
       return;
     }
 
