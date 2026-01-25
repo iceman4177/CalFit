@@ -1,10 +1,6 @@
 // src/lib/hydrateCloudToLocal.js
 // Pull "cloud truth" into local caches to make cross-device totals instant.
-// - Reads daily_metrics for today
-// - Recomputes burned from workouts (workouts table is the source of truth)
-// - Writes localStorage dailyMetricsCache + burnedToday/consumedToday
-// - Dispatches events so UI updates immediately
-// - Repairs daily_metrics in Supabase (so future loads match)
+// This runs after login bootstrap (useBootstrapSync) and fixes the banner/PC sync.
 
 import { supabase } from './supabaseClient';
 
@@ -12,17 +8,6 @@ import { supabase } from './supabaseClient';
 function localDayISO(d = new Date()) {
   const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   return ld.toISOString().slice(0, 10);
-}
-
-function boundsForLocalDayISO(dayISO) {
-  const [y, m, d] = String(dayISO).split('-').map(Number);
-  const startLocal = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
-  const nextDayStartLocal = new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
-
-  return {
-    startISO: startLocal.toISOString(),
-    nextStartISO: nextDayStartLocal.toISOString()
-  };
 }
 
 function safeNum(v, d = 0) {
@@ -53,7 +38,7 @@ function writeDailyMetricsCache(dayISO, eaten, burned) {
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     cache[dayISO] = {
-      eaten: safeNum(eaten, 0),
+      consumed: safeNum(eaten, 0), // ✅ canonical key used by banner
       burned: safeNum(burned, 0),
       net: safeNum(eaten, 0) - safeNum(burned, 0),
       updated_at: new Date().toISOString()
@@ -93,6 +78,7 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
     updated_at: new Date().toISOString()
   };
 
+  // New schema attempt
   const res = await supabase
     .from('daily_metrics')
     .upsert(rowNew, { onConflict: 'user_id,local_day' })
@@ -101,7 +87,8 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
 
   if (!res?.error) return;
 
-  if (/column .*local_day.* does not exist/i.test(res.error?.message || '')) {
+  // Legacy fallback if new columns missing
+  if (/column .* does not exist/i.test(res.error?.message || '')) {
     const legacy = {
       user_id: userId,
       day: dayISO,
@@ -126,62 +113,19 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
   console.warn('[hydrateCloudToLocal] daily_metrics upsert failed', res.error);
 }
 
-// ✅ Pull workouts for today and sum their calories
-// IMPORTANT: only select columns that exist in your workouts table (no totalCalories/kcal/etc)
+// ✅ NEW: Burned should be computed via local_day (no timezone mismatch)
 async function sumBurnedFromWorkouts(userId, dayISO) {
   if (!supabase || !userId) return 0;
 
-  const { startISO, nextStartISO } = boundsForLocalDayISO(dayISO);
-
-  // 1) Prefer local_day filtering if column exists (fast + accurate)
-  try {
-    const resByLocalDay = await supabase
-      .from('workouts')
-      .select('id,total_calories,local_day,started_at,created_at')
-      .eq('user_id', userId)
-      .eq('local_day', dayISO)
-      .order('started_at', { ascending: false });
-
-    if (!resByLocalDay?.error && Array.isArray(resByLocalDay.data)) {
-      const sum = resByLocalDay.data.reduce((s, w) => {
-        return s + safeNum(w.total_calories, 0);
-      }, 0);
-
-      // even if local_day rows are missing, don't return 0 prematurely
-      if (sum > 0) return sum;
-    }
-  } catch (e) {
-    console.warn('[hydrateCloudToLocal] workouts local_day query failed', e);
-  }
-
-  // 2) Fallback to started_at bounds
+  // This select ONLY uses columns we know exist now.
+  // Avoids PostgREST 400 from selecting non-existent columns.
   const { data, error } = await supabase
     .from('workouts')
-    .select('id,started_at,total_calories,created_at')
+    .select('id,total_calories,local_day,started_at,created_at')
     .eq('user_id', userId)
-    .gte('started_at', startISO)
-    .lt('started_at', nextStartISO)
-    .order('started_at', { ascending: false });
+    .eq('local_day', dayISO);
 
   if (error) {
-    // 3) Last-resort fallback: created_at bounds (if started_at is missing)
-    if (/column .*started_at.* does not exist/i.test(error.message || '')) {
-      const fb = await supabase
-        .from('workouts')
-        .select('id,created_at,total_calories')
-        .eq('user_id', userId)
-        .gte('created_at', startISO)
-        .lt('created_at', nextStartISO)
-        .order('created_at', { ascending: false });
-
-      if (fb.error) {
-        console.warn('[hydrateCloudToLocal] workout created_at fallback query failed', fb.error);
-        return 0;
-      }
-
-      return (fb.data || []).reduce((s, w) => s + safeNum(w.total_calories, 0), 0);
-    }
-
     console.warn('[hydrateCloudToLocal] workouts query failed', error);
     return 0;
   }
@@ -189,53 +133,59 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
   return (data || []).reduce((s, w) => s + safeNum(w.total_calories, 0), 0);
 }
 
-// Pull meals for today and sum calories (fallback for eaten)
+// Optional backup for eaten from meals table (if daily_metrics missing)
 async function sumEatenFromMeals(userId, dayISO) {
   if (!supabase || !userId) return 0;
 
-  const { startISO, nextStartISO } = boundsForLocalDayISO(dayISO);
+  // Meals query also should rely on local_day if you have it.
+  // But if your meals table doesn't have local_day, fallback safely.
+  let total = 0;
 
-  const { data, error } = await supabase
-    .from('meals')
-    .select('id,eaten_at,total_calories,created_at')
-    .eq('user_id', userId)
-    .gte('eaten_at', startISO)
-    .lt('eaten_at', nextStartISO)
-    .order('eaten_at', { ascending: false });
+  // Attempt local_day first
+  try {
+    const res = await supabase
+      .from('meals')
+      .select('id,total_calories,local_day,eaten_at,created_at')
+      .eq('user_id', userId)
+      .eq('local_day', dayISO);
 
-  if (error) {
-    if (/column .*eaten_at.* does not exist/i.test(error.message || '')) {
-      const fb = await supabase
-        .from('meals')
-        .select('id,created_at,total_calories')
-        .eq('user_id', userId)
-        .gte('created_at', startISO)
-        .lt('created_at', nextStartISO)
-        .order('created_at', { ascending: false });
+    if (!res?.error) {
+      total = (res.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+      return total;
+    }
+  } catch {}
 
-      if (fb.error) {
-        console.warn('[hydrateCloudToLocal] meals created_at fallback query failed', fb.error);
-        return 0;
-      }
+  // Fallback to eaten_at range (best effort)
+  try {
+    const startLocal = new Date(`${dayISO}T00:00:00`);
+    const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
-      return (fb.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+    const res2 = await supabase
+      .from('meals')
+      .select('id,total_calories,eaten_at,created_at')
+      .eq('user_id', userId)
+      .gte('eaten_at', startLocal.toISOString())
+      .lt('eaten_at', nextLocal.toISOString());
+
+    if (res2?.error) {
+      console.warn('[hydrateCloudToLocal] meals fallback query failed', res2.error);
+      return 0;
     }
 
-    console.warn('[hydrateCloudToLocal] meals query failed', error);
+    return (res2.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] meals fallback failed', e);
     return 0;
   }
-
-  return (data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
 }
 
 /**
  * hydrateTodayTotalsFromCloud
  * - Reads daily_metrics if available
- * - Recomputes burned from workouts ALWAYS (workouts is truth)
- * - Recomputes eaten from meals if missing
- * - Writes local cache so banner matches across devices
- * - Dispatches events so UI updates instantly
- * - Repairs daily_metrics in Supabase (so future loads match)
+ * - If burned missing/0, computes burned from workouts table (local_day ✅)
+ * - Writes local cache (dailyMetricsCache) so NetCalorieBanner becomes cross-device
+ * - Dispatches events so UI updates immediately
+ * - Repairs Supabase daily_metrics so future loads are perfect
  */
 export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } = {}) {
   const userId = user?.id || null;
@@ -246,7 +196,7 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   let eaten = 0;
   let burned = 0;
 
-  // 1) daily_metrics read (new schema first)
+  // 1) Read daily_metrics (new schema)
   try {
     const resNew = await supabase
       .from('daily_metrics')
@@ -260,6 +210,7 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
       eaten = nums.eaten;
       burned = nums.burned;
     } else if (resNew?.error && /column .*local_day.* does not exist/i.test(resNew.error.message || '')) {
+      // 2) Legacy schema fallback: day column
       const resOld = await supabase
         .from('daily_metrics')
         .select('*')
@@ -277,32 +228,39 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
     console.warn('[hydrateCloudToLocal] daily_metrics read failed', e);
   }
 
-  // 2) ALWAYS compute burned from workouts (this fixes cross-device mismatch)
-  const burnedFromWorkouts = await sumBurnedFromWorkouts(userId, dayISO);
-  if (burnedFromWorkouts >= 0) {
-    burned = burnedFromWorkouts;
+  // 3) If burned missing, sum workouts from workouts.local_day ✅
+  let burnedFromWorkouts = 0;
+  if (!burned || burned <= 0) {
+    burnedFromWorkouts = await sumBurnedFromWorkouts(userId, dayISO);
+    if (burnedFromWorkouts > 0) burned = burnedFromWorkouts;
   }
 
-  // 3) If eaten missing/0, compute from meals
+  // 4) If eaten missing, sum meals (backup)
   if (!eaten || eaten <= 0) {
     const eatenFromMeals = await sumEatenFromMeals(userId, dayISO);
     if (eatenFromMeals > 0) eaten = eatenFromMeals;
   }
 
-  // 4) Write local cache (banner reads this)
+  // 5) Write local cache so the banner is correct on this device immediately
   writeDailyMetricsCache(dayISO, eaten, burned);
 
+  // Convenience keys used elsewhere
   try {
     localStorage.setItem('consumedToday', String(Math.round(eaten || 0)));
     localStorage.setItem('burnedToday', String(Math.round(burned || 0)));
   } catch {}
 
-  // 5) Dispatch events so UI updates without refresh
-  if (alsoDispatch) dispatchTotals(dayISO, eaten, burned);
+  // 6) Dispatch events so UI updates without refresh
+  if (alsoDispatch) {
+    dispatchTotals(dayISO, eaten, burned);
+  }
 
-  // 6) Repair daily_metrics so future loads match on every device
+  // 7) Repair Supabase daily_metrics (makes future loads perfect)
   try {
-    await upsertDailyMetricsCloud(userId, dayISO, eaten, burned);
+    // If we got better burned from workouts, sync it back
+    if ((burnedFromWorkouts || 0) > 0) {
+      await upsertDailyMetricsCloud(userId, dayISO, eaten, burned);
+    }
   } catch (e) {
     console.warn('[hydrateCloudToLocal] repair upsert failed', e);
   }
