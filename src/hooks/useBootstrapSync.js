@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
-import { hydrateTodayTotalsFromCloud, hydrateTodayMealsFromCloud } from '../lib/hydrateCloudToLocal';
+import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
 
@@ -101,6 +101,11 @@ export default function useBootstrapSync(user) {
     ranForUserRef.current = userId;
 
     (async () => {
+      // ✅ Instant banner hydration (before migrate/flush)
+      try {
+        await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+      } catch {}
+
       try {
         await migrateLocalToCloudOneTime(user);
         await flushPending({ maxTries: 2 });
