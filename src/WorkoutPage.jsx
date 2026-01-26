@@ -32,6 +32,7 @@ import FeatureUseBadge, {
   registerDailyFeatureUse
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
+import { saveWorkout as saveWorkoutDb } from './lib/db';
 import { calcExerciseCaloriesHybrid } from './analytics';
 import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
@@ -132,6 +133,74 @@ function clearActiveWorkoutSessionId() {
   } catch { }
 }
 
+
+// ---- Draft persistence (prevents losing exercises on tab switch/refresh) -----
+function draftStorageKey(sessionId) {
+  return `slimcal:workoutDraft:${sessionId}`;
+}
+function readDraftSession(sessionId) {
+  try {
+    const raw = localStorage.getItem(draftStorageKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeDraftSession(sessionId, session) {
+  try {
+    localStorage.setItem(draftStorageKey(sessionId), JSON.stringify(session));
+  } catch { }
+}
+function clearDraftSession(sessionId) {
+  try {
+    localStorage.removeItem(draftStorageKey(sessionId));
+  } catch { }
+}
+
+// ---- Local workoutHistory upsert (banner + history rely on this) -------------
+function upsertWorkoutHistorySession(session, { draft = true } = {}) {
+  try {
+    const key = 'workoutHistory';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    const list = Array.isArray(arr) ? arr : [];
+
+    const sid = session?.client_id || session?.id;
+    if (!sid) return;
+
+    const total = Number(session?.total_calories ?? session?.totalCalories ?? 0) || 0;
+
+    const row = {
+      // canonical
+      id: sid,
+      client_id: sid,
+      date: session?.date || new Date(session?.started_at || Date.now()).toLocaleDateString('en-US'),
+      totalCalories: total,
+      total_calories: total,
+      exercises: Array.isArray(session?.exercises) ? session.exercises : [],
+      // metadata
+      uploaded: !!session?.uploaded,
+      createdAt: session?.started_at || session?.createdAt || new Date().toISOString(),
+      __draft: !!draft
+    };
+
+    const next = [row, ...list.filter(w => (w?.id || w?.client_id) !== sid)];
+    localStorage.setItem(key, JSON.stringify(next.slice(0, 250)));
+  } catch { }
+}
+
+function removeWorkoutHistorySession(sessionId) {
+  try {
+    const key = 'workoutHistory';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    const list = Array.isArray(arr) ? arr : [];
+    const next = list.filter(w => (w?.id || w?.client_id) !== sessionId);
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch { }
+}
+
+
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
@@ -175,6 +244,50 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ debounce autosave timer
   const autosaveTimerRef = useRef(null);
+
+  // ✅ Rehydrate draft exercises if the user navigates away / refreshes mid-workout
+  useEffect(() => {
+    try {
+      const sid = activeWorkoutSessionIdRef.current;
+      const draft = readDraftSession(sid);
+      if (!draft) return;
+
+      // Only restore drafts from today (prevents stale drafts)
+      const todayIso = localDayISO(new Date());
+      const draftDay = draft?.__local_day || draft?.local_day || null;
+      if (draftDay && draftDay !== todayIso) {
+        clearDraftSession(sid);
+        removeWorkoutHistorySession(sid);
+        return;
+      }
+
+      const ex = Array.isArray(draft?.exercises) ? draft.exercises : [];
+      if (ex.length > 0) {
+        setCumulativeExercises(ex.map(e => ({
+          exerciseType: e.exerciseType || '',
+          cardioType: e.cardioType || '',
+          manualCalories: e.manualCalories || '',
+          muscleGroup: e.muscleGroup || '',
+          exerciseName: e.exerciseName || e.name || '',
+          weight: e.weight ?? '',
+          sets: e.sets ?? '',
+          reps: e.reps ?? '',
+          concentricTime: e.concentricTime || '',
+          eccentricTime: e.eccentricTime || '',
+          calories: Number(e.calories) || 0
+        })));
+
+        const totalRaw = ex.reduce((s, e) => s + (Number(e.calories) || 0), 0);
+        setCurrentCalories(Math.round(totalRaw * 100) / 100);
+
+        if (draft?.started_at) {
+          startedAtRef.current = draft.started_at;
+        }
+      }
+    } catch { }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   const handleDismiss = (key, setter, cb) => {
     try {
@@ -455,6 +568,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         } catch { }
       })();
 
+      // ✅ Clear local draft + local workoutHistory entry so banner doesn't drift
+      try {
+        const sid = activeWorkoutSessionIdRef.current;
+        clearDraftSession(sid);
+        removeWorkoutHistorySession(sid);
+      } catch { }
+
       return;
     }
 
@@ -463,7 +583,16 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     autosaveTimerRef.current = setTimeout(async () => {
       try {
         const session = buildDraftWorkoutSession();
-        await saveWorkoutLocalFirst(session);
+
+        // ✅ Persist draft locally (prevents disappearing exercises)
+        writeDraftSession(activeWorkoutSessionIdRef.current, session);
+
+        // ✅ Keep local workoutHistory updated so banner + history match instantly
+        upsertWorkoutHistorySession(session, { draft: true });
+
+        // ✅ Cloud upsert is idempotent, but DO NOT stack daily calories on draft saves
+        await saveWorkoutLocalFirst({ ...session, skipDailyMetricsUpdate: true });
+
         await syncBurnedTodayToDailyMetrics(session.date, session.__local_day);
       } catch (e) {
         console.warn('[WorkoutPage] autosave draft failed', e);
@@ -495,7 +624,42 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
     try {
       const session = buildDraftWorkoutSession();
-      await saveWorkoutLocalFirst(session);
+
+      // ✅ Finalize local workoutHistory row (not a draft)
+      upsertWorkoutHistorySession(session, { draft: false });
+      clearDraftSession(activeWorkoutSessionIdRef.current);
+
+      // ✅ Cloud upsert (idempotent) — don't stack daily calories here
+      await saveWorkoutLocalFirst({ ...session, skipDailyMetricsUpdate: true });
+
+      // ✅ Write workout sets once so history has real exercise names across devices
+      try {
+        const already = localStorage.getItem(`slimcal:workoutSetsSaved:${session.client_id}`);
+        if (!already && user?.id) {
+          const sets = (session.exercises || []).map((e) => ({
+            exercise_name: e.name || e.exerciseName || 'Exercise',
+            weight: e.weight ?? null,
+            reps: e.reps ?? null,
+            equipment: null,
+            muscle_group: null,
+            tempo: e.tempo ?? null,
+            volume: null,
+          }));
+
+          await saveWorkoutDb(user.id, {
+            client_id: session.client_id,
+            started_at: session.started_at,
+            ended_at: session.ended_at,
+            total_calories: session.total_calories,
+            goal: null,
+            notes: null,
+          }, sets);
+
+          localStorage.setItem(`slimcal:workoutSetsSaved:${session.client_id}`, 'true');
+        }
+      } catch (e) {
+        console.warn('[WorkoutPage] saveWorkoutDb (sets) failed', e);
+      }
 
       updateStreak();
 
@@ -518,6 +682,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   };
 
   const handleNewWorkout = () => {
+    // ✅ wipe current draft session + remove from history
+    try {
+      const sid = activeWorkoutSessionIdRef.current;
+      clearDraftSession(sid);
+      removeWorkoutHistorySession(sid);
+    } catch { }
+
     setCumulativeExercises([]);
     setCurrentCalories(0);
     setShowSaunaSection(false);

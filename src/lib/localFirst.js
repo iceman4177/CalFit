@@ -141,10 +141,29 @@ async function upsertDailyMetricsCloud(payload) {
  * Writes dailyMetricsCache locally (instant UI),
  * then upserts daily_metrics to Supabase (or queues if fails).
  */
-export async function upsertDailyMetricsLocalFirst({ user_id, local_day, burned, consumed }) {
+export async function upsertDailyMetricsLocalFirst({ user_id, local_day, burned, consumed, calories_burned, calories_eaten, cals_burned, cals_eaten, net_calories, net_cals }) {
   const dayISO = local_day || localDayISO(new Date());
-  const eaten = Math.round(safeNum(consumed, 0));
-  const b = Math.round(safeNum(burned, 0));
+
+// Accept both new and legacy argument names
+const eatenRaw =
+  consumed ??
+  calories_eaten ??
+  cals_eaten ??
+  0;
+
+const burnedRaw =
+  burned ??
+  calories_burned ??
+  cals_burned ??
+  0;
+
+const eaten = Math.round(safeNum(eatenRaw, 0));
+const b = Math.round(safeNum(burnedRaw, 0));
+
+const net =
+  (net_calories ?? net_cals ?? null);
+
+const netValue = net == null ? (eaten - b) : Math.round(safeNum(net, eaten - b));
 
   // local truth for banner
   writeDailyMetricsCache(dayISO, { consumed: eaten, burned: b });
@@ -167,7 +186,7 @@ export async function upsertDailyMetricsLocalFirst({ user_id, local_day, burned,
     local_day: dayISO,
     calories_eaten: eaten,
     calories_burned: b,
-    net_calories: eaten - b,
+    net_calories: netValue,
     updated_at: new Date().toISOString(),
   };
 
@@ -264,6 +283,7 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   notes = null,
   goal = null,
+  skipDailyMetricsUpdate = false,
 }) {
   if (!user_id) return;
 
@@ -299,7 +319,8 @@ export async function saveWorkoutLocalFirst({
   }
 
   // Also keep the banner daily metrics in sync instantly
-  try {
+  if (!skipDailyMetricsUpdate) {
+    try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache[dayISO] || {};
     const eaten = safeNum(row.consumed ?? row.calories_eaten ?? 0, 0);
@@ -316,7 +337,8 @@ export async function saveWorkoutLocalFirst({
       burned: newBurned,
       consumed: eaten,
     });
-  } catch {}
+    } catch {}
+  }
 }
 
 /**
