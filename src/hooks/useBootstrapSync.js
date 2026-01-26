@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
-import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
+import { hydrateTodayTotalsFromCloud, hydrateTodayMealsFromCloud } from '../lib/hydrateCloudToLocal';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
 
@@ -41,6 +41,10 @@ export default function useBootstrapSync(user) {
       } catch {}
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        try {
+          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
+        } catch {}
+
       } catch (e) {
         console.warn('[useBootstrapSync] hydrate (focus) failed', e);
       }
@@ -72,6 +76,10 @@ export default function useBootstrapSync(user) {
       } catch {}
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        try {
+          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
+        } catch {}
+
       } catch {}
     }, 15000);
 
@@ -91,6 +99,10 @@ export default function useBootstrapSync(user) {
         if (!shouldHydrateNow()) return;
         try {
           await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        try {
+          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
+        } catch {}
+
         } catch {}
       })();
 
@@ -107,6 +119,10 @@ export default function useBootstrapSync(user) {
 
         try {
           await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+        try {
+          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
+        } catch {}
+
         } catch (e) {
           console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
         }

@@ -267,3 +267,101 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
 
   return { ok: true, dayISO, eaten, burned };
 }
+
+
+// ---------------- Meals hydration (cloud -> local) ----------------
+function startOfLocalDayISO(d = new Date()) {
+  const dt = new Date(d);
+  const start = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 0, 0, 0, 0);
+  return start.toISOString();
+}
+function endOfLocalDayISO(d = new Date()) {
+  const dt = new Date(d);
+  const end = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + 1, 0, 0, 0, 0);
+  return end.toISOString();
+}
+
+function upsertTodayMealHistory(dayDisplay, mealsArr) {
+  try {
+    const key = 'mealHistory';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const list = Array.isArray(existing) ? existing : [];
+
+    const others = list.filter(r => r?.date !== dayDisplay);
+
+    const todayRec = {
+      date: dayDisplay,
+      meals: mealsArr,
+    };
+
+    localStorage.setItem(key, JSON.stringify([todayRec, ...others].slice(0, 60)));
+  } catch {}
+}
+
+export async function hydrateTodayMealsFromCloud(user, { alsoDispatch = true } = {}) {
+  const userId = user?.id || null;
+  if (!userId) return { ok: false, reason: 'no-user' };
+
+  const now = new Date();
+  const dayISO = localDayISO(now);
+  const dayDisplay = now.toLocaleDateString('en-US');
+
+  // meals table has: user_id, eaten_at, title, total_calories, client_id, created_at, updated_at
+  const startISO = startOfLocalDayISO(now);
+  const endISO = endOfLocalDayISO(now);
+
+  const { data, error } = await supabase
+    .from('meals')
+    .select('id,user_id,client_id,eaten_at,title,total_calories,created_at,updated_at')
+    .eq('user_id', userId)
+    .gte('eaten_at', startISO)
+    .lt('eaten_at', endISO)
+    .order('eaten_at', { ascending: false });
+
+  if (error) {
+    console.warn('[hydrateTodayMealsFromCloud] failed', error);
+    return { ok: false, error };
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+
+  const mealsArr = rows.map(r => ({
+    title: r?.title || 'Meal',
+    calories: safeNum(r?.total_calories, 0),
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    createdAt: r?.eaten_at || r?.created_at || new Date().toISOString(),
+    client_id: r?.client_id || null,
+    cloud_id: r?.id || null,
+  }));
+
+  // Update local mealHistory so MealTracker on PC shows meals logged on mobile.
+  upsertTodayMealHistory(dayDisplay, mealsArr);
+
+  // Update dailyMetricsCache consumed for banner.
+  const consumed = mealsArr.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
+
+  let burned = 0;
+  try {
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    const row = cache[dayISO] || {};
+    burned = safeNum(row.burned, 0);
+  } catch {}
+
+  writeDailyMetricsCache(dayISO, consumed, burned);
+
+  try {
+    localStorage.setItem('consumedToday', String(Math.round(consumed)));
+  } catch {}
+
+  if (alsoDispatch) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('slimcal:consumed:update', { detail: { date: dayISO, consumed: Math.round(consumed) } })
+      );
+    } catch {}
+  }
+
+  return { ok: true, dayISO, consumed, count: mealsArr.length };
+}
