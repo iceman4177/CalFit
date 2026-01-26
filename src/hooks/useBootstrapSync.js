@@ -41,10 +41,6 @@ export default function useBootstrapSync(user) {
       } catch {}
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        try {
-          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-
       } catch (e) {
         console.warn('[useBootstrapSync] hydrate (focus) failed', e);
       }
@@ -76,10 +72,6 @@ export default function useBootstrapSync(user) {
       } catch {}
       try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        try {
-          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-
       } catch {}
     }, 15000);
 
@@ -99,10 +91,6 @@ export default function useBootstrapSync(user) {
         if (!shouldHydrateNow()) return;
         try {
           await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        try {
-          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-
         } catch {}
       })();
 
@@ -119,10 +107,6 @@ export default function useBootstrapSync(user) {
 
         try {
           await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        try {
-          await hydrateTodayMealsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-
         } catch (e) {
           console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
         }

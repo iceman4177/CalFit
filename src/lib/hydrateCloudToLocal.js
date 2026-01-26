@@ -1,7 +1,7 @@
 // src/lib/hydrateCloudToLocal.js
 import { supabase } from './supabaseClient';
 
-// local-day helpers
+// ---------- Local-day helpers ----------
 function startOfLocalDay(d = new Date()) {
   const dt = new Date(d);
   return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 0, 0, 0, 0);
@@ -68,13 +68,47 @@ function dispatchBurned(dayISO, burned) {
   } catch {}
 }
 
-// ---- Existing: hydrate workout totals / daily_metrics burned ------------------
-// ✅ FIXED: never clobber local burned/consumed with stale 0 from cloud
+// ---------- Cloud fallback helpers ----------
+async function sumWorkoutsForToday(user_id, now = new Date()) {
+  const start = startOfLocalDay(now).toISOString();
+  const end = endOfLocalDay(now).toISOString();
+
+  const { data: rows, error } = await supabase
+    .from('workouts')
+    .select('total_calories,started_at')
+    .eq('user_id', user_id)
+    .gte('started_at', start)
+    .lt('started_at', end);
+
+  if (error) throw error;
+
+  const arr = Array.isArray(rows) ? rows : [];
+  const sum = arr.reduce((s, r) => s + safeNum(r?.total_calories, 0), 0);
+  return Math.round(sum);
+}
+
+/**
+ * ✅ hydrateTodayTotalsFromCloud(user_id)
+ *
+ * Authoritative summary source is daily_metrics, BUT:
+ * - daily_metrics can be stale for a few seconds/minutes during device drift
+ * - if it returns 0 burned while workouts exist, the banner flickers to 0
+ *
+ * FIX:
+ * - merge cloud values with local cache
+ * - never clobber local >0 with cloud 0
+ * - if cloud burned is 0, compute burned from today's workouts as a fallback
+ */
 export async function hydrateTodayTotalsFromCloud(user_id) {
   if (!user_id) return { ok: false, reason: 'no-user' };
 
   const now = new Date();
   const dayISO = localDayISO(now);
+
+  const prev = readCacheForDay(dayISO);
+  const localEaten = Math.round(safeNum(prev?.consumed ?? prev?.calories_eaten ?? 0, 0));
+  const localBurned = Math.round(safeNum(prev?.burned ?? prev?.calories_burned ?? 0, 0));
+  const localUpdatedMs = toMs(prev?.updated_at);
 
   const { data, error } = await supabase
     .from('daily_metrics')
@@ -88,64 +122,65 @@ export async function hydrateTodayTotalsFromCloud(user_id) {
     return { ok: false, error };
   }
 
-  // If no row yet, DO NOT overwrite local cache to 0 (prevents flicker)
-  if (!data) {
-    return { ok: true, note: 'no-cloud-row' };
+  // If no daily_metrics row yet, do NOT overwrite local cache to 0 (prevents flicker)
+  // We'll still try to compute burned from workouts as a fallback.
+  let cloudEaten = 0;
+  let cloudBurned = 0;
+  let cloudUpdatedMs = 0;
+
+  if (data) {
+    cloudEaten = Math.round(safeNum(data?.calories_eaten, 0));
+    cloudBurned = Math.round(safeNum(data?.calories_burned, 0));
+    cloudUpdatedMs = toMs(data?.updated_at);
   }
 
-  const cloudEaten = Math.round(safeNum(data?.calories_eaten, 0));
-  const cloudBurned = Math.round(safeNum(data?.calories_burned, 0));
-  const cloudUpdatedMs = toMs(data?.updated_at);
+  // Fallback: if cloud burned is 0, compute from workouts table (today)
+  let workoutBurned = 0;
+  try {
+    workoutBurned = await sumWorkoutsForToday(user_id, now);
+  } catch (e) {
+    // ignore; don't break hydration on transient errors
+  }
 
-  // Read local cache
-  const prev = readCacheForDay(dayISO);
-  const localEaten = Math.round(safeNum(prev?.consumed ?? prev?.calories_eaten ?? 0, 0));
-  const localBurned = Math.round(safeNum(prev?.burned ?? prev?.calories_burned ?? 0, 0));
-  const localUpdatedMs = toMs(prev?.updated_at);
+  // Merge rule:
+  // - prefer newer cloud when non-zero
+  // - never overwrite local/workout >0 with cloud 0
+  const cloudIsNewer = cloudUpdatedMs >= localUpdatedMs;
 
-  // ✅ Merge rule:
-  // - Prefer cloud if it is newer AND non-zero
-  // - Never overwrite local >0 with cloud 0
-  // - If cloud is newer and local is 0, accept cloud even if 0 (fresh reset case)
   let nextEaten = localEaten;
   let nextBurned = localBurned;
 
-  const cloudIsNewer = cloudUpdatedMs >= localUpdatedMs;
+  // eaten: if cloud has a value or local is 0, accept newer cloud
+  if (cloudIsNewer && (cloudEaten > 0 || localEaten === 0)) nextEaten = cloudEaten;
+  if (!cloudIsNewer && localEaten === 0 && cloudEaten > 0) nextEaten = cloudEaten;
 
-  if (cloudIsNewer) {
-    // eaten
-    if (cloudEaten > 0 || localEaten === 0) nextEaten = cloudEaten;
-    // burned
-    if (cloudBurned > 0 || localBurned === 0) nextBurned = cloudBurned;
-  } else {
-    // local is newer — keep local, unless local is 0 and cloud has >0
-    if (localEaten === 0 && cloudEaten > 0) nextEaten = cloudEaten;
-    if (localBurned === 0 && cloudBurned > 0) nextBurned = cloudBurned;
-  }
+  // burned: take the max of (localBurned, workoutBurned, cloudBurned) with anti-clobber rules
+  const bestBurned = Math.max(localBurned || 0, workoutBurned || 0, cloudBurned || 0);
+  nextBurned = bestBurned;
 
   // Write merged cache
   const nextRow = {
     ...prev,
-    consumed: nextEaten,
-    burned: nextBurned,
+    consumed: Math.round(nextEaten || 0),
+    burned: Math.round(nextBurned || 0),
     updated_at: new Date().toISOString(),
   };
   writeCacheForDay(dayISO, nextRow);
 
-  // convenience keys
+  // convenience keys (banner reads these as strongest truth)
   try {
-    localStorage.setItem('consumedToday', String(nextEaten));
-    localStorage.setItem('burnedToday', String(nextBurned));
+    localStorage.setItem('consumedToday', String(Math.round(nextEaten || 0)));
+    localStorage.setItem('burnedToday', String(Math.round(nextBurned || 0)));
   } catch {}
 
   // dispatch UI updates
-  dispatchConsumed(dayISO, nextEaten);
-  dispatchBurned(dayISO, nextBurned);
+  dispatchConsumed(dayISO, Math.round(nextEaten || 0));
+  dispatchBurned(dayISO, Math.round(nextBurned || 0));
 
-  return { ok: true, eaten: nextEaten, burned: nextBurned };
+  return { ok: true, eaten: Math.round(nextEaten || 0), burned: Math.round(nextBurned || 0) };
 }
 
-// ---- Meals hydration (already fixed: NEVER CLOBBER burned) --------------------
+// ---- Meals hydration (never clobbers burned) ---------------------------------
 
 function upsertMealHistoryFromCloudRows(rows, dayDisplay) {
   try {
