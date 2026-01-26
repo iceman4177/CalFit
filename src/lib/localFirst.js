@@ -30,21 +30,30 @@ function localDayISO(d = new Date()) {
   }
 }
 
-function safeNum(n, fallback = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : fallback;
+function safeNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
 }
 
+// ---- Local cache helpers -----------------------------------------------------
 function writeDailyMetricsCache(dayISO, { consumed, burned }) {
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     cache[dayISO] = {
-      ...(cache[dayISO] || {}),
-      consumed: safeNum(consumed, 0),
-      burned: safeNum(burned, 0),
+      consumed: Math.round(safeNum(consumed, 0)),
+      burned: Math.round(safeNum(burned, 0)),
+      net: Math.round(safeNum(consumed, 0)) - Math.round(safeNum(burned, 0)),
       updated_at: new Date().toISOString(),
     };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+  } catch {}
+}
+
+function dispatchConsumed(dayISO, consumed) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('slimcal:consumed:update', { detail: { date: dayISO, consumed } })
+    );
   } catch {}
 }
 
@@ -55,64 +64,155 @@ function dispatchBurned(dayISO, burned) {
     );
   } catch {}
 }
-function dispatchConsumed(dayISO, consumed) {
-  try {
-    window.dispatchEvent(
-      new CustomEvent('slimcal:consumed:update', { detail: { date: dayISO, consumed } })
-    );
-  } catch {}
-}
 
-// ---- Cloud helpers -----------------------------------------------------------
+// ---- Cloud upserts -----------------------------------------------------------
 async function upsertWorkoutCloud(payload) {
-  const res = await supabase.from('workouts').upsert(payload, {
-    onConflict: 'user_id,client_id',
-    returning: 'minimal',
-  });
+  const { user_id } = payload || {};
+  if (!supabase || !user_id) return;
+
+  // IMPORTANT: requires UNIQUE(user_id, client_id) which you just added ✅
+  const res = await supabase
+    .from('workouts')
+    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .select('id')
+    .maybeSingle();
+
   if (res?.error) throw res.error;
-  return true;
+  return res?.data || null;
 }
 
 async function upsertMealCloud(payload) {
-  const res = await supabase.from('meals').upsert(payload, {
-    onConflict: 'user_id,client_id',
-    returning: 'minimal',
-  });
+  const { user_id } = payload || {};
+  if (!supabase || !user_id) return;
+
+  const res = await supabase
+    .from('meals')
+    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .select('id')
+    .maybeSingle();
+
   if (res?.error) throw res.error;
-  return true;
+  return res?.data || null;
 }
 
 async function upsertDailyMetricsCloud(payload) {
-  const res = await supabase.from('daily_metrics').upsert(payload, {
-    onConflict: 'user_id,local_day',
-    returning: 'minimal',
-  });
-  if (res?.error) throw res.error;
-  return true;
+  const { user_id } = payload || {};
+  if (!supabase || !user_id) return;
+
+  // Try new schema
+  const res = await supabase
+    .from('daily_metrics')
+    .upsert(payload, { onConflict: 'user_id,local_day' })
+    .select('id')
+    .maybeSingle();
+
+  if (!res?.error) return res?.data || null;
+
+  // Legacy fallback
+  if (/column .* does not exist/i.test(res.error?.message || '')) {
+    const legacy = {
+      user_id: payload.user_id,
+      day: payload.local_day,
+      cals_eaten: payload.calories_eaten,
+      cals_burned: payload.calories_burned,
+      net_cals: payload.net_calories,
+      updated_at: payload.updated_at,
+    };
+
+    const res2 = await supabase
+      .from('daily_metrics')
+      .upsert(legacy, { onConflict: 'user_id,day' })
+      .select('id')
+      .maybeSingle();
+
+    if (res2?.error) throw res2.error;
+    return res2?.data || null;
+  }
+
+  throw res.error;
 }
 
-// ---- Meals ------------------------------------------------------------------
+// =============================================================================
+// ✅ Public exports
+// =============================================================================
+
+/**
+ * upsertDailyMetricsLocalFirst
+ * Writes dailyMetricsCache locally (instant UI),
+ * then upserts daily_metrics to Supabase (or queues if fails).
+ */
+export async function upsertDailyMetricsLocalFirst({ user_id, local_day, burned, consumed }) {
+  const dayISO = local_day || localDayISO(new Date());
+  const eaten = Math.round(safeNum(consumed, 0));
+  const b = Math.round(safeNum(burned, 0));
+
+  // local truth for banner
+  writeDailyMetricsCache(dayISO, { consumed: eaten, burned: b });
+
+  // convenience keys (some parts read these)
+  try {
+    localStorage.setItem('consumedToday', String(eaten));
+    localStorage.setItem('burnedToday', String(b));
+  } catch {}
+
+  // update UI now
+  dispatchConsumed(dayISO, eaten);
+  dispatchBurned(dayISO, b);
+
+  // cloud (best-effort)
+  if (!user_id) return;
+
+  const payload = {
+    user_id,
+    local_day: dayISO,
+    calories_eaten: eaten,
+    calories_burned: b,
+    net_calories: eaten - b,
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    await upsertDailyMetricsCloud(payload);
+  } catch (e) {
+    // queue for later flush
+    try {
+      enqueueOp?.({
+        op: 'upsert_daily_metrics',
+        table: 'daily_metrics',
+        user_id,
+        local_day: dayISO,
+        payload,
+      });
+    } catch {}
+    throw e;
+  }
+}
+
+/**
+ * saveMealLocalFirst
+ * MealTracker already updates mealHistory locally.
+ * This ensures cloud upsert uses stable client_id and writes local_day.
+ */
 export async function saveMealLocalFirst({
   user_id,
   client_id,
-  local_day,
   eaten_at,
   title,
-  food_name,
   total_calories,
-  protein_g,
-  carbs_g,
-  fat_g,
-  food_id,
-  portion_id,
-  portion_label,
-  qty,
-  unit,
+  protein_g = null,
+  carbs_g = null,
+  fat_g = null,
+  food_id = null,
+  portion_id = null,
+  portion_label = null,
+  qty = 1,
+  unit = 'serving',
+  food_name = null,
 }) {
   if (!user_id) return;
 
   const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}`);
-  const dayISO = local_day || localDayISO(new Date());
+  const dayISO = localDayISO(eaten_at ? new Date(eaten_at) : new Date());
 
   const payload = {
     user_id,
@@ -147,70 +247,14 @@ export async function saveMealLocalFirst({
     } catch {}
     throw e;
   }
-
-  return payload;
-}
-
-/**
- * ✅ upsertDailyMetricsLocalFirst
- * Keeps local banner truth + queues cloud sync.
- */
-export async function upsertDailyMetricsLocalFirst({ user_id, local_day, burned, consumed }) {
-  const dayISO = local_day || localDayISO(new Date());
-  const eaten = Math.round(safeNum(consumed, 0));
-  const b = Math.round(safeNum(burned, 0));
-
-  // local truth for banner
-  writeDailyMetricsCache(dayISO, { consumed: eaten, burned: b });
-
-  // convenience keys (some parts read these)
-  try {
-    localStorage.setItem('consumedToday', String(eaten));
-    localStorage.setItem('burnedToday', String(b));
-  } catch {}
-
-  // update UI now
-  dispatchConsumed(dayISO, eaten);
-  dispatchBurned(dayISO, b);
-
-  if (!user_id) return;
-
-  const payload = {
-    user_id,
-    local_day: dayISO,
-    calories_eaten: eaten,
-    calories_burned: b,
-    net_calories: eaten - b,
-    updated_at: new Date().toISOString(),
-  };
-
-  try {
-    await upsertDailyMetricsCloud(payload);
-  } catch (e) {
-    // queue for later flush
-    try {
-      enqueueOp?.({
-        op: 'upsert_daily_metrics',
-        table: 'daily_metrics',
-        user_id,
-        local_day: dayISO,
-        payload,
-      });
-    } catch {}
-    throw e;
-  }
 }
 
 /**
  * ✅ saveWorkoutLocalFirst
- * Upserts workout row to Supabase using stable client_id.
- *
- * IMPORTANT:
- * - This function originally ALSO incremented burned calories in daily_metrics.
- * - Autosave drafts were calling this repeatedly → burned doubled.
- *
- * Fix:
- * - Add skipDailyMetricsUpdate flag so drafts can upsert cloud row without stacking calories.
+ * THIS is the big fix:
+ * - local_day is always written
+ * - client_id is stable
+ * - cloud upsert uses UNIQUE(user_id, client_id)
  */
 export async function saveWorkoutLocalFirst({
   user_id,
@@ -220,7 +264,6 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   notes = null,
   goal = null,
-  skipDailyMetricsUpdate = false,
 }) {
   if (!user_id) return;
 
@@ -255,28 +298,25 @@ export async function saveWorkoutLocalFirst({
     throw e;
   }
 
-  // ✅ Prevent double counting from draft autosaves
-  if (!skipDailyMetricsUpdate) {
-    // Also keep the banner daily metrics in sync instantly
-    try {
-      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-      const row = cache[dayISO] || {};
-      const eaten = safeNum(row.consumed ?? row.calories_eaten ?? 0, 0);
-      const burned = safeNum(row.burned ?? row.calories_burned ?? 0, 0);
+  // Also keep the banner daily metrics in sync instantly
+  try {
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    const row = cache[dayISO] || {};
+    const eaten = safeNum(row.consumed ?? row.calories_eaten ?? 0, 0);
+    const burned = safeNum(row.burned ?? row.calories_burned ?? 0, 0);
 
-      const newBurned = Math.round(burned + safeNum(total_calories, 0));
-      writeDailyMetricsCache(dayISO, { consumed: eaten, burned: newBurned });
-      dispatchBurned(dayISO, newBurned);
+    const newBurned = Math.round(burned + safeNum(total_calories, 0));
+    writeDailyMetricsCache(dayISO, { consumed: eaten, burned: newBurned });
+    dispatchBurned(dayISO, newBurned);
 
-      // best effort cloud daily_metrics update too
-      await upsertDailyMetricsLocalFirst({
-        user_id,
-        local_day: dayISO,
-        burned: newBurned,
-        consumed: eaten,
-      });
-    } catch {}
-  }
+    // best effort cloud daily_metrics update too
+    await upsertDailyMetricsLocalFirst({
+      user_id,
+      local_day: dayISO,
+      burned: newBurned,
+      consumed: eaten,
+    });
+  } catch {}
 }
 
 /**
@@ -309,7 +349,7 @@ export async function deleteWorkoutLocalFirst({ user_id, client_id }) {
     throw e;
   }
 
-  // best-effort: nudge UI to refresh totals
+  // best-effort: re-hydrate today burned via cloud
   try {
     window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: {} }));
   } catch {}
