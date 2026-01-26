@@ -106,7 +106,10 @@ function readTodayTotals() {
       );
 
       if (Number.isFinite(eatenFromCache)) eaten = eatenFromCache;
-      if (Number.isFinite(burnedFromCache)) burned = burnedFromCache;
+      if (Number.isFinite(burnedFromCache)) {
+        // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
+        if (burnedFromCache > 0 || burned === 0) burned = burnedFromCache;
+      }
     }
   } catch {}
 
@@ -118,7 +121,10 @@ function readTodayTotals() {
 
   try {
     const burnedDirect = safeNum(localStorage.getItem('burnedToday'), NaN);
-    if (Number.isFinite(burnedDirect)) burned = burnedDirect;
+    if (Number.isFinite(burnedDirect)) {
+      // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
+      if (burnedDirect > 0 || burned === 0) burned = burnedDirect;
+    }
   } catch {}
 
   return {
