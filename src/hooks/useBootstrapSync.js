@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
-import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
+import { hydrateTodayTotalsFromCloud, hydrateTodayWorkoutsFromCloud } from '../lib/hydrateCloudToLocal';
 
 const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
 
@@ -40,6 +40,9 @@ export default function useBootstrapSync(user) {
         await flushPending({ maxTries: 1 });
       } catch {}
       try {
+        await hydrateTodayWorkoutsFromCloud(user, { alsoDispatch: true });
+      } catch {}
+      try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
       } catch (e) {
         console.warn('[useBootstrapSync] hydrate (focus) failed', e);
@@ -71,6 +74,9 @@ export default function useBootstrapSync(user) {
         await flushPending({ maxTries: 1 });
       } catch {}
       try {
+        await hydrateTodayWorkoutsFromCloud(user, { alsoDispatch: true });
+      } catch {}
+      try {
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
       } catch {}
     }, 15000);
@@ -80,46 +86,59 @@ export default function useBootstrapSync(user) {
 
   // ✅ One-time bootstrap on login
   useEffect(() => {
-    const userId = user?.id || null;
-    if (!userId) return;
+    if (!user?.id) return;
 
-    const sessionKey = `${SESSION_FLAG_PREFIX}${userId}`;
-    if (sessionStorage.getItem(sessionKey) === '1') {
-      ranForUserRef.current = userId;
+    // session gating (avoid repeated heavy bootstraps)
+    const sessionKey = `${SESSION_FLAG_PREFIX}${user.id}`;
+    try {
+      const already = sessionStorage.getItem(sessionKey);
+      if (already === '1') {
+        // Still do a lightweight hydrate on mount
+        (async () => {
+          try {
+            await hydrateTodayWorkoutsFromCloud(user, { alsoDispatch: true });
+          } catch {}
+          try {
+            await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+          } catch {}
+        })();
+        return;
+      }
+    } catch {}
 
-      (async () => {
-        if (!shouldHydrateNow()) return;
-        try {
-          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-      })();
-
-      return;
-    }
-
-    if (ranForUserRef.current === userId) return;
-    ranForUserRef.current = userId;
+    // Only run once per user per session
+    if (ranForUserRef.current === user.id) return;
+    ranForUserRef.current = user.id;
 
     (async () => {
-      // ✅ Instant banner hydration (before migrate/flush)
       try {
-        await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-      } catch {}
-
-      try {
-        await migrateLocalToCloudOneTime(user);
-        await flushPending({ maxTries: 2 });
-
+        // ✅ Instant banner hydration (before migrate/flush)
+        try {
+          await hydrateTodayWorkoutsFromCloud(user, { alsoDispatch: true });
+        } catch {}
         try {
           await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        } catch (e) {
-          console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
-        }
-      } finally {
-        try {
-          sessionStorage.setItem(sessionKey, '1');
         } catch {}
-      }
+
+        try {
+          await migrateLocalToCloudOneTime(user);
+          await flushPending({ maxTries: 2 });
+
+          try {
+            await hydrateTodayWorkoutsFromCloud(user, { alsoDispatch: true });
+          } catch {}
+
+          try {
+            await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+          } catch (e) {
+            console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
+          }
+        } finally {
+          try {
+            sessionStorage.setItem(sessionKey, '1');
+          } catch {}
+        }
+      } catch {}
     })();
   }, [user?.id]);
 }
