@@ -92,6 +92,12 @@ function localDayISO(d = new Date()) {
   }
 }
 
+// ✅ ADD: safe number helper (missing before; caused silent failure in instant banner updater)
+function safeNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
 // ---- Stable device id (not workout session id) ----
 function getOrCreateClientId() {
   try {
@@ -274,11 +280,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         alert('Please enter valid calories for cardio.');
         return;
       }
-            const entry = { exerciseType: 'cardio', exerciseName: newExercise.cardioType || 'Cardio', calories: cal };
+      const entry = { exerciseType: 'cardio', exerciseName: newExercise.cardioType || 'Cardio', calories: cal };
       const next = [...cumulativeExercises, entry];
       setCumulativeExercises(next);
       instantPersistWorkoutDraftToBanner(next);
-setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
+      setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
       setCurrentCalories(0);
       return;
     }
@@ -293,12 +299,12 @@ setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
     }
 
     const cals = calculateCalories();
-        const entry = { ...newExercise, calories: cals };
+    const entry = { ...newExercise, calories: cals };
     const next = [...cumulativeExercises, entry];
     setCumulativeExercises(next);
     instantPersistWorkoutDraftToBanner(next);
 
-setNewExercise({
+    setNewExercise({
       exerciseType: '',
       cardioType: '',
       manualCalories: '',
@@ -345,13 +351,12 @@ setNewExercise({
       const kcalPerMin = (met * 3.5 * weightKg) / 200;
       const saunaCals = kcalPerMin * t;
 
-            const next = [
+      const next = [
         ...(cumulativeExercises || []).filter(e => e.exerciseType !== 'Sauna'),
         { exerciseType: 'Sauna', exerciseName: 'Sauna Session', calories: saunaCals }
       ];
       setCumulativeExercises(next);
       instantPersistWorkoutDraftToBanner(next);
-
     }
 
     setShowSaunaSection(false);
@@ -508,7 +513,6 @@ setNewExercise({
     }
   }, []);
 
-
   // ✅ keeps daily_metrics in sync so calories carry over across devices
   const syncBurnedTodayToDailyMetrics = useCallback(async (todayDisplay, todayLocalIso) => {
     try {
@@ -549,12 +553,12 @@ setNewExercise({
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
 
-      
       // ✅ also clear local draft so banner reflects removal instantly
       try {
         instantPersistWorkoutDraftToBanner([]);
       } catch {}
-// best-effort: delete draft workout from cloud (if signed in)
+
+      // best-effort: delete draft workout from cloud (if signed in)
       (async () => {
         try {
           const cid = activeWorkoutSessionIdRef.current;
