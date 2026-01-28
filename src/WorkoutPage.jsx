@@ -336,13 +336,29 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       try {
         const res = await supabase
           .from('workouts')
-          .select('id,client_id,total_calories,started_at,ended_at,created_at')
+          .select('id,client_id,total_calories,started_at,ended_at,created_at,name,exercises')
           .eq('user_id', user.id)
           .gte('started_at', startLocal.toISOString())
           .lt('started_at', nextLocal.toISOString());
         data = res?.data;
         error = res?.error;
       } catch {}
+
+      
+
+// If JSON detail columns aren't present yet, retry without them
+if (error && /column .*\b(name|exercises)\b.* does not exist/i.test(error?.message || '')) {
+  try {
+    const resRetry = await supabase
+      .from('workouts')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at')
+      .eq('user_id', user.id)
+      .gte('started_at', startLocal.toISOString())
+      .lt('started_at', nextLocal.toISOString());
+    data = resRetry?.data;
+    error = resRetry?.error;
+  } catch {}
+}
 
       // Fallback: created_at range
       if (error && /column .*started_at.* does not exist/i.test(error?.message || '')) {
@@ -1390,12 +1406,33 @@ setNewExercise({
                     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 2 }}>
                       <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
                       <Chip label={`${kcals} kcal`} color="primary" />
-                    </Stack>
-                    {!hasDetails && (
-                      <Typography variant="caption" color="textSecondary">
-                        Synced session—exercise details may load in history.
-                      </Typography>
-                    )}
+                    </Stack>{!hasDetails ? (
+  <Typography variant="caption" color="textSecondary">
+    Synced session—exercise details may load in history.
+  </Typography>
+) : (
+  <Box sx={{ mt: 1 }}>
+    {sess.exercises.slice(0, 12).map((ex, i) => {
+      const line = formatExerciseLine({
+        name: ex?.name,
+        sets: ex?.sets,
+        reps: ex?.reps,
+        weight: ex?.weight,
+        calories: ex?.calories
+      });
+      return (
+        <Typography key={i} variant="body2" color="textSecondary" sx={{ lineHeight: 1.35 }}>
+          {line}
+        </Typography>
+      );
+    })}
+    {sess.exercises.length > 12 && (
+      <Typography variant="caption" color="textSecondary">
+        +{sess.exercises.length - 12} more…
+      </Typography>
+    )}
+  </Box>
+)}
                   </CardContent>
                 </Card>
               );

@@ -281,13 +281,31 @@ export async function migrateLocalToCloudOneTime(user) {
       started_at: startedAt,
       ended_at: endedAt,
       total_calories: totalCalories,
+      name: w.name ?? null,
+      exercises: Array.isArray(w.exercises) ? w.exercises : null,
       goal: w.goal ?? null,
       notes: w.notes ?? null,
       client_updated_at: new Date().toISOString(),
     };
 
     try {
-      const { error } = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
+      
+let error = null;
+try {
+  const res0 = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
+  error = res0?.error || null;
+
+  // If schema doesn't have detail columns yet, retry with minimal row
+  if (error && /column .*\b(name|exercises)\b.* does not exist/i.test(error?.message || '')) {
+    const minimalRow = { ...row };
+    delete minimalRow.name;
+    delete minimalRow.exercises;
+    const res1 = await supabase.from('workouts').upsert(minimalRow, { onConflict: 'client_id' });
+    error = res1?.error || null;
+  }
+} catch (e) {
+  error = e;
+}
       if (!error) {
         pushedW++;
         markSynced(userKey, 'workouts', cid);

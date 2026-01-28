@@ -252,6 +252,8 @@ export async function saveWorkoutLocalFirst({
   started_at,
   ended_at,
   total_calories,
+  name = null,
+  exercises = null,
   notes = null,
   goal = null,
 }) {

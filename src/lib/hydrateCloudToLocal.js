@@ -173,13 +173,27 @@ async function pullWorkoutsForDay(userId, dayISO) {
   try {
     const res = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at,name,exercises')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
 
     if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
 
+
+
+// If JSON detail columns aren't present yet, retry without them
+if (res?.error && /column .*\b(name|exercises)\b.* does not exist/i.test(res.error?.message || '')) {
+  try {
+    const resRetry = await supabase
+      .from('workouts')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at')
+      .eq('user_id', userId)
+      .gte('started_at', startLocal.toISOString())
+      .lt('started_at', nextLocal.toISOString());
+    if (!resRetry?.error) return Array.isArray(resRetry?.data) ? resRetry.data : [];
+  } catch {}
+}
     // If started_at is missing, fall through to created_at range
     if (!/column .*started_at.* does not exist/i.test(res.error?.message || '')) {
       console.warn('[hydrateCloudToLocal] workouts pull (started_at) failed', res.error);
