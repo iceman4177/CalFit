@@ -324,7 +324,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       const d = String(s?.date || '');
       return d === String(todayUS) || d === String(dayISO);
     };
-    const startLocal = new Date(`${dayISO}T00:00:00`);
+    const [yy, mm, dd] = String(dayISO).split('-').map(n => parseInt(n, 10));
+    const startLocal = new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
     const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
     setLoadingTodaySessions(true);
@@ -336,29 +337,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       try {
         const res = await supabase
           .from('workouts')
-          .select('id,client_id,total_calories,started_at,ended_at,created_at,name,exercises')
+          .select('id,client_id,total_calories,started_at,ended_at,created_at')
           .eq('user_id', user.id)
           .gte('started_at', startLocal.toISOString())
           .lt('started_at', nextLocal.toISOString());
         data = res?.data;
         error = res?.error;
       } catch {}
-
-      
-
-// If JSON detail columns aren't present yet, retry without them
-if (error && /column .*\b(name|exercises)\b.* does not exist/i.test(error?.message || '')) {
-  try {
-    const resRetry = await supabase
-      .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at')
-      .eq('user_id', user.id)
-      .gte('started_at', startLocal.toISOString())
-      .lt('started_at', nextLocal.toISOString());
-    data = resRetry?.data;
-    error = resRetry?.error;
-  } catch {}
-}
 
       // Fallback: created_at range
       if (error && /column .*started_at.* does not exist/i.test(error?.message || '')) {
@@ -377,7 +362,49 @@ if (error && /column .*\b(name|exercises)\b.* does not exist/i.test(error?.messa
         return;
       }
 
-      const cloud = Array.isArray(data) ? data : [];
+      let cloud = Array.isArray(data) ? data : [];
+      // Mobile/Safari-safe fallback: avoid strict midnight range misses.
+      // If range query returns 0, pull recent workouts and filter to today locally.
+      if (cloud.length === 0) {
+        try {
+          let rData = null;
+          let rErr = null;
+          try {
+            const r = await supabase
+              .from('workouts')
+              .select('id,client_id,total_calories,started_at,ended_at,created_at')
+              .eq('user_id', user.id)
+              .order('started_at', { ascending: false })
+              .limit(50);
+            rData = r?.data;
+            rErr = r?.error;
+          } catch {}
+          if (rErr && /column .*started_at.* does not exist/i.test(rErr?.message || '')) {
+            const r2 = await supabase
+              .from('workouts')
+              .select('id,client_id,total_calories,created_at')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(50);
+            rData = r2?.data;
+            rErr = r2?.error;
+          }
+          if (!rErr) {
+            const recent = Array.isArray(rData) ? rData : [];
+            const todays = recent.filter(w => {
+              try {
+                const dt = new Date(w?.started_at || w?.created_at || 0);
+                return localDayISO(dt) === dayISO;
+              } catch {
+                return false;
+              }
+            });
+            cloud = todays;
+          }
+        } catch (e) {
+          console.warn('[WorkoutPage] recent fallback failed', e);
+        }
+      }
       if (cloud.length === 0) return;
 
       // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
@@ -1406,33 +1433,12 @@ setNewExercise({
                     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 2 }}>
                       <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
                       <Chip label={`${kcals} kcal`} color="primary" />
-                    </Stack>{!hasDetails ? (
-  <Typography variant="caption" color="textSecondary">
-    Synced session—exercise details may load in history.
-  </Typography>
-) : (
-  <Box sx={{ mt: 1 }}>
-    {sess.exercises.slice(0, 12).map((ex, i) => {
-      const line = formatExerciseLine({
-        name: ex?.name,
-        sets: ex?.sets,
-        reps: ex?.reps,
-        weight: ex?.weight,
-        calories: ex?.calories
-      });
-      return (
-        <Typography key={i} variant="body2" color="textSecondary" sx={{ lineHeight: 1.35 }}>
-          {line}
-        </Typography>
-      );
-    })}
-    {sess.exercises.length > 12 && (
-      <Typography variant="caption" color="textSecondary">
-        +{sess.exercises.length - 12} more…
-      </Typography>
-    )}
-  </Box>
-)}
+                    </Stack>
+                    {!hasDetails && (
+                      <Typography variant="caption" color="textSecondary">
+                        Synced session—exercise details may load in history.
+                      </Typography>
+                    )}
                   </CardContent>
                 </Card>
               );

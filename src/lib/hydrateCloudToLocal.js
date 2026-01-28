@@ -166,34 +166,25 @@ function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
 
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
-  const startLocal = new Date(`${dayISO}T00:00:00`);
+  const [yy, mm, dd] = String(dayISO).split('-').map(n => parseInt(n, 10));
+  const startLocal = new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
   // Prefer started_at range (same as meals hydration)
   try {
     const res = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at,name,exercises')
-      .eq('user_id', userId)
-      .gte('started_at', startLocal.toISOString())
-      .lt('started_at', nextLocal.toISOString());
-
-    if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
-
-
-
-// If JSON detail columns aren't present yet, retry without them
-if (res?.error && /column .*\b(name|exercises)\b.* does not exist/i.test(res.error?.message || '')) {
-  try {
-    const resRetry = await supabase
-      .from('workouts')
       .select('id,client_id,total_calories,started_at,ended_at,created_at')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
-    if (!resRetry?.error) return Array.isArray(resRetry?.data) ? resRetry.data : [];
-  } catch {}
-}
+
+    if (!res?.error) {
+      const out = Array.isArray(res?.data) ? res.data : [];
+      if (out.length > 0) return out;
+      // If range returned 0, fall through to recent-filter fallback (mobile-safe).
+    }
+
     // If started_at is missing, fall through to created_at range
     if (!/column .*started_at.* does not exist/i.test(res.error?.message || '')) {
       console.warn('[hydrateCloudToLocal] workouts pull (started_at) failed', res.error);
@@ -213,7 +204,46 @@ if (res?.error && /column .*\b(name|exercises)\b.* does not exist/i.test(res.err
       console.warn('[hydrateCloudToLocal] workouts pull (created_at) failed', res2.error);
       return [];
     }
-    return Array.isArray(res2?.data) ? res2.data : [];
+    const out2 = Array.isArray(res2?.data) ? res2.data : [];
+    if (out2.length > 0) return out2;
+  // Last resort: pull recent workouts and filter to today locally.
+  try {
+    let rData = null;
+    let rErr = null;
+    try {
+      const r = await supabase
+        .from('workouts')
+        .select('id,client_id,total_calories,started_at,ended_at,created_at')
+        .eq('user_id', userId)
+        .order('started_at', { ascending: false })
+        .limit(50);
+      rData = r?.data;
+      rErr = r?.error;
+    } catch {}
+    if (rErr && /column .*started_at.* does not exist/i.test(rErr?.message || '')) {
+      const r2 = await supabase
+        .from('workouts')
+        .select('id,client_id,total_calories,created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      rData = r2?.data;
+      rErr = r2?.error;
+    }
+    if (!rErr) {
+      const recent = Array.isArray(rData) ? rData : [];
+      const todays = recent.filter(w => {
+        try {
+          const dt = new Date(w?.started_at || w?.created_at || 0);
+          return localDayISO(dt) === dayISO;
+        } catch {
+          return false;
+        }
+      });
+      return todays;
+    }
+  } catch {}
+
   } catch {
     return [];
   }
