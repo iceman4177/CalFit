@@ -23,110 +23,234 @@ function readDailyMetricsNums(row) {
     safeNum(row.cals_eaten) ||
     safeNum(row.consumed) ||
     safeNum(row.eaten) ||
-    safeNum(row.caloriesEaten) ||
     0;
 
   const burned =
     safeNum(row.calories_burned) ||
     safeNum(row.cals_burned) ||
     safeNum(row.burned) ||
-    safeNum(row.caloriesBurned) ||
     0;
 
-  return {
-    eaten: Math.round(eaten),
-    burned: Math.round(burned),
-  };
-}
-
-function getUserId(user) {
-  if (!user) return null;
-  if (typeof user === 'string') return user;
-  return user?.id || user?.user_id || null;
+  return { eaten, burned };
 }
 
 function writeDailyMetricsCache(dayISO, eaten, burned) {
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-    const prev = cache[dayISO] || {};
     cache[dayISO] = {
-      ...prev,
-      consumed: Math.round(eaten || 0),
-      burned: Math.round(burned || 0),
-      updated_at: new Date().toISOString(),
+      consumed: safeNum(eaten, 0), // ✅ canonical key used by banner
+      burned: safeNum(burned, 0),
+      net: safeNum(eaten, 0) - safeNum(burned, 0),
+      updated_at: new Date().toISOString()
     };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
   } catch {}
-}
-
-function readDailyMetricsCache(dayISO) {
-  try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-    return cache[dayISO] || {};
-  } catch {
-    return {};
-  }
 }
 
 function dispatchTotals(dayISO, eaten, burned) {
   try {
     window.dispatchEvent(
       new CustomEvent('slimcal:consumed:update', {
-        detail: { date: dayISO, consumed: Math.round(eaten || 0) },
+        detail: { date: dayISO, consumed: Math.round(safeNum(eaten, 0)) }
       })
     );
   } catch {}
+
   try {
     window.dispatchEvent(
       new CustomEvent('slimcal:burned:update', {
-        detail: { date: dayISO, burned: Math.round(burned || 0) },
+        detail: { date: dayISO, burned: Math.round(safeNum(burned, 0)) }
       })
     );
   } catch {}
 }
 
-// ---------------- Supabase helpers ----------------
-async function fetchDailyMetricsRow(userId, dayISO) {
+// ---------------- Workouts → local workoutHistory (for banner + on-page history) ----------------
+function dayISOToUS(dayISO) {
   try {
-    const { data, error } = await supabase
-      .from('daily_metrics')
-      .select('user_id, local_day, calories_eaten, calories_burned, updated_at')
+    // Construct local midnight for that day, then format in US locale.
+    const d = new Date(`${dayISO}T00:00:00`);
+    return d.toLocaleDateString('en-US');
+  } catch {
+    return dayISO;
+  }
+}
+
+function normalizeWorkoutForLocal(w, todayUS) {
+  const cid = w?.client_id || w?.id || `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
+  const startedAt = w?.started_at || w?.created_at || new Date().toISOString();
+  const endedAt = w?.ended_at || startedAt;
+  const total = safeNum(w?.total_calories, 0);
+
+  return {
+    id: cid,
+    client_id: cid,
+    date: todayUS,
+    started_at: startedAt,
+    ended_at: endedAt,
+    createdAt: startedAt,
+    totalCalories: total,
+    total_calories: total,
+    name: 'Workout',
+    exercises: Array.isArray(w?.exercises) ? w.exercises : [],
+    uploaded: true,
+    __cloud: true
+  };
+}
+
+function mergeWorkoutsIntoLocalHistory(todayUS, cloudWorkouts) {
+  try {
+    const key = 'workoutHistory';
+    const raw = JSON.parse(localStorage.getItem(key) || '[]');
+    const list = Array.isArray(raw) ? raw : [];
+
+    // Build map by client_id/id to keep local exercise details if present
+    const map = new Map();
+    for (const sess of list) {
+      const cid = sess?.client_id || sess?.id;
+      if (!cid) continue;
+      map.set(String(cid), sess);
+    }
+
+    for (const w of (cloudWorkouts || [])) {
+      const norm = normalizeWorkoutForLocal(w, todayUS);
+      const cid = String(norm.client_id || norm.id);
+      const existing = map.get(cid);
+
+      if (existing) {
+        // Prefer local details (exercises/name) if they exist
+        const keepExercises = Array.isArray(existing?.exercises) && existing.exercises.length > 0;
+        const keepName = !!existing?.name && existing.name !== 'Workout';
+        map.set(cid, {
+          ...norm,
+          ...existing,
+          exercises: keepExercises ? existing.exercises : norm.exercises,
+          name: keepName ? existing.name : norm.name,
+          totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
+          total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories)
+        });
+      } else {
+        map.set(cid, norm);
+      }
+    }
+
+    // Keep non-today entries + today merged entries
+    const nonToday = list.filter(s => String(s?.date || '') !== String(todayUS));
+    const todayMerged = Array.from(map.values()).filter(s => String(s?.date || '') === String(todayUS));
+    // Sort today newest first (by started/created)
+    todayMerged.sort((a, b) => {
+      const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
+      const tb = new Date(b?.started_at || b?.createdAt || 0).getTime();
+      return tb - ta;
+    });
+
+    const next = [...todayMerged, ...nonToday];
+    localStorage.setItem(key, JSON.stringify(next.slice(0, 300)));
+
+    // Let same-tab UI know workoutHistory changed
+    try {
+      window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayUS } }));
+    } catch {}
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] mergeWorkoutsIntoLocalHistory failed', e);
+  }
+}
+
+async function pullWorkoutsForDay(userId, dayISO) {
+  if (!supabase || !userId) return [];
+  const startLocal = new Date(`${dayISO}T00:00:00`);
+  const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
+
+  // Prefer started_at range (same as meals hydration)
+  try {
+    const res = await supabase
+      .from('workouts')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at')
       .eq('user_id', userId)
-      .eq('local_day', dayISO)
+      .gte('started_at', startLocal.toISOString())
+      .lt('started_at', nextLocal.toISOString());
+
+    if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
+
+    // If started_at is missing, fall through to created_at range
+    if (!/column .*started_at.* does not exist/i.test(res.error?.message || '')) {
+      console.warn('[hydrateCloudToLocal] workouts pull (started_at) failed', res.error);
+    }
+  } catch {}
+
+  // Fallback: created_at range
+  try {
+    const res2 = await supabase
+      .from('workouts')
+      .select('id,client_id,total_calories,created_at')
+      .eq('user_id', userId)
+      .gte('created_at', startLocal.toISOString())
+      .lt('created_at', nextLocal.toISOString());
+
+    if (res2?.error) {
+      console.warn('[hydrateCloudToLocal] workouts pull (created_at) failed', res2.error);
+      return [];
+    }
+    return Array.isArray(res2?.data) ? res2.data : [];
+  } catch {
+    return [];
+  }
+}
+
+// Try to upsert daily_metrics in Supabase (new schema first, legacy fallback)
+async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
+  if (!supabase || !userId) return;
+
+  const rowNew = {
+    user_id: userId,
+    local_day: dayISO,
+    calories_eaten: safeNum(eaten, 0),
+    calories_burned: safeNum(burned, 0),
+    net_calories: safeNum(eaten, 0) - safeNum(burned, 0),
+    updated_at: new Date().toISOString()
+  };
+
+  // New schema attempt
+  const res = await supabase
+    .from('daily_metrics')
+    .upsert(rowNew, { onConflict: 'user_id,local_day' })
+    .select()
+    .maybeSingle();
+
+  if (!res?.error) return;
+
+  // Legacy fallback if new columns missing
+  if (/column .* does not exist/i.test(res.error?.message || '')) {
+    const legacy = {
+      user_id: userId,
+      day: dayISO,
+      cals_eaten: safeNum(eaten, 0),
+      cals_burned: safeNum(burned, 0),
+      net_cals: safeNum(eaten, 0) - safeNum(burned, 0),
+      updated_at: new Date().toISOString()
+    };
+
+    const res2 = await supabase
+      .from('daily_metrics')
+      .upsert(legacy, { onConflict: 'user_id,day' })
+      .select()
       .maybeSingle();
 
-    if (error) throw error;
-    return data || null;
-  } catch (e) {
-    console.warn('[hydrateCloudToLocal] daily_metrics fetch failed', e);
-    return null;
+    if (res2?.error) {
+      console.warn('[hydrateCloudToLocal] daily_metrics legacy upsert failed', res2.error);
+    }
+    return;
   }
+
+  console.warn('[hydrateCloudToLocal] daily_metrics upsert failed', res.error);
 }
 
-async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
-  try {
-    const payload = {
-      user_id: userId,
-      local_day: dayISO,
-      calories_eaten: Math.round(eaten || 0),
-      calories_burned: Math.round(burned || 0),
-      net_calories: Math.round((eaten || 0) - (burned || 0)),
-      updated_at: new Date().toISOString(),
-    };
-    const { error } = await supabase.from('daily_metrics').upsert(payload, {
-      onConflict: 'user_id,local_day',
-      returning: 'minimal',
-    });
-    if (error) throw error;
-    return true;
-  } catch (e) {
-    throw e;
-  }
-}
+// ✅ NEW: Burned should be computed via local_day (no timezone mismatch)
+async function sumBurnedFromWorkouts(userId, dayISO) {
+  if (!supabase || !userId) return 0;
 
-// ---------------- Workouts fallback (truthy burned) ----------------
-async function computeBurnedFromWorkouts(userId, dayISO) {
-  // Use started_at time range so it matches local day drift and works even if workouts.local_day is missing or null.
+  // ✅ Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
+  // This avoids drift and works even if workouts.local_day is missing or null.
   const startLocal = new Date(`${dayISO}T00:00:00`);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
@@ -142,9 +266,17 @@ async function computeBurnedFromWorkouts(userId, dayISO) {
     if (!error) {
       return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
     }
+
+    // If started_at isn't a column, fall back to created_at
+    if (/column .*started_at.* does not exist/i.test(error?.message || '')) {
+      // continue to fallback below
+    } else {
+      console.warn('[hydrateCloudToLocal] workouts started_at query failed', error);
+      // still try fallback to created_at
+    }
   } catch {}
 
-  // Fallback: last 24h by created_at (less accurate but better than 0)
+  // Fallback: created_at range (best effort)
   try {
     const { data, error } = await supabase
       .from('workouts')
@@ -153,58 +285,145 @@ async function computeBurnedFromWorkouts(userId, dayISO) {
       .gte('created_at', startLocal.toISOString())
       .lt('created_at', nextLocal.toISOString());
 
-    if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    if (error) {
+      console.warn('[hydrateCloudToLocal] workouts created_at query failed', error);
+      return 0;
+    }
+
+    return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] workouts fallback failed', e);
+    return 0;
+  }
+}
+
+// Optional backup for eaten from meals table (if daily_metrics missing)
+async function sumEatenFromMeals(userId, dayISO) {
+  if (!supabase || !userId) return 0;
+
+  // Meals query also should rely on local_day if you have it.
+  // But if your meals table doesn't have local_day, fallback safely.
+  let total = 0;
+
+  // Attempt local_day first
+  try {
+    const res = await supabase
+      .from('meals')
+      .select('id,total_calories,local_day,eaten_at,created_at')
+      .eq('user_id', userId)
+      .eq('local_day', dayISO);
+
+    if (!res?.error) {
+      total = (res.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+      return total;
     }
   } catch {}
 
-  return 0;
+  // Fallback to eaten_at range (best effort)
+  try {
+    const startLocal = new Date(`${dayISO}T00:00:00`);
+    const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
+
+    const res2 = await supabase
+      .from('meals')
+      .select('id,total_calories,eaten_at,created_at')
+      .eq('user_id', userId)
+      .gte('eaten_at', startLocal.toISOString())
+      .lt('eaten_at', nextLocal.toISOString());
+
+    if (res2?.error) {
+      console.warn('[hydrateCloudToLocal] meals fallback query failed', res2.error);
+      return 0;
+    }
+
+    return (res2.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] meals fallback failed', e);
+    return 0;
+  }
 }
 
 /**
- * ✅ hydrateTodayTotalsFromCloud(user, { alsoDispatch })
- *
- * Authoritative summary source is daily_metrics, BUT:
- * - daily_metrics can be stale for a few seconds/minutes during device drift
- * - if it returns 0 burned while workouts exist, the banner flickers / stays 0
- *
- * Fix:
- * - merge daily_metrics with local cache
- * - if burned is 0 but workouts exist today, compute burned from workouts table and use it
- * - write local cache + dispatch UI events
+ * hydrateTodayTotalsFromCloud
+ * - Reads daily_metrics if available
+ * - If burned missing/0, computes burned from workouts table (local_day ✅)
+ * - Writes local cache (dailyMetricsCache) so NetCalorieBanner becomes cross-device
+ * - Dispatches events so UI updates immediately
+ * - Repairs Supabase daily_metrics so future loads are perfect
  */
 export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } = {}) {
-  const userId = getUserId(user);
-  if (!userId) return { ok: false, reason: 'no-user' };
+  const userId = (typeof user === "string") ? user : (user?.id || null);
+  if (!userId || !supabase) return { ok: false, reason: 'no-user-or-supabase' };
 
   const dayISO = localDayISO(new Date());
 
-  // 1) read local cache first (avoid overwriting with 0)
-  const local = readDailyMetricsCache(dayISO);
-  const localNums = readDailyMetricsNums(local);
+  let eaten = 0;
+  let burned = 0;
 
-  // 2) fetch cloud daily_metrics
-  const cloudRow = await fetchDailyMetricsRow(userId, dayISO);
-  const cloudNums = readDailyMetricsNums(cloudRow);
+  // 1) Read daily_metrics (new schema)
+  try {
+    const resNew = await supabase
+      .from('daily_metrics')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('local_day', dayISO)
+      .maybeSingle();
 
-  // 3) merge eaten/burned with "never clobber non-zero local with zero cloud"
-  let eaten = localNums.eaten;
-  let burned = localNums.burned;
+    if (!resNew?.error && resNew?.data) {
+      const nums = readDailyMetricsNums(resNew.data);
+      eaten = nums.eaten;
+      burned = nums.burned;
+    } else if (resNew?.error && /column .*local_day.* does not exist/i.test(resNew.error.message || '')) {
+      // 2) Legacy schema fallback: day column
+      const resOld = await supabase
+        .from('daily_metrics')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('day', dayISO)
+        .maybeSingle();
 
-  // Prefer cloud if it has real values
-  if (cloudNums.eaten > 0 || eaten === 0) eaten = cloudNums.eaten;
-  if (cloudNums.burned > 0 || burned === 0) burned = cloudNums.burned;
-
-  // 4) if burned still 0, compute from workouts to prevent stuck-at-0
-  let burnedFromWorkouts = 0;
-  if ((burned || 0) === 0) {
-    try {
-      burnedFromWorkouts = await computeBurnedFromWorkouts(userId, dayISO);
-      if (burnedFromWorkouts > 0) burned = Math.round(burnedFromWorkouts);
-    } catch {}
+      if (!resOld?.error && resOld?.data) {
+        const nums = readDailyMetricsNums(resOld.data);
+        eaten = nums.eaten;
+        burned = nums.burned;
+      }
+    }
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] daily_metrics read failed', e);
   }
 
-  // 5) Write local cache so banner is correct on this device immediately
+  // 3) If burned missing, sum workouts from workouts.local_day ✅
+  let burnedFromWorkouts = 0;
+  if (!burned || burned <= 0) {
+    burnedFromWorkouts = await sumBurnedFromWorkouts(userId, dayISO);
+    if (burnedFromWorkouts > 0) burned = burnedFromWorkouts;
+  }
+
+  // 3b) Always pull today's workouts into local workoutHistory so banner + in-page history
+  // can show cross-device sessions without needing to visit /history.
+  try {
+    const todayUS = dayISOToUS(dayISO);
+    const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
+    if (Array.isArray(cloudWorkouts) && cloudWorkouts.length > 0) {
+      mergeWorkoutsIntoLocalHistory(todayUS, cloudWorkouts);
+
+      // If daily_metrics burned was stale, the list is a strong fallback.
+      const sumFromList = (cloudWorkouts || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      if (sumFromList > 0 && (!burned || burned <= 0)) {
+        burned = sumFromList;
+      }
+    }
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] workoutHistory hydrate failed', e);
+  }
+
+  // 4) If eaten missing, sum meals (backup)
+  if (!eaten || eaten <= 0) {
+    const eatenFromMeals = await sumEatenFromMeals(userId, dayISO);
+    if (eatenFromMeals > 0) eaten = eatenFromMeals;
+  }
+
+  // 5) Write local cache so the banner is correct on this device immediately
   writeDailyMetricsCache(dayISO, eaten, burned);
 
   // Convenience keys used elsewhere
@@ -229,117 +448,4 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   }
 
   return { ok: true, dayISO, eaten, burned };
-}
-
-// ---------------- Workouts hydration (meal-style) ----------------
-// Hydrates today's workouts into localStorage.workoutHistory so the Net Banner
-// can show burned calories immediately without needing to visit Workout History.
-export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true } = {}) {
-  try {
-    const userId = typeof user === 'string' ? user : (user?.id || user?.user_id || null);
-    if (!userId) return { ok: false, reason: 'no-user' };
-
-    const now = new Date();
-    const dayISO = localDayISO(now);
-    const dayDisplay = now.toLocaleDateString('en-US');
-
-    const startLocal = new Date(`${dayISO}T00:00:00`);
-    const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
-
-    const { data: rows, error } = await supabase
-      .from('workouts')
-      .select('client_id,total_calories,started_at,created_at,updated_at')
-      .eq('user_id', userId)
-      .gte('started_at', startLocal.toISOString())
-      .lt('started_at', nextLocal.toISOString())
-      .order('started_at', { ascending: false });
-
-    if (error) {
-      console.warn('[hydrateTodayWorkoutsFromCloud] error', error);
-      return { ok: false, error };
-    }
-
-    const workouts = Array.isArray(rows) ? rows : [];
-    const burnedToday = Math.round(
-      workouts.reduce((s, w) => s + safeNum(w?.total_calories, 0), 0)
-    );
-
-    // Merge into local workoutHistory while preserving any detailed sessions already stored
-    try {
-      const key = 'workoutHistory';
-      const existing = JSON.parse(localStorage.getItem(key) || '[]');
-      const list = Array.isArray(existing) ? existing : [];
-
-      const isToday = (sess) => sess?.date === dayDisplay;
-      const others = list.filter((s) => !isToday(s));
-      const todaysLocal = list.filter((s) => isToday(s));
-
-      const byCid = new Map();
-      for (const s of todaysLocal) {
-        const cid = s?.client_id || s?.id || null;
-        if (cid) byCid.set(String(cid), s);
-      }
-
-      const todaysMerged = workouts.map((w) => {
-        const cid = String(w?.client_id || '');
-        const prev = byCid.get(cid);
-
-        // Preserve exercises/notes if they exist locally
-        const keepExercises =
-          prev && Array.isArray(prev.exercises) && prev.exercises.length > 0;
-
-        return {
-          ...(prev || {}),
-          id: prev?.id || w?.client_id || cid,
-          client_id: prev?.client_id || w?.client_id || cid,
-          date: dayDisplay,
-          name: prev?.name || 'Workout',
-          totalCalories: safeNum(w?.total_calories, prev?.totalCalories || 0),
-          exercises: keepExercises ? prev.exercises : (prev?.exercises || []),
-          createdAt: w?.started_at || w?.created_at || prev?.createdAt || new Date().toISOString(),
-          uploaded: true,
-          __draft: false,
-        };
-      });
-
-      // If there were local sessions today that don't exist in cloud (drafts), keep them too
-      const cloudCids = new Set(workouts.map((w) => String(w?.client_id || '')));
-      const keepDrafts = todaysLocal.filter((s) => {
-        const cid = String(s?.client_id || s?.id || '');
-        return cid && !cloudCids.has(cid) && (s?.__draft || false);
-      });
-
-      const next = [...todaysMerged, ...keepDrafts, ...others].slice(0, 300);
-      localStorage.setItem(key, JSON.stringify(next));
-    } catch {}
-
-    // Merge burned into dailyMetricsCache WITHOUT touching consumed
-    try {
-      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-      const prev = cache[dayISO] || {};
-      cache[dayISO] = {
-        ...prev,
-        burned: Math.max(safeNum(prev?.burned, 0), burnedToday),
-        updated_at: new Date().toISOString(),
-      };
-      localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-    } catch {}
-
-    try {
-      localStorage.setItem('burnedToday', String(burnedToday));
-    } catch {}
-
-    if (alsoDispatch) {
-      try {
-        window.dispatchEvent(
-          new CustomEvent('slimcal:burned:update', { detail: { date: dayISO, burned: burnedToday } })
-        );
-      } catch {}
-    }
-
-    return { ok: true, dayISO, count: workouts.length, burnedToday };
-  } catch (e) {
-    console.warn('[hydrateTodayWorkoutsFromCloud] failed', e);
-    return { ok: false, error: e };
-  }
 }
