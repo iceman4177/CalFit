@@ -449,3 +449,68 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
 
   return { ok: true, dayISO, eaten, burned };
 }
+
+
+// ---------------------------------------------------------------------------
+// Extra: hydrate ONLY workouts into local workoutHistory + burned totals
+// Some builds import this directly from useBootstrapSync; keep it exported.
+// Signature matches hydrateTodayTotalsFromCloud(user, { alsoDispatch })
+export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true } = {}) {
+  try {
+    const userId = user?.id || user?.user?.id || null;
+    if (!userId) return { ok: false, reason: 'no_user' };
+
+    const dayISO = localDayISO(new Date());
+    const todayUS = dayISOToUS(dayISO);
+
+    const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
+    const list = Array.isArray(cloudWorkouts) ? cloudWorkouts : [];
+
+    // Merge into local workoutHistory (preserve local exercise details if present)
+    if (list.length > 0) {
+      mergeWorkoutsIntoLocalHistory(todayUS, list);
+    } else {
+      // still notify listeners (prevents stale UI)
+      try {
+        window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayUS } }));
+      } catch {}
+    }
+
+    // Compute burned from cloud sessions for today
+    const burned = list.reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+
+    // Update convenience key
+    try {
+      localStorage.setItem('burnedToday', String(Math.round(burned || 0)));
+    } catch {}
+
+    // Update dailyMetricsCache burned without clobbering consumed
+    try {
+      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+      const prev = cache[dayISO] || {};
+      const consumed = safeNum(prev?.consumed ?? prev?.calories_eaten ?? prev?.eaten ?? 0, 0);
+      cache[dayISO] = {
+        ...prev,
+        consumed,
+        burned: Math.round(safeNum(burned, 0)),
+        net: safeNum(consumed, 0) - safeNum(burned, 0),
+        updated_at: new Date().toISOString()
+      };
+      localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+    } catch {}
+
+    // Dispatch burned update (banner listens to this)
+    if (alsoDispatch) {
+      try {
+        window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+          detail: { date: dayISO, burned: Math.round(safeNum(burned, 0)) }
+        }));
+      } catch {}
+    }
+
+    return { ok: true, dayISO, burned };
+  } catch (e) {
+    console.warn('[hydrateCloudToLocal] hydrateTodayWorkoutsFromCloud failed', e);
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
