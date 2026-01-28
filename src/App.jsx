@@ -14,6 +14,7 @@ import {
   Typography,
   Button,
   Stack,
+  Tooltip,
   Menu,
   MenuItem,
   Dialog,
@@ -24,7 +25,7 @@ import {
   Snackbar,
   Alert,
   Badge,
-  Chip
+  Chip,
 } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -75,6 +76,7 @@ import { attachSyncListeners } from './lib/sync';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
+import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
 import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
@@ -253,11 +255,13 @@ function dedupLocalWorkouts() {
   }
 }
 
-function recomputeTodayBanners(setBurned, setConsumed) {
+function recomputeTodayBanners(setBurned, setConsumed, userId) {
   const today = new Date().toLocaleDateString('en-US');
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-  const todayRec = meals.find(m => m.date === today);
+  ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+  ensureScopedFromLegacy(KEYS.mealHistory, userId);
+  const workouts = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const meals    = readScopedJSON(KEYS.mealHistory, userId, []);
+  const todayRec = Array.isArray(meals) ? meals.find(m => m?.date === today) : null;
 
   setBurned(
     workouts.filter(w => w.date === today)
@@ -603,7 +607,7 @@ export default function App() {
     const run = () => {
       normalizeLocalData();
       dedupLocalWorkouts();
-      recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
+      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, user?.id || null);
     };
     run();
 
@@ -662,25 +666,35 @@ export default function App() {
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
         {/* ✅ New hero quick action: Evaluate */}
-        <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
+        <Tooltip title="Daily Evaluation (Hero)">
+          <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
             EVALUATE
           </Button>
+        </Tooltip>
 
-        <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
+        <Tooltip title="Log Workout">
+          <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
             WORKOUT
           </Button>
+        </Tooltip>
 
-        <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
+        <Tooltip title="Log Meal">
+          <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             MEALS
           </Button>
+        </Tooltip>
 
-        <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
+        <Tooltip title="Invite Friends">
+          <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
             INVITE
           </Button>
+        </Tooltip>
 
-        <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
+        <Tooltip title="More options">
+          <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
             MORE
           </Button>
+        </Tooltip>
       </Stack>
 
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
@@ -857,7 +871,7 @@ export default function App() {
           )}
         </Box>
 
-        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
+        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} userId={user?.id || null} />
         <StreakBanner streak={streak} />
         <SocialProofBanner />
         {navBar}

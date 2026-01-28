@@ -3,12 +3,24 @@
 // This runs after login bootstrap (useBootstrapSync) and fixes the banner/PC sync.
 
 import { supabase } from './supabaseClient';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './scopedStorage.js';
 
 // ---------------- Local-day helpers (avoid UTC drift) ----------------
 function localDayISO(d = new Date()) {
   const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   return ld.toISOString().slice(0, 10);
 }
+
+function safeLocalMidnight(dayISO) {
+  try {
+    const [y, m, d] = String(dayISO).split('-').map(n => parseInt(n, 10));
+    if (!y || !m || !d) return new Date(`${dayISO}T00:00:00`);
+    return new Date(y, m - 1, d, 0, 0, 0, 0);
+  } catch {
+    return new Date(`${dayISO}T00:00:00`);
+  }
+}
+
 
 function safeNum(v, d = 0) {
   const n = Number(v);
@@ -34,16 +46,17 @@ function readDailyMetricsNums(row) {
   return { eaten, burned };
 }
 
-function writeDailyMetricsCache(dayISO, eaten, burned) {
+function writeDailyMetricsCache(dayISO, eaten, burned, userId) {
   try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     cache[dayISO] = {
-      consumed: safeNum(eaten, 0), // ✅ canonical key used by banner
+      consumed: safeNum(eaten, 0), // canonical key used by banner
       burned: safeNum(burned, 0),
       net: safeNum(eaten, 0) - safeNum(burned, 0),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     };
-    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+    writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
   } catch {}
 }
 
@@ -69,7 +82,7 @@ function dispatchTotals(dayISO, eaten, burned) {
 function dayISOToUS(dayISO) {
   try {
     // Construct local midnight for that day, then format in US locale.
-    const d = new Date(`${dayISO}T00:00:00`);
+    const d = safeLocalMidnight(dayISO);
     return d.toLocaleDateString('en-US');
   } catch {
     return dayISO;
@@ -77,32 +90,10 @@ function dayISOToUS(dayISO) {
 }
 
 function normalizeWorkoutForLocal(w, todayUS) {
-  const cid =
-    w?.client_id ||
-    w?.id ||
-    `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
-
+  const cid = w?.client_id || w?.id || `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
   const startedAt = w?.started_at || w?.created_at || new Date().toISOString();
   const endedAt = w?.ended_at || startedAt;
   const total = safeNum(w?.total_calories, 0);
-
-  // Prefer workouts.items (jsonb) if present; fallback to workouts.exercises
-  const rawItems = Array.isArray(w?.items)
-    ? w.items
-    : (Array.isArray(w?.exercises) ? w.exercises : []);
-
-  const exercises = Array.isArray(rawItems)
-    ? rawItems.map((it) => ({
-        name: it?.name || it?.exercise_name || it?.exerciseName || 'Exercise',
-        sets: it?.sets ?? it?.set_count ?? it?.setCount ?? null,
-        reps: it?.reps ?? null,
-        weight: it?.weight ?? null,
-        calories: it?.calories ?? null,
-        tempo: it?.tempo ?? null,
-        muscleGroup: it?.muscle_group || it?.muscleGroup || null,
-        equipment: it?.equipment || null,
-      }))
-    : [];
 
   return {
     id: cid,
@@ -113,19 +104,17 @@ function normalizeWorkoutForLocal(w, todayUS) {
     createdAt: startedAt,
     totalCalories: total,
     total_calories: total,
-    name: w?.title || w?.name || 'Workout',
-    exercises,
-    items: exercises, // keep a copy in case UI prefers items
+    name: 'Workout',
+    exercises: Array.isArray(w?.exercises) ? w.exercises : [],
     uploaded: true,
-    __cloud: true,
+    __cloud: true
   };
 }
 
-function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
+function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts, userId) {
   try {
-    const key = 'workoutHistory';
-    const raw = JSON.parse(localStorage.getItem(key) || '[]');
-    const list = Array.isArray(raw) ? raw : [];
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+    const list = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
 
     const isTodayAny = (s) => {
       const d = String(s?.date || '');
@@ -176,7 +165,7 @@ function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
     });
 
     const next = [...todayMerged, ...nonToday];
-    localStorage.setItem(key, JSON.stringify(next.slice(0, 300)));
+    writeScopedJSON(KEYS.workoutHistory, userId, next.slice(0, 300));
 
     // Let same-tab UI know workoutHistory changed
     try {
@@ -189,15 +178,14 @@ function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
 
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
-  const [yy, mm, dd] = String(dayISO || '').split('-').map(n => parseInt(n, 10));
-  const startLocal = (yy && mm && dd) ? new Date(yy, mm - 1, dd, 0, 0, 0, 0) : new Date();
-  const nextLocal = new Date(startLocal.getFullYear(), startLocal.getMonth(), startLocal.getDate() + 1, 0, 0, 0, 0);
+  const startLocal = safeLocalMidnight(dayISO);
+  const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
   // Prefer started_at range (same as meals hydration)
   try {
     const res = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at,items,local_day')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
@@ -283,7 +271,7 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
 
   // ✅ Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
   // This avoids drift and works even if workouts.local_day is missing or null.
-  const startLocal = new Date(`${dayISO}T00:00:00`);
+  const startLocal = safeLocalMidnight(dayISO);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
   // Attempt started_at range first (most accurate)
@@ -456,7 +444,7 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   }
 
   // 5) Write local cache so the banner is correct on this device immediately
-  writeDailyMetricsCache(dayISO, eaten, burned);
+  writeDailyMetricsCache(dayISO, eaten, burned, userId);
 
   // Convenience keys used elsewhere
   try {
@@ -500,7 +488,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
 
     // Merge into local workoutHistory (preserve local exercise details if present)
     if (list.length > 0) {
-      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, list);
+      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, list, userId);
     } else {
       // still notify listeners (prevents stale UI)
       try {
@@ -518,7 +506,8 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
 
     // Update dailyMetricsCache burned without clobbering consumed
     try {
-      const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+      const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
       const prev = cache[dayISO] || {};
       const consumed = safeNum(prev?.consumed ?? prev?.calories_eaten ?? prev?.eaten ?? 0, 0);
       cache[dayISO] = {
@@ -528,7 +517,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
         net: safeNum(consumed, 0) - safeNum(burned, 0),
         updated_at: new Date().toISOString()
       };
-      localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+      writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
     } catch {}
 
     // Dispatch burned update (banner listens to this)

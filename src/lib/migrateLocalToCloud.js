@@ -6,6 +6,7 @@
 // - Stores a per-user bootstrap map to prevent duplicates across sessions/devices
 
 import { supabase } from './supabaseClient';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './scopedStorage.js';
 
 // ---------- small utils ----------
 function readLS(key, fallback) {
@@ -97,22 +98,22 @@ function ensureClientId(obj) {
   return obj.client_id;
 }
 
-function persistClientIdsBackToLocalStorage({ workoutHistory, mealHistory }) {
+function persistClientIdsBackToLocalStorage(userId, { workoutHistory, mealHistory }) {
   // Persist updated workoutHistory if we added client_id to any workout
   try {
-    writeLS('workoutHistory', workoutHistory);
+    writeScopedJSON(KEYS.workoutHistory, userId, workoutHistory);
   } catch {}
 
   // Persist updated mealHistory if we added client_id to any meal entry
   try {
-    writeLS('mealHistory', mealHistory);
+    writeScopedJSON(KEYS.mealHistory, userId, mealHistory);
   } catch {}
 }
 
 // ---------- Collect local data in your current formats ----------
 export function collectAllLocalData() {
-  const workoutHistoryRaw = readLS('workoutHistory', []);
-  const mealHistoryRaw = readLS('mealHistory', []);
+  const workoutHistoryRaw = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const mealHistoryRaw = readScopedJSON(KEYS.mealHistory, userId, []);
 
   const workoutHistory = Array.isArray(workoutHistoryRaw) ? workoutHistoryRaw : [];
   const mealHistory = Array.isArray(mealHistoryRaw) ? mealHistoryRaw : [];
@@ -166,7 +167,7 @@ export function collectAllLocalData() {
   }
 
   // Persist any newly created client_ids back to LS so bootstrap stays idempotent forever
-  persistClientIdsBackToLocalStorage({ workoutHistory, mealHistory });
+  persistClientIdsBackToLocalStorage(userId, { workoutHistory, mealHistory });
 
   return { workouts: workoutHistory, meals: mealsFlat };
 }
@@ -174,8 +175,8 @@ export function collectAllLocalData() {
 // ---------- Compute day totals from local caches (prevents daily_metrics overwrite) ----------
 function computeLocalDailyTotals() {
   const dUS = todayUS(); // used by some local caches
-  const workoutHistory = readLS('workoutHistory', []);
-  const mealHistory = readLS('mealHistory', []);
+  const workoutHistory = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const mealHistory = readScopedJSON(KEYS.mealHistory, userId, []);
 
   const dayTotals = new Map(); // dayKey -> { consumed, burned }
 
@@ -206,7 +207,7 @@ function computeLocalDailyTotals() {
 
   // Also consider dailyMetricsCache if present (some builds store ISO day keys)
   try {
-    const cache = readLS('dailyMetricsCache', {});
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {});
     if (cache && typeof cache === 'object') {
       for (const [k, row] of Object.entries(cache)) {
         const consumed = safeNum(row?.consumed ?? row?.eaten ?? row?.calories_eaten ?? 0, 0);
@@ -245,6 +246,11 @@ function normalizeDayKeyToISO(dayKey) {
 
 // ---------- One-time, idempotent bootstrap ----------
 export async function migrateLocalToCloudOneTime(user) {
+  const userId = user?.id || null;
+  ensureScopedFromLegacy(KEYS.mealHistory, userId);
+  ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+  ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+
   // If supabase client is missing/misconfigured, don't crash
   if (!supabase) return { ok: false, skipped: 'no-supabase-client' };
 
@@ -281,31 +287,13 @@ export async function migrateLocalToCloudOneTime(user) {
       started_at: startedAt,
       ended_at: endedAt,
       total_calories: totalCalories,
-      name: w.name ?? null,
-      exercises: Array.isArray(w.exercises) ? w.exercises : null,
       goal: w.goal ?? null,
       notes: w.notes ?? null,
       client_updated_at: new Date().toISOString(),
     };
 
     try {
-      
-let error = null;
-try {
-  const res0 = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
-  error = res0?.error || null;
-
-  // If schema doesn't have detail columns yet, retry with minimal row
-  if (error && /column .*\b(name|exercises)\b.* does not exist/i.test(error?.message || '')) {
-    const minimalRow = { ...row };
-    delete minimalRow.name;
-    delete minimalRow.exercises;
-    const res1 = await supabase.from('workouts').upsert(minimalRow, { onConflict: 'client_id' });
-    error = res1?.error || null;
-  }
-} catch (e) {
-  error = e;
-}
+      const { error } = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
       if (!error) {
         pushedW++;
         markSynced(userKey, 'workouts', cid);

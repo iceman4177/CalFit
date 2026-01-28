@@ -13,7 +13,9 @@ import {
   Paper,
   Stack,
   Chip,
-  IconButton,  Dialog,
+  IconButton,
+  Tooltip,
+  Dialog,
   DialogTitle,
   DialogContent,
   DialogActions
@@ -21,6 +23,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useAuth } from './context/AuthProvider.jsx';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
@@ -133,13 +136,11 @@ function summarizeExercisesFromSets(sets = []) {
     prev.sets += 1;
     prev.reps += safeNum(s.reps, 0);
 
-    // calories: prefer explicit per-set calories; else if volume looks like calories (cardio), use it; else proxy
+    // calories: prefer explicit per-set calories, else proxy
     const c =
       (typeof s.calories === 'number' && Number.isFinite(s.calories))
         ? s.calories
-        : (typeof s.volume === 'number' && Number.isFinite(s.volume) && (safeNum(s.weight, 0) === 0) && (safeNum(s.reps, 0) === 0))
-          ? s.volume
-          : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
+        : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
 
     prev.calories += safeNum(c, 0);
 
@@ -173,6 +174,11 @@ function bestLocalMatch(candidates = [], supaSets = []) {
 
 export default function WorkoutHistory({ onHistoryChange }) {
   const { user } = useAuth();
+  const userId = user?.id || null;
+
+  useEffect(() => {
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+  }, [userId]);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [shareOpen, setShareOpen] = useState(false);
@@ -186,7 +192,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [deleting, setDeleting] = useState(false);
 
   const localIdx = useMemo(() => {
-    const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const raw = readScopedJSON(KEYS.workoutHistory, userId, []);
     const byDay = new Map();
     for (const sess of raw) {
       const arr = byDay.get(sess.date) || [];
@@ -213,7 +219,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     // burned today from local history (source of truth for UI)
     let burnedToday = 0;
     try {
-      const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+      const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
       burnedToday = (wh || [])
         .filter(w => w?.date === todayUS || w?.date === todayISO)
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
@@ -283,7 +289,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
       // 2) Delete from localStorage workoutHistory
       try {
-        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+        const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
 
         // match strategy:
         // - if row has client_id -> remove matching local session id/client_id
@@ -307,7 +313,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
           return true;
         });
 
-        localStorage.setItem('workoutHistory', JSON.stringify(filtered));
+        writeScopedJSON(KEYS.workoutHistory, userId, filtered);
       } catch (e) {
         console.warn('[WorkoutHistory] local delete failed', e);
       }
@@ -368,7 +374,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
         const withSets = await Promise.all(
           base.map(async w => {
-            const sets = await getWorkoutSetsFor(w.id, user.id, w.client_id);
+            const sets = await getWorkoutSetsFor(w.id, user.id);
 
             const dayUS = toUS(w.started_at);
             const candidates = localIdx.byDay.get(dayUS) || [];
@@ -520,14 +526,18 @@ export default function WorkoutHistory({ onHistoryChange }) {
                             {(Number(w.total_calories) || 0).toFixed(2)} cals
                           </Typography>
 
-                          <span><IconButton
+                          <Tooltip title="Delete workout">
+                            <span>
+                              <IconButton
                                 size="small"
                                 color="error"
                                 onClick={() => askDeleteRow(w)}
                                 disabled={deleting}
                               >
                                 <DeleteIcon fontSize="small" />
-                              </IconButton></span>
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                         </Stack>
                       </Stack>
                     }

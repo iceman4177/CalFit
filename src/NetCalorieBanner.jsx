@@ -10,6 +10,8 @@ import {
   LinearProgress,
 } from '@mui/material';
 
+import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
+
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 function todayUS() {
@@ -54,7 +56,7 @@ function readUserGoalCalories() {
  * - dailyMetricsCache
  * - burnedToday / consumedToday (hydrated truth keys)
  */
-function readTodayTotals() {
+function readTodayTotals(userId) {
   const dUS = todayUS();
   const dISO = localISODay();
 
@@ -63,7 +65,8 @@ function readTodayTotals() {
 
   // Meals
   try {
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    ensureScopedFromLegacy(KEYS.mealHistory, userId);
+    const mh = readScopedJSON(KEYS.mealHistory, userId, []);
     const rec = Array.isArray(mh)
       ? mh.find(m => m?.date === dUS || m?.date === dISO)
       : null;
@@ -74,7 +77,8 @@ function readTodayTotals() {
 
   // Workouts
   try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+    const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
     const arr = Array.isArray(wh) ? wh : [];
     burned = arr
       .filter(w => w?.date === dUS || w?.date === dISO)
@@ -83,7 +87,8 @@ function readTodayTotals() {
 
   // dailyMetricsCache
   try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     const row = cache?.[dISO];
     if (row) {
       const eatenFromCache = safeNum(
@@ -151,9 +156,9 @@ function preferProp(propVal, baseVal) {
   return p;
 }
 
-export default function NetCalorieBanner({ burned: burnedProp, consumed: consumedProp, goal: goalProp } = {}) {
+export default function NetCalorieBanner({ burned, consumed, userId = null }) {
   const [state, setState] = useState(() => {
-    const base = readTodayTotals();
+    const base = readTodayTotals(userId);
     return {
       ...base,
       eaten: preferProp(consumedProp, base.eaten),
@@ -165,7 +170,7 @@ export default function NetCalorieBanner({ burned: burnedProp, consumed: consume
   });
 
   const recompute = useCallback(() => {
-    const base = readTodayTotals();
+    const base = readTodayTotals(userId);
     setState({
       ...base,
       eaten: preferProp(consumedProp, base.eaten),
