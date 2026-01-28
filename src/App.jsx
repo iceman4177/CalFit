@@ -8,13 +8,11 @@ import {
   useLocation,
   useHistory
 } from 'react-router-dom';
-import {
-  Container,
+import { Container,
   Box,
   Typography,
   Button,
   Stack,
-  Tooltip,
   Menu,
   MenuItem,
   Dialog,
@@ -25,8 +23,7 @@ import {
   Snackbar,
   Alert,
   Badge,
-  Chip,
-} from '@mui/material';
+  Chip } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
@@ -41,10 +38,8 @@ import ProLandingPage from './ProLandingPage';
 import ProSuccess     from './ProSuccess';
 import AuthCallback   from './AuthCallback';
 
-import useDailyNotification from './hooks/useDailyNotification';
 import useVariableRewards    from './hooks/useVariableRewards';
-import useMealReminders      from './hooks/useMealReminders';
-import useInAppMealPrompt    from './hooks/useInAppMealPrompt';
+
 import useFirstTimeTip       from './hooks/useFirstTimeTip';
 import useReferral           from './hooks/useReferral';
 
@@ -62,7 +57,7 @@ import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
 import WaitlistSignup    from './components/WaitlistSignup';
-import AlertPreferences  from './components/AlertPreferences';
+
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
 import ReferralDashboard from './components/ReferralDashboard';
@@ -76,7 +71,6 @@ import { attachSyncListeners } from './lib/sync';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
-import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
 import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
@@ -98,7 +92,7 @@ const routeTips = {
   '/summary':      'Summary: quick overview of today’s net calories.',
   '/recap':        'Coach (legacy route): redirects to Coach tab.',
   '/waitlist':     'Join our waitlist for early access to new features!',
-  '/preferences':  'Customize when you get meal reminders each day.'
+
 };
 
 function PageTracker() {
@@ -255,13 +249,11 @@ function dedupLocalWorkouts() {
   }
 }
 
-function recomputeTodayBanners(setBurned, setConsumed, userId) {
+function recomputeTodayBanners(setBurned, setConsumed) {
   const today = new Date().toLocaleDateString('en-US');
-  ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-  ensureScopedFromLegacy(KEYS.mealHistory, userId);
-  const workouts = readScopedJSON(KEYS.workoutHistory, userId, []);
-  const meals    = readScopedJSON(KEYS.mealHistory, userId, []);
-  const todayRec = Array.isArray(meals) ? meals.find(m => m?.date === today) : null;
+  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+  const todayRec = meals.find(m => m.date === today);
 
   setBurned(
     workouts.filter(w => w.date === today)
@@ -430,20 +422,12 @@ export default function App() {
 
   const [userData, setUserDataState] = useState(null);
 
-  useDailyNotification({
-    hour:   19,
-    minute: 0,
-    title:  'Slimcal.ai Reminder',
-    body:   '⏰ Don’t forget to log today’s workout & meals!'
-  });
-
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
   const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')   || '[]')
     .reduce((sum, e) => sum + (e.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
-  useMealReminders();
 
-  const missedMeals = useInAppMealPrompt() || [];
+  const missedMeals = []; // meal prompts disabled
   const [promptOpen, setPromptOpen] = useState(false);
   useEffect(() => {
     if (
@@ -607,7 +591,7 @@ export default function App() {
     const run = () => {
       normalizeLocalData();
       dedupLocalWorkouts();
-      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id || null);
+      recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
     };
     run();
 
@@ -666,35 +650,35 @@ export default function App() {
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
         {/* ✅ New hero quick action: Evaluate */}
-        <Tooltip title="Daily Evaluation (Hero)">
+        
           <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
             EVALUATE
           </Button>
-        </Tooltip>
+        
 
-        <Tooltip title="Log Workout">
+        
           <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
             WORKOUT
           </Button>
-        </Tooltip>
+        
 
-        <Tooltip title="Log Meal">
+        
           <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             MEALS
           </Button>
-        </Tooltip>
+        
 
-        <Tooltip title="Invite Friends">
+        
           <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
             INVITE
           </Button>
-        </Tooltip>
+        
 
-        <Tooltip title="More options">
+        
           <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
             MORE
           </Button>
-        </Tooltip>
+        
       </Stack>
 
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
@@ -709,11 +693,7 @@ export default function App() {
         </MenuItem>
         <MenuItem component={NavLink} to="/waitlist" onClick={closeMore}>
           <InfoIcon fontSize="small"/> Waitlist
-        </MenuItem>
-        <MenuItem component={NavLink} to="/preferences" onClick={closeMore}>
-          <InfoIcon fontSize="small"/> Preferences
-        </MenuItem>
-        <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
+        </MenuItem><MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
           <InfoIcon fontSize="small"/> Edit Info
         </MenuItem>
 
@@ -871,7 +851,7 @@ export default function App() {
           )}
         </Box>
 
-        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} userId={authUser?.id || null} />
+        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
         <StreakBanner streak={streak} />
         <SocialProofBanner />
         {navBar}
@@ -931,7 +911,6 @@ export default function App() {
           <Route path="/recap" render={() => <Redirect to="/coach" />} />
 
           <Route path="/waitlist"     component={WaitlistSignup} />
-          <Route path="/preferences"  component={AlertPreferences} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={DailyEvaluationHome} />

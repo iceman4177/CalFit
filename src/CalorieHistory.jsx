@@ -1,9 +1,18 @@
 // src/CalorieHistory.jsx
 import React, { useEffect, useState, useCallback } from 'react';
-import {
-  Box, Container, Divider, Typography, Table, TableBody, TableCell,
-  TableHead, TableRow, Paper, CircularProgress, Chip, Stack, Tooltip
-} from '@mui/material';
+import { Box,
+  Container,
+  Divider,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Paper,
+  CircularProgress,
+  Chip,
+  Stack } from '@mui/material';
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
 
@@ -186,9 +195,9 @@ export default function CalorieHistory() {
           <Typography variant="body2">
             <b>Deficit days:</b> {deficitDays} ({deficitPct}%)
           </Typography>
-          <Tooltip title="Average of latest 7 days (newest first)">
+          
             <Typography variant="body2"><b>7-day avg net:</b> {isFinite(avgNet7) ? avgNet7 : 0}</Typography>
-          </Tooltip>
+          
           <Typography variant="body2"><b>Current streak:</b> {streak} day{streak === 1 ? '' : 's'}</Typography>
         </Stack>
       </Paper>

@@ -1,7 +1,6 @@
 // src/MealTracker.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  Container,
+import { Container,
   Typography,
   Box,
   TextField,
@@ -13,7 +12,6 @@ import {
   Autocomplete,
   Alert,
   IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -28,8 +26,7 @@ import {
   MenuItem,
   Select,
   FormControl,
-  InputLabel
-} from '@mui/material';
+  InputLabel } from '@mui/material';
 
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -52,7 +49,6 @@ import FeatureUseBadge, {
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { saveMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 import { callAIGenerate } from './lib/ai';
 
@@ -383,12 +379,6 @@ export default function MealTracker({ onMealUpdate }) {
   const [openBowl, setOpenBowl] = useState(false);
 
   const { user } = useAuth();
-  const userId = user?.id || null;
-
-  useEffect(() => {
-    ensureScopedFromLegacy(KEYS.mealHistory, userId);
-    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
-  }, [userId]);
 
   // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
@@ -405,9 +395,9 @@ export default function MealTracker({ onMealUpdate }) {
 
   // ------------ persistence helpers ------------
   const persistToday = meals => {
-    const rest = readScopedJSON(KEYS.mealHistory, userId, []).filter(e => e.date !== todayUS);
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
     rest.push({ date: todayUS, meals });
-    writeScopedJSON(KEYS.mealHistory, userId, rest);
+    localStorage.setItem('mealHistory', JSON.stringify(rest));
   };
 
   const emitConsumed = total => {
@@ -441,9 +431,9 @@ export default function MealTracker({ onMealUpdate }) {
   const syncDailyMetrics = async consumedTotal => {
     const burned = getBurnedTodayLocal(todayUS);
 
-    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {});
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
     cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
-    writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
     localStorage.setItem('consumedToday', String(consumedTotal));
     emitConsumed(consumedTotal);
     emitBurned(burned);
@@ -476,7 +466,7 @@ export default function MealTracker({ onMealUpdate }) {
     let ignore = false;
 
     // First: local load (keeps your existing behavior)
-    const all = readScopedJSON(KEYS.mealHistory, userId, []);
+    const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayLog = all.find(e => e.date === todayUS);
     const meals = todayLog ? todayLog.meals || [] : [];
 
@@ -561,7 +551,7 @@ export default function MealTracker({ onMealUpdate }) {
 
         // 6) Write dailyMetricsCache in the exact keys your UI reads
         try {
-          const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
           cache[todayISO] = {
             burned: burnedToday,
             consumed: consumedTotal,
@@ -571,7 +561,7 @@ export default function MealTracker({ onMealUpdate }) {
             net_calories: consumedTotal - burnedToday,
             updated_at: new Date().toISOString()
           };
-          writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
         } catch {}
 
         // 7) Also upsert via local-first so it stays consistent everywhere
@@ -779,8 +769,8 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const handleClear = () => {
-    const rest = readScopedJSON(KEYS.mealHistory, userId, []).filter(e => e.date !== todayUS);
-    writeScopedJSON(KEYS.mealHistory, userId, rest);
+    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
+    localStorage.setItem('mealHistory', JSON.stringify(rest));
     setMealLog([]);
     onMealUpdate?.(0);
     syncDailyMetrics(0);
@@ -1214,11 +1204,11 @@ export default function MealTracker({ onMealUpdate }) {
                   <Box key={`${m.name}-${i}`}>
                     <ListItem
                       secondaryAction={
-                        <Tooltip title="Delete this meal">
+                        
                           <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
                             <DeleteIcon fontSize="small" />
                           </IconButton>
-                        </Tooltip>
+                        
                       }
                     >
                       <ListItemText

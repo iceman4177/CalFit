@@ -1,6 +1,9 @@
 // src/hooks/useMealReminders.js
 import { useEffect, useRef } from 'react';
 
+// NOTE: Meal reminders/notifications disabled (testing + UX).
+const MEAL_REMINDERS_DISABLED = true;
+
 // Default reminder times (24h)
 const DEFAULT_PREFS = {
   breakfast: '08:00',
@@ -18,7 +21,9 @@ export default function useMealReminders() {
   const timers = useRef([]);
 
   useEffect(() => {
-    if (!('Notification' in window)) return;
+    
+    if (MEAL_REMINDERS_DISABLED) return;
+if (!('Notification' in window)) return;
 
     const scheduleReminders = () => {
       // clear any existing timers

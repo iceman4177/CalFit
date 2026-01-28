@@ -1,7 +1,6 @@
 // src/WorkoutHistory.jsx
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import {
-  Box,
+import { Box,
   Button,
   Container,
   Divider,
@@ -14,16 +13,13 @@ import {
   Stack,
   Chip,
   IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
-} from '@mui/material';
+  DialogActions } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useAuth } from './context/AuthProvider.jsx';
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
@@ -174,11 +170,6 @@ function bestLocalMatch(candidates = [], supaSets = []) {
 
 export default function WorkoutHistory({ onHistoryChange }) {
   const { user } = useAuth();
-  const userId = user?.id || null;
-
-  useEffect(() => {
-    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-  }, [userId]);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [shareOpen, setShareOpen] = useState(false);
@@ -192,7 +183,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [deleting, setDeleting] = useState(false);
 
   const localIdx = useMemo(() => {
-    const raw = readScopedJSON(KEYS.workoutHistory, userId, []);
+    const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const byDay = new Map();
     for (const sess of raw) {
       const arr = byDay.get(sess.date) || [];
@@ -219,7 +210,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     // burned today from local history (source of truth for UI)
     let burnedToday = 0;
     try {
-      const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+      const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
       burnedToday = (wh || [])
         .filter(w => w?.date === todayUS || w?.date === todayISO)
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
@@ -289,7 +280,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
       // 2) Delete from localStorage workoutHistory
       try {
-        const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
 
         // match strategy:
         // - if row has client_id -> remove matching local session id/client_id
@@ -313,7 +304,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
           return true;
         });
 
-        writeScopedJSON(KEYS.workoutHistory, userId, filtered);
+        localStorage.setItem('workoutHistory', JSON.stringify(filtered));
       } catch (e) {
         console.warn('[WorkoutHistory] local delete failed', e);
       }
@@ -526,7 +517,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                             {(Number(w.total_calories) || 0).toFixed(2)} cals
                           </Typography>
 
-                          <Tooltip title="Delete workout">
+                          
                             <span>
                               <IconButton
                                 size="small"
@@ -537,7 +528,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
                             </span>
-                          </Tooltip>
+                          
                         </Stack>
                       </Stack>
                     }

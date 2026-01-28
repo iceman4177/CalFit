@@ -101,7 +101,9 @@ export function registerDailyFeatureUse(featureKey) {
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
   if (isPro) {
     return (
-      <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+      
+        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+      
     );
   }
 
@@ -112,6 +114,8 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
-    <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+    
+      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+    
   );
 }

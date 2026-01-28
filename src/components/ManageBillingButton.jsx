@@ -42,10 +42,12 @@ export default function ManageBillingButton({ variant = 'text', size = 'medium' 
   }
 
   return (
-    <span>
+    
+      <span>
         <Button onClick={openUpgrade} variant={variant} size={size}>
           Upgrade
         </Button>
       </span>
+    
   );
 }

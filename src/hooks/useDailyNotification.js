@@ -2,6 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 
+// NOTE: Meal reminders/notifications disabled (testing + UX).
+const MEAL_REMINDERS_DISABLED = true;
+
 export default function useDailyNotification({
   hour = 19,
   minute = 0,
@@ -11,7 +14,9 @@ export default function useDailyNotification({
   const timeoutId = useRef(null);
 
   useEffect(() => {
-    // 1) Bail if the Notifications API isn't supported
+    
+    if (MEAL_REMINDERS_DISABLED) return;
+// 1) Bail if the Notifications API isn't supported
     if (!('Notification' in window)) return;
 
     // 2) Ask for permission if not already granted/denied

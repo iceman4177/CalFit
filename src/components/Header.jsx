@@ -1,16 +1,14 @@
 // src/components/Header.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {
-  AppBar,
+import { AppBar,
   Toolbar,
   Box,
   Button,
   IconButton,
   Typography,
   Stack,
-  Chip
-} from '@mui/material';
+  Chip } from '@mui/material';
 import { useEntitlements } from '../context/EntitlementsContext.jsx';
 import { supabase } from '../lib/supabaseClient';
 import { openBillingPortal } from '../lib/billing';
@@ -200,7 +198,8 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
 
           {/* Ambassador badge */}
           {hasAmbassador && (
-            <Chip
+            
+              <Chip
                 label="Ambassador"
                 size="small"
                 color="warning"
@@ -211,6 +210,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
                   '& .MuiChip-label': { px: 1 },
                 }}
               />
+            
           )}
         </Box>
 
@@ -252,7 +252,8 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
           </Button>
 
           {!authUser && (
-            <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
+            
+              <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
                 <img
                   src="https://www.svgrepo.com/show/475656/google-color.svg"
                   alt="Sign in"
@@ -261,6 +262,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
                   style={{ display: 'block' }}
                 />
               </IconButton>
+            
           )}
         </Stack>
       </Toolbar>

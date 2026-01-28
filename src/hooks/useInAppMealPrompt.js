@@ -1,6 +1,9 @@
 // src/hooks/useInAppMealPrompt.js
 import { useEffect, useState } from 'react';
 
+// NOTE: Meal reminders/notifications disabled (testing + UX).
+const MEAL_REMINDERS_DISABLED = true;
+
 // Default times if user hasn’t set preferences
 const DEFAULT_PREFS = {
   breakfast: '08:00',
@@ -12,7 +15,9 @@ export default function useInAppMealPrompt() {
   const [missedMeals, setMissedMeals] = useState([]);
 
   useEffect(() => {
-    const now       = new Date();
+    
+    if (MEAL_REMINDERS_DISABLED) return;
+const now       = new Date();
     const todayKey  = now.toLocaleDateString('en-US');
     const history   = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const todayRec  = history.find(m => m.date === todayKey);

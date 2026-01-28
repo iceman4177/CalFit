@@ -24,9 +24,11 @@ export default function ReferralDashboard() {
           fullWidth
           InputProps={{ readOnly: true }}
         />
-        <Button onClick={copyToClipboard} variant="outlined">
+        
+          <Button onClick={copyToClipboard} variant="outlined">
             <ContentCopyIcon />
           </Button>
+        
       </Box>
       <Typography variant="body1">
         Friends joined: <strong>{yourCount}</strong>

@@ -1,7 +1,6 @@
 // src/ExerciseForm.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import {
-  Box,
+import { Box,
   Button,
   FormControl,
   InputLabel,
@@ -11,14 +10,12 @@ import {
   Typography,
   ToggleButtonGroup,
   ToggleButton,
-  Tooltip,
   IconButton,
   Checkbox,
   FormControlLabel,
   Paper,
   Divider,
-  Stack
-} from '@mui/material';
+  Stack } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { ROM_DEPTH_OPTIONS } from './exerciseConstants';
@@ -359,11 +356,11 @@ export default function ExerciseForm({
               <ToggleButton value="slow">Slow</ToggleButton>
               <ToggleButton value="custom">Custom</ToggleButton>
             </ToggleButtonGroup>
-            <Tooltip title="Hypertrophy: 1s+3s; Power: 1s+1s; Slow: 3s+3s">
+            
               <IconButton size="small" sx={{ ml: 1 }}>
                 <InfoOutlinedIcon fontSize="small" />
               </IconButton>
-            </Tooltip>
+            
           </Box>
 
           {tempoMode === 'custom' && (
