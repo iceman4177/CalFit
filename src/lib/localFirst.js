@@ -67,37 +67,18 @@ function dispatchBurned(dayISO, burned) {
 
 // ---- Cloud upserts -----------------------------------------------------------
 async function upsertWorkoutCloud(payload) {
-  // Try upsert; if optional columns don't exist, retry without them.
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  const attempt = async (pl) => {
-    const res = await supabase
-      .from('workouts')
-      .upsert(pl, { onConflict: 'user_id,client_id' })
-      .select('id')
-      .maybeSingle();
-    if (res?.error) throw res.error;
-    return res?.data || null;
-  };
+  // IMPORTANT: requires UNIQUE(user_id, client_id) which you just added ✅
+  const res = await supabase
+    .from('workouts')
+    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .select('id')
+    .maybeSingle();
 
-  try {
-    return await attempt(payload);
-  } catch (err) {
-    const msg = String(err?.message || '');
-    const cleaned = { ...payload };
-    if (/column .*title.* does not exist/i.test(msg)) delete cleaned.title;
-    if (/column .*name.* does not exist/i.test(msg)) delete cleaned.name;
-    if (/column .*items.* does not exist/i.test(msg)) delete cleaned.items;
-
-    const changed =
-      (('title' in payload) && !('title' in cleaned)) ||
-      (('name' in payload) && !('name' in cleaned)) ||
-      (('items' in payload) && !('items' in cleaned));
-
-    if (!changed) throw err;
-    return await attempt(cleaned);
-  }
+  if (res?.error) throw res.error;
+  return res?.data || null;
 }
 
 async function upsertMealCloud(payload) {
@@ -271,12 +252,12 @@ export async function saveWorkoutLocalFirst({
   started_at,
   ended_at,
   total_calories,
-  items = null,
-  title = null,
   notes = null,
   goal = null,
+  // optional: store lightweight exercise summary if your schema supports it
+  items = undefined,
 }) {
-  if (!user_id) return;
+  if (!user_id) return null;
 
   const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}`);
   const startISO = started_at || new Date().toISOString();
@@ -289,18 +270,17 @@ export async function saveWorkoutLocalFirst({
     started_at: startISO,
     ended_at: ended_at || startISO,
     total_calories: safeNum(total_calories, 0),
-  items: (Array.isArray(items) ? items : null),
-  // Optional display fields (if columns exist)
-  title: title || (Array.isArray(items) && items[0]?.name ? String(items[0].name) : null),
-  name: title || (Array.isArray(items) && items[0]?.name ? String(items[0].name) : null),
     notes,
     goal,
     updated_at: new Date().toISOString(),
   };
 
-  let up = null;
+  // Only include items if caller provided it (and schema has items column)
+  if (items !== undefined) payload.items = items;
+
   try {
-    up = await upsertWorkoutCloud(payload);
+    const row = await upsertWorkoutCloud(payload);
+    return row; // { id } (or null)
   } catch (e) {
     try {
       enqueueOp?.({
@@ -313,29 +293,8 @@ export async function saveWorkoutLocalFirst({
     } catch {}
     throw e;
   }
-
-  // Also keep the banner daily metrics in sync instantly
-  try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-    const row = cache[dayISO] || {};
-    const eaten = safeNum(row.consumed ?? row.calories_eaten ?? 0, 0);
-    const burned = safeNum(row.burned ?? row.calories_burned ?? 0, 0);
-
-    const newBurned = Math.round(burned + safeNum(total_calories, 0));
-    writeDailyMetricsCache(dayISO, { consumed: eaten, burned: newBurned });
-    dispatchBurned(dayISO, newBurned);
-
-    // best effort cloud daily_metrics update too
-    await upsertDailyMetricsLocalFirst({
-      user_id,
-      local_day: dayISO,
-      burned: newBurned,
-      consumed: eaten,
-    });
-  } catch {}
-
-  return up;
 }
+
 
 /**
  * ✅ deleteWorkoutLocalFirst

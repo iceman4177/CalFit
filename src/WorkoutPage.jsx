@@ -84,6 +84,37 @@ function formatExerciseLine(ex) {
   if (!vol && !hasWeight) return `${name} — ${kcals} cals`;
   return `${name} — ${vol}${wt} — ${kcals} cals`;
 }
+function formatSessionExerciseDetail(ex) {
+  const name = ex?.name || ex?.exerciseName || 'Exercise';
+
+  // If we have per-set rows (from workout_sets hydration), render them compactly
+  if (Array.isArray(ex?._sets) && ex._sets.length) {
+    const parts = ex._sets.slice(0, 4).map((s) => {
+      const r = (s?.reps != null && s?.reps !== '') ? String(s.reps) : '';
+      const w = (s?.weight != null && s?.weight !== '' && Number(s.weight) > 0) ? `${s.weight}lb` : '';
+      if (w && r) return `${w}×${r}`;
+      if (w) return w;
+      if (r) return `${r} reps`;
+      return '';
+    }).filter(Boolean);
+
+    const more = ex._sets.length > 4 ? ` +${ex._sets.length - 4} more` : '';
+    const suffix = parts.length ? ` — ${parts.join(', ')}${more}` : '';
+    return `${name}${suffix}`;
+  }
+
+  const setsNum = parseInt(ex?.sets, 10);
+  const reps = ex?.reps != null ? String(ex.reps).trim() : '';
+  const weight = ex?.weight != null ? Number(ex.weight) : 0;
+
+  const vol =
+    Number.isFinite(setsNum) && setsNum > 0 && reps ? `${setsNum}×${reps}` :
+      Number.isFinite(setsNum) && setsNum > 0 ? `${setsNum} sets` :
+        reps ? `${reps} reps` : '';
+
+  const wt = Number.isFinite(weight) && weight > 0 ? ` @ ${weight} lb` : '';
+  return vol || wt ? `${name} — ${vol}${wt}` : name;
+}
 
 // ---- Local-day ISO helper (local midnight; avoids UTC off-by-one) ----
 function localDayISO(d = new Date()) {
@@ -93,15 +124,6 @@ function localDayISO(d = new Date()) {
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
-}
-
-
-// ✅ NEW: local midnight → tomorrow midnight range (so “today” matches user timezone)
-function getTodayRangeISOLocal(d = new Date()) {
-  const now = new Date(d);
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
-  return { startIso: start.toISOString(), endIso: end.toISOString(), dayISO: localDayISO(now) };
 }
 
 function safeNum(v, d = 0) {
@@ -202,9 +224,45 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
 
-  // ✅ debounce autosave timer
-  const autosaveTimerRef = useRef(null);
+  // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
+  useEffect(() => {
+    try {
+      const now = new Date();
+      const todayUS = now.toLocaleDateString('en-US');
+      const todayISO = localDayISO(now);
+      const cid = String(activeWorkoutSessionIdRef.current || '');
+      if (!cid) return;
 
+      const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      const list = Array.isArray(raw) ? raw : [];
+      const draft = list.find((w) => {
+        const id = String(w?.client_id || w?.id || '');
+        const d = String(w?.date || '');
+        const hasEx = Array.isArray(w?.exercises) && w.exercises.length > 0;
+        return id === cid && hasEx && (d === todayUS || d === todayISO);
+      });
+
+      if (draft) {
+        const next = (draft.exercises || []).map((ex) => ({
+          exerciseType: ex.exerciseType || '',
+          muscleGroup: ex.muscleGroup || '',
+          exerciseName: ex.name || ex.exerciseName || '',
+          weight: ex.weight || '',
+          sets: ex.sets || '',
+          reps: ex.reps || '',
+          concentricTime: ex.concentricTime || '',
+          eccentricTime: ex.eccentricTime || '',
+          calories: ex.calories || 0
+        }));
+        if (next.length) {
+          setCumulativeExercises(next);
+          const total = next.reduce((s, ex) => s + (Number(ex.calories) || 0), 0);
+          setCurrentCalories(total);
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const readTodaySessionsFromLocal = useCallback(() => {
     const now = new Date();
     const todayUS = now.toLocaleDateString('en-US');
@@ -231,6 +289,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         if (!w0) continue;
         const cid = String(w0?.client_id || w0?.id || '');
         if (!cid) continue;
+        const total0 = safeNum(w0?.totalCalories ?? w0?.total_calories, 0);
+        const hasExercises0 = Array.isArray(w0?.exercises) && w0.exercises.length > 0;
+        // Drop "ghost" sessions: 0 kcal + no exercises (these are usually stale draft placeholders from old versions)
+        if ((isToday(w0?.date) || isToday(w0?.date?.toString?.() || '')) && total0 <= 0 && !hasExercises0) continue;
         const w = {
           ...w0,
           // normalize totals for UI
@@ -326,35 +388,44 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   const hydrateTodaySessionsFromCloud = useCallback(async () => {
     if (!user?.id || !supabase) return;
+
     const now = new Date();
+    const dayISO = localDayISO(now);
     const todayUS = now.toLocaleDateString('en-US');
-    const { startIso, endIso, dayISO } = getTodayRangeISOLocal(now);
+
+    const isTodayAny = (s) => {
+      const d = String(s?.date || '');
+      const ld = String(s?.__local_day || '');
+      return d === String(todayUS) || d === String(dayISO) || ld === String(dayISO);
+    };
 
     setLoadingTodaySessions(true);
     try {
-      // Prefer started_at range (same as meals)
       let data = null;
       let error = null;
 
+      // ✅ Prefer local_day equality (timezone-proof)
       try {
         const res = await supabase
           .from('workouts')
-          .select('id,client_id,total_calories,started_at,ended_at,created_at,items,local_day')
+          .select('id,client_id,total_calories,started_at,ended_at,created_at,local_day')
           .eq('user_id', user.id)
-          .gte('started_at', startIso)
-          .lt('started_at', endIso);
+          .eq('local_day', dayISO)
+          .order('started_at', { ascending: false });
         data = res?.data;
         error = res?.error;
       } catch {}
 
-      // Fallback: created_at range
-      if (error && /column .*started_at.* does not exist/i.test(error?.message || '')) {
+      // Fallback: started_at range (older schema)
+      if (error && /column .*local_day.* does not exist/i.test(error?.message || '')) {
+        const startLocal = new Date(`${dayISO}T00:00:00`);
+        const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
         const res2 = await supabase
           .from('workouts')
-          .select('id,client_id,total_calories,created_at')
+          .select('id,client_id,total_calories,started_at,ended_at,created_at')
           .eq('user_id', user.id)
-          .gte('created_at', startIso)
-          .lt('created_at', endIso);
+          .gte('started_at', startLocal.toISOString())
+          .lt('started_at', nextLocal.toISOString());
         data = res2?.data;
         error = res2?.error;
       }
@@ -364,9 +435,63 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         return;
       }
 
-      const cloudRaw = Array.isArray(data) ? data : [];
-      const cloud = cloudRaw.filter(w => (safeNum(w?.total_calories, 0) > 0) || (Array.isArray(w?.items) && w.items.length > 0));
+      const cloud = Array.isArray(data) ? data : [];
       if (cloud.length === 0) return;
+
+      // ✅ Pull workout_sets so we can render exercise/sets details (like meals)
+      const workoutIds = cloud.map(w => w?.id).filter(Boolean);
+      const setsByWorkout = new Map();
+      try {
+        if (workoutIds.length) {
+          const resS = await supabase
+            .from('workout_sets')
+            .select('workout_id,exercise_name,weight,reps,tempo,volume,created_at')
+            .eq('user_id', user.id)
+            .in('workout_id', workoutIds)
+            .order('created_at', { ascending: true });
+
+          const rows = Array.isArray(resS?.data) ? resS.data : [];
+          for (const r of rows) {
+            const wid = String(r?.workout_id || '');
+            if (!wid) continue;
+            const arr = setsByWorkout.get(wid) || [];
+            arr.push(r);
+            setsByWorkout.set(wid, arr);
+          }
+        }
+      } catch (e) {
+        console.warn('[WorkoutPage] workout_sets pull failed (continuing)', e);
+      }
+
+      const buildExercisesFromSets = (rows = []) => {
+        const by = new Map();
+        for (const r of rows) {
+          const name = String(r?.exercise_name || '').trim();
+          if (!name) continue;
+          const arr = by.get(name) || [];
+          arr.push({
+            reps: r?.reps ?? null,
+            weight: r?.weight ?? null,
+            tempo: r?.tempo ?? null,
+            volume: r?.volume ?? null
+          });
+          by.set(name, arr);
+        }
+        const out = [];
+        for (const [name, sets] of by.entries()) {
+          const repsList = sets.map(s => (s?.reps != null ? String(s.reps) : '')).filter(Boolean);
+          const maxW = sets.map(s => Number(s?.weight) || 0).reduce((m, v) => Math.max(m, v), 0);
+          out.push({
+            name,
+            sets: sets.length,
+            reps: repsList.length ? repsList.join(',') : '',
+            weight: maxW > 0 ? maxW : '',
+            calories: 0,
+            _sets: sets
+          });
+        }
+        return out;
+      };
 
       // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
       try {
@@ -385,29 +510,40 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           const cid = String(w?.client_id || w?.id || '');
           if (!cid) continue;
 
+          const total = safeNum(w?.total_calories, 0);
+          const setsRows = setsByWorkout.get(String(w?.id || '')) || [];
+          const exercisesFromSets = buildExercisesFromSets(setsRows);
+
+          // Skip junk rows (old draft placeholders)
+          if (total <= 0 && exercisesFromSets.length === 0) continue;
+
           const norm = {
             id: cid,
             client_id: cid,
             date: todayUS,
+            __local_day: w?.local_day || dayISO,
             started_at: w?.started_at || w?.created_at || new Date().toISOString(),
             ended_at: w?.ended_at || w?.started_at || w?.created_at || new Date().toISOString(),
             createdAt: w?.started_at || w?.created_at || new Date().toISOString(),
-            totalCalories: safeNum(w?.total_calories, 0),
-            total_calories: safeNum(w?.total_calories, 0),
-            name: 'Workout',
-            exercises: Array.isArray(w?.items) ? w.items : [],
-            items: Array.isArray(w?.items) ? w.items : [],
+            totalCalories: total,
+            total_calories: total,
+            name: exercisesFromSets?.[0]?.name || 'Workout',
+            exercises: exercisesFromSets,
             uploaded: true,
-            __cloud: true
+            __cloud: true,
+            __workout_id: w?.id || null
           };
 
           const existing = map.get(cid);
           if (existing) {
-            const keepExercises = Array.isArray(existing?.exercises) && existing.exercises.length > 0;
+            const existingExercises = Array.isArray(existing?.exercises) ? existing.exercises : [];
+            const keepExercises = existingExercises.length > 0;
             map.set(cid, {
               ...norm,
               ...existing,
-              exercises: keepExercises ? existing.exercises : norm.exercises,
+              __local_day: norm.__local_day,
+              __workout_id: norm.__workout_id || existing.__workout_id || null,
+              exercises: keepExercises ? existingExercises : norm.exercises,
               totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
               total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories)
             });
@@ -421,14 +557,15 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
         // Normalize all today entries to use the US string (matches meals)
         todayMerged = todayMerged.map(s => ({ ...s, date: todayUS }));
+
+        // newest first
         todayMerged.sort((a, b) => {
           const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
           const tb = new Date(b?.started_at || b?.createdAt || 0).getTime();
           return tb - ta;
         });
 
-        // Extra guard: if two sessions have different ids but same time+calories,
-        // treat as duplicate (prevents double-count + banner flicker).
+        // Extra guard: if two sessions have different ids but same time+calories, treat as duplicate
         if (todayMerged.length > 1) {
           const seen = new Set();
           const uniq = [];
@@ -448,25 +585,18 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
         // Update burnedToday + cache so banner reflects sessions immediately
         const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
-        try {
-          localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
-        } catch {}
+        try { localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0))); } catch {}
 
         try {
           const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
           const prev = cache[dayISO] || {};
-          cache[dayISO] = {
-            ...prev,
-            burned: Math.round(burnedToday || 0),
-            updated_at: new Date().toISOString()
-          };
+          cache[dayISO] = { ...prev, burned: Math.round(burnedToday || 0), updated_at: new Date().toISOString() };
           localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
         } catch {}
 
         try {
-          window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
-            detail: { date: dayISO, burned: Math.round(burnedToday || 0) }
-          }));
+          window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: dayISO, burned: Math.round(burnedToday || 0) } }));
+          window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
         } catch {}
       } catch (e) {
         console.warn('[WorkoutPage] merge cloud workouts into local failed', e);
@@ -726,22 +856,7 @@ setNewExercise({
         sets: ex.sets,
         reps: ex.reps,
         weight: ex.weight || null,
-        calories: ex.calories,
-        muscle_group: ex.muscleGroup || null,
-        equipment: ex.equipmentType || ex.equipment || null,
-        tempo: (ex.concentricTime && ex.eccentricTime) ? `${ex.concentricTime}-${ex.eccentricTime}` : (ex.tempo || null)
-      })),
-
-      // Cloud-friendly details
-      items: cumulativeExercises.map(ex => ({
-        name: ex.exerciseName,
-        sets: ex.sets,
-        reps: ex.reps,
-        weight: ex.weight || null,
-        calories: ex.calories,
-        muscle_group: ex.muscleGroup || null,
-        equipment: ex.equipmentType || ex.equipment || null,
-        tempo: (ex.concentricTime && ex.eccentricTime) ? `${ex.concentricTime}-${ex.eccentricTime}` : (ex.tempo || null)
+        calories: ex.calories
       })),
 
       // local metadata
@@ -889,49 +1004,6 @@ setNewExercise({
     }
   }, [user?.id]);
 
-  // ✅ AUTOSAVE draft workout while logging (meal-style behavior)
-  useEffect(() => {
-    // If there are no exercises, only clear the *empty* draft.
-    // NEVER delete cloud workouts automatically (that caused "disappearing" history).
-    if (!Array.isArray(cumulativeExercises) || cumulativeExercises.length === 0) {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-
-      try {
-        const cid = activeWorkoutSessionIdRef.current;
-        const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-        const list = Array.isArray(raw) ? raw : [];
-        const existing = list.find(w => String(w?.client_id || w?.id || '') === String(cid || ''));
-        const total = safeNum(existing?.totalCalories ?? existing?.total_calories, 0);
-        const hasExercises = Array.isArray(existing?.exercises) && existing.exercises.length > 0;
-
-        // Only clear if it's an empty draft (0 cals + no exercises)
-        if (existing && (existing?.__draft || existing?.uploaded === false) && !hasExercises && total <= 0) {
-          instantPersistWorkoutDraftToBanner([]);
-        }
-      } catch {}
-
-      return;
-    }
-
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-
-    autosaveTimerRef.current = setTimeout(async () => {
-      try {
-        // Local-first draft only (do NOT upsert to cloud until Submit)
-        const session = buildDraftWorkoutSession();
-        try { instantPersistWorkoutDraftToBanner(cumulativeExercises); } catch {}
-        await syncBurnedTodayToDailyMetrics(session.date, session.__local_day);
-      } catch (e) {
-        console.warn('[WorkoutPage] autosave draft failed', e);
-      }
-    }, 450);
-
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
-  }, [cumulativeExercises, buildDraftWorkoutSession, syncBurnedTodayToDailyMetrics, user?.id]);
-
   // ✅ Submit now just finalizes (draft already saved) + navigates to history
   const handleFinish = async () => {
     // add partial exercise if valid
@@ -952,37 +1024,86 @@ setNewExercise({
 
     try {
       const session = buildDraftWorkoutSession();
-      // ✅ Finalize: upsert workout row to cloud with items for cross-device details
-      const up = await saveWorkoutLocalFirst({
-        user_id: session.user_id || user?.id,
-        client_id: session.client_id,
-        started_at: session.started_at,
-        ended_at: session.ended_at,
-        total_calories: session.total_calories,
-        notes: session.notes || null,
-        goal: session.goal || null,
-        items: Array.isArray(session.exercises) ? session.exercises : Array.isArray(session.items) ? session.items : [],
-      });
 
-      // Mark local history entry as uploaded (prevents later cleanup from deleting it)
+      // 1) Save workout header row (cloud + local-first queue)
+      const saved = await saveWorkoutLocalFirst(session);
+      const workoutId = saved?.id || null;
+
+      // 2) Persist exercise details as workout_sets so other devices can render breakdown
+      try {
+        if (workoutId) {
+          // clear any prior sets for this workout (idempotent on resubmit)
+          await supabase
+            .from('workout_sets')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('workout_id', workoutId);
+
+          const rows = [];
+          for (const ex of cumulativeExercises) {
+            const name = String(ex?.exerciseName || '').trim();
+            if (!name) continue;
+
+            // For cardio/sauna/manual items, store a single row
+            const setsN = Math.max(1, parseInt(ex?.sets, 10) || 1);
+            const repsVal = ex?.reps != null && ex?.reps !== '' ? parseInt(ex.reps, 10) : null;
+            const weightVal = ex?.weight != null && ex?.weight !== '' ? Number(ex.weight) : null;
+
+            if (!weightVal && !repsVal) {
+              rows.push({
+                user_id: user.id,
+                workout_id: workoutId,
+                exercise_name: name,
+                weight: null,
+                reps: null,
+                volume: 0
+              });
+              continue;
+            }
+
+            // Strength: one row per set (matches your current schema usage)
+            for (let i = 0; i < setsN; i++) {
+              const reps = repsVal || null;
+              const weight = Number.isFinite(weightVal) ? weightVal : null;
+              const volume = (Number.isFinite(weight) ? weight : 0) * (Number.isFinite(reps) ? reps : 0);
+              rows.push({
+                user_id: user.id,
+                workout_id: workoutId,
+                exercise_name: name,
+                weight,
+                reps,
+                volume
+              });
+            }
+          }
+
+          if (rows.length) {
+            const ins = await supabase.from('workout_sets').insert(rows);
+            if (ins?.error) console.warn('[WorkoutPage] workout_sets insert error', ins.error);
+          }
+        }
+      } catch (e) {
+        console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
+      }
+
+      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
         const key = 'workoutHistory';
         const raw = JSON.parse(localStorage.getItem(key) || '[]');
         const list = Array.isArray(raw) ? raw : [];
-        const cid = String(session.client_id || session.id || '');
-        const next = list.map(w => {
-          const wid = String(w?.client_id || w?.id || '');
-          if (wid !== cid) return w;
-          return {
-            ...w,
+        const cid = String(session?.client_id || session?.id || '');
+        const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx],
             uploaded: true,
             __draft: false,
             __cloud: true,
-            workout_id: up?.id || w?.workout_id || null,
+            __workout_id: workoutId || list[idx].__workout_id || null
           };
-        });
-        localStorage.setItem(key, JSON.stringify(next));
-        window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { client_id: cid } }));
+          localStorage.setItem(key, JSON.stringify(list));
+          window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
+        }
       } catch {}
 
       updateStreak();
@@ -992,6 +1113,7 @@ setNewExercise({
         onWorkoutLogged(total);
       }
 
+      // 4) Push today's burned total into daily_metrics (absolute, stable across devices)
       await syncBurnedTodayToDailyMetrics(session.date, session.__local_day);
     } catch (e) {
       console.warn('[WorkoutPage] finalize save failed', e);
@@ -1443,24 +1565,16 @@ setNewExercise({
                       <Chip label={`${kcals} kcal`} color="primary" />
                     </Stack>
                     {hasDetails ? (
-                      <Box sx={{ mt: 1 }}>
-                        {sess.exercises.slice(0, 12).map((ex, i2) => {
-                          const nm = ex?.name || ex?.exerciseName || 'Exercise';
-                          const sets = ex?.sets ?? ex?.set_count ?? ex?.setCount;
-                          const reps = ex?.reps;
-                          const wt = ex?.weight;
-                          const cals = ex?.calories;
-                          return (
-                            <Typography key={i2} variant="body2" color="textSecondary" sx={{ lineHeight: 1.6 }}>
-                              {nm}
-                              {sets ? ` — ${sets} sets` : ''}{reps ? ` • ${reps} reps` : ''}{(wt || wt === 0) && wt !== null ? ` • ${wt} lb` : ''}{cals ? ` • ${Math.round(Number(cals) || 0)} kcal` : ''}
-                            </Typography>
-                          );
-                        })}
+                      <Box sx={{ mt: 0.75 }}>
+                        {sess.exercises.slice(0, 10).map((ex, i) => (
+                          <Typography key={i} variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.4 }}>
+                            {formatSessionExerciseDetail(ex)}
+                          </Typography>
+                        ))}
                       </Box>
                     ) : (
                       <Typography variant="caption" color="textSecondary">
-                        Synced session—exercise details may load in history.
+                        No details yet.
                       </Typography>
                     )}
                   </CardContent>
