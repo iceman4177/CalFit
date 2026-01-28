@@ -10,8 +10,6 @@ import {
   LinearProgress,
 } from '@mui/material';
 
-import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
-
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 function todayUS() {
@@ -56,44 +54,41 @@ function readUserGoalCalories() {
  * - dailyMetricsCache
  * - burnedToday / consumedToday (hydrated truth keys)
  */
-function readTodayTotals(userId) {
+function readTodayTotals() {
   const dUS = todayUS();
   const dISO = localISODay();
 
-  let eaten = 0;
-  let burned = 0;
+  let eatenNow = 0;
+  let burnedNow = 0;
 
   // Meals
   try {
-    ensureScopedFromLegacy(KEYS.mealHistory, userId);
-    const mh = readScopedJSON(KEYS.mealHistory, userId, []);
+    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
     const rec = Array.isArray(mh)
       ? mh.find(m => m?.date === dUS || m?.date === dISO)
       : null;
     if (rec?.meals?.length) {
-      eaten = rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
+      eatenNow = rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
     }
   } catch {}
 
   // Workouts
   try {
-    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-    const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
+    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
     const arr = Array.isArray(wh) ? wh : [];
-    burned = arr
+    burnedNow = arr
       .filter(w => w?.date === dUS || w?.date === dISO)
       .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
   } catch {}
 
   // dailyMetricsCache
   try {
-    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
-    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
     if (row) {
       const eatenFromCache = safeNum(
         row?.consumed ??
-          row?.eaten ??
+          row?.eatenNow ??
           row?.calories_eaten ??
           row?.cals_eaten ??
           row?.food ??
@@ -102,7 +97,7 @@ function readTodayTotals(userId) {
       );
 
       const burnedFromCache = safeNum(
-        row?.burned ??
+        row?.burnedNow ??
           row?.calories_burned ??
           row?.cals_burned ??
           row?.exercise ??
@@ -110,10 +105,10 @@ function readTodayTotals(userId) {
         NaN
       );
 
-      if (Number.isFinite(eatenFromCache)) eaten = eatenFromCache;
+      if (Number.isFinite(eatenFromCache)) eatenNow = eatenFromCache;
       if (Number.isFinite(burnedFromCache)) {
         // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
-        if (burnedFromCache > 0 || burned === 0) burned = burnedFromCache;
+        if (burnedFromCache > 0 || burnedNow === 0) burnedNow = burnedFromCache;
       }
     }
   } catch {}
@@ -121,23 +116,23 @@ function readTodayTotals(userId) {
   // ✅ burnedToday / consumedToday — strongest truth keys
   try {
     const eatenDirect = safeNum(localStorage.getItem('consumedToday'), NaN);
-    if (Number.isFinite(eatenDirect)) eaten = eatenDirect;
+    if (Number.isFinite(eatenDirect)) eatenNow = eatenDirect;
   } catch {}
 
   try {
     const burnedDirect = safeNum(localStorage.getItem('burnedToday'), NaN);
     if (Number.isFinite(burnedDirect)) {
       // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
-      if (burnedDirect > 0 || burned === 0) burned = burnedDirect;
+      if (burnedDirect > 0 || burnedNow === 0) burnedNow = burnedDirect;
     }
   } catch {}
 
   return {
     dayUS: dUS,
     dayISO: dISO,
-    eaten: Math.round(eaten || 0),
-    burned: Math.round(burned || 0),
-    goal: Math.round(readUserGoalCalories() || 0),
+    eatenNow: Math.round(eatenNow || 0),
+    burnedNow: Math.round(burnedNow || 0),
+    goalNow: Math.round(readUserGoalCalories() || 0),
   };
 }
 
@@ -156,28 +151,28 @@ function preferProp(propVal, baseVal) {
   return p;
 }
 
-export default function NetCalorieBanner({ burned, consumed, userId = null }) {
+export default function NetCalorieBanner({ burnedNow: burnedProp, consumed: consumedProp, goalNow: goalProp } = {}) {
   const [state, setState] = useState(() => {
-    const base = readTodayTotals(userId);
+    const base = readTodayTotals();
     return {
       ...base,
-      eaten: preferProp(consumedProp, base.eaten),
-      burned: preferProp(burnedProp, base.burned),
-      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
+      eatenNow: preferProp(consumedProp, base.eatenNow),
+      burnedNow: preferProp(burnedProp, base.burnedNow),
+      goalNow: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
         ? Math.round(goalProp)
-        : base.goal,
+        : base.goalNow,
     };
   });
 
   const recompute = useCallback(() => {
-    const base = readTodayTotals(userId);
+    const base = readTodayTotals();
     setState({
       ...base,
-      eaten: preferProp(consumedProp, base.eaten),
-      burned: preferProp(burnedProp, base.burned),
-      goal: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
+      eatenNow: preferProp(consumedProp, base.eatenNow),
+      burnedNow: preferProp(burnedProp, base.burnedNow),
+      goalNow: (typeof goalProp === 'number' && Number.isFinite(goalProp) && goalProp > 0)
         ? Math.round(goalProp)
-        : base.goal,
+        : base.goalNow,
     });
   }, [burnedProp, consumedProp, goalProp]);
 
@@ -206,7 +201,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
     const onVisOrFocus = () => recompute();
 
     window.addEventListener('slimcal:consumed:update', kick);
-    window.addEventListener('slimcal:burned:update', kick);
+    window.addEventListener('slimcal:burnedNow:update', kick);
     window.addEventListener('slimcal:streak:update', kick);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisOrFocus);
@@ -214,21 +209,20 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
 
     return () => {
       window.removeEventListener('slimcal:consumed:update', kick);
-      window.removeEventListener('slimcal:burned:update', kick);
+      window.removeEventListener('slimcal:burnedNow:update', kick);
       window.removeEventListener('slimcal:streak:update', kick);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisOrFocus);
       window.removeEventListener('focus', onVisOrFocus);
     };
   }, [recompute]);
-
-  const eaten = state.eaten || 0;
-  const burned = state.burned || 0;
-  const goal = state.goal || 0;
+  const eatenNow = state.eatenNow || 0;
+  const burnedNow = state.burnedNow || 0;
+  const goalNow = state.goalNow || 0;
 
   // Canonical math
-  const net = eaten - burned;
-  const remaining = goal ? (goal - eaten + burned) : 0;
+  const net = eatenNow - burnedNow;
+  const remaining = goalNow ? (goalNow - eatenNow + burnedNow) : 0;
 
   const netPill =
     net > 0
@@ -238,15 +232,15 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
         : { label: 'Net: 0 kcal', color: 'info' };
 
   const ringPct = useMemo(() => {
-    if (!goal) return 0;
-    const effective = eaten - burned;
-    const pct = goal > 0 ? (effective / goal) * 100 : 0;
+    if (!goalNow) return 0;
+    const effective = eatenNow - burnedNow;
+    const pct = goalNow > 0 ? (effective / goalNow) * 100 : 0;
     return clamp(pct, 0, 120);
-  }, [goal, eaten, burned]);
+  }, [goalNow, eatenNow, burnedNow]);
 
-  const remainingLabel = goal
+  const remainingLabel = goalNow
     ? `${nf0.format(Math.max(0, remaining))} left`
-    : 'Set goal';
+    : 'Set goalNow';
 
   return (
     <Paper
@@ -298,7 +292,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
           <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 1.25 }}>
             <Box sx={{ flex: 1 }}>
               <Typography sx={{ fontWeight: 950, fontSize: '1.8rem', lineHeight: 1.05 }}>
-                {goal ? nf0.format(Math.max(0, remaining)) : '—'}
+                {goalNow ? nf0.format(Math.max(0, remaining)) : '—'}
                 <Typography component="span" sx={{ ml: 1, fontWeight: 900, color: 'text.secondary' }}>
                   kcal
                 </Typography>
@@ -311,7 +305,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
 
           <LinearProgress
             variant="determinate"
-            value={goal ? clamp(ringPct, 0, 100) : 0}
+            value={goalNow ? clamp(ringPct, 0, 100) : 0}
             sx={{
               mt: 1.25,
               height: 10,
@@ -320,7 +314,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
             }}
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.6 }}>
-            {goal ? `${nf0.format(eaten - burned)} / ${nf0.format(goal)} effective` : 'Add a daily goal to unlock remaining'}
+            {goalNow ? `${nf0.format(eatenNow - burnedNow)} / ${nf0.format(goalNow)} effective` : 'Add a daily goalNow to unlock remaining'}
           </Typography>
         </Box>
 
@@ -339,10 +333,10 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
             label={
               <Stack direction="row" justifyContent="space-between" sx={{ width: '100%' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <span role="img" aria-label="goal">🎯</span>
+                  <span role="img" aria-label="goalNow">🎯</span>
                   <Typography component="span" sx={{ fontWeight: 900 }}>Goal</Typography>
                 </Box>
-                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(goal || 0)} kcal</Typography>
+                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(goalNow || 0)} kcal</Typography>
               </Stack>
             }
             sx={{ borderRadius: 2, '& .MuiChip-label': { width: '100%' } }}
@@ -356,7 +350,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
                   <span role="img" aria-label="food">🍽️</span>
                   <Typography component="span" sx={{ fontWeight: 900 }}>Food</Typography>
                 </Box>
-                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(eaten)} kcal</Typography>
+                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(eatenNow)} kcal</Typography>
               </Stack>
             }
             sx={{ borderRadius: 2, '& .MuiChip-label': { width: '100%' } }}
@@ -370,7 +364,7 @@ export default function NetCalorieBanner({ burned, consumed, userId = null }) {
                   <span role="img" aria-label="exercise">🔥</span>
                   <Typography component="span" sx={{ fontWeight: 900 }}>Exercise</Typography>
                 </Box>
-                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(burned)} kcal</Typography>
+                <Typography component="span" sx={{ fontWeight: 950 }}>{nf0.format(burnedNow)} kcal</Typography>
               </Stack>
             }
             sx={{ borderRadius: 2, '& .MuiChip-label': { width: '100%' } }}
