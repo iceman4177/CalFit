@@ -77,10 +77,32 @@ function dayISOToUS(dayISO) {
 }
 
 function normalizeWorkoutForLocal(w, todayUS) {
-  const cid = w?.client_id || w?.id || `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
+  const cid =
+    w?.client_id ||
+    w?.id ||
+    `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
+
   const startedAt = w?.started_at || w?.created_at || new Date().toISOString();
   const endedAt = w?.ended_at || startedAt;
   const total = safeNum(w?.total_calories, 0);
+
+  // Prefer workouts.items (jsonb) if present; fallback to workouts.exercises
+  const rawItems = Array.isArray(w?.items)
+    ? w.items
+    : (Array.isArray(w?.exercises) ? w.exercises : []);
+
+  const exercises = Array.isArray(rawItems)
+    ? rawItems.map((it) => ({
+        name: it?.name || it?.exercise_name || it?.exerciseName || 'Exercise',
+        sets: it?.sets ?? it?.set_count ?? it?.setCount ?? null,
+        reps: it?.reps ?? null,
+        weight: it?.weight ?? null,
+        calories: it?.calories ?? null,
+        tempo: it?.tempo ?? null,
+        muscleGroup: it?.muscle_group || it?.muscleGroup || null,
+        equipment: it?.equipment || null,
+      }))
+    : [];
 
   return {
     id: cid,
@@ -91,10 +113,11 @@ function normalizeWorkoutForLocal(w, todayUS) {
     createdAt: startedAt,
     totalCalories: total,
     total_calories: total,
-    name: 'Workout',
-    exercises: Array.isArray(w?.exercises) ? w.exercises : [],
+    name: w?.title || w?.name || 'Workout',
+    exercises,
+    items: exercises, // keep a copy in case UI prefers items
     uploaded: true,
-    __cloud: true
+    __cloud: true,
   };
 }
 
@@ -166,24 +189,20 @@ function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
 
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
-  const [yy, mm, dd] = String(dayISO).split('-').map(n => parseInt(n, 10));
-  const startLocal = new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
-  const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
+  const [yy, mm, dd] = String(dayISO || '').split('-').map(n => parseInt(n, 10));
+  const startLocal = (yy && mm && dd) ? new Date(yy, mm - 1, dd, 0, 0, 0, 0) : new Date();
+  const nextLocal = new Date(startLocal.getFullYear(), startLocal.getMonth(), startLocal.getDate() + 1, 0, 0, 0, 0);
 
   // Prefer started_at range (same as meals hydration)
   try {
     const res = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at,items,local_day')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
 
-    if (!res?.error) {
-      const out = Array.isArray(res?.data) ? res.data : [];
-      if (out.length > 0) return out;
-      // If range returned 0, fall through to recent-filter fallback (mobile-safe).
-    }
+    if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
 
     // If started_at is missing, fall through to created_at range
     if (!/column .*started_at.* does not exist/i.test(res.error?.message || '')) {
@@ -204,46 +223,7 @@ async function pullWorkoutsForDay(userId, dayISO) {
       console.warn('[hydrateCloudToLocal] workouts pull (created_at) failed', res2.error);
       return [];
     }
-    const out2 = Array.isArray(res2?.data) ? res2.data : [];
-    if (out2.length > 0) return out2;
-  // Last resort: pull recent workouts and filter to today locally.
-  try {
-    let rData = null;
-    let rErr = null;
-    try {
-      const r = await supabase
-        .from('workouts')
-        .select('id,client_id,total_calories,started_at,ended_at,created_at')
-        .eq('user_id', userId)
-        .order('started_at', { ascending: false })
-        .limit(50);
-      rData = r?.data;
-      rErr = r?.error;
-    } catch {}
-    if (rErr && /column .*started_at.* does not exist/i.test(rErr?.message || '')) {
-      const r2 = await supabase
-        .from('workouts')
-        .select('id,client_id,total_calories,created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      rData = r2?.data;
-      rErr = r2?.error;
-    }
-    if (!rErr) {
-      const recent = Array.isArray(rData) ? rData : [];
-      const todays = recent.filter(w => {
-        try {
-          const dt = new Date(w?.started_at || w?.created_at || 0);
-          return localDayISO(dt) === dayISO;
-        } catch {
-          return false;
-        }
-      });
-      return todays;
-    }
-  } catch {}
-
+    return Array.isArray(res2?.data) ? res2.data : [];
   } catch {
     return [];
   }

@@ -67,18 +67,37 @@ function dispatchBurned(dayISO, burned) {
 
 // ---- Cloud upserts -----------------------------------------------------------
 async function upsertWorkoutCloud(payload) {
+  // Try upsert; if optional columns don't exist, retry without them.
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // IMPORTANT: requires UNIQUE(user_id, client_id) which you just added ✅
-  const res = await supabase
-    .from('workouts')
-    .upsert(payload, { onConflict: 'user_id,client_id' })
-    .select('id')
-    .maybeSingle();
+  const attempt = async (pl) => {
+    const res = await supabase
+      .from('workouts')
+      .upsert(pl, { onConflict: 'user_id,client_id' })
+      .select('id')
+      .maybeSingle();
+    if (res?.error) throw res.error;
+    return res?.data || null;
+  };
 
-  if (res?.error) throw res.error;
-  return res?.data || null;
+  try {
+    return await attempt(payload);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    const cleaned = { ...payload };
+    if (/column .*title.* does not exist/i.test(msg)) delete cleaned.title;
+    if (/column .*name.* does not exist/i.test(msg)) delete cleaned.name;
+    if (/column .*items.* does not exist/i.test(msg)) delete cleaned.items;
+
+    const changed =
+      (('title' in payload) && !('title' in cleaned)) ||
+      (('name' in payload) && !('name' in cleaned)) ||
+      (('items' in payload) && !('items' in cleaned));
+
+    if (!changed) throw err;
+    return await attempt(cleaned);
+  }
 }
 
 async function upsertMealCloud(payload) {
@@ -252,8 +271,8 @@ export async function saveWorkoutLocalFirst({
   started_at,
   ended_at,
   total_calories,
-  name = null,
-  exercises = null,
+  items = null,
+  title = null,
   notes = null,
   goal = null,
 }) {
@@ -270,13 +289,18 @@ export async function saveWorkoutLocalFirst({
     started_at: startISO,
     ended_at: ended_at || startISO,
     total_calories: safeNum(total_calories, 0),
+  items: (Array.isArray(items) ? items : null),
+  // Optional display fields (if columns exist)
+  title: title || (Array.isArray(items) && items[0]?.name ? String(items[0].name) : null),
+  name: title || (Array.isArray(items) && items[0]?.name ? String(items[0].name) : null),
     notes,
     goal,
     updated_at: new Date().toISOString(),
   };
 
+  let up = null;
   try {
-    await upsertWorkoutCloud(payload);
+    up = await upsertWorkoutCloud(payload);
   } catch (e) {
     try {
       enqueueOp?.({
@@ -309,6 +333,8 @@ export async function saveWorkoutLocalFirst({
       consumed: eaten,
     });
   } catch {}
+
+  return up;
 }
 
 /**
