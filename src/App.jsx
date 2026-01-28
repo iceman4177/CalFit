@@ -14,7 +14,6 @@ import {
   Typography,
   Button,
   Stack,
-  Tooltip,
   Menu,
   MenuItem,
   Dialog,
@@ -25,7 +24,7 @@ import {
   Snackbar,
   Alert,
   Badge,
-  Chip,
+  Chip
 } from '@mui/material';
 import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -663,35 +662,25 @@ export default function App() {
     <Box sx={{ textAlign: 'center', mb: 3 }}>
       <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
         {/* ✅ New hero quick action: Evaluate */}
-        <Tooltip title="Daily Evaluation (Hero)">
-          <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
+        <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
             EVALUATE
           </Button>
-        </Tooltip>
 
-        <Tooltip title="Log Workout">
-          <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
+        <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
             WORKOUT
           </Button>
-        </Tooltip>
 
-        <Tooltip title="Log Meal">
-          <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
+        <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
             MEALS
           </Button>
-        </Tooltip>
 
-        <Tooltip title="Invite Friends">
-          <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
+        <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
             INVITE
           </Button>
-        </Tooltip>
 
-        <Tooltip title="More options">
-          <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
+        <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
             MORE
           </Button>
-        </Tooltip>
       </Stack>
 
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>

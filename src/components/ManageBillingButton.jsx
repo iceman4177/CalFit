@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, CircularProgress, Tooltip } from '@mui/material';
+import { Button, CircularProgress } from '@mui/material';
 import { useAuth } from '../context/AuthProvider.jsx';
 import { openBillingPortal } from '../lib/billing';
 
@@ -42,12 +42,10 @@ export default function ManageBillingButton({ variant = 'text', size = 'medium' 
   }
 
   return (
-    <Tooltip title="Unlock AI meal suggestions, exports, and more">
-      <span>
+    <span>
         <Button onClick={openUpgrade} variant={variant} size={size}>
           Upgrade
         </Button>
       </span>
-    </Tooltip>
   );
 }

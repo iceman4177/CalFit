@@ -13,7 +13,6 @@ import {
   Autocomplete,
   Alert,
   IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -1207,11 +1206,9 @@ export default function MealTracker({ onMealUpdate }) {
                   <Box key={`${m.name}-${i}`}>
                     <ListItem
                       secondaryAction={
-                        <Tooltip title="Delete this meal">
-                          <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
+                        <IconButton edge="end" aria-label="delete meal" onClick={() => handleDeleteMeal(i)} size="small">
                             <DeleteIcon fontSize="small" />
                           </IconButton>
-                        </Tooltip>
                       }
                     >
                       <ListItemText

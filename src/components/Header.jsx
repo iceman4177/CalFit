@@ -9,8 +9,7 @@ import {
   IconButton,
   Typography,
   Stack,
-  Tooltip,
-  Chip,
+  Chip
 } from '@mui/material';
 import { useEntitlements } from '../context/EntitlementsContext.jsx';
 import { supabase } from '../lib/supabaseClient';
@@ -201,8 +200,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
 
           {/* Ambassador badge */}
           {hasAmbassador && (
-            <Tooltip title="Slimcal Ambassador">
-              <Chip
+            <Chip
                 label="Ambassador"
                 size="small"
                 color="warning"
@@ -213,7 +211,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
                   '& .MuiChip-label': { px: 1 },
                 }}
               />
-            </Tooltip>
           )}
         </Box>
 
@@ -255,8 +252,7 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
           </Button>
 
           {!authUser && (
-            <Tooltip title="Sign in with Google">
-              <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
+            <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
                 <img
                   src="https://www.svgrepo.com/show/475656/google-color.svg"
                   alt="Sign in"
@@ -265,7 +261,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
                   style={{ display: 'block' }}
                 />
               </IconButton>
-            </Tooltip>
           )}
         </Stack>
       </Toolbar>

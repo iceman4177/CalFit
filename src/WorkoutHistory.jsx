@@ -14,7 +14,6 @@ import {
   Stack,
   Chip,
   IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -520,8 +519,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
                             {(Number(w.total_calories) || 0).toFixed(2)} cals
                           </Typography>
 
-                          <Tooltip title="Delete workout">
-                            <span>
+                          <span>
                               <IconButton
                                 size="small"
                                 color="error"
@@ -531,7 +529,6 @@ export default function WorkoutHistory({ onHistoryChange }) {
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
                             </span>
-                          </Tooltip>
                         </Stack>
                       </Stack>
                     }

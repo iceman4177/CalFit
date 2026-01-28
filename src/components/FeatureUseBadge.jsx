@@ -1,6 +1,6 @@
 // src/components/FeatureUseBadge.jsx
 import React from "react";
-import { Chip, Tooltip } from "@mui/material";
+import { Chip } from '@mui/material';
 
 // -----------------------------------------------------------------------------
 // Daily Free-tier usage tracking (client-side)
@@ -101,9 +101,7 @@ export function registerDailyFeatureUse(featureKey) {
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
   if (isPro) {
     return (
-      <Tooltip title="PRO: Unlimited" arrow>
-        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
-      </Tooltip>
+      <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
     );
   }
 
@@ -114,8 +112,6 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
-    <Tooltip title="Free daily uses. Upgrade for unlimited." arrow>
-      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
-    </Tooltip>
+    <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
   );
 }
