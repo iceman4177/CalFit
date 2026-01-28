@@ -243,16 +243,22 @@ export async function getWorkouts(userId, { limit = 100 } = {}) {
   return data || [];
 }
 
-export async function getWorkoutSetsFor(workoutId, userId) {
+export async function getWorkoutSetsFor(workoutId, userId, workoutClientId = null) {
+  if (!userId) return [];
+  const ids = [workoutClientId, workoutId].filter(Boolean).map(String);
+  // NOTE: In this app, workout_sets.workout_id historically points at the workout's *client_id* (stable across devices),
+  // not necessarily the workouts.id (server uuid). So we query both to be safe.
   const { data, error } = await supabase
     .from("workout_sets")
     .select("exercise_name, reps, weight, tempo, volume, created_at")
-    .eq("workout_id", workoutId)
     .eq("user_id", userId)
+    .in("workout_id", ids)
     .order("created_at", { ascending: true });
+
   if (error) throw error;
   return data || [];
 }
+
 
 export async function getDailyMetricsRange(userId, from, to) {
   if (!userId) return [];
@@ -299,4 +305,62 @@ export async function getDailyMetricsRange(userId, from, to) {
     eaten: r.calories_eaten ?? null,
     net: r.net_calories ?? null,
   }));
+}
+
+export async function replaceWorkoutSetsFor({ userId, workoutClientId, exercises = [] }) {
+  if (!userId || !workoutClientId) return;
+  const wid = String(workoutClientId);
+
+  // Flatten exercises into "set rows"
+  const rows = [];
+  for (const ex of (exercises || [])) {
+    const name = String(ex?.exerciseName || ex?.name || "Exercise").trim();
+    if (!name) continue;
+
+    // cardio: store calories in volume so we can show it later without a schema change
+    if (ex?.exerciseType === 'cardio') {
+      const cals = Number(ex?.calories);
+      rows.push({
+        user_id: userId,
+        workout_id: wid,
+        exercise_name: name,
+        reps: null,
+        weight: null,
+        tempo: null,
+        volume: Number.isFinite(cals) ? cals : null,
+      });
+      continue;
+    }
+
+    const setsN = Math.max(1, parseInt(ex?.sets ?? 1, 10) || 1);
+    const repsN = parseInt(ex?.reps ?? 0, 10) || 0;
+    const weightN = Number(ex?.weight ?? 0) || 0;
+
+    // Write one row per set (so history can show "3 sets", etc.)
+    for (let i = 0; i < setsN; i++) {
+      rows.push({
+        user_id: userId,
+        workout_id: wid,
+        exercise_name: name,
+        reps: repsN || null,
+        weight: weightN || null,
+        tempo: ex?.tempo || null,
+        // volume used as "per-set calories" proxy if provided; else leave null.
+        volume: null,
+      });
+    }
+  }
+
+  // Clear then insert (simple + prevents dupes)
+  const delRes = await supabase
+    .from("workout_sets")
+    .delete()
+    .eq("user_id", userId)
+    .eq("workout_id", wid);
+
+  if (delRes?.error) throw delRes.error;
+
+  if (rows.length === 0) return;
+  const insRes = await supabase.from("workout_sets").insert(rows);
+  if (insRes?.error) throw insRes.error;
 }

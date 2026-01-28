@@ -254,10 +254,8 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   notes = null,
   goal = null,
-  // optional: store lightweight exercise summary if your schema supports it
-  items = undefined,
 }) {
-  if (!user_id) return null;
+  if (!user_id) return;
 
   const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}`);
   const startISO = started_at || new Date().toISOString();
@@ -275,12 +273,8 @@ export async function saveWorkoutLocalFirst({
     updated_at: new Date().toISOString(),
   };
 
-  // Only include items if caller provided it (and schema has items column)
-  if (items !== undefined) payload.items = items;
-
   try {
-    const row = await upsertWorkoutCloud(payload);
-    return row; // { id } (or null)
+    await upsertWorkoutCloud(payload);
   } catch (e) {
     try {
       enqueueOp?.({
@@ -294,7 +288,6 @@ export async function saveWorkoutLocalFirst({
     throw e;
   }
 }
-
 
 /**
  * ✅ deleteWorkoutLocalFirst

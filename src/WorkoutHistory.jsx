@@ -13,8 +13,7 @@ import {
   Paper,
   Stack,
   Chip,
-  IconButton,
-  Dialog,
+  IconButton,  Dialog,
   DialogTitle,
   DialogContent,
   DialogActions
@@ -134,11 +133,13 @@ function summarizeExercisesFromSets(sets = []) {
     prev.sets += 1;
     prev.reps += safeNum(s.reps, 0);
 
-    // calories: prefer explicit per-set calories, else proxy
+    // calories: prefer explicit per-set calories; else if volume looks like calories (cardio), use it; else proxy
     const c =
       (typeof s.calories === 'number' && Number.isFinite(s.calories))
         ? s.calories
-        : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
+        : (typeof s.volume === 'number' && Number.isFinite(s.volume) && (safeNum(s.weight, 0) === 0) && (safeNum(s.reps, 0) === 0))
+          ? s.volume
+          : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
 
     prev.calories += safeNum(c, 0);
 
@@ -367,7 +368,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
         const withSets = await Promise.all(
           base.map(async w => {
-            const sets = await getWorkoutSetsFor(w.id, user.id);
+            const sets = await getWorkoutSetsFor(w.id, user.id, w.client_id);
 
             const dayUS = toUS(w.started_at);
             const candidates = localIdx.byDay.get(dayUS) || [];
@@ -519,16 +520,14 @@ export default function WorkoutHistory({ onHistoryChange }) {
                             {(Number(w.total_calories) || 0).toFixed(2)} cals
                           </Typography>
 
-                          <span>
-                              <IconButton
+                          <span><IconButton
                                 size="small"
                                 color="error"
                                 onClick={() => askDeleteRow(w)}
                                 disabled={deleting}
                               >
                                 <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </span>
+                              </IconButton></span>
                         </Stack>
                       </Stack>
                     }
