@@ -98,18 +98,24 @@ function normalizeWorkoutForLocal(w, todayUS) {
   };
 }
 
-function mergeWorkoutsIntoLocalHistory(todayUS, cloudWorkouts) {
+function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts) {
   try {
     const key = 'workoutHistory';
     const raw = JSON.parse(localStorage.getItem(key) || '[]');
     const list = Array.isArray(raw) ? raw : [];
+
+    const isTodayAny = (s) => {
+      const d = String(s?.date || '');
+      return d === String(todayUS) || d === String(dayISO);
+    };
 
     // Build map by client_id/id to keep local exercise details if present
     const map = new Map();
     for (const sess of list) {
       const cid = sess?.client_id || sess?.id;
       if (!cid) continue;
-      map.set(String(cid), sess);
+      const normSess = isTodayAny(sess) ? { ...sess, date: todayUS } : sess;
+      map.set(String(cid), normSess);
     }
 
     for (const w of (cloudWorkouts || [])) {
@@ -134,9 +140,11 @@ function mergeWorkoutsIntoLocalHistory(todayUS, cloudWorkouts) {
       }
     }
 
-    // Keep non-today entries + today merged entries
-    const nonToday = list.filter(s => String(s?.date || '') !== String(todayUS));
-    const todayMerged = Array.from(map.values()).filter(s => String(s?.date || '') === String(todayUS));
+    // Keep non-today entries + today merged entries (treat both US + ISO as "today")
+    const nonToday = list.filter(s => !isTodayAny(s));
+    const todayMerged = Array.from(map.values())
+      .filter(s => isTodayAny(s))
+      .map(s => ({ ...s, date: todayUS }));
     // Sort today newest first (by started/created)
     todayMerged.sort((a, b) => {
       const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
@@ -405,7 +413,7 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
     const todayUS = dayISOToUS(dayISO);
     const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
     if (Array.isArray(cloudWorkouts) && cloudWorkouts.length > 0) {
-      mergeWorkoutsIntoLocalHistory(todayUS, cloudWorkouts);
+      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts);
 
       // If daily_metrics burned was stale, the list is a strong fallback.
       const sumFromList = (cloudWorkouts || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
@@ -468,7 +476,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
 
     // Merge into local workoutHistory (preserve local exercise details if present)
     if (list.length > 0) {
-      mergeWorkoutsIntoLocalHistory(todayUS, list);
+      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, list);
     } else {
       // still notify listeners (prevents stale UI)
       try {

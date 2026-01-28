@@ -15,13 +15,8 @@ import {
   CardContent,
   Paper,
   Stack,
-  Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  CircularProgress
+  Chip
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
@@ -40,15 +35,15 @@ import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
+// ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
+import { supabase } from './lib/supabaseClient';
+
 // ✅ local-first wrappers (idempotent, queued sync, syncs to Supabase when signed in)
 import {
   saveWorkoutLocalFirst,
   deleteWorkoutLocalFirst,
   upsertDailyMetricsLocalFirst
 } from './lib/localFirst';
-
-// ✅ Use the same DB readers that WorkoutHistory uses so we can show real exercise data
-import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 
 // ---- Paywall helpers ----
 const isProUser = () => {
@@ -105,12 +100,12 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-function toUS(iso) {
-  try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; }
-}
-function formatTimeOnly(iso) {
-  try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
-  catch { return ''; }
+function tryHHMM(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
 }
 
 // ---- Stable device id (not workout session id) ----
@@ -153,30 +148,6 @@ function clearActiveWorkoutSessionId() {
   } catch { }
 }
 
-// --- Better display: show per-exercise summary (same as WorkoutHistory)
-const SCALE = 0.1;
-function summarizeExercisesFromSets(sets = []) {
-  if (!Array.isArray(sets) || sets.length === 0) return [];
-  const map = new Map();
-  for (const s of sets) {
-    const name = String(s.exercise_name || s.name || 'Exercise').trim();
-    const prev = map.get(name) || { name, reps: 0, sets: 0, calories: 0 };
-    prev.sets += 1;
-    prev.reps += safeNum(s.reps, 0);
-
-    const c =
-      (typeof s.calories === 'number' && Number.isFinite(s.calories))
-        ? s.calories
-        : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
-
-    prev.calories += safeNum(c, 0);
-    map.set(name, prev);
-  }
-  return Array.from(map.values())
-    .sort((a, b) => (b.calories || 0) - (a.calories || 0))
-    .map(x => ({ ...x, calories: Math.round((x.calories || 0) * 100) / 100 }));
-}
-
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
@@ -212,6 +183,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
 
+  // ✅ "Meals-style": show today's logged workouts at the bottom (no need to leave page)
+  const [todaySessions, setTodaySessions] = useState([]);
+  const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
+
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
 
@@ -221,10 +196,312 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ debounce autosave timer
   const autosaveTimerRef = useRef(null);
 
-  // --- NEW: Today widget state (compact, real data) ---
-  const [todaySessions, setTodaySessions] = useState([]);
-  const [todaySetsByWorkoutId, setTodaySetsByWorkoutId] = useState({});
-  const [todayLoading, setTodayLoading] = useState(false);
+  const readTodaySessionsFromLocal = useCallback(() => {
+    const now = new Date();
+    const todayUS = now.toLocaleDateString('en-US');
+    const todayISO = localDayISO(now);
+    try {
+      const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      const list = Array.isArray(raw) ? raw : [];
+      // --- De-dupe + normalize ---
+      // Workouts can exist in localStorage with either `date` = todayUS or `date` = todayISO.
+      // If both exist for the same session (same client_id), it shows twice and doubles burned.
+      const byId = new Map();
+      let sawDupes = false;
+
+      const isToday = (d) => d === todayUS || d === todayISO;
+      const score = (sess) => {
+        const hasExercises = Array.isArray(sess?.exercises) && sess.exercises.length > 0;
+        const total = safeNum(sess?.totalCalories ?? sess?.total_calories, 0);
+        // prefer sessions with exercises, then higher total, then newer timestamp
+        const t = new Date(sess?.started_at || sess?.createdAt || 0).getTime() || 0;
+        return (hasExercises ? 1_000_000 : 0) + (total * 1000) + (t / 1000);
+      };
+
+      for (const w0 of list) {
+        if (!w0) continue;
+        const cid = String(w0?.client_id || w0?.id || '');
+        if (!cid) continue;
+        const w = {
+          ...w0,
+          // normalize totals for UI
+          totalCalories: safeNum(w0?.totalCalories ?? w0?.total_calories, 0),
+          total_calories: safeNum(w0?.total_calories ?? w0?.totalCalories, 0),
+        };
+        if (isToday(w?.date)) w.date = todayUS;
+
+        const prev = byId.get(cid);
+        if (!prev) byId.set(cid, w);
+        else {
+          sawDupes = true;
+          byId.set(cid, score(w) >= score(prev) ? w : prev);
+        }
+      }
+
+      let cleaned = Array.from(byId.values());
+      // newest first
+      cleaned.sort((a, b) => {
+        const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
+        const tb = new Date(b?.started_at || b?.createdAt || 0).getTime();
+        return tb - ta;
+      });
+
+      // Today list (normalized to todayUS). Extra de-dupe by (time + kcal) to guard
+      // against rare cases where two rows exist for the same workout but different ids.
+      let today = cleaned.filter(w => w?.date === todayUS);
+      if (today.length > 1) {
+        const fpMap = new Map();
+        const uniq = [];
+        for (const w of today) {
+          const total = safeNum(w?.totalCalories ?? w?.total_calories, 0);
+          const hhmm = tryHHMM(w?.started_at || w?.createdAt || w?.ended_at);
+          const fp = `${hhmm}|${Math.round(total * 10)}`;
+          const prev = fpMap.get(fp);
+          if (!prev) {
+            fpMap.set(fp, w);
+            uniq.push(w);
+            continue;
+          }
+          // prefer the one with exercises detail
+          const prevEx = Array.isArray(prev?.exercises) ? prev.exercises.length : 0;
+          const curEx = Array.isArray(w?.exercises) ? w.exercises.length : 0;
+          if (curEx > prevEx) {
+            fpMap.set(fp, w);
+            const idx = uniq.indexOf(prev);
+            if (idx >= 0) uniq[idx] = w;
+          } else {
+            sawDupes = true;
+          }
+        }
+        today = uniq;
+        if (sawDupes) {
+          // rebuild cleaned with today's unique sessions only
+          const nonToday2 = cleaned.filter(w => w?.date !== todayUS);
+          cleaned = [...today, ...nonToday2];
+        }
+      }
+
+      setTodaySessions(today);
+
+      // If we detected dupes / mixed date formats, write back a cleaned list + fix burned caches
+      if (sawDupes) {
+        try {
+          localStorage.setItem('workoutHistory', JSON.stringify(cleaned.slice(0, 300)));
+        } catch {}
+
+        // Update burnedToday + dailyMetricsCache burned so banner doesn't flicker/double-count
+        const burnedToday = today.reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+        try {
+          localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+        } catch {}
+        try {
+          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          const prev = cache[todayISO] || {};
+          cache[todayISO] = {
+            ...prev,
+            burned: Math.round(burnedToday || 0),
+            updated_at: new Date().toISOString()
+          };
+          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+        } catch {}
+        try {
+          window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+            detail: { date: todayISO, burned: Math.round(burnedToday || 0) }
+          }));
+        } catch {}
+      }
+    } catch {
+      setTodaySessions([]);
+    }
+  }, []);
+
+  const hydrateTodaySessionsFromCloud = useCallback(async () => {
+    if (!user?.id || !supabase) return;
+    const now = new Date();
+    const dayISO = localDayISO(now);
+    const todayUS = now.toLocaleDateString('en-US');
+    const isTodayAny = (s) => {
+      const d = String(s?.date || '');
+      return d === String(todayUS) || d === String(dayISO);
+    };
+    const startLocal = new Date(`${dayISO}T00:00:00`);
+    const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
+
+    setLoadingTodaySessions(true);
+    try {
+      // Prefer started_at range (same as meals)
+      let data = null;
+      let error = null;
+
+      try {
+        const res = await supabase
+          .from('workouts')
+          .select('id,client_id,total_calories,started_at,ended_at,created_at')
+          .eq('user_id', user.id)
+          .gte('started_at', startLocal.toISOString())
+          .lt('started_at', nextLocal.toISOString());
+        data = res?.data;
+        error = res?.error;
+      } catch {}
+
+      // Fallback: created_at range
+      if (error && /column .*started_at.* does not exist/i.test(error?.message || '')) {
+        const res2 = await supabase
+          .from('workouts')
+          .select('id,client_id,total_calories,created_at')
+          .eq('user_id', user.id)
+          .gte('created_at', startLocal.toISOString())
+          .lt('created_at', nextLocal.toISOString());
+        data = res2?.data;
+        error = res2?.error;
+      }
+
+      if (error) {
+        console.warn('[WorkoutPage] hydrateTodaySessionsFromCloud failed', error);
+        return;
+      }
+
+      const cloud = Array.isArray(data) ? data : [];
+      if (cloud.length === 0) return;
+
+      // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
+      try {
+        const key = 'workoutHistory';
+        const raw = JSON.parse(localStorage.getItem(key) || '[]');
+        const list = Array.isArray(raw) ? raw : [];
+
+        const map = new Map();
+        for (const sess of list) {
+          const cid = String(sess?.client_id || sess?.id || '');
+          if (!cid) continue;
+          map.set(cid, sess);
+        }
+
+        for (const w of cloud) {
+          const cid = String(w?.client_id || w?.id || '');
+          if (!cid) continue;
+
+          const norm = {
+            id: cid,
+            client_id: cid,
+            date: todayUS,
+            started_at: w?.started_at || w?.created_at || new Date().toISOString(),
+            ended_at: w?.ended_at || w?.started_at || w?.created_at || new Date().toISOString(),
+            createdAt: w?.started_at || w?.created_at || new Date().toISOString(),
+            totalCalories: safeNum(w?.total_calories, 0),
+            total_calories: safeNum(w?.total_calories, 0),
+            name: 'Workout',
+            exercises: [],
+            uploaded: true,
+            __cloud: true
+          };
+
+          const existing = map.get(cid);
+          if (existing) {
+            const keepExercises = Array.isArray(existing?.exercises) && existing.exercises.length > 0;
+            map.set(cid, {
+              ...norm,
+              ...existing,
+              exercises: keepExercises ? existing.exercises : norm.exercises,
+              totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
+              total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories)
+            });
+          } else {
+            map.set(cid, norm);
+          }
+        }
+
+        const nonToday = list.filter(s => !isTodayAny(s));
+        let todayMerged = Array.from(map.values()).filter(s => isTodayAny(s));
+
+        // Normalize all today entries to use the US string (matches meals)
+        todayMerged = todayMerged.map(s => ({ ...s, date: todayUS }));
+        todayMerged.sort((a, b) => {
+          const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
+          const tb = new Date(b?.started_at || b?.createdAt || 0).getTime();
+          return tb - ta;
+        });
+
+        // Extra guard: if two sessions have different ids but same time+calories,
+        // treat as duplicate (prevents double-count + banner flicker).
+        if (todayMerged.length > 1) {
+          const seen = new Set();
+          const uniq = [];
+          for (const s of todayMerged) {
+            const kcal = Math.round(safeNum(s?.totalCalories ?? s?.total_calories, 0) * 10) / 10;
+            const hhmm = tryHHMM(s?.started_at || s?.createdAt || '');
+            const fp = `${hhmm}|${kcal}`;
+            if (hhmm && kcal > 0 && seen.has(fp)) continue;
+            seen.add(fp);
+            uniq.push(s);
+          }
+          todayMerged = uniq;
+        }
+
+        const next = [...todayMerged, ...nonToday];
+        localStorage.setItem(key, JSON.stringify(next.slice(0, 300)));
+
+        // Update burnedToday + cache so banner reflects sessions immediately
+        const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
+        try {
+          localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+        } catch {}
+
+        try {
+          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          const prev = cache[dayISO] || {};
+          cache[dayISO] = {
+            ...prev,
+            burned: Math.round(burnedToday || 0),
+            updated_at: new Date().toISOString()
+          };
+          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+        } catch {}
+
+        try {
+          window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
+            detail: { date: dayISO, burned: Math.round(burnedToday || 0) }
+          }));
+        } catch {}
+      } catch (e) {
+        console.warn('[WorkoutPage] merge cloud workouts into local failed', e);
+      }
+    } finally {
+      setLoadingTodaySessions(false);
+    }
+  }, [user?.id]);
+
+  // ✅ Meals-style behavior: on load/focus, pull today's workouts from cloud into local
+  // and keep the on-page history + banner consistent without needing to visit /history.
+  useEffect(() => {
+    readTodaySessionsFromLocal();
+    hydrateTodaySessionsFromCloud();
+
+    const onWorkoutHistoryUpdate = () => readTodaySessionsFromLocal();
+    const onBurnedUpdate = () => readTodaySessionsFromLocal();
+    const onStorage = (e) => {
+      if (!e) return;
+      if (e.key === 'workoutHistory') readTodaySessionsFromLocal();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        hydrateTodaySessionsFromCloud();
+        readTodaySessionsFromLocal();
+      }
+    };
+
+    window.addEventListener('slimcal:workoutHistory:update', onWorkoutHistoryUpdate);
+    window.addEventListener('slimcal:burned:update', onBurnedUpdate);
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.removeEventListener('slimcal:workoutHistory:update', onWorkoutHistoryUpdate);
+      window.removeEventListener('slimcal:burned:update', onBurnedUpdate);
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [readTodaySessionsFromLocal, hydrateTodaySessionsFromCloud]);
 
   const handleDismiss = (key, setter, cb) => {
     try {
@@ -317,7 +594,151 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
   };
 
-  // ✅ INSTANT banner update helper (kept)
+  const handleAddExercise = () => {
+    if (newExercise.exerciseType === 'cardio') {
+      const cal = parseFloat(newExercise.manualCalories);
+      if (!cal || cal <= 0) {
+        alert('Please enter valid calories for cardio.');
+        return;
+      }
+            const entry = { exerciseType: 'cardio', exerciseName: newExercise.cardioType || 'Cardio', calories: cal };
+      const next = [...cumulativeExercises, entry];
+      setCumulativeExercises(next);
+      instantPersistWorkoutDraftToBanner(next);
+setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
+      setCurrentCalories(0);
+      return;
+    }
+
+    if (
+      !newExercise.exerciseName ||
+      parseFloat(newExercise.weight) <= 0 ||
+      parseInt(newExercise.reps, 10) <= 0
+    ) {
+      alert('Please enter a valid exercise, weight, and reps.');
+      return;
+    }
+
+    const cals = calculateCalories();
+        const entry = { ...newExercise, calories: cals };
+    const next = [...cumulativeExercises, entry];
+    setCumulativeExercises(next);
+    instantPersistWorkoutDraftToBanner(next);
+
+setNewExercise({
+      exerciseType: '',
+      cardioType: '',
+      manualCalories: '',
+      muscleGroup: '',
+      exerciseName: '',
+      weight: '',
+      sets: '1',
+      reps: '',
+      concentricTime: '',
+      eccentricTime: ''
+    });
+    setCurrentCalories(0);
+  };
+
+  const handleDoneWithExercises = () => {
+    if (
+      (newExercise.exerciseType === 'cardio' && parseFloat(newExercise.manualCalories) > 0) ||
+      (newExercise.exerciseName &&
+        parseFloat(newExercise.weight) > 0 &&
+        parseInt(newExercise.reps, 10) > 0)
+    ) {
+      handleAddExercise();
+    }
+    setCurrentStep(3);
+  };
+
+  const handleRemoveExercise = idx => {
+    const next = (cumulativeExercises || []).filter((_, i) => i !== idx);
+    setCumulativeExercises(next);
+    instantPersistWorkoutDraftToBanner(next);
+  };
+
+  // ✅ Sauna logging
+  const handleSaveSauna = () => {
+    if (saunaTime.trim()) {
+      const t = parseFloat(saunaTime) || 0;
+      const tmp = parseFloat(saunaTemp) || 180;
+      const uw = parseFloat(userData?.weight) || 150;
+
+      // temperature-scaled MET model
+      const weightKg = uw * 0.45359237;
+      let met = 1.5 + (tmp - 160) * 0.02;
+      met = Math.min(Math.max(met, 1.3), 2.5);
+      const kcalPerMin = (met * 3.5 * weightKg) / 200;
+      const saunaCals = kcalPerMin * t;
+
+            const next = [
+        ...(cumulativeExercises || []).filter(e => e.exerciseType !== 'Sauna'),
+        { exerciseType: 'Sauna', exerciseName: 'Sauna Session', calories: saunaCals }
+      ];
+      setCumulativeExercises(next);
+      instantPersistWorkoutDraftToBanner(next);
+
+    }
+
+    setShowSaunaSection(false);
+    setSaunaTime('');
+    setSaunaTemp('180');
+  };
+
+  const handleCancelSaunaForm = () => {
+    setShowSaunaSection(false);
+    setSaunaTime('');
+    setSaunaTemp('180');
+  };
+
+  // ✅ build a draft workout session that gets upserted continuously
+  const buildDraftWorkoutSession = useCallback(() => {
+    const now = new Date();
+    const startedAt = startedAtRef.current || now.toISOString();
+    const endedAt = now.toISOString();
+
+    const todayLocalIso = localDayISO(now);
+    const todayDisplay = now.toLocaleDateString('en-US');
+
+    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
+    const total = Math.round(totalRaw * 100) / 100;
+
+    return {
+      // ✅ upsert key for device sync
+      client_id: activeWorkoutSessionIdRef.current,
+      user_id: user?.id || null,
+
+      started_at: startedAt,
+      ended_at: endedAt,
+      total_calories: total,
+
+      // local history fields (used by History UI)
+      date: todayDisplay,
+      name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
+      exercises: cumulativeExercises.map(ex => ({
+        name: ex.exerciseName,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight: ex.weight || null,
+        calories: ex.calories
+      })),
+
+      // local metadata
+      id: activeWorkoutSessionIdRef.current,
+      localId: `w_${getOrCreateClientId()}_${Date.now()}`,
+      createdAt: startedAt,
+      uploaded: false,
+
+      // helper
+      __local_day: todayLocalIso
+    };
+  }, [cumulativeExercises, user?.id]);
+
+  // ✅ INSTANT banner update (workout = meal behavior)
+  // Meals update instantly because MealTracker writes to localStorage immediately.
+  // Workouts MUST do the same: as you add/remove exercises, immediately upsert a draft
+  // session into localStorage.workoutHistory + update burnedToday + dispatch event.
   const instantPersistWorkoutDraftToBanner = useCallback((nextExercises) => {
     try {
       const now = new Date();
@@ -414,145 +835,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     }
   }, []);
 
-  const handleAddExercise = () => {
-    if (newExercise.exerciseType === 'cardio') {
-      const cal = parseFloat(newExercise.manualCalories);
-      if (!cal || cal <= 0) {
-        alert('Please enter valid calories for cardio.');
-        return;
-      }
-      const entry = { exerciseType: 'cardio', exerciseName: newExercise.cardioType || 'Cardio', calories: cal };
-      const next = [...cumulativeExercises, entry];
-      setCumulativeExercises(next);
-      instantPersistWorkoutDraftToBanner(next);
-      setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
-      setCurrentCalories(0);
-      return;
-    }
-
-    if (
-      !newExercise.exerciseName ||
-      parseFloat(newExercise.weight) <= 0 ||
-      parseInt(newExercise.reps, 10) <= 0
-    ) {
-      alert('Please enter a valid exercise, weight, and reps.');
-      return;
-    }
-
-    const cals = calculateCalories();
-    const entry = { ...newExercise, calories: cals };
-    const next = [...cumulativeExercises, entry];
-    setCumulativeExercises(next);
-    instantPersistWorkoutDraftToBanner(next);
-
-    setNewExercise({
-      exerciseType: '',
-      cardioType: '',
-      manualCalories: '',
-      muscleGroup: '',
-      exerciseName: '',
-      weight: '',
-      sets: '1',
-      reps: '',
-      concentricTime: '',
-      eccentricTime: ''
-    });
-    setCurrentCalories(0);
-  };
-
-  const handleDoneWithExercises = () => {
-    if (
-      (newExercise.exerciseType === 'cardio' && parseFloat(newExercise.manualCalories) > 0) ||
-      (newExercise.exerciseName &&
-        parseFloat(newExercise.weight) > 0 &&
-        parseInt(newExercise.reps, 10) > 0)
-    ) {
-      handleAddExercise();
-    }
-    setCurrentStep(3);
-  };
-
-  const handleRemoveExercise = idx => {
-    const next = (cumulativeExercises || []).filter((_, i) => i !== idx);
-    setCumulativeExercises(next);
-    instantPersistWorkoutDraftToBanner(next);
-  };
-
-  // ✅ Sauna logging
-  const handleSaveSauna = () => {
-    if (saunaTime.trim()) {
-      const t = parseFloat(saunaTime) || 0;
-      const tmp = parseFloat(saunaTemp) || 180;
-      const uw = parseFloat(userData?.weight) || 150;
-
-      // temperature-scaled MET model
-      const weightKg = uw * 0.45359237;
-      let met = 1.5 + (tmp - 160) * 0.02;
-      met = Math.min(Math.max(met, 1.3), 2.5);
-      const kcalPerMin = (met * 3.5 * weightKg) / 200;
-      const saunaCals = kcalPerMin * t;
-
-      const next = [
-        ...(cumulativeExercises || []).filter(e => e.exerciseType !== 'Sauna'),
-        { exerciseType: 'Sauna', exerciseName: 'Sauna Session', calories: saunaCals }
-      ];
-      setCumulativeExercises(next);
-      instantPersistWorkoutDraftToBanner(next);
-    }
-
-    setShowSaunaSection(false);
-    setSaunaTime('');
-    setSaunaTemp('180');
-  };
-
-  const handleCancelSaunaForm = () => {
-    setShowSaunaSection(false);
-    setSaunaTime('');
-    setSaunaTemp('180');
-  };
-
-  // ✅ build a draft workout session that gets upserted continuously
-  const buildDraftWorkoutSession = useCallback(() => {
-    const now = new Date();
-    const startedAt = startedAtRef.current || now.toISOString();
-    const endedAt = now.toISOString();
-
-    const todayLocalIso = localDayISO(now);
-    const todayDisplay = now.toLocaleDateString('en-US');
-
-    const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
-    const total = Math.round(totalRaw * 100) / 100;
-
-    return {
-      // ✅ upsert key for device sync
-      client_id: activeWorkoutSessionIdRef.current,
-      user_id: user?.id || null,
-
-      started_at: startedAt,
-      ended_at: endedAt,
-      total_calories: total,
-
-      // local history fields (used by History UI)
-      date: todayDisplay,
-      name: (cumulativeExercises[0]?.exerciseName) || 'Workout',
-      exercises: cumulativeExercises.map(ex => ({
-        name: ex.exerciseName,
-        sets: ex.sets,
-        reps: ex.reps,
-        weight: ex.weight || null,
-        calories: ex.calories
-      })),
-
-      // local metadata
-      id: activeWorkoutSessionIdRef.current,
-      localId: `w_${getOrCreateClientId()}_${Date.now()}`,
-      createdAt: startedAt,
-      uploaded: false,
-
-      // helper
-      __local_day: todayLocalIso
-    };
-  }, [cumulativeExercises, user?.id]);
 
   // ✅ keeps daily_metrics in sync so calories carry over across devices
   const syncBurnedTodayToDailyMetrics = useCallback(async (todayDisplay, todayLocalIso) => {
@@ -575,7 +857,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }));
       } catch { }
 
-      // ✅ localFirst expects { consumed, burned }
+      // ✅ FIX: localFirst expects { consumed, burned }
       await upsertDailyMetricsLocalFirst({
         user_id: user?.id || null,
         local_day: todayLocalIso,
@@ -594,12 +876,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
 
+      
       // ✅ also clear local draft so banner reflects removal instantly
       try {
         instantPersistWorkoutDraftToBanner([]);
       } catch {}
-
-      // best-effort: delete draft workout from cloud (if signed in)
+// best-effort: delete draft workout from cloud (if signed in)
       (async () => {
         try {
           const cid = activeWorkoutSessionIdRef.current;
@@ -762,150 +1044,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       sets
     };
   }, [cumulativeExercises]);
-
-  // --- NEW: load today's logged workouts + sets (real data) ---
-  const refreshTodayLoggedWorkouts = useCallback(async () => {
-    const todayUS = new Date().toLocaleDateString('en-US');
-    const todayISO = localDayISO(new Date());
-
-    setTodayLoading(true);
-    try {
-      // 1) Start from localStorage sessions (works offline)
-      let localSessions = [];
-      try {
-        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
-        localSessions = (wh || []).filter(w => w?.date === todayUS || w?.date === todayISO);
-      } catch {}
-
-      // 2) If logged in, pull cloud workouts for today (source of truth),
-      // and ensure they exist in local list (so banner + UI are stable after refresh)
-      let cloudToday = [];
-      if (user?.id) {
-        try {
-          const base = await getWorkouts(user.id, { limit: 200 });
-          cloudToday = (base || []).filter(w => toUS(w.started_at) === todayUS);
-        } catch (e) {
-          console.warn('[WorkoutPage] getWorkouts failed', e);
-        }
-      }
-
-      // Merge cloud into local (by client_id if present, else by id, else by total+day)
-      const merged = [...localSessions];
-      const seen = new Set(
-        merged.map(s => String(s?.client_id || s?.id || ''))
-      );
-
-      for (const w of cloudToday) {
-        const k = String(w?.client_id || w?.id || '');
-        if (!k) continue;
-
-        if (!seen.has(k)) {
-          merged.push({
-            id: w.client_id || w.id,
-            client_id: w.client_id || w.id,
-            date: todayUS,
-            started_at: w.started_at,
-            ended_at: w.ended_at,
-            totalCalories: safeNum(w.total_calories, 0),
-            total_calories: safeNum(w.total_calories, 0),
-            name: 'Workout',
-            exercises: [], // will be populated from sets below
-            __cloud_workout_id: w.id,
-            __draft: false,
-            uploaded: true
-          });
-          seen.add(k);
-        } else {
-          // patch existing record with cloud id if missing
-          for (const s of merged) {
-            const sk = String(s?.client_id || s?.id || '');
-            if (sk === k) {
-              if (!s.__cloud_workout_id) s.__cloud_workout_id = w.id;
-              if (!s.started_at) s.started_at = w.started_at;
-              if (!s.ended_at) s.ended_at = w.ended_at;
-              if (!Number.isFinite(Number(s.totalCalories)) && Number.isFinite(Number(w.total_calories))) {
-                s.totalCalories = Number(w.total_calories);
-                s.total_calories = Number(w.total_calories);
-              }
-              break;
-            }
-          }
-        }
-      }
-
-      // Sort newest first
-      merged.sort((a, b) => {
-        const ta = Date.parse(a?.started_at || a?.createdAt || '') || 0;
-        const tb = Date.parse(b?.started_at || b?.createdAt || '') || 0;
-        return tb - ta;
-      });
-
-      // 3) Pull sets for each cloud workout (today only) and compute exercise summaries
-      const setsMap = {};
-      if (user?.id) {
-        await Promise.all(
-          merged.slice(0, 8).map(async (sess) => {
-            const cloudId = sess?.__cloud_workout_id;
-            if (!cloudId) return;
-
-            // Avoid refetch if already in state
-            if (todaySetsByWorkoutId?.[cloudId]) return;
-
-            try {
-              const sets = await getWorkoutSetsFor(cloudId, user.id);
-              if (Array.isArray(sets) && sets.length) {
-                setsMap[cloudId] = sets;
-
-                // Also populate a compact "exercises" summary onto the session and cache it locally
-                const summary = summarizeExercisesFromSets(sets).map(e => ({
-                  name: e.name,
-                  sets: e.sets,
-                  reps: e.reps,
-                  weight: null,
-                  calories: e.calories
-                }));
-
-                sess.exercises = summary;
-                sess.__sets_loaded = true;
-              }
-            } catch (e) {
-              console.warn('[WorkoutPage] getWorkoutSetsFor failed', e);
-            }
-          })
-        );
-      }
-
-      // 4) Persist merged "today sessions" back into localStorage so refresh/tab switch doesn’t lose detail
-      try {
-        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
-        const rest = (wh || []).filter(w => !(w?.date === todayUS || w?.date === todayISO));
-        const next = [...merged, ...rest].slice(0, 300);
-        localStorage.setItem('workoutHistory', JSON.stringify(next));
-      } catch {}
-
-      if (Object.keys(setsMap).length) {
-        setTodaySetsByWorkoutId(prev => ({ ...(prev || {}), ...setsMap }));
-      }
-
-      setTodaySessions(merged);
-    } finally {
-      setTodayLoading(false);
-    }
-  }, [user?.id, todaySetsByWorkoutId]);
-
-  useEffect(() => {
-    refreshTodayLoggedWorkouts();
-    // also refresh when returning to tab (fixes “shows only after visiting history”)
-    const onVis = () => {
-      if (document.visibilityState === 'visible') refreshTodayLoggedWorkouts();
-    };
-    window.addEventListener('focus', refreshTodayLoggedWorkouts);
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      window.removeEventListener('focus', refreshTodayLoggedWorkouts);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [refreshTodayLoggedWorkouts]);
 
   // --- summary step UI ---
   if (currentStep === 3) {
@@ -1206,113 +1344,65 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
                 </Box>
               </Paper>
             )}
-
-            {/* ✅ TODAY’S LOGGED WORKOUTS (compact, real data like History) */}
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 2,
-                borderRadius: 2,
-                border: '1px solid rgba(0,0,0,0.06)',
-                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
-              }}
-            >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                  Today’s Logged Workouts
-                </Typography>
-                <Stack direction="row" spacing={1}>
-                  <Button size="small" variant="outlined" onClick={refreshTodayLoggedWorkouts}>
-                    Refresh
-                  </Button>
-                  <Button size="small" variant="outlined" onClick={() => history.push('/history')}>
-                    View full history
-                  </Button>
-                </Stack>
-              </Stack>
-
-              {todayLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                  <CircularProgress size={22} />
-                </Box>
-              ) : todaySessions.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No workouts logged yet today.
-                </Typography>
-              ) : (
-                <Stack spacing={1.25}>
-                  {todaySessions.slice(0, 5).map((w, idx) => {
-                    const total = safeNum(w?.totalCalories ?? w?.total_calories, 0);
-                    const started = w?.started_at || w?.createdAt;
-                    const t = started ? formatTimeOnly(started) : '';
-                    const ex = Array.isArray(w?.exercises) ? w.exercises : [];
-                    const preview = ex.slice(0, 2);
-
-                    return (
-                      <Accordion
-                        key={`${w?.__cloud_workout_id || w?.client_id || w?.id || idx}`}
-                        disableGutters
-                        sx={{
-                          borderRadius: 2,
-                          overflow: 'hidden',
-                          border: '1px solid rgba(0,0,0,0.06)',
-                          boxShadow: 'none'
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: '100%' }}>
-                            <Box>
-                              <Typography sx={{ fontWeight: 800 }}>
-                                {w?.name || 'Workout'}{t ? ` • ${t}` : ''}
-                              </Typography>
-                              {preview.length > 0 ? (
-                                <Typography variant="body2" color="text.secondary">
-                                  {preview.map((e, i) => (
-                                    <span key={i}>
-                                      {i > 0 ? ' • ' : ''}
-                                      {e.name} — {Math.round(safeNum(e.calories, 0))} cal
-                                    </span>
-                                  ))}
-                                  {ex.length > 2 ? ` • +${ex.length - 2} more` : ''}
-                                </Typography>
-                              ) : (
-                                <Typography variant="body2" color="text.secondary">
-                                  {user?.id
-                                    ? 'Loading exercise details…'
-                                    : 'Log in to sync exercise details across devices.'}
-                                </Typography>
-                              )}
-                            </Box>
-
-                            <Chip label={`${Math.round(total)} kcal`} color="primary" sx={{ fontWeight: 800 }} />
-                          </Stack>
-                        </AccordionSummary>
-
-                        <AccordionDetails>
-                          {ex.length > 0 ? (
-                            <Stack spacing={0.75}>
-                              {ex.map((e, i) => (
-                                <Typography key={i} variant="body2">
-                                  • {e.name} — {Math.round(safeNum(e.calories, 0))} cal
-                                  {safeNum(e.sets, 0) ? ` (${safeNum(e.sets, 0)} set${safeNum(e.sets, 0) === 1 ? '' : 's'})` : ''}
-                                </Typography>
-                              ))}
-                            </Stack>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              No exercise details available for this session yet.
-                            </Typography>
-                          )}
-                        </AccordionDetails>
-                      </Accordion>
-                    );
-                  })}
-                </Stack>
-              )}
-            </Paper>
           </Stack>
         </Grid>
       </Grid>
+
+      {/* ✅ Meals-style: show today's logged workouts on-page so banner stays consistent */}
+      <Paper
+        variant="outlined"
+        sx={{
+          mt: 3,
+          p: 2,
+          borderRadius: 2,
+          border: '1px solid rgba(0,0,0,0.06)',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
+        }}
+      >
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Today’s Logged Workouts
+          </Typography>
+          {loadingTodaySessions && (
+            <Typography variant="caption" color="textSecondary">
+              Syncing…
+            </Typography>
+          )}
+        </Stack>
+
+        {(!todaySessions || todaySessions.length === 0) ? (
+          <Typography variant="body2" color="textSecondary">
+            No workouts logged today yet.
+          </Typography>
+        ) : (
+          <Stack spacing={1}>
+            {todaySessions.map((sess, idx) => {
+              const title = sess?.name || 'Workout';
+              const kcals = Math.round(safeNum(sess?.totalCalories ?? sess?.total_calories, 0));
+              const hasDetails = Array.isArray(sess?.exercises) && sess.exercises.length > 0;
+              return (
+                <Card
+                  key={sess?.client_id || sess?.id || idx}
+                  variant="outlined"
+                  sx={{ borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}
+                >
+                  <CardContent sx={{ py: 1.25, px: 2 }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 2 }}>
+                      <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
+                      <Chip label={`${kcals} kcal`} color="primary" />
+                    </Stack>
+                    {!hasDetails && (
+                      <Typography variant="caption" color="textSecondary">
+                        Synced session—exercise details may load in history.
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
+        )}
+      </Paper>
 
       <Box textAlign="center" sx={{ mt: 4 }}>
         <Button
