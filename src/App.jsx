@@ -607,7 +607,7 @@ export default function App() {
     const run = () => {
       normalizeLocalData();
       dedupLocalWorkouts();
-      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, user?.id || null);
+      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id || null);
     };
     run();
 
@@ -871,7 +871,7 @@ export default function App() {
           )}
         </Box>
 
-        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} userId={user?.id || null} />
+        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} userId={authUser?.id || null} />
         <StreakBanner streak={streak} />
         <SocialProofBanner />
         {navBar}
