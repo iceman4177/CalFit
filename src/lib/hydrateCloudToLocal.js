@@ -21,7 +21,6 @@ function safeLocalMidnight(dayISO) {
   }
 }
 
-
 function safeNum(v, d = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -89,54 +88,77 @@ function dayISOToUS(dayISO) {
   }
 }
 
-function normalizeWorkoutForLocal(w, todayUS) {
-  const cid = w?.client_id || w?.id || `cloud_${String(w?.started_at || w?.created_at || '')}_${String(w?.total_calories || '')}`;
-  const startedAt = w?.started_at || w?.created_at || new Date().toISOString();
+function localDayFromTs(ts) {
+  try {
+    const d = new Date(ts);
+    return localDayISO(d);
+  } catch {
+    return localDayISO(new Date());
+  }
+}
+
+function normalizeWorkoutForLocal(w) {
+  const startedAt = w?.started_at || w?.created_at || w?.createdAt || new Date().toISOString();
   const endedAt = w?.ended_at || startedAt;
-  const total = safeNum(w?.total_calories, 0);
+  const dayISO = w?.local_day || w?.__local_day || localDayFromTs(startedAt);
+  const dayUS = dayISOToUS(dayISO);
+
+  // Use client_id if present (stable cross-device). Fall back to id.
+  const cid = w?.client_id || w?.id || `cloud_${String(startedAt)}_${String(w?.total_calories || '')}`;
+
+  const total = safeNum(w?.total_calories ?? w?.totalCalories, 0);
 
   return {
     id: cid,
     client_id: cid,
-    date: todayUS,
+    // Keep both for compatibility with older code paths
+    local_day: dayISO,
+    __local_day: dayISO,
+    date: dayUS,
     started_at: startedAt,
     ended_at: endedAt,
     createdAt: startedAt,
     totalCalories: total,
     total_calories: total,
-    name: 'Workout',
+    name: w?.name || 'Workout',
     exercises: Array.isArray(w?.exercises) ? w.exercises : [],
     uploaded: true,
     __cloud: true
   };
 }
 
-function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts, userId) {
+function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
   try {
     ensureScopedFromLegacy(KEYS.workoutHistory, userId);
     const list = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
 
-    const isTodayAny = (s) => {
+    const isSameDay = (s) => {
+      const ld = String(s?.local_day || s?.__local_day || '');
+      if (ld) return ld === String(dayISO);
       const d = String(s?.date || '');
-      return d === String(todayUS) || d === String(dayISO);
+      const dayUS = dayISOToUS(dayISO);
+      if (d === String(dayISO) || d === String(dayUS)) return true;
+      // last resort: derive from timestamp
+      const ts = s?.started_at || s?.createdAt || s?.created_at;
+      if (!ts) return false;
+      return localDayFromTs(ts) === String(dayISO);
     };
 
-    // Build map by client_id/id to keep local exercise details if present
+    // Map by stable key, preserve any richer local exercise details
     const map = new Map();
-    for (const sess of list) {
+    for (const sess of (list || [])) {
       const cid = sess?.client_id || sess?.id;
       if (!cid) continue;
-      const normSess = isTodayAny(sess) ? { ...sess, date: todayUS } : sess;
-      map.set(String(cid), normSess);
+      const fixed = (sess?.local_day || sess?.__local_day) ? sess : { ...sess, local_day: localDayFromTs(sess?.started_at || sess?.createdAt || sess?.created_at), __local_day: localDayFromTs(sess?.started_at || sess?.createdAt || sess?.created_at) };
+      map.set(String(cid), fixed);
     }
 
     for (const w of (cloudWorkouts || [])) {
-      const norm = normalizeWorkoutForLocal(w, todayUS);
+      const norm = normalizeWorkoutForLocal(w);
       const cid = String(norm.client_id || norm.id);
       const existing = map.get(cid);
 
       if (existing) {
-        // Prefer local details (exercises/name) if they exist
         const keepExercises = Array.isArray(existing?.exercises) && existing.exercises.length > 0;
         const keepName = !!existing?.name && existing.name !== 'Workout';
         map.set(cid, {
@@ -145,31 +167,29 @@ function mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts, userId) {
           exercises: keepExercises ? existing.exercises : norm.exercises,
           name: keepName ? existing.name : norm.name,
           totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
-          total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories)
+          total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories),
+          local_day: existing?.local_day || existing?.__local_day || norm.local_day,
+          __local_day: existing?.__local_day || existing?.local_day || norm.__local_day,
+          date: existing?.date || norm.date
         });
       } else {
         map.set(cid, norm);
       }
     }
 
-    // Keep non-today entries + today merged entries (treat both US + ISO as "today")
-    const nonToday = list.filter(s => !isTodayAny(s));
-    const todayMerged = Array.from(map.values())
-      .filter(s => isTodayAny(s))
-      .map(s => ({ ...s, date: todayUS }));
-    // Sort today newest first (by started/created)
-    todayMerged.sort((a, b) => {
-      const ta = new Date(a?.started_at || a?.createdAt || 0).getTime();
-      const tb = new Date(b?.started_at || b?.createdAt || 0).getTime();
+    const merged = Array.from(map.values());
+
+    // Sort by started/created desc
+    merged.sort((a, b) => {
+      const ta = new Date(a?.started_at || a?.createdAt || a?.created_at || 0).getTime();
+      const tb = new Date(b?.started_at || b?.createdAt || b?.created_at || 0).getTime();
       return tb - ta;
     });
 
-    const next = [...todayMerged, ...nonToday];
-    writeScopedJSON(KEYS.workoutHistory, userId, next.slice(0, 300));
+    writeScopedJSON(KEYS.workoutHistory, userId, merged.slice(0, 300));
 
-    // Let same-tab UI know workoutHistory changed
     try {
-      window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayUS } }));
+      window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { dayISO } }));
     } catch {}
   } catch (e) {
     console.warn('[hydrateCloudToLocal] mergeWorkoutsIntoLocalHistory failed', e);
@@ -412,20 +432,19 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
     console.warn('[hydrateCloudToLocal] daily_metrics read failed', e);
   }
 
-  // 3) If burned missing, sum workouts from workouts.local_day ✅
+  // 3) Always compute burned from today's workouts (prevents stale daily_metrics from leaking prior days)
   let burnedFromWorkouts = 0;
-  if (!burned || burned <= 0) {
+  try {
     burnedFromWorkouts = await sumBurnedFromWorkouts(userId, dayISO);
-    if (burnedFromWorkouts > 0) burned = burnedFromWorkouts;
-  }
+    if (burnedFromWorkouts >= 0) burned = burnedFromWorkouts;
+  } catch {}
 
   // 3b) Always pull today's workouts into local workoutHistory so banner + in-page history
   // can show cross-device sessions without needing to visit /history.
   try {
-    const todayUS = dayISOToUS(dayISO);
     const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
     if (Array.isArray(cloudWorkouts) && cloudWorkouts.length > 0) {
-      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, cloudWorkouts);
+      mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId);
 
       // If daily_metrics burned was stale, the list is a strong fallback.
       const sumFromList = (cloudWorkouts || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
@@ -470,7 +489,6 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   return { ok: true, dayISO, eaten, burned };
 }
 
-
 // ---------------------------------------------------------------------------
 // Extra: hydrate ONLY workouts into local workoutHistory + burned totals
 // Some builds import this directly from useBootstrapSync; keep it exported.
@@ -481,18 +499,17 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
     if (!userId) return { ok: false, reason: 'no_user' };
 
     const dayISO = localDayISO(new Date());
-    const todayUS = dayISOToUS(dayISO);
 
     const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
     const list = Array.isArray(cloudWorkouts) ? cloudWorkouts : [];
 
     // Merge into local workoutHistory (preserve local exercise details if present)
     if (list.length > 0) {
-      mergeWorkoutsIntoLocalHistory(todayUS, dayISO, list, userId);
+      mergeWorkoutsIntoLocalHistory(dayISO, list, userId);
     } else {
       // still notify listeners (prevents stale UI)
       try {
-        window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayUS } }));
+        window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { dayISO } }));
       } catch {}
     }
 

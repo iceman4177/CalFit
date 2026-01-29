@@ -72,16 +72,30 @@ function readTodayTotals() {
     }
   } catch {}
 
-  // Workouts
-  try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const arr = Array.isArray(wh) ? wh : [];
-    burnedNow = arr
-      .filter(w => w?.date === dUS || w?.date === dISO)
-      .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-  } catch {}
+  
+// Workouts (strictly today by local-day; avoids timezone and legacy date drift)
+try {
+  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const arr = Array.isArray(wh) ? wh : [];
 
-  // dailyMetricsCache
+  const isTodayWorkout = (w) => {
+    const ld = w?.local_day || w?.__local_day;
+    if (ld) return String(ld) === String(dISO);
+
+    const ts = w?.started_at || w?.createdAt || w?.created_at;
+    if (ts) return localISODay(ts) === String(dISO);
+
+    const d = String(w?.date || '');
+    return d === String(dISO) || d === String(dUS);
+  };
+
+  burnedNow = arr
+    .filter(isTodayWorkout)
+    .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+} catch {}
+
+// dailyMetricsCache
+
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
