@@ -1,5 +1,5 @@
 // src/NetCalorieBanner.jsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef} from 'react';
 import {
   Box,
   Paper,
@@ -9,6 +9,9 @@ import {
   Divider,
   LinearProgress,
 } from '@mui/material';
+
+import { useAuth } from './context/AuthProvider.jsx';
+import { hydrateTodayTotalsFromCloud } from './lib/hydrateCloudToLocal.js';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
@@ -72,30 +75,16 @@ function readTodayTotals() {
     }
   } catch {}
 
-  
-// Workouts (strictly today by local-day; avoids timezone and legacy date drift)
-try {
-  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-  const arr = Array.isArray(wh) ? wh : [];
+  // Workouts
+  try {
+    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const arr = Array.isArray(wh) ? wh : [];
+    burnedNow = arr
+      .filter(w => w?.date === dUS || w?.date === dISO)
+      .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+  } catch {}
 
-  const isTodayWorkout = (w) => {
-    const ld = w?.local_day || w?.__local_day;
-    if (ld) return String(ld) === String(dISO);
-
-    const ts = w?.started_at || w?.createdAt || w?.created_at;
-    if (ts) return localISODay(ts) === String(dISO);
-
-    const d = String(w?.date || '');
-    return d === String(dISO) || d === String(dUS);
-  };
-
-  burnedNow = arr
-    .filter(isTodayWorkout)
-    .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-} catch {}
-
-// dailyMetricsCache
-
+  // dailyMetricsCache
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[dISO];
@@ -387,4 +376,41 @@ export default function NetCalorieBanner({ burnedNow: burnedProp, consumed: cons
       </Stack>
     </Paper>
   );
+
+  const { user } = useAuth();
+  const lastHydrateRef = useRef(0);
+
+  // Pull cloud truth on mount/login and whenever the app comes back to foreground.
+  // This prevents "0 until you visit Meals/Workout tab" on mobile.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+
+    const run = () => {
+      const now = Date.now();
+      // simple throttle to avoid spam if multiple events fire at once
+      if (now - (lastHydrateRef.current || 0) < 1500) return;
+      lastHydrateRef.current = now;
+      hydrateTodayTotalsFromCloud(user, { alsoDispatch: true }).catch(() => {});
+    };
+
+    run();
+
+    const onFocus = () => run();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') run();
+    };
+    const onOnline = () => run();
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [user?.id]);
+
 }
