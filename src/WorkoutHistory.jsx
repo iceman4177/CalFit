@@ -1,6 +1,7 @@
 // src/WorkoutHistory.jsx
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Box,
+import {
+  Box,
   Button,
   Container,
   Divider,
@@ -12,11 +13,11 @@ import { Box,
   Paper,
   Stack,
   Chip,
-  IconButton,
-  Dialog,
+  IconButton,  Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions } from '@mui/material';
+  DialogActions
+} from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useAuth } from './context/AuthProvider.jsx';
@@ -121,34 +122,33 @@ function dispatchBurnedUpdate(dayISO, burned) {
 
 // --- Better display: show per-exercise summary instead of set-by-set "12 cals"
 function summarizeExercisesFromSets(sets = []) {
-  if (!Array.isArray(sets) || sets.length === 0) return [];
+  const arr = Array.isArray(sets) ? sets : [];
+  const by = new Map();
 
-  // Aggregate by exercise name
-  const map = new Map();
-  for (const s of sets) {
-    const name = String(s.exercise_name || s.name || 'Exercise').trim();
-    const prev = map.get(name) || { name, reps: 0, sets: 0, calories: 0 };
+  for (const s of arr) {
+    const name = String(s?.exercise_name || s?.name || 'Exercise').trim() || 'Exercise';
+    const prev = by.get(name) || { name, sets: 0, reps: 0, topWeight: 0, minutes: 0 };
 
     prev.sets += 1;
-    prev.reps += safeNum(s.reps, 0);
 
-    // calories: prefer explicit per-set calories, else proxy
-    const c =
-      (typeof s.calories === 'number' && Number.isFinite(s.calories))
-        ? s.calories
-        : (safeNum(s.weight, 0) * safeNum(s.reps, 0) * SCALE);
+    const w = safeNum(s?.weight, 0);
+    const r = safeNum(s?.reps, 0);
+    if (w > prev.topWeight) prev.topWeight = w;
+    if (r) prev.reps += r;
 
-    prev.calories += safeNum(c, 0);
+    const vol = safeNum(s?.volume, 0);
+    // Treat `volume` as minutes for cardio/timed entries when there are no strength numbers.
+    if (vol && w === 0 && r === 0) prev.minutes += vol;
 
-    map.set(name, prev);
+    by.set(name, prev);
   }
 
-  return Array.from(map.values())
-    .sort((a, b) => (b.calories || 0) - (a.calories || 0))
-    .map(x => ({
-      ...x,
-      calories: Math.round((x.calories || 0) * 100) / 100
-    }));
+  return Array.from(by.values()).sort((a, b) => {
+    // Prefer minutes (cardio) then sets (strength)
+    const as = (a.minutes || 0) * 1000 + (a.sets || 0);
+    const bs = (b.minutes || 0) * 1000 + (b.sets || 0);
+    return bs - as;
+  });
 }
 
 const normalizeName = s => (s || '').toLowerCase().trim();
@@ -365,7 +365,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
         const withSets = await Promise.all(
           base.map(async w => {
-            const sets = await getWorkoutSetsFor(w.id, user.id);
+            const sets = await getWorkoutSetsFor(w.id, user.id, w.client_id);
 
             const dayUS = toUS(w.started_at);
             const candidates = localIdx.byDay.get(dayUS) || [];
@@ -517,18 +517,14 @@ export default function WorkoutHistory({ onHistoryChange }) {
                             {(Number(w.total_calories) || 0).toFixed(2)} cals
                           </Typography>
 
-                          
-                            <span>
-                              <IconButton
+                          <span><IconButton
                                 size="small"
                                 color="error"
                                 onClick={() => askDeleteRow(w)}
                                 disabled={deleting}
                               >
                                 <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          
+                              </IconButton></span>
                         </Stack>
                       </Stack>
                     }
@@ -538,8 +534,9 @@ export default function WorkoutHistory({ onHistoryChange }) {
                         {exerciseSummary.length > 0 ? (
                           exerciseSummary.map((e, i) => (
                             <Typography key={i} variant="body2">
-                              • {e.name} — {Math.round(e.calories)} cal
-                              {e.sets ? ` (${e.sets} set${e.sets === 1 ? '' : 's'})` : ''}
+                              • {e.name} — {e.minutes
+                                ? `${Math.round(e.minutes)} min`
+                                : `${e.sets} set${e.sets === 1 ? '' : 's'}${e.reps ? ` • ${e.reps} reps` : ''}${e.topWeight ? ` • top ${Math.round(e.topWeight)} lb` : ''}`}
                             </Typography>
                           ))
                         ) : (
