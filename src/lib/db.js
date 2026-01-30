@@ -239,7 +239,7 @@ export async function getWorkouts(userId, { limit = 100 } = {}) {
   if (!userId) return [];
   const { data, error } = await supabase
     .from("workouts")
-    .select("id, started_at, ended_at, goal, notes, total_calories")
+    .select("id, client_id, local_day, started_at, ended_at, goal, notes, total_calories")
     .eq("user_id", userId)
     .order("started_at", { ascending: false })
     .limit(limit);

@@ -250,8 +250,19 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       const cid = String(activeWorkoutSessionIdRef.current || '');
       if (!cid) return;
 
-      const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      const list = Array.isArray(raw) ? raw : [];
+      let list = [];
+      try {
+        if (user?.id) {
+          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+          const scoped = readScopedJSON(KEYS.workoutHistory, user.id, []);
+          list = Array.isArray(scoped) ? scoped : [];
+        } else {
+          const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+          list = Array.isArray(raw) ? raw : [];
+        }
+      } catch {
+        list = [];
+      }
       const draft = list.find((w) => {
         const id = String(w?.client_id || w?.id || '');
         const d = String(w?.date || '');
@@ -285,8 +296,19 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const todayUS = now.toLocaleDateString('en-US');
     const todayISO = localDayISO(now);
     try {
-      const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      const list = Array.isArray(raw) ? raw : [];
+      let list = [];
+      try {
+        if (user?.id) {
+          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+          const scoped = readScopedJSON(KEYS.workoutHistory, user.id, []);
+          list = Array.isArray(scoped) ? scoped : [];
+        } else {
+          const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+          list = Array.isArray(raw) ? raw : [];
+        }
+      } catch {
+        list = [];
+      }
       // --- De-dupe + normalize ---
       // Workouts can exist in localStorage with either `date` = todayUS or `date` = todayISO.
       // If both exist for the same session (same client_id), it shows twice and doubles burned.
@@ -316,6 +338,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           totalCalories: safeNum(w0?.totalCalories ?? w0?.total_calories, 0),
           total_calories: safeNum(w0?.total_calories ?? w0?.totalCalories, 0),
         };
+        if (String(w?.local_day || w?.__local_day || '') === String(todayISO)) w.date = todayUS;
         if (isToday(w?.date)) w.date = todayUS;
 
         const prev = byId.get(cid);
@@ -953,7 +976,16 @@ setNewExercise({
         nextList = [sess, ...filtered];
       }
 
-      localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300)));
+      try {
+        if (user?.id) {
+          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+          writeScopedJSON(KEYS.workoutHistory, user.id, nextList.slice(0, 300));
+        } else {
+          localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300)));
+        }
+      } catch {
+        try { localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300))); } catch {}
+      }
 
       // burnedToday = sum of all sessions logged today (including draft)
       const burnedToday = (nextList || [])
@@ -991,12 +1023,32 @@ setNewExercise({
   // ✅ keeps daily_metrics in sync so calories carry over across devices
   const syncBurnedTodayToDailyMetrics = useCallback(async (todayDisplay, todayLocalIso) => {
     try {
-      const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      let workouts = [];
+      try {
+        if (user?.id) {
+          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+          workouts = readScopedJSON(KEYS.workoutHistory, user.id, []) || [];
+        } else {
+          workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+        }
+      } catch {
+        workouts = [];
+      }
       const burnedToday = workouts
         .filter(w => w.date === todayDisplay)
         .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
 
-      const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+      let meals = [];
+      try {
+        if (user?.id) {
+          ensureScopedFromLegacy(KEYS.mealHistory, user.id);
+          meals = readScopedJSON(KEYS.mealHistory, user.id, []) || [];
+        } else {
+          meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+        }
+      } catch {
+        meals = [];
+      }
       const todayMealRec = meals.find(m => m.date === todayDisplay);
       const consumedToday = todayMealRec
         ? (todayMealRec.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)

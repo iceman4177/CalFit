@@ -11,6 +11,7 @@ import {
 } from '@mui/material';
 
 import { useAuth } from './context/AuthProvider.jsx';
+import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { hydrateTodayTotalsFromCloud } from './lib/hydrateCloudToLocal.js';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -57,87 +58,69 @@ function readUserGoalCalories() {
  * - dailyMetricsCache
  * - burnedToday / consumedToday (hydrated truth keys)
  */
-function readTodayTotals() {
-  const dUS = todayUS();
-  const dISO = localISODay();
+function readTodayTotals(userId) {
+  const todayISO = localDayISO(new Date());
+  const todayUS = formatDayUS(new Date());
 
-  let eatenNow = 0;
-  let burnedNow = 0;
+  // Prefer scoped storage (prevents multi-account bleed on same device)
+  let meals = [];
+  let workouts = [];
+  let cache = {};
 
-  // Meals
   try {
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-    const rec = Array.isArray(mh)
-      ? mh.find(m => m?.date === dUS || m?.date === dISO)
-      : null;
-    if (rec?.meals?.length) {
-      eatenNow = rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
+    if (userId) {
+      ensureScopedFromLegacy(KEYS.mealHistory, userId);
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+
+      meals = readScopedJSON(KEYS.mealHistory, userId, []) || [];
+      workouts = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+      cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     }
   } catch {}
 
-  // Workouts
-  try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const arr = Array.isArray(wh) ? wh : [];
-    burnedNow = arr
-      .filter(w => w?.date === dUS || w?.date === dISO)
-      .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-  } catch {}
+  // Fallback (legacy unscoped)
+  if (!Array.isArray(meals) || meals.length === 0) {
+    try { meals = JSON.parse(localStorage.getItem('mealHistory') || '[]') || []; } catch { meals = []; }
+  }
+  if (!Array.isArray(workouts) || workouts.length === 0) {
+    try { workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || []; } catch { workouts = []; }
+  }
+  if (!cache || typeof cache !== 'object' || Array.isArray(cache)) {
+    try { cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {}; } catch { cache = {}; }
+  }
 
-  // dailyMetricsCache
-  try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-    const row = cache?.[dISO];
-    if (row) {
-      const eatenFromCache = safeNum(
-        row?.consumed ??
-          row?.eatenNow ??
-          row?.calories_eaten ??
-          row?.cals_eaten ??
-          row?.food ??
-          row?.caloriesConsumed,
-        NaN
-      );
+  // Meals today
+  const eaten = (meals || [])
+    .filter(m => {
+      const ld = String(m?.local_day || m?.__local_day || '');
+      if (ld) return ld === todayISO;
+      const d = String(m?.date || '');
+      return d === todayISO || d === todayUS;
+    })
+    .reduce((sum, m) => sum + safeNum(m?.calories ?? m?.totalCalories ?? m?.total_calories, 0), 0);
 
-      const burnedFromCache = safeNum(
-        row?.burnedNow ??
-          row?.calories_burned ??
-          row?.cals_burned ??
-          row?.exercise ??
-          row?.caloriesBurned,
-        NaN
-      );
+  // Workouts today
+  const burned = (workouts || [])
+    .filter(w => {
+      const ld = String(w?.local_day || w?.__local_day || '');
+      if (ld) return ld === todayISO;
+      const d = String(w?.date || '');
+      return d === todayISO || d === todayUS;
+    })
+    .reduce((sum, w) => sum + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
 
-      if (Number.isFinite(eatenFromCache)) eatenNow = eatenFromCache;
-      if (Number.isFinite(burnedFromCache)) {
-        // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
-        if (burnedFromCache > 0 || burnedNow === 0) burnedNow = burnedFromCache;
-      }
-    }
-  } catch {}
-
-  // ✅ burnedToday / consumedToday — strongest truth keys
-  try {
-    const eatenDirect = safeNum(localStorage.getItem('consumedToday'), NaN);
-    if (Number.isFinite(eatenDirect)) eatenNow = eatenDirect;
-  } catch {}
-
-  try {
-    const burnedDirect = safeNum(localStorage.getItem('burnedToday'), NaN);
-    if (Number.isFinite(burnedDirect)) {
-      // Avoid flicker: don't let a stale 0 clobber a non-zero computed-from-history value.
-      if (burnedDirect > 0 || burnedNow === 0) burnedNow = burnedDirect;
-    }
-  } catch {}
+  // If dailyMetricsCache has a newer value, use it (but ONLY for today)
+  const cached = cache?.[todayISO];
+  const cachedEaten = safeNum(cached?.consumed ?? cached?.calories_eaten ?? cached?.eaten ?? cached?.cals_eaten, NaN);
+  const cachedBurned = safeNum(cached?.burned ?? cached?.calories_burned ?? cached?.cals_burned, NaN);
 
   return {
-    dayUS: dUS,
-    dayISO: dISO,
-    eatenNow: Math.round(eatenNow || 0),
-    burnedNow: Math.round(burnedNow || 0),
-    goalNow: Math.round(readUserGoalCalories() || 0),
+    eaten: Number.isFinite(cachedEaten) ? cachedEaten : eaten,
+    burned: Number.isFinite(cachedBurned) ? cachedBurned : burned,
   };
 }
+
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
