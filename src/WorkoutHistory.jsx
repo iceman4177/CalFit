@@ -24,6 +24,8 @@ import { useAuth } from './context/AuthProvider.jsx';
 import { getWorkouts, getWorkoutSetsFor } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+
 // ✅ We use Supabase directly here to delete cloud rows safely
 import { supabase } from './lib/supabaseClient';
 
@@ -170,6 +172,27 @@ function bestLocalMatch(candidates = [], supaSets = []) {
 
 export default function WorkoutHistory({ onHistoryChange }) {
   const { user } = useAuth();
+
+  // --- User-scoped workout history (prevents cross-account contamination on same device) ---
+  const userId = user?.id || null;
+
+  const readWorkoutHistory = useCallback(() => {
+    try {
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      const list = readScopedJSON(KEYS.workoutHistory, userId, []);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }, [userId]);
+
+  const writeWorkoutHistory = useCallback((list) => {
+    try {
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
+    } catch {}
+  }, [userId]);
+
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [shareOpen, setShareOpen] = useState(false);
@@ -183,7 +206,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [deleting, setDeleting] = useState(false);
 
   const localIdx = useMemo(() => {
-    const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const raw = readWorkoutHistory();
     const byDay = new Map();
     for (const sess of raw) {
       const arr = byDay.get(sess.date) || [];
@@ -210,7 +233,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     // burned today from local history (source of truth for UI)
     let burnedToday = 0;
     try {
-      const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+      const wh = readWorkoutHistory();
       burnedToday = (wh || [])
         .filter(w => w?.date === todayUS || w?.date === todayISO)
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
@@ -280,7 +303,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
       // 2) Delete from localStorage workoutHistory
       try {
-        const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || [];
+        const wh = readWorkoutHistory();
 
         // match strategy:
         // - if row has client_id -> remove matching local session id/client_id
@@ -304,7 +327,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
           return true;
         });
 
-        localStorage.setItem('workoutHistory', JSON.stringify(filtered));
+        writeWorkoutHistory(filtered);
       } catch (e) {
         console.warn('[WorkoutHistory] local delete failed', e);
       }

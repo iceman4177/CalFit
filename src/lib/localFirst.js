@@ -252,75 +252,45 @@ export async function saveWorkoutLocalFirst({
   started_at,
   ended_at,
   total_calories,
-  notes = null,
-  goal = null,
+  local_day,
+  items,
 }) {
-  if (!user_id) return;
+  // Always keep the local UI updated first (even if cloud is down).
+  // Cloud sync is best-effort and will be queued if it fails.
 
-  const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}`);
-  const startISO = started_at || new Date().toISOString();
-  const dayISO = localDayISO(new Date(startISO));
+  const dayISO = String(local_day || localDayISO(new Date()));
+  const cid = String(client_id || getClientId());
 
-  const payload = {
+  // Dispatch immediate burned update for today
+  if (dayISO === localDayISO(new Date())) {
+    dispatchBurned(total_calories);
+  }
+
+  // If no logged-in user, we can't write to Supabase; local UI still works.
+  if (!user_id) {
+    return { ok: false, reason: 'no_user', client_id: cid };
+  }
+
+  const row = {
     user_id,
     client_id: cid,
-    local_day: dayISO,
-    started_at: startISO,
-    ended_at: ended_at || startISO,
-    total_calories: safeNum(total_calories, 0),
-    notes,
-    goal,
-    updated_at: new Date().toISOString(),
+    started_at,
+    ended_at,
+    total_calories,
+    local_day: dayISO, // Supabase date column accepts YYYY-MM-DD
+    items: items ?? null,
   };
 
   try {
-    await upsertWorkoutCloud(payload);
+    const saved = await upsertWorkoutCloud(row);
+    return { ok: true, id: saved?.id || null, data: saved, client_id: cid };
   } catch (e) {
+    // Queue the op so it can flush later.
     try {
-      enqueueOp?.({
-        op: 'upsert_workout',
-        table: 'workouts',
-        user_id,
-        client_id: cid,
-        payload,
-      });
+      enqueueOp({ type: 'upsert_workout', payload: row });
     } catch {}
-    throw e;
+
+    console.warn('[localFirst] saveWorkoutLocalFirst queued (cloud unavailable)', e);
+    return { ok: false, queued: true, error: String(e?.message || e), client_id: cid };
   }
-}
-
-/**
- * ✅ deleteWorkoutLocalFirst
- * Fixes your build error and keeps daily totals correct.
- */
-export async function deleteWorkoutLocalFirst({ user_id, client_id }) {
-  if (!user_id || !client_id) return;
-
-  // delete cloud row
-  try {
-    const res = await supabase
-      .from('workouts')
-      .delete()
-      .eq('user_id', user_id)
-      .eq('client_id', client_id);
-
-    if (res?.error) throw res.error;
-  } catch (e) {
-    // queue for later
-    try {
-      enqueueOp?.({
-        op: 'delete_workout',
-        table: 'workouts',
-        user_id,
-        client_id,
-        payload: { user_id, client_id },
-      });
-    } catch {}
-    throw e;
-  }
-
-  // best-effort: re-hydrate today burned via cloud
-  try {
-    window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: {} }));
-  } catch {}
 }

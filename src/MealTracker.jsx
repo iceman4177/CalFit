@@ -36,6 +36,8 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 
 import foodData from './foodData.json';
 
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 
@@ -380,6 +382,27 @@ export default function MealTracker({ onMealUpdate }) {
 
   const { user } = useAuth();
 
+  // --- User-scoped local caches (prevents cross-account contamination on same device) ---
+  const userId = user?.id || null;
+
+  const readMealHistory = useCallback(() => {
+    try {
+      ensureScopedFromLegacy(KEYS.mealHistory, userId);
+      const list = readScopedJSON(KEYS.mealHistory, userId, []);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }, [userId]);
+
+  const writeMealHistory = useCallback((list) => {
+    try {
+      ensureScopedFromLegacy(KEYS.mealHistory, userId);
+      writeScopedJSON(KEYS.mealHistory, userId, Array.isArray(list) ? list : []);
+    } catch {}
+  }, [userId]);
+
+
   // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
 
@@ -395,9 +418,9 @@ export default function MealTracker({ onMealUpdate }) {
 
   // ------------ persistence helpers ------------
   const persistToday = meals => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
+    const rest = readMealHistory().filter(e => e.date !== todayUS);
     rest.push({ date: todayUS, meals });
-    localStorage.setItem('mealHistory', JSON.stringify(rest));
+    writeMealHistory(rest);
   };
 
   const emitConsumed = total => {
@@ -418,7 +441,8 @@ export default function MealTracker({ onMealUpdate }) {
 
   const getBurnedTodayLocal = dateUS => {
     try {
-      const all = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      const all = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
       // Your workoutHistory can have multiple workouts per day, so SUM them
       return (Array.isArray(all) ? all : [])
         .filter(e => e.date === dateUS)
@@ -466,7 +490,7 @@ export default function MealTracker({ onMealUpdate }) {
     let ignore = false;
 
     // First: local load (keeps your existing behavior)
-    const all = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const all = readMealHistory();
     const todayLog = all.find(e => e.date === todayUS);
     const meals = todayLog ? todayLog.meals || [] : [];
 
@@ -769,8 +793,8 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const handleClear = () => {
-    const rest = JSON.parse(localStorage.getItem('mealHistory') || '[]').filter(e => e.date !== todayUS);
-    localStorage.setItem('mealHistory', JSON.stringify(rest));
+    const rest = readMealHistory().filter(e => e.date !== todayUS);
+    writeMealHistory(rest);
     setMealLog([]);
     onMealUpdate?.(0);
     syncDailyMetrics(0);

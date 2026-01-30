@@ -11,8 +11,8 @@ import {
 } from '@mui/material';
 
 import { useAuth } from './context/AuthProvider.jsx';
-import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { hydrateTodayTotalsFromCloud } from './lib/hydrateCloudToLocal.js';
+import { ensureScopedFromLegacy, readScopedJSON, KEYS } from './lib/scopedStorage.js';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
@@ -31,20 +31,6 @@ function localISODay(d = new Date()) {
     return localMidnight.toISOString().slice(0, 10);
   } catch {
     return new Date().toISOString().slice(0, 10);
-  }
-}
-
-// Back-compat helpers: earlier patches referenced these names.
-// Keep aliases here so builds don't break if the call sites exist.
-function localDayISO(d = new Date()) {
-  return localISODay(d);
-}
-
-function formatDayUS(d = new Date()) {
-  try {
-    return new Date(d).toLocaleDateString('en-US');
-  } catch {
-    return todayUS();
   }
 }
 
@@ -73,66 +59,41 @@ function readUserGoalCalories() {
  * - burnedToday / consumedToday (hydrated truth keys)
  */
 function readTodayTotals(userId) {
-  const todayISO = localDayISO(new Date());
-  const todayUS = formatDayUS(new Date());
-
-  // Prefer scoped storage (prevents multi-account bleed on same device)
-  let meals = [];
-  let workouts = [];
-  let cache = {};
-
   try {
-    if (userId) {
-      ensureScopedFromLegacy(KEYS.mealHistory, userId);
-      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    const todayISO = localDayISO(new Date());
+    const todayUS = new Date().toLocaleDateString('en-US');
 
-      meals = readScopedJSON(KEYS.mealHistory, userId, []) || [];
-      workouts = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
-      cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
-    }
-  } catch {}
+    // migrate legacy caches into scoped keys for this user (one-time)
+    ensureScopedFromLegacy(KEYS.mealHistory, userId);
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
 
-  // Fallback (legacy unscoped)
-  if (!Array.isArray(meals) || meals.length === 0) {
-    try { meals = JSON.parse(localStorage.getItem('mealHistory') || '[]') || []; } catch { meals = []; }
-  }
-  if (!Array.isArray(workouts) || workouts.length === 0) {
-    try { workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]') || []; } catch { workouts = []; }
-  }
-  if (!cache || typeof cache !== 'object' || Array.isArray(cache)) {
-    try { cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {}; } catch { cache = {}; }
-  }
+    const meals = readScopedJSON(KEYS.mealHistory, userId, []) || [];
+    const workouts = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
 
-  // Meals today
-  const eaten = (meals || [])
-    .filter(m => {
-      const ld = String(m?.local_day || m?.__local_day || '');
+    const isForToday = (it) => {
+      if (!it) return false;
+      const ld = String(it.local_day || it.__local_day || '');
       if (ld) return ld === todayISO;
-      const d = String(m?.date || '');
+      const d = String(it.date || it.day || '');
       return d === todayISO || d === todayUS;
-    })
-    .reduce((sum, m) => sum + safeNum(m?.calories ?? m?.totalCalories ?? m?.total_calories, 0), 0);
+    };
 
-  // Workouts today
-  const burned = (workouts || [])
-    .filter(w => {
-      const ld = String(w?.local_day || w?.__local_day || '');
-      if (ld) return ld === todayISO;
-      const d = String(w?.date || '');
-      return d === todayISO || d === todayUS;
-    })
-    .reduce((sum, w) => sum + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+    const consumedFromMeals = (Array.isArray(meals) ? meals : []).filter(isForToday)
+      .reduce((s, m) => s + safeNum(m?.totalCalories ?? m?.total_calories ?? m?.calories, 0), 0);
 
-  // If dailyMetricsCache has a newer value, use it (but ONLY for today)
-  const cached = cache?.[todayISO];
-  const cachedEaten = safeNum(cached?.consumed ?? cached?.calories_eaten ?? cached?.eaten ?? cached?.cals_eaten, NaN);
-  const cachedBurned = safeNum(cached?.burned ?? cached?.calories_burned ?? cached?.cals_burned, NaN);
+    const burnedFromWorkouts = (Array.isArray(workouts) ? workouts : []).filter(isForToday)
+      .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
 
-  return {
-    eaten: Number.isFinite(cachedEaten) ? cachedEaten : eaten,
-    burned: Number.isFinite(cachedBurned) ? cachedBurned : burned,
-  };
+    const cached = (cache && typeof cache === 'object') ? (cache[todayISO] || cache[todayUS] || null) : null;
+    const consumed = safeNum(cached?.consumed ?? cached?.calories_eaten ?? cached?.eaten ?? consumedFromMeals, consumedFromMeals);
+    const burned = safeNum(cached?.burned ?? cached?.calories_burned ?? cached?.cals_burned ?? burnedFromWorkouts, burnedFromWorkouts);
+
+    return { consumed, burned, todayISO };
+  } catch {
+    return { consumed: 0, burned: 0, todayISO: localDayISO(new Date()) };
+  }
 }
 
 
@@ -201,7 +162,7 @@ export default function NetCalorieBanner({ burnedNow: burnedProp, consumed: cons
     const onVisOrFocus = () => recompute();
 
     window.addEventListener('slimcal:consumed:update', kick);
-    window.addEventListener('slimcal:burnedNow:update', kick);
+    window.addEventListener('slimcal:burned:update', kick);
     window.addEventListener('slimcal:streak:update', kick);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisOrFocus);
@@ -209,7 +170,7 @@ export default function NetCalorieBanner({ burnedNow: burnedProp, consumed: cons
 
     return () => {
       window.removeEventListener('slimcal:consumed:update', kick);
-      window.removeEventListener('slimcal:burnedNow:update', kick);
+      window.removeEventListener('slimcal:burned:update', kick);
       window.removeEventListener('slimcal:streak:update', kick);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisOrFocus);
@@ -375,6 +336,7 @@ export default function NetCalorieBanner({ burnedNow: burnedProp, consumed: cons
   );
 
   const { user } = useAuth();
+  const userId = user?.id || null;
   const lastHydrateRef = useRef(0);
 
   // Pull cloud truth on mount/login and whenever the app comes back to foreground.

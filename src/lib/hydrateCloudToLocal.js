@@ -121,7 +121,7 @@ function normalizeWorkoutForLocal(w) {
     totalCalories: total,
     total_calories: total,
     name: w?.name || 'Workout',
-    exercises: Array.isArray(w?.exercises) ? w.exercises : [],
+    exercises: (Array.isArray(w?.exercises) ? w.exercises : (Array.isArray(w?.items) ? w.items : (Array.isArray(w?.items?.exercises) ? w.items.exercises : []))),
     uploaded: true,
     __cloud: true
   };
@@ -198,61 +198,44 @@ function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
 
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
-
-  // ✅ Prefer local_day (DATE) if present: it's already normalized to the user's local day.
-  try {
-    const res = await supabase
-      .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at,local_day')
-      .eq('user_id', userId)
-      .eq('local_day', dayISO);
-
-    if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
-
-    // If local_day doesn't exist, fall back below
-    if (!/column .*local_day.* does not exist/i.test(res.error?.message || '')) {
-      console.warn('[hydrateCloudToLocal] workouts pull (local_day) failed', res.error);
-    }
-  } catch {}
-
-  // Fallback: started_at local timestamp range (best effort for legacy schemas)
   const startLocal = safeLocalMidnight(dayISO);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
+  // Prefer started_at range (same as meals hydration)
   try {
-    const res2 = await supabase
+    const res = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,started_at,ended_at,created_at')
+      .select('id,client_id,total_calories,items,started_at,ended_at,created_at')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
 
-    if (!res2?.error) return Array.isArray(res2?.data) ? res2.data : [];
+    if (!res?.error) return Array.isArray(res?.data) ? res.data : [];
 
-    if (!/column .*started_at.* does not exist/i.test(res2.error?.message || '')) {
-      console.warn('[hydrateCloudToLocal] workouts pull (started_at) failed', res2.error);
+    // If started_at is missing, fall through to created_at range
+    if (!/column .*started_at.* does not exist/i.test(res.error?.message || '')) {
+      console.warn('[hydrateCloudToLocal] workouts pull (started_at) failed', res.error);
     }
   } catch {}
 
-  // Fallback: created_at local timestamp range (last resort)
+  // Fallback: created_at range
   try {
-    const res3 = await supabase
+    const res2 = await supabase
       .from('workouts')
-      .select('id,client_id,total_calories,created_at')
+      .select('id,client_id,total_calories,items,created_at')
       .eq('user_id', userId)
       .gte('created_at', startLocal.toISOString())
       .lt('created_at', nextLocal.toISOString());
 
-    if (res3?.error) {
-      console.warn('[hydrateCloudToLocal] workouts pull (created_at) failed', res3.error);
+    if (res2?.error) {
+      console.warn('[hydrateCloudToLocal] workouts pull (created_at) failed', res2.error);
       return [];
     }
-    return Array.isArray(res3?.data) ? res3.data : [];
+    return Array.isArray(res2?.data) ? res2.data : [];
   } catch {
     return [];
   }
 }
-
 
 // Try to upsert daily_metrics in Supabase (new schema first, legacy fallback)
 async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
@@ -306,28 +289,12 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
 async function sumBurnedFromWorkouts(userId, dayISO) {
   if (!supabase || !userId) return 0;
 
-  // ✅ Prefer local_day (DATE) if present to avoid timezone drift and "last 2 days" leakage.
-  try {
-    const { data, error } = await supabase
-      .from('workouts')
-      .select('id,total_calories,local_day')
-      .eq('user_id', userId)
-      .eq('local_day', dayISO);
-
-    if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
-    }
-
-    // If local_day isn't a column, fall through to legacy range queries.
-    if (!/column .*local_day.* does not exist/i.test(error?.message || '')) {
-      console.warn('[hydrateCloudToLocal] workouts local_day query failed', error);
-    }
-  } catch {}
-
-  // Legacy fallback: started_at local timestamp range
+  // ✅ Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
+  // This avoids drift and works even if workouts.local_day is missing or null.
   const startLocal = safeLocalMidnight(dayISO);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
+  // Attempt started_at range first (most accurate)
   try {
     const { data, error } = await supabase
       .from('workouts')
@@ -336,14 +303,20 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
 
-    if (!error) return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    if (!error) {
+      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    }
 
-    if (!/column .*started_at.* does not exist/i.test(error?.message || '')) {
+    // If started_at isn't a column, fall back to created_at
+    if (/column .*started_at.* does not exist/i.test(error?.message || '')) {
+      // continue to fallback below
+    } else {
       console.warn('[hydrateCloudToLocal] workouts started_at query failed', error);
+      // still try fallback to created_at
     }
   } catch {}
 
-  // Last resort: created_at local timestamp range
+  // Fallback: created_at range (best effort)
   try {
     const { data, error } = await supabase
       .from('workouts')
@@ -363,7 +336,6 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
     return 0;
   }
 }
-
 
 // Optional backup for eaten from meals table (if daily_metrics missing)
 async function sumEatenFromMeals(userId, dayISO) {

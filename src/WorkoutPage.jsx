@@ -37,6 +37,7 @@ import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
 
 // ✅ local-first wrappers (idempotent, queued sync, syncs to Supabase when signed in)
 import {
@@ -199,6 +200,42 @@ function clearActiveWorkoutSessionId() {
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
+  // --- User-scoped local caches (prevents cross-account contamination on same device) ---
+  const userId = user?.id || null;
+
+  const readWorkoutHistory = useCallback(() => {
+    try {
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      const list = readScopedJSON(KEYS.workoutHistory, userId, []);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }, [userId]);
+
+  const writeWorkoutHistory = useCallback((list) => {
+    try {
+      ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
+    } catch {}
+  }, [userId]);
+
+  const readDailyCache = useCallback(() => {
+    try {
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+      const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {});
+      return cache && typeof cache === 'object' ? cache : {};
+    } catch {
+      return {};
+    }
+  }, [userId]);
+
+  const writeDailyCache = useCallback((cache) => {
+    try {
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+      writeScopedJSON(KEYS.dailyMetricsCache, userId, cache && typeof cache === 'object' ? cache : {});
+    } catch {}
+  }, [userId]);
 
   useEffect(() => {
     if (!userData) history.replace('/edit-info');
@@ -250,19 +287,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       const cid = String(activeWorkoutSessionIdRef.current || '');
       if (!cid) return;
 
-      let list = [];
-      try {
-        if (user?.id) {
-          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
-          const scoped = readScopedJSON(KEYS.workoutHistory, user.id, []);
-          list = Array.isArray(scoped) ? scoped : [];
-        } else {
-          const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-          list = Array.isArray(raw) ? raw : [];
-        }
-      } catch {
-        list = [];
-      }
+      const raw = readWorkoutHistory();
+      const list = Array.isArray(raw) ? raw : [];
       const draft = list.find((w) => {
         const id = String(w?.client_id || w?.id || '');
         const d = String(w?.date || '');
@@ -296,19 +322,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const todayUS = now.toLocaleDateString('en-US');
     const todayISO = localDayISO(now);
     try {
-      let list = [];
-      try {
-        if (user?.id) {
-          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
-          const scoped = readScopedJSON(KEYS.workoutHistory, user.id, []);
-          list = Array.isArray(scoped) ? scoped : [];
-        } else {
-          const raw = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-          list = Array.isArray(raw) ? raw : [];
-        }
-      } catch {
-        list = [];
-      }
+      const raw = readWorkoutHistory();
+      const list = Array.isArray(raw) ? raw : [];
       // --- De-dupe + normalize ---
       // Workouts can exist in localStorage with either `date` = todayUS or `date` = todayISO.
       // If both exist for the same session (same client_id), it shows twice and doubles burned.
@@ -338,7 +353,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           totalCalories: safeNum(w0?.totalCalories ?? w0?.total_calories, 0),
           total_calories: safeNum(w0?.total_calories ?? w0?.totalCalories, 0),
         };
-        if (String(w?.local_day || w?.__local_day || '') === String(todayISO)) w.date = todayUS;
         if (isToday(w?.date)) w.date = todayUS;
 
         const prev = byId.get(cid);
@@ -397,7 +411,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       // If we detected dupes / mixed date formats, write back a cleaned list + fix burned caches
       if (sawDupes) {
         try {
-          localStorage.setItem('workoutHistory', JSON.stringify(cleaned.slice(0, 300)));
+          writeWorkoutHistory(cleaned.slice(0, 300));
         } catch {}
 
         // Update burnedToday + dailyMetricsCache burned so banner doesn't flicker/double-count
@@ -406,14 +420,14 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
         } catch {}
         try {
-          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          const cache = readDailyCache() || {};
           const prev = cache[todayISO] || {};
           cache[todayISO] = {
             ...prev,
             burned: Math.round(burnedToday || 0),
             updated_at: new Date().toISOString()
           };
-          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+          writeDailyCache(cache);
         } catch {}
         try {
           window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
@@ -628,10 +642,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         try { localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0))); } catch {}
 
         try {
-          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          const cache = readDailyCache() || {};
           const prev = cache[dayISO] || {};
           cache[dayISO] = { ...prev, burned: Math.round(burnedToday || 0), updated_at: new Date().toISOString() };
-          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+          writeDailyCache(cache);
         } catch {}
 
         try {
@@ -976,16 +990,7 @@ setNewExercise({
         nextList = [sess, ...filtered];
       }
 
-      try {
-        if (user?.id) {
-          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
-          writeScopedJSON(KEYS.workoutHistory, user.id, nextList.slice(0, 300));
-        } else {
-          localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300)));
-        }
-      } catch {
-        try { localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300))); } catch {}
-      }
+      localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300)));
 
       // burnedToday = sum of all sessions logged today (including draft)
       const burnedToday = (nextList || [])
@@ -998,14 +1003,14 @@ setNewExercise({
 
       // Update dailyMetricsCache burned WITHOUT touching consumed
       try {
-        const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+        const cache = readDailyCache() || {};
         const prev = cache[todayISO] || {};
         cache[todayISO] = {
           ...prev,
           burned: Math.round(burnedToday || 0),
           updated_at: new Date().toISOString()
         };
-        localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+        writeDailyCache(cache);
       } catch {}
 
       // Dispatch so NetCalorieBanner updates instantly
@@ -1023,32 +1028,13 @@ setNewExercise({
   // ✅ keeps daily_metrics in sync so calories carry over across devices
   const syncBurnedTodayToDailyMetrics = useCallback(async (todayDisplay, todayLocalIso) => {
     try {
-      let workouts = [];
-      try {
-        if (user?.id) {
-          ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
-          workouts = readScopedJSON(KEYS.workoutHistory, user.id, []) || [];
-        } else {
-          workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-        }
-      } catch {
-        workouts = [];
-      }
+      const workouts = readWorkoutHistory();
       const burnedToday = workouts
         .filter(w => w.date === todayDisplay)
         .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
 
-      let meals = [];
-      try {
-        if (user?.id) {
-          ensureScopedFromLegacy(KEYS.mealHistory, user.id);
-          meals = readScopedJSON(KEYS.mealHistory, user.id, []) || [];
-        } else {
-          meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-        }
-      } catch {
-        meals = [];
-      }
+      ensureScopedFromLegacy(KEYS.mealHistory, userId);
+    const meals = readScopedJSON(KEYS.mealHistory, userId, []);
       const todayMealRec = meals.find(m => m.date === todayDisplay);
       const consumedToday = todayMealRec
         ? (todayMealRec.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)
