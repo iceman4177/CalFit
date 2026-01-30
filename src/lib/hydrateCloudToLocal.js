@@ -3,7 +3,7 @@
 // This runs after login bootstrap (useBootstrapSync) and fixes the banner/PC sync.
 
 import { supabase } from './supabaseClient';
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './scopedStorage.js';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './scopedStorage.js';
 
 // ---------------- Local-day helpers (avoid UTC drift) ----------------
 function localDayISO(d = new Date()) {
@@ -198,6 +198,25 @@ function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
 
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
+
+  // ✅ Best: local_day equality (your workouts.local_day is a DATE)
+  try {
+    const res0 = await supabase
+      .from('workouts')
+      .select('id,client_id,total_calories,started_at,ended_at,created_at,local_day')
+      .eq('user_id', userId)
+      .eq('local_day', dayISO);
+
+    if (!res0?.error && Array.isArray(res0?.data) && res0.data.length > 0) {
+      return res0.data;
+    }
+
+    // If local_day isn't a column, fall through to timestamp range below
+    if (res0?.error && /column .*local_day.* does not exist/i.test(res0.error?.message || '')) {
+      // continue
+    }
+  } catch {}
+
   const startLocal = safeLocalMidnight(dayISO);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
 
@@ -288,6 +307,24 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
 // ✅ NEW: Burned should be computed via local_day (no timezone mismatch)
 async function sumBurnedFromWorkouts(userId, dayISO) {
   if (!supabase || !userId) return 0;
+
+  // ✅ Best: local_day equality (DATE) — avoids any started_at null / timezone drift
+  try {
+    const { data, error } = await supabase
+      .from('workouts')
+      .select('id,total_calories,local_day')
+      .eq('user_id', userId)
+      .eq('local_day', dayISO);
+
+    if (!error) {
+      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    }
+
+    if (!/column .*local_day.* does not exist/i.test(error?.message || '')) {
+      console.warn('[hydrateCloudToLocal] workouts local_day query failed', error);
+    }
+  } catch {}
+
 
   // ✅ Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
   // This avoids drift and works even if workouts.local_day is missing or null.
@@ -467,8 +504,8 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
 
   // Convenience keys used elsewhere
   try {
-    localStorage.setItem('consumedToday', String(Math.round(eaten || 0)));
-    localStorage.setItem('burnedToday', String(Math.round(burned || 0)));
+    localStorage.setItem(scopedKey('consumedToday', userId), String(Math.round(eaten || 0)));
+    localStorage.setItem(scopedKey('burnedToday', userId), String(Math.round(burned || 0)));
   } catch {}
 
   // 6) Dispatch events so UI updates without refresh
@@ -518,7 +555,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
 
     // Update convenience key
     try {
-      localStorage.setItem('burnedToday', String(Math.round(burned || 0)));
+      localStorage.setItem(scopedKey('burnedToday', userId), String(Math.round(burned || 0)));
     } catch {}
 
     // Update dailyMetricsCache burned without clobbering consumed

@@ -37,7 +37,7 @@ import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
 // ✅ local-first wrappers (idempotent, queued sync, syncs to Supabase when signed in)
 import {
@@ -417,7 +417,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         // Update burnedToday + dailyMetricsCache burned so banner doesn't flicker/double-count
         const burnedToday = today.reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
         try {
-          localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+          localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0)));
         } catch {}
         try {
           const cache = readDailyCache() || {};
@@ -639,7 +639,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
         // Update burnedToday + cache so banner reflects sessions immediately
         const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
-        try { localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0))); } catch {}
+        try { localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0))); } catch {}
 
         try {
           const cache = readDailyCache() || {};
@@ -998,7 +998,7 @@ setNewExercise({
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
 
       try {
-        localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+        localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0)));
       } catch {}
 
       // Update dailyMetricsCache burned WITHOUT touching consumed

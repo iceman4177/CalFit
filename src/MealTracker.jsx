@@ -36,7 +36,7 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 
 import foodData from './foodData.json';
 
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
@@ -455,10 +455,23 @@ export default function MealTracker({ onMealUpdate }) {
   const syncDailyMetrics = async consumedTotal => {
     const burned = getBurnedTodayLocal(todayUS);
 
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}');
-    cache[todayISO] = { burned, consumed: consumedTotal, net: consumedTotal - burned };
-    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-    localStorage.setItem('consumedToday', String(consumedTotal));
+    try {
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+      const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+      cache[todayISO] = {
+        ...(cache[todayISO] || {}),
+        burned,
+        consumed: consumedTotal,
+        net: consumedTotal - burned,
+        updated_at: new Date().toISOString(),
+      };
+      writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+
+      // Convenience keys (also scoped) for legacy readers
+      localStorage.setItem(scopedKey('consumedToday', userId), String(consumedTotal));
+      localStorage.setItem(scopedKey('burnedToday', userId), String(burned));
+    } catch {}
+
     emitConsumed(consumedTotal);
     emitBurned(burned);
 

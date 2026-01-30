@@ -80,12 +80,24 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
     try {
       const res = await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
       if (res?.ok) {
-        setState((s) => ({
-          ...s,
-          eatenNow: safeNum(res.eaten, s.eatenNow),
-          burnedNow: safeNum(res.burned, s.burnedNow),
-          goalNow: readUserGoalCalories(safeNum(goal || dailyGoal || s.goalNow || 0, 0)),
-        }));
+        setState((s) => {
+          // Prevent “snap back to 0” when cloud lags behind a fresh local log.
+          // If local already has >0 and cloud reports 0, keep local.
+          const nextEaten = (safeNum(res.eaten, 0) === 0 && s.eatenNow > 0)
+            ? s.eatenNow
+            : safeNum(res.eaten, s.eatenNow);
+
+          const nextBurned = (safeNum(res.burned, 0) === 0 && s.burnedNow > 0)
+            ? s.burnedNow
+            : safeNum(res.burned, s.burnedNow);
+
+          return {
+            ...s,
+            eatenNow: nextEaten,
+            burnedNow: nextBurned,
+            goalNow: readUserGoalCalories(safeNum(goal || dailyGoal || s.goalNow || 0, 0)),
+          };
+        });
       }
     } catch (e) {
       console.warn('[NetCalorieBanner] hydrate failed', e);
