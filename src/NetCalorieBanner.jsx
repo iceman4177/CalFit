@@ -34,6 +34,20 @@ function localISODay(d = new Date()) {
   }
 }
 
+// Back-compat helpers: earlier patches referenced these names.
+// Keep aliases here so builds don't break if the call sites exist.
+function localDayISO(d = new Date()) {
+  return localISODay(d);
+}
+
+function formatDayUS(d = new Date()) {
+  try {
+    return new Date(d).toLocaleDateString('en-US');
+  } catch {
+    return todayUS();
+  }
+}
+
 function safeNum(n, fallback = 0) {
   const v = Number(n);
   return Number.isFinite(v) ? v : fallback;
