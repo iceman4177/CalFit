@@ -104,19 +104,65 @@ function setConvenienceTotals(dayISO, eaten, burned, userId = null) {
 
 // ---- Cloud upserts -----------------------------------------------------------
 async function upsertWorkoutCloud(payload) {
-  const { user_id } = payload || {};
-  if (!supabase || !user_id) return;
+  const { user_id, client_id } = payload || {};
+  if (!supabase || !user_id) return null;
 
-  // Requires UNIQUE(user_id, client_id)
+  // Preferred: upsert using UNIQUE(user_id,client_id)
   const res = await supabase
     .from('workouts')
     .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
 
-  if (res?.error) throw res.error;
-  return res?.data || null;
+  if (!res?.error) return res?.data || null;
+
+  // Fallback: schema may not have UNIQUE constraint; emulate upsert manually.
+  const msg = String(res.error?.message || '');
+  const needsFallback =
+    /no unique or exclusion constraint/i.test(msg) ||
+    /ON CONFLICT specification/i.test(msg) ||
+    /there is no unique/i.test(msg) ||
+    /no unique constraint/i.test(msg);
+
+  if (!needsFallback) throw res.error;
+
+  // 1) Find existing row for (user_id, client_id)
+  try {
+    const ex = await supabase
+      .from('workouts')
+      .select('id')
+      .eq('user_id', user_id)
+      .eq('client_id', client_id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (ex?.data?.id) {
+      const upd = await supabase
+        .from('workouts')
+        .update(payload)
+        .eq('id', ex.data.id)
+        .select('id')
+        .maybeSingle();
+
+      if (upd?.error) throw upd.error;
+      return upd?.data || null;
+    }
+  } catch {
+    // continue to insert
+  }
+
+  // 2) Insert new
+  const ins = await supabase
+    .from('workouts')
+    .insert(payload)
+    .select('id')
+    .maybeSingle();
+
+  if (ins?.error) throw ins.error;
+  return ins?.data || null;
 }
+
 
 async function deleteWorkoutCloud({ user_id, client_id }) {
   if (!supabase || !user_id || !client_id) return;

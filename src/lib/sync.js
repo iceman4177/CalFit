@@ -9,6 +9,35 @@
 
 import { supabase } from './supabaseClient';
 
+
+async function fallbackWorkoutUpsert(payload) {
+  const { user_id, client_id } = payload || {};
+  if (!supabase || !user_id) throw new Error('missing_user_or_supabase');
+
+  const ex = await supabase
+    .from('workouts')
+    .select('id')
+    .eq('user_id', user_id)
+    .eq('client_id', client_id)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (ex?.data?.id) {
+    const upd = await supabase
+      .from('workouts')
+      .update(payload)
+      .eq('id', ex.data.id);
+    if (upd?.error) throw upd.error;
+    return;
+  }
+
+  const ins = await supabase
+    .from('workouts')
+    .insert(payload);
+  if (ins?.error) throw ins.error;
+}
+
 const OPS_KEY = 'slimcal:pendingOps:v1';
 const LOCK_KEY = 'slimcal:pendingOps:lock:v1';
 const LOCK_MS = 8000;

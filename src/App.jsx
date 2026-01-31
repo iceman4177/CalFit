@@ -228,51 +228,6 @@ function normalizeLocalData() {
     uploaded: typeof day.uploaded === 'boolean' ? day.uploaded : false,
   }));
   localStorage.setItem('mealHistory', JSON.stringify(mhNorm));
-
-  // ✅ Also normalize any SCOPED stores (workoutHistory:<userId>, mealHistory:<userId>, dailyMetricsCache:<userId>)
-  // This prevents background normalizers from writing legacy keys while the UI reads scoped keys.
-  function normalizeScopedKey(prefix, normalizer) {
-    try {
-      const keys = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(prefix + ":")) keys.push(k);
-      }
-      for (const k of keys) {
-        const raw = localStorage.getItem(k);
-        if (!raw) continue;
-        const parsed = JSON.parse(raw);
-        const normalized = normalizer(parsed);
-        localStorage.setItem(k, JSON.stringify(normalized));
-      }
-    } catch {}
-  }
-
-  normalizeScopedKey('workoutHistory', (wh) => {
-    const list = Array.isArray(wh) ? wh : [];
-    return list.map(w => ({
-      ...w,
-      clientId: w.clientId || clientId,
-      localId: w.localId || `w_${clientId}_${w.createdAt ? Date.parse(w.createdAt) : Date.now()}`,
-      createdAt: w.createdAt || new Date().toISOString(),
-      uploaded: typeof w.uploaded === 'boolean' ? w.uploaded : false,
-    }));
-  });
-
-  normalizeScopedKey('mealHistory', (mh) => {
-    const list = Array.isArray(mh) ? mh : [];
-    return list.map(day => ({
-      ...day,
-      clientId: day.clientId || clientId,
-      localId: day.localId || `m_${clientId}_${day.date || Date.now()}`,
-    }));
-  });
-
-  normalizeScopedKey('dailyMetricsCache', (cache) => {
-    const obj = (cache && typeof cache === 'object') ? cache : {};
-    return obj;
-  });
-
 }
 
 function dedupLocalWorkouts() {

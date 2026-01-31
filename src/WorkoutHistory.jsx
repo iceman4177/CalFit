@@ -34,6 +34,29 @@ import { upsertDailyMetricsLocalFirst } from './lib/localFirst';
 
 const SCALE = 0.1;
 
+
+function fallbackLocalHistory(userId) {
+  try {
+    if (!userId) return [];
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+    const list = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+    const arr = Array.isArray(list) ? list : [];
+    return arr.map(w => ({
+      id: w?.id || w?.client_id,
+      client_id: w?.client_id || w?.id,
+      user_id: userId,
+      total_calories: Number(w?.totalCalories ?? w?.total_calories ?? 0) || 0,
+      created_at: w?.started_at || w?.createdAt || w?.created_at || new Date().toISOString(),
+      started_at: w?.started_at || w?.createdAt || w?.created_at || new Date().toISOString(),
+      local_day: w?.local_day || w?.__local_day || null,
+      items: w?.items || (w?.exercises ? { exercises: w.exercises } : null),
+      __local_fallback: true,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function calcCaloriesFromSets(sets) {
   if (!Array.isArray(sets) || sets.length === 0) return 0;
   let vol = 0;
