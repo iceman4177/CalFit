@@ -394,9 +394,36 @@ export default function WorkoutHistory({ onHistoryChange }) {
         return;
       }
 
+
+      // Seed from local-first cache so History never goes blank while cloud fetch runs.
+      try {
+        const seeded = localIdx.raw
+          .slice()
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .map((h, idx) => ({
+            id: `seed-${idx}`,
+            started_at: new Date(h.date || Date.now()).toISOString(),
+            total_calories: safeNum(h.totalCalories, 0),
+            __draft: !!h.__draft,
+            __local: true,
+            exercises: Array.isArray(h.exercises) ? h.exercises : (Array.isArray(h.items) ? h.items : (h.items?.exercises || [])),
+            client_id: h.client_id || h.id
+          }));
+        if (!ignore && seeded.length) {
+          setRows(seeded);
+          if (onHistoryChange) onHistoryChange(sumTotals(seeded));
+        }
+      } catch {}
+
       setLoading(true);
       try {
         const base = await getWorkouts(user.id, { limit: 200 });
+
+        if (!Array.isArray(base) || base.length === 0) {
+          // keep seeded local history; don't clobber
+          setLoading(false);
+          return;
+        }
 
         const withSets = await Promise.all(
           base.map(async w => {
