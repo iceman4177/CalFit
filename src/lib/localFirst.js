@@ -38,43 +38,6 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-function normalizeWorkoutItems(items, exercisesFallback) {
-  // Accept either:
-  // - items: { exercises: [...] }
-  // - items: [...] (exercise array)
-  // - exercisesFallback: [...] (from WorkoutPage session)
-  let ex = [];
-  try {
-    if (Array.isArray(items)) ex = items;
-    else if (items && typeof items === 'object' && Array.isArray(items.exercises)) ex = items.exercises;
-    else if (Array.isArray(exercisesFallback)) ex = exercisesFallback;
-  } catch {}
-
-  const exercises = (ex || []).filter(Boolean).map(e => ({
-    name: e?.name ?? e?.exerciseName ?? 'Exercise',
-    sets: safeNum(e?.sets, 0),
-    reps: safeNum(e?.reps, 0),
-    weight: (e?.weight == null ? null : safeNum(e?.weight, 0)),
-    calories: safeNum(e?.calories, 0),
-    equipment: e?.equipment ?? null,
-    muscle_group: e?.muscle_group ?? null,
-  }));
-
-  return { exercises };
-}
-
-function calcWorkoutTotalFromItems(workoutItems) {
-  try {
-    const arr = workoutItems?.exercises;
-    if (!Array.isArray(arr)) return 0;
-    const sum = arr.reduce((s, e) => s + safeNum(e?.calories, 0), 0);
-    return Math.round(sum * 100) / 100;
-  } catch {
-    return 0;
-  }
-}
-
-
 function dispatchConsumed(dayISO, consumed) {
   try {
     window.dispatchEvent(
@@ -141,65 +104,19 @@ function setConvenienceTotals(dayISO, eaten, burned, userId = null) {
 
 // ---- Cloud upserts -----------------------------------------------------------
 async function upsertWorkoutCloud(payload) {
-  const { user_id, client_id } = payload || {};
-  if (!supabase || !user_id) return null;
+  const { user_id } = payload || {};
+  if (!supabase || !user_id) return;
 
-  // Preferred: upsert using UNIQUE(user_id,client_id)
+  // Requires UNIQUE(user_id, client_id)
   const res = await supabase
     .from('workouts')
     .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
 
-  if (!res?.error) return res?.data || null;
-
-  // Fallback: schema may not have UNIQUE constraint; emulate upsert manually.
-  const msg = String(res.error?.message || '');
-  const needsFallback =
-    /no unique or exclusion constraint/i.test(msg) ||
-    /ON CONFLICT specification/i.test(msg) ||
-    /there is no unique/i.test(msg) ||
-    /no unique constraint/i.test(msg);
-
-  if (!needsFallback) throw res.error;
-
-  // 1) Find existing row for (user_id, client_id)
-  try {
-    const ex = await supabase
-      .from('workouts')
-      .select('id')
-      .eq('user_id', user_id)
-      .eq('client_id', client_id)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (ex?.data?.id) {
-      const upd = await supabase
-        .from('workouts')
-        .update(payload)
-        .eq('id', ex.data.id)
-        .select('id')
-        .maybeSingle();
-
-      if (upd?.error) throw upd.error;
-      return upd?.data || null;
-    }
-  } catch {
-    // continue to insert
-  }
-
-  // 2) Insert new
-  const ins = await supabase
-    .from('workouts')
-    .insert(payload)
-    .select('id')
-    .maybeSingle();
-
-  if (ins?.error) throw ins.error;
-  return ins?.data || null;
+  if (res?.error) throw res.error;
+  return res?.data || null;
 }
-
 
 async function deleteWorkoutCloud({ user_id, client_id }) {
   if (!supabase || !user_id || !client_id) return;
@@ -418,8 +335,6 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   local_day,
   items,
-  // WorkoutPage passes exercises (not items) today
-  exercises,
   name = 'Workout',
 } = {}) {
   const nowISO = new Date().toISOString();
@@ -427,23 +342,9 @@ export async function saveWorkoutLocalFirst({
   const dayISO = local_day || localDayISO(new Date(startISO));
 
   // Per-session client id (do NOT reuse device id)
-  const cid =
-    client_id ||
-    (crypto?.randomUUID?.() ||
-      `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 
-  // ✅ Normalize items to match schema (jsonb object) and ensure we have exercises
-  const workoutItems = normalizeWorkoutItems(items, exercises);
-  const exCount = Array.isArray(workoutItems?.exercises) ? workoutItems.exercises.length : 0;
-
-  // ✅ Never create blank cloud rows
-  if (!exCount) {
-    return { ok: true, skippedCloud: true, reason: 'empty_workout', client_id: cid };
-  }
-
-  // ✅ Total calories must be non-null; compute from exercises if missing
-  const computedTotal = calcWorkoutTotalFromItems(workoutItems);
-  const total = Math.round(safeNum(total_calories, computedTotal));
+  const total = Math.round(safeNum(total_calories, 0));
 
   // Update burned totals locally right away (scoped)
   if (user_id) {
@@ -462,26 +363,24 @@ export async function saveWorkoutLocalFirst({
     dispatchBurned(dayISO, total);
   }
 
-  // ✅ Exact column match to Supabase schema + no nulls
   const row = {
-    id: cid,
-    user_id,
+    user_id: user_id || null,
     client_id: cid,
+    name,
     total_calories: total,
     started_at: startISO,
     ended_at: ended_at || startISO,
-    local_day: dayISO,
-    items: workoutItems,
-    goal: null,
-    notes: null,
+    local_day: dayISO, // Supabase column is date
+    items: items ?? null,
     updated_at: new Date().toISOString(),
   };
 
+  // Guests: just return local result (WorkoutPage writes local history)
   if (!user_id) return { ok: true, localOnly: true, client_id: cid };
 
   try {
     const saved = await upsertWorkoutCloud(row);
-    return { ok: true, id: saved?.id || cid || null, data: saved, client_id: cid };
+    return { ok: true, id: saved?.id || null, data: saved, client_id: cid };
   } catch (e) {
     try {
       enqueueOp({ type: 'upsert', table: 'workouts', user_id, client_id: cid, payload: row });

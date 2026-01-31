@@ -19,7 +19,6 @@ function safeNum(v, d = 0) {
 }
 
 function preferLiveProp(next, prev) {
-  // Props often arrive as default 0 during async recompute. Never let that clobber a real, non-zero value.
   if (next == null) return prev;
   const n = Number(next);
   const p = Number(prev);

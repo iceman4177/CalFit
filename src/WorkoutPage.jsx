@@ -920,15 +920,7 @@ setNewExercise({
       uploaded: false,
 
       // helper
-      items: { exercises: cumulativeExercises.map(ex => ({
-        name: ex.exerciseName,
-        sets: ex.sets,
-        reps: ex.reps,
-        weight: ex.weight || null,
-        calories: ex.calories
-      })) },
-      __local_day: todayLocalIso,
-      local_day: todayLocalIso
+      __local_day: todayLocalIso
     };
   }, [cumulativeExercises, user?.id]);
 
@@ -942,30 +934,16 @@ setNewExercise({
       const todayISO = localDayISO(now);
       const todayUS = now.toLocaleDateString('en-US');
 
-      const uid = user?.id || null;
       const cid = activeWorkoutSessionIdRef.current;
 
-      // ✅ Read current workout history from the SAME source the rest of the app reads
-      let list = [];
-      try {
-        if (uid) {
-          ensureScopedFromLegacy(KEYS.workoutHistory, uid);
-          const existing = readScopedJSON(KEYS.workoutHistory, uid, []);
-          list = Array.isArray(existing) ? existing : [];
-        } else {
-          const existing = JSON.parse(localStorage.getItem(KEYS.workoutHistory) || '[]');
-          list = Array.isArray(existing) ? existing : [];
-        }
-      } catch {
-        list = [];
-      }
+      const key = 'workoutHistory';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      const list = Array.isArray(existing) ? existing : [];
 
-      // Remove previous draft for this session (today only)
       const filtered = list.filter(w => {
-        const wDay = String(w?.local_day || w?.__local_day || '');
-        const wDate = String(w?.date || '');
+        const wDay = w?.date;
         const wCid = w?.client_id || w?.id;
-        const isToday = (wDay === String(todayISO)) || (wDate === String(todayUS)) || (wDate === String(todayISO));
+        const isToday = (wDay === todayUS || wDay === todayISO);
         const same = String(wCid || '') === String(cid || '');
         return !(isToday && same);
       });
@@ -976,24 +954,25 @@ setNewExercise({
         const startedAt = startedAtRef.current || now.toISOString();
         const endedAt = now.toISOString();
 
-        const totalRaw = nextExercises.reduce((sum, ex) => sum + safeNum(ex?.calories, 0), 0);
+        const totalRaw = nextExercises.reduce((s, ex) => s + safeNum(ex?.calories, 0), 0);
         const total = Math.round(totalRaw * 100) / 100;
 
         const sess = {
+          // stable keys
           id: cid,
           client_id: cid,
 
-          local_day: todayISO,
-          __local_day: todayISO,
-
+          // dates
           date: todayUS,
           started_at: startedAt,
           ended_at: endedAt,
           createdAt: startedAt,
 
+          // totals
           totalCalories: total,
           total_calories: total,
 
+          // display
           name: (nextExercises[0]?.exerciseName) || 'Workout',
           exercises: nextExercises.map(ex => ({
             name: ex.exerciseName,
@@ -1003,6 +982,7 @@ setNewExercise({
             calories: ex.calories
           })),
 
+          // flags
           uploaded: false,
           __draft: true
         };
@@ -1010,63 +990,39 @@ setNewExercise({
         nextList = [sess, ...filtered];
       }
 
-      // Persist history (scoped if logged in)
-      try {
-        if (uid) writeScopedJSON(KEYS.workoutHistory, uid, nextList.slice(0, 300));
-        else localStorage.setItem(KEYS.workoutHistory, JSON.stringify(nextList.slice(0, 300)));
-      } catch {}
+      localStorage.setItem(key, JSON.stringify(nextList.slice(0, 300)));
 
-      // Update "Today's Workouts Logged" immediately (WorkoutPage uses this state)
-      try {
-        const todaySessions = (nextList || []).filter(w => {
-          const wDay = String(w?.local_day || w?.__local_day || '');
-          const wDate = String(w?.date || '');
-          return wDay === String(todayISO) || wDate === String(todayUS) || wDate === String(todayISO);
-        });
-        setTodaySessions(todaySessions);
-      } catch {}
-
-      // Compute burnedToday from all sessions logged today (including draft)
+      // burnedToday = sum of all sessions logged today (including draft)
       const burnedToday = (nextList || [])
-        .filter(w => String(w?.local_day || w?.__local_day || '') === String(todayISO) || w?.date === todayUS || w?.date === todayISO)
-        .reduce((sum, w) => sum + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+        .filter(w => w?.date === todayUS || w?.date === todayISO)
+        .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
 
-      // Store burnedToday (scoped if possible)
       try {
-        localStorage.setItem((uid ? scopedKey('burnedToday', uid) : 'burnedToday'), String(Math.round(burnedToday || 0)));
+        localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0)));
       } catch {}
 
-      // Update dailyMetricsCache burned WITHOUT clobbering non-zero
+      // Update dailyMetricsCache burned WITHOUT touching consumed
       try {
-        if (uid) ensureScopedFromLegacy(KEYS.dailyMetricsCache, uid);
-        const cache = uid
-          ? (readScopedJSON(KEYS.dailyMetricsCache, uid, {}) || {})
-          : (JSON.parse(localStorage.getItem(KEYS.dailyMetricsCache) || '{}') || {});
+        const cache = readDailyCache() || {};
         const prev = cache[todayISO] || {};
-        const prevBurned = Number(prev?.burned ?? prev?.calories_burned ?? 0) || 0;
-        const nextBurned = Math.round(Number(burnedToday || 0) || 0);
-
         cache[todayISO] = {
           ...prev,
-          burned: (nextBurned === 0 && prevBurned > 0) ? prevBurned : nextBurned,
+          burned: Math.round(burnedToday || 0),
           updated_at: new Date().toISOString()
         };
-
-        if (uid) writeScopedJSON(KEYS.dailyMetricsCache, uid, cache);
-        else localStorage.setItem(KEYS.dailyMetricsCache, JSON.stringify(cache));
+        writeDailyCache(cache);
       } catch {}
 
-      // Dispatch events so banner + listeners update instantly
+      // Dispatch so NetCalorieBanner updates instantly
       try {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
           detail: { date: todayISO, burned: Math.round(burnedToday || 0) }
         }));
-        window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { dayISO: todayISO } }));
       } catch {}
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
     }
-  }, [user?.id, setTodaySessions]);
+  }, []);
 
 
   // ✅ keeps daily_metrics in sync so calories carry over across devices
@@ -1128,8 +1084,7 @@ setNewExercise({
       const saved = await saveWorkoutLocalFirst(session);
       const workoutId = saved?.id || null;
 
-      /*
-// 2) Persist exercise details as workout_sets so other devices can render breakdown
+      // 2) Persist exercise details as workout_sets so other devices can render breakdown
       try {
         if (workoutId) {
           // clear any prior sets for this workout (idempotent on resubmit)
@@ -1186,9 +1141,7 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      
-*/
-// 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
+      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
         const key = 'workoutHistory';
         const raw = JSON.parse(localStorage.getItem(key) || '[]');
