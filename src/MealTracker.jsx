@@ -38,6 +38,32 @@ import foodData from './foodData.json';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
+// ---- Anti-clobber guard (prevents banner snapping to 0) -----------------
+function safeWriteDailyMetricsCache(userId, dayISO, nextRow) {
+  try {
+    const key = scopedKey('dailyMetricsCache', userId);
+    const raw = localStorage.getItem(key);
+    const cache = raw ? JSON.parse(raw) : {};
+    const prev = cache?.[dayISO] || {};
+    const prevConsumed = Number(prev?.consumed ?? 0) || 0;
+    const prevBurned = Number(prev?.burned ?? 0) || 0;
+    const nConsumed = Number(nextRow?.consumed ?? 0) || 0;
+    const nBurned = Number(nextRow?.burned ?? 0) || 0;
+
+    // If new values are zero but previous had real totals, keep previous.
+    cache[dayISO] = {
+      ...prev,
+      ...nextRow,
+      consumed: (nConsumed <= 0 && prevConsumed > 0) ? prevConsumed : nConsumed,
+      burned: (nBurned <= 0 && prevBurned > 0) ? prevBurned : nBurned,
+      net: ((nConsumed <= 0 && prevConsumed > 0) ? prevConsumed : nConsumed) - ((nBurned <= 0 && prevBurned > 0) ? prevBurned : nBurned),
+      updated_at: new Date().toISOString(),
+    };
+
+    localStorage.setItem(key, JSON.stringify(cache));
+  } catch {}
+}
+
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 
