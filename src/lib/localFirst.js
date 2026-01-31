@@ -337,6 +337,18 @@ export async function saveWorkoutLocalFirst({
   items,
   name = 'Workout',
 } = {}) {
+  // ANTI_CLOBBER_WORKOUTS: never persist empty workouts (prevents banner/today list resetting to 0)
+  try {
+    const _items = items;
+    const _ex =
+      (typeof exercises !== 'undefined' && exercises) ||
+      (Array.isArray(_items) ? _items :
+        (_items && typeof _items === 'object' && Array.isArray(_items.exercises) ? _items.exercises : null));
+    if (!Array.isArray(_ex) || _ex.length === 0) {
+      return { ok: true, skipped: true, reason: 'empty_workout' };
+    }
+  } catch {}
+
   const nowISO = new Date().toISOString();
   const startISO = started_at || nowISO;
   const dayISO = local_day || localDayISO(new Date(startISO));
