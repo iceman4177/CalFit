@@ -107,10 +107,10 @@ async function upsertWorkoutCloud(payload) {
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // Use primary key upsert (id) so we don't depend on UNIQUE(user_id, client_id).
+  // Requires UNIQUE(user_id, client_id)
   const res = await supabase
     .from('workouts')
-    .upsert(payload, { onConflict: 'id' })
+    .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
 
@@ -123,8 +123,8 @@ async function deleteWorkoutCloud({ user_id, client_id }) {
   const res = await supabase
     .from('workouts')
     .delete()
-    .eq('id', client_id)
-    .eq('user_id', user_id);
+    .eq('user_id', user_id)
+    .eq('client_id', client_id);
 
   if (res?.error) throw res.error;
 }
@@ -133,10 +133,9 @@ async function upsertMealCloud(payload) {
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // Use primary key upsert (id) so we don't depend on UNIQUE(user_id, client_id).
   const res = await supabase
     .from('meals')
-    .upsert(payload, { onConflict: 'id' })
+    .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
 
@@ -149,8 +148,8 @@ async function deleteMealCloud({ user_id, client_id }) {
   const res = await supabase
     .from('meals')
     .delete()
-    .eq('id', client_id)
-    .eq('user_id', user_id);
+    .eq('user_id', user_id)
+    .eq('client_id', client_id);
 
   if (res?.error) throw res.error;
 }
@@ -280,8 +279,7 @@ export async function saveMealLocalFirst({
   const eatenAt = eaten_at || new Date().toISOString();
   const dayISO = local_day || localDayISO(new Date(eatenAt));
 
-    const payload = {
-    id: cid,
+  const payload = {
     user_id,
     client_id: cid,
     eaten_at: eatenAt,
@@ -297,7 +295,6 @@ export async function saveMealLocalFirst({
     qty,
     unit,
     updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
   };
 
   try {
@@ -307,7 +304,6 @@ export async function saveMealLocalFirst({
     try {
       enqueueOp({ type: 'upsert', table: 'meals', user_id, client_id: cid, payload });
     } catch {}
-    try { localStorage.setItem('slimcal:lastSyncError', String(e?.message || e)); } catch {}
     return { ok: false, queued: true, error: String(e?.message || e), client_id: cid };
   }
 }
@@ -345,6 +341,7 @@ export async function saveWorkoutLocalFirst({
   try {
     const _items = items;
     const _ex =
+      (typeof exercises !== 'undefined' && exercises) ||
       (Array.isArray(_items) ? _items :
         (_items && typeof _items === 'object' && Array.isArray(_items.exercises) ? _items.exercises : null));
     if (!Array.isArray(_ex) || _ex.length === 0) {
@@ -378,25 +375,43 @@ export async function saveWorkoutLocalFirst({
     dispatchBurned(dayISO, total);
   }
 
-    const exArr =
-    (items && typeof items === 'object' && Array.isArray(items.exercises)) ? items.exercises :
-    (Array.isArray(items) ? items : []);
+  
+  // Build cloud-safe row matching Supabase schema (public.workouts)
+  const exArr = Array.isArray(exercises) ? exercises : [];
+  const normalizedItems = (() => {
+    // Schema requires items to be an object with non-empty items.exercises array
+    if (items && typeof items === 'object' && !Array.isArray(items)) {
+      if (Array.isArray(items.exercises) && items.exercises.length > 0) return items;
+    }
+    if (exArr.length > 0) {
+      return {
+        exercises: exArr.map(ex => ({
+          name: ex?.name || ex?.exerciseName || '',
+          sets: ex?.sets ?? null,
+          reps: ex?.reps ?? null,
+          weight: ex?.weight ?? null,
+          calories: ex?.calories ?? null,
+        })).filter(x => String(x.name || '').trim().length > 0)
+      };
+    }
+    return { exercises: [] };
+  })();
+
+  if (!normalizedItems.exercises || normalizedItems.exercises.length === 0) {
+    throw new Error('Workout must include at least 1 exercise (items.exercises required)');
+  }
 
   const row = {
-    id: cid,
-    user_id: user_id || null,
+    user_id: userId,
     client_id: cid,
-    name,
-    total_calories: total,
-    started_at: startISO,
-    ended_at: ended_at || startISO,
-    local_day: dayISO, // Supabase column is date
-    items: (items && typeof items === 'object')
-      ? { ...items, exercises: exArr }
-      : { exercises: exArr },
-    updated_at: nowISO,
-    created_at: nowISO
+    started_at: started_at || new Date().toISOString(),
+    ended_at: ended_at || new Date().toISOString(),
+    total_calories: safeNum(total_calories ?? totalCalories),
+    local_day: dayISO,
+    items: normalizedItems,
+    updated_at: new Date().toISOString(),
   };
+
 
   // Guests: just return local result (WorkoutPage writes local history)
   if (!user_id) return { ok: true, localOnly: true, client_id: cid };
@@ -408,7 +423,6 @@ export async function saveWorkoutLocalFirst({
     try {
       enqueueOp({ type: 'upsert', table: 'workouts', user_id, client_id: cid, payload: row });
     } catch {}
-    try { localStorage.setItem('slimcal:lastSyncError', String(e?.message || e)); } catch {}
     return { ok: false, queued: true, error: String(e?.message || e), client_id: cid };
   }
 }

@@ -1,129 +1,94 @@
-import { hydrateRecentWorkoutsToLocal } from '../lib/hydrateCloudToLocal.js';
 // src/hooks/useBootstrapSync.js
 import { useEffect, useRef } from 'react';
+import { useAuth } from '../context/AuthProvider.jsx';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
 import { flushPending, attachSyncListeners } from '../lib/sync';
-import { hydrateTodayTotalsFromCloud } from '../lib/hydrateCloudToLocal';
+import { hydrateTodayTotalsFromCloud, hydrateRecentWorkoutsToLocal } from '../lib/hydrateCloudToLocal';
+import { supabase } from '../lib/supabaseClient';
 
-const SESSION_FLAG_PREFIX = 'bootstrapSync:ranThisSession:';
+// Run migration + cloud hydration once per session/user so the banner/totals
+// are stable across navigation, refresh, and device sync.
+export default function useBootstrapSync() {
+  const { user } = useAuth();
 
-export default function useBootstrapSync(user) {
-  const listenersAttachedRef = useRef(false);
-  const ranForUserRef = useRef(null);
-
-  // prevent spam hydrates
-  const lastHydrateAtRef = useRef(0);
-
-  function shouldHydrateNow(ms = 3500) {
-    const now = Date.now();
-    if (now - lastHydrateAtRef.current < ms) return false;
-    lastHydrateAtRef.current = now;
-    return true;
-  }
+  const hasBootstrappedRef = useRef(false);
+  const lastHydrateMsRef = useRef(0);
 
   useEffect(() => {
-    if (!listenersAttachedRef.current) {
-      try {
-        attachSyncListeners?.();
-      } catch {}
-      listenersAttachedRef.current = true;
-    }
-  }, []);
+    if (!user?.id) return;
 
-  // ✅ Hydrate on focus/visibility
-  useEffect(() => {
-    const userId = user?.id || null;
-    if (!userId) return;
+    let didCancel = false;
 
-    const onFocus = async () => {
-      if (!shouldHydrateNow()) return;
+    async function run() {
       try {
-        await flushPending({ maxTries: 1 });
-      } catch {}
-      try {
-        // ✅ This function now also hydrates today's workouts into local workoutHistory
-        // (and updates burned totals) so the banner stays correct cross-device.
+        // 1) One-time local -> cloud bootstrap (idempotent)
+        await migrateLocalToCloudOneTime(user.id);
+
+        // 2) Flush any queued ops (meals/workouts/daily_metrics)
+        await flushPending(user.id);
+
+        // 3) Pull today's totals from cloud into local (anti-clobber logic lives inside)
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-      
-          try {
-            await hydrateRecentWorkoutsToLocal({ supabase, userId: user.id, days: 30 });
-          } catch (e) {
-            console.warn('[bootstrap] hydrateRecentWorkoutsToLocal failed', e);
-          }
-} catch (e) {
-        console.warn('[useBootstrapSync] hydrate (focus) failed', e);
-      }
-    };
 
-    const onVisibility = async () => {
-      if (document.visibilityState !== 'visible') return;
-      await onFocus();
-    };
+        // 4) Pull recent workout history so other devices see it locally (for History UI)
+        try {
+          await hydrateRecentWorkoutsToLocal({ supabase, userId: user.id, days: 30 });
+        } catch (e) {
+          console.warn('[useBootstrapSync] hydrateRecentWorkoutsToLocal failed', e);
+        }
+
+        hasBootstrappedRef.current = true;
+        lastHydrateMsRef.current = Date.now();
+      } catch (e) {
+        console.warn('[useBootstrapSync] bootstrap failed', e);
+      }
+    }
+
+    run();
+
+    // Listeners: online/focus -> flush + hydrate (throttled)
+    const detach = attachSyncListeners(user.id);
+
+    async function onFocus() {
+      if (didCancel) return;
+      if (!user?.id) return;
+
+      // throttle: avoid rehydrating multiple times in quick succession
+      const now = Date.now();
+      if (now - (lastHydrateMsRef.current || 0) < 2500) return;
+      lastHydrateMsRef.current = now;
+
+      try {
+        await flushPending(user.id);
+      } catch (e) {
+        console.warn('[useBootstrapSync] flushPending failed', e);
+      }
+
+      try {
+        await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
+      } catch (e) {
+        console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
+      }
+
+      try {
+        await hydrateRecentWorkoutsToLocal({ supabase, userId: user.id, days: 30 });
+      } catch (e) {
+        // not mission critical for banner
+      }
+    }
 
     window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('visibilitychange', onFocus);
 
     return () => {
+      didCancel = true;
+      try { detach?.(); } catch {}
       window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('visibilitychange', onFocus);
     };
   }, [user?.id]);
 
-  // ✅ IMPORTANT: Poll while logged in so PC updates when you log workouts on mobile
-  useEffect(() => {
-    const userId = user?.id || null;
-    if (!userId) return;
-
-    const t = setInterval(async () => {
-      if (!shouldHydrateNow(12000)) return; // throttle
-      try {
-        await flushPending({ maxTries: 1 });
-      } catch {}
-      try {
-        await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-      } catch {}
-    }, 15000);
-
-    return () => clearInterval(t);
-  }, [user?.id]);
-
-  // ✅ One-time bootstrap on login
-  useEffect(() => {
-    const userId = user?.id || null;
-    if (!userId) return;
-
-    const sessionKey = `${SESSION_FLAG_PREFIX}${userId}`;
-    if (sessionStorage.getItem(sessionKey) === '1') {
-      ranForUserRef.current = userId;
-
-      (async () => {
-        if (!shouldHydrateNow()) return;
-        try {
-          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        } catch {}
-      })();
-
-      return;
-    }
-
-    if (ranForUserRef.current === userId) return;
-    ranForUserRef.current = userId;
-
-    (async () => {
-      try {
-        await migrateLocalToCloudOneTime(user);
-        await flushPending({ maxTries: 2 });
-
-        try {
-          await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-        } catch (e) {
-          console.warn('[useBootstrapSync] hydrateTodayTotalsFromCloud failed', e);
-        }
-      } finally {
-        try {
-          sessionStorage.setItem(sessionKey, '1');
-        } catch {}
-      }
-    })();
-  }, [user?.id]);
+  return {
+    bootstrapped: !!user?.id && hasBootstrappedRef.current
+  };
 }
