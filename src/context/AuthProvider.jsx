@@ -3,7 +3,15 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { supabase } from '../lib/supabaseClient';
 import useBootstrapSync from '../hooks/useBootstrapSync';
 
-const AuthCtx = createContext(null);
+const DEFAULT_AUTH = {
+  session: null,
+  user: null,
+  loading: true,
+  signInWithGoogle: () => supabase.auth.signInWithOAuth({ provider: 'google' }),
+  signOut: () => supabase.auth.signOut(),
+};
+
+const AuthCtx = createContext(DEFAULT_AUTH);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -73,4 +81,4 @@ export function AuthProvider({ children }) {
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 
-export const useAuth = () => useContext(AuthCtx);
+export const useAuth = () => useContext(AuthCtx) || DEFAULT_AUTH;
