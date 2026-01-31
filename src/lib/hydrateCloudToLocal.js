@@ -49,13 +49,29 @@ function writeDailyMetricsCache(dayISO, eaten, burned, userId) {
   try {
     ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
     const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+    const prev = cache[dayISO] || {};
+    const prevConsumed = safeNum(prev?.consumed ?? prev?.calories_eaten ?? 0, 0);
+    const prevBurned = safeNum(prev?.burned ?? prev?.calories_burned ?? 0, 0);
+    const nextConsumed = safeNum(eaten, 0);
+    const nextBurned = safeNum(burned, 0);
+
+    // ANTI_CLOBBER_TOTALS: do not overwrite a non-zero local cache with zeros (common during async hydration)
+    const lastWrite = Number(localStorage.getItem(scopedKey('dailyMetrics:lastWrite', userId)) || 0) || 0;
+    const recentlyWritten = (Date.now() - lastWrite) < (10 * 60 * 1000);
+    const wouldClobberToZero = (nextConsumed === 0 && nextBurned === 0) && (prevConsumed > 0 || prevBurned > 0);
+
+    if (wouldClobberToZero && recentlyWritten) {
+      return; // keep local truth
+    }
+
     cache[dayISO] = {
-      consumed: safeNum(eaten, 0), // canonical key used by banner
-      burned: safeNum(burned, 0),
-      net: safeNum(eaten, 0) - safeNum(burned, 0),
+      consumed: nextConsumed,
+      burned: nextBurned,
+      net: nextConsumed - nextBurned,
       updated_at: new Date().toISOString(),
     };
     writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+    try { localStorage.setItem(scopedKey('dailyMetrics:lastWrite', userId), String(Date.now())); } catch {}
   } catch {}
 }
 
@@ -500,24 +516,6 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   }
 
   // 5) Write local cache so the banner is correct on this device immediately
-  // ANTI_CLOBBER_TOTALS: never overwrite a non-zero local cache with zeros from a transient/empty cloud pull.
-  try {
-    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
-    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
-    const prev = cache[dayISO] || {};
-    const prevEaten = Math.round(safeNum(prev?.consumed ?? prev?.eaten ?? 0, 0));
-    const prevBurned = Math.round(safeNum(prev?.burned ?? 0, 0));
-
-    const nextEaten = Math.round(safeNum(eaten || 0, 0));
-    const nextBurned = Math.round(safeNum(burned || 0, 0));
-
-    // If cloud says 0 but local has data, keep local.
-    if ((nextEaten === 0 && prevEaten > 0) || (nextBurned === 0 && prevBurned > 0)) {
-      eaten = Math.max(nextEaten, prevEaten);
-      burned = Math.max(nextBurned, prevBurned);
-    }
-  } catch {}
-
   writeDailyMetricsCache(dayISO, eaten, burned, userId);
 
   // Convenience keys used elsewhere
