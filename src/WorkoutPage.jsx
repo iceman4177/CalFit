@@ -920,7 +920,15 @@ setNewExercise({
       uploaded: false,
 
       // helper
-      __local_day: todayLocalIso
+      items: { exercises: cumulativeExercises.map(ex => ({
+        name: ex.exerciseName,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight: ex.weight || null,
+        calories: ex.calories
+      })) },
+      __local_day: todayLocalIso,
+      local_day: todayLocalIso
     };
   }, [cumulativeExercises, user?.id]);
 
@@ -1120,7 +1128,8 @@ setNewExercise({
       const saved = await saveWorkoutLocalFirst(session);
       const workoutId = saved?.id || null;
 
-      // 2) Persist exercise details as workout_sets so other devices can render breakdown
+      /*
+// 2) Persist exercise details as workout_sets so other devices can render breakdown
       try {
         if (workoutId) {
           // clear any prior sets for this workout (idempotent on resubmit)
@@ -1177,7 +1186,9 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
+      
+*/
+// 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
         const key = 'workoutHistory';
         const raw = JSON.parse(localStorage.getItem(key) || '[]');
