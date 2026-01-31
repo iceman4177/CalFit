@@ -1,3 +1,4 @@
+import { hydrateRecentWorkoutsToLocal } from '../lib/hydrateCloudToLocal.js';
 // src/hooks/useBootstrapSync.js
 import { useEffect, useRef } from 'react';
 import { migrateLocalToCloudOneTime } from '../lib/migrateLocalToCloud';
@@ -43,7 +44,13 @@ export default function useBootstrapSync(user) {
         // ✅ This function now also hydrates today's workouts into local workoutHistory
         // (and updates burned totals) so the banner stays correct cross-device.
         await hydrateTodayTotalsFromCloud(user, { alsoDispatch: true });
-      } catch (e) {
+      
+          try {
+            await hydrateRecentWorkoutsToLocal({ supabase, userId: user.id, days: 30 });
+          } catch (e) {
+            console.warn('[bootstrap] hydrateRecentWorkoutsToLocal failed', e);
+          }
+} catch (e) {
         console.warn('[useBootstrapSync] hydrate (focus) failed', e);
       }
     };
