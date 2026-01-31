@@ -589,3 +589,119 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
     return { ok: false, error: String(e?.message || e) };
   }
 }
+
+
+// ---- Workouts → local hydration (cross-device) --------------------------------
+// Pulls recent workouts from Supabase and writes them into scoped local caches.
+// Includes anti-clobber: won't overwrite recent non-empty local history with empty cloud pulls.
+export async function hydrateRecentWorkoutsToLocal({ supabase, userId, days = 30 }) {
+  if (!supabase || !userId) return { ok: false, reason: 'missing_supabase_or_user' };
+
+  const now = new Date();
+  const todayISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const start = new Date(now.getTime() - (days * 86400 * 1000));
+  const startISO = new Date(start.getTime() - start.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  const safe = (n, d = 0) => {
+    const x = Number(n);
+    return Number.isFinite(x) ? x : d;
+  };
+
+  const toSession = (row) => {
+    const cid = row?.client_id || row?.id;
+    const items = (row?.items && typeof row.items === 'object') ? row.items : {};
+    const ex = Array.isArray(items?.exercises) ? items.exercises : [];
+    const total = safe(row?.total_calories, safe(row?.calories, 0));
+
+    return {
+      id: cid,
+      client_id: cid,
+      local_day: row?.local_day || null,
+      __local_day: row?.local_day || null,
+      date: row?.local_day ? new Date(row.local_day + 'T00:00:00').toLocaleDateString('en-US') : '',
+      started_at: row?.started_at || row?.created_at || new Date().toISOString(),
+      ended_at: row?.ended_at || row?.started_at || row?.created_at || new Date().toISOString(),
+      createdAt: row?.started_at || row?.created_at || new Date().toISOString(),
+      totalCalories: total,
+      total_calories: total,
+      name: (ex?.[0]?.name) || 'Workout',
+      exercises: ex.map(e => ({
+        name: e?.name ?? 'Exercise',
+        sets: safe(e?.sets, 0),
+        reps: safe(e?.reps, 0),
+        weight: (e?.weight == null ? null : safe(e?.weight, 0)),
+        calories: safe(e?.calories, 0),
+        equipment: e?.equipment ?? null,
+        muscle_group: e?.muscle_group ?? null,
+      })),
+      uploaded: true,
+      __cloud: true,
+      __draft: false,
+    };
+  };
+
+  const computeBurnedForDay = (list, dayISO) => {
+    try {
+      return Math.round((list || [])
+        .filter(w => String(w?.local_day || w?.__local_day || '') === String(dayISO))
+        .reduce((s, w) => s + safe(w?.totalCalories ?? w?.total_calories, 0), 0));
+    } catch {
+      return 0;
+    }
+  };
+
+  const res = await supabase
+    .from('workouts')
+    .select('id,client_id,user_id,local_day,started_at,ended_at,total_calories,calories,items,created_at,updated_at')
+    .eq('user_id', userId)
+    .gte('local_day', startISO)
+    .order('started_at', { ascending: false })
+    .limit(300);
+
+  if (res?.error) return { ok: false, error: res.error };
+
+  const rows = Array.isArray(res?.data) ? res.data : [];
+  const sessions = rows.map(toSession).filter(s => s?.client_id);
+
+  // ANTI_CLOBBER_WORKOUTS: never overwrite non-empty local history with empty cloud pull shortly after a local write
+  try {
+    const key = `workoutHistory:${userId}`;
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const hasLocal = Array.isArray(existing) && existing.length > 0;
+    const hasCloud = Array.isArray(sessions) && sessions.length > 0;
+    const lastWrite = Number(localStorage.getItem(`workoutHistory:lastWrite:${userId}`) || 0) || 0;
+    const recentlyWritten = (Date.now() - lastWrite) < (5 * 60 * 1000);
+
+    if (!hasCloud && hasLocal && recentlyWritten) {
+      // keep local
+    } else {
+      localStorage.setItem(key, JSON.stringify(sessions));
+      localStorage.setItem(`workoutHistory:lastWrite:${userId}`, String(Date.now()));
+    }
+  } catch {}
+
+  const burnedToday = computeBurnedForDay(sessions, todayISO);
+
+  try { localStorage.setItem(`burnedToday:${userId}`, String(burnedToday)); } catch {}
+
+  try {
+    const cacheKey = `dailyMetricsCache:${userId}`;
+    const cache = JSON.parse(localStorage.getItem(cacheKey) || '{}') || {};
+    const prev = cache[todayISO] || {};
+    const prevBurned = Number(prev?.burned || prev?.calories_burned || 0) || 0;
+    cache[todayISO] = {
+      ...prev,
+      burned: (burnedToday === 0 && prevBurned > 0) ? prevBurned : burnedToday,
+      updated_at: new Date().toISOString(),
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cache));
+  } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: burnedToday } }));
+    window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { dayISO: todayISO } }));
+  } catch {}
+
+  return { ok: true, count: sessions.length, burnedToday };
+}
+
