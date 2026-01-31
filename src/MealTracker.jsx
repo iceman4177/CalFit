@@ -526,22 +526,38 @@ export default function MealTracker({ onMealUpdate }) {
       try {
         const { startIso, endIso } = getTodayRangeISOLocal();
 
-        // 1) Pull TODAY meals from cloud
-        const mealsRes = await supabase
-          .from('meals')
-          .select('client_id,title,total_calories,eaten_at')
-          .eq('user_id', user.id)
-          .gte('eaten_at', startIso)
-          .lt('eaten_at', endIso)
-          .order('eaten_at', { ascending: true });
+        // 1) Pull TODAY meals from cloud (prefer local_day to avoid timezone drift)
+        let mealsRes = null;
+
+        // Try local_day first (your meals table should have local_day)
+        try {
+          mealsRes = await supabase
+            .from('meals')
+            .select('client_id,title,total_calories,eaten_at,local_day')
+            .eq('user_id', user.id)
+            .eq('local_day', todayISO)
+            .order('eaten_at', { ascending: true });
+        } catch {}
+
+        // Fallback to eaten_at range if local_day isn't available or query fails
+        if (mealsRes?.error && /column .*local_day.* does not exist/i.test(mealsRes.error?.message || '')) {
+          try {
+            mealsRes = await supabase
+              .from('meals')
+              .select('client_id,title,total_calories,eaten_at')
+              .eq('user_id', user.id)
+              .gte('eaten_at', startIso)
+              .lt('eaten_at', endIso)
+              .order('eaten_at', { ascending: true });
+          } catch {}
+        }
 
         if (mealsRes?.error) {
           console.warn('[MealTracker] cloud meals fetch error', mealsRes.error);
         }
 
         const cloudMealsRaw = Array.isArray(mealsRes?.data) ? mealsRes.data : [];
-
-        // Normalize into your local shape
+// Normalize into your local shape
         const cloudMeals = cloudMealsRaw.map((m) => {
           const cid =
             m?.client_id ||
@@ -593,22 +609,7 @@ export default function MealTracker({ onMealUpdate }) {
 
         if (!ignore) emitBurned(burnedToday);
 
-        // 6) Write dailyMetricsCache in the exact keys your UI reads
-        try {
-          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
-          cache[todayISO] = {
-            burned: burnedToday,
-            consumed: consumedTotal,
-            net: consumedTotal - burnedToday,
-            calories_burned: burnedToday,
-            calories_eaten: consumedTotal,
-            net_calories: consumedTotal - burnedToday,
-            updated_at: new Date().toISOString()
-          };
-          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-        } catch {}
-
-        // 7) Also upsert via local-first so it stays consistent everywhere
+        // 6) Persist totals via local-first so cache + banner stay stable across navigation/devices
         try {
           await upsertDailyMetricsLocalFirst({
             user_id: user.id,

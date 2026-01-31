@@ -48,6 +48,7 @@ function readDailyMetricsNums(row) {
 function writeDailyMetricsCache(dayISO, eaten, burned, userId) {
   try {
     ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
     const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     cache[dayISO] = {
       consumed: safeNum(eaten, 0), // canonical key used by banner
@@ -499,6 +500,34 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
     if (eatenFromMeals > 0) eaten = eatenFromMeals;
   }
 
+
+  // ---- ANTI-CLOBBER: never overwrite good local totals with empty/stale cloud reads ----
+  try {
+    // If cloud reads return 0/0 but local cache already has >0 for today, keep local.
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+    const row = cache?.[dayISO] || {};
+    const localEaten = safeNum(row?.consumed ?? row?.calories_eaten ?? 0, 0);
+    const localBurned = safeNum(row?.burned ?? row?.calories_burned ?? 0, 0);
+
+    // Also respect pending offline ops (cloud may lag behind)
+    let hasPending = false;
+    try {
+      const ops = JSON.parse(localStorage.getItem('slimcal:pendingOps:v1') || '[]') || [];
+      if (Array.isArray(ops)) {
+        hasPending = ops.some(op =>
+          (op?.payload?.user_id === userId || op?.user_id === userId) &&
+          (op?.payload?.local_day === dayISO || op?.payload?.day === dayISO || op?.dayISO === dayISO)
+        );
+      }
+    } catch {}
+
+    if ((safeNum(eaten, 0) === 0 && safeNum(burned, 0) === 0) && (localEaten > 0 || localBurned > 0 || hasPending)) {
+      eaten = localEaten;
+      burned = localBurned;
+    }
+  } catch {}
+
   // 5) Write local cache so the banner is correct on this device immediately
   writeDailyMetricsCache(dayISO, eaten, burned, userId);
 
@@ -561,7 +590,8 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
     // Update dailyMetricsCache burned without clobbering consumed
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
-      const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
       const prev = cache[dayISO] || {};
       const consumed = safeNum(prev?.consumed ?? prev?.calories_eaten ?? prev?.eaten ?? 0, 0);
       cache[dayISO] = {
