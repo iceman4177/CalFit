@@ -9,7 +9,7 @@ import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEY
 // ---- Workouts → local hydration (cross-device) --------------------------------
 // Reads recent workouts from Supabase and writes into scoped workoutHistory + burnedToday + dailyMetricsCache
 // so mobile immediately reflects PC (and vice versa).
-function safeNum(n, d = 0) {
+function safeNumW(n, d = 0) {
   const x = Number(n);
   return Number.isFinite(x) ? x : d;
 }
@@ -18,7 +18,7 @@ function toLocalSession(row) {
   const cid = row?.client_id || row?.id;
   const items = row?.items && typeof row.items === 'object' ? row.items : {};
   const ex = Array.isArray(items?.exercises) ? items.exercises : [];
-  const total = safeNum(row?.total_calories, safeNum(row?.calories, 0));
+  const total = safeNumW(row?.total_calories, safeNumW(row?.calories, 0));
 
   return {
     id: cid,
@@ -38,10 +38,10 @@ function toLocalSession(row) {
     name: (ex?.[0]?.name) || 'Workout',
     exercises: ex.map(e => ({
       name: e?.name ?? 'Exercise',
-      sets: safeNum(e?.sets, 0),
-      reps: safeNum(e?.reps, 0),
-      weight: (e?.weight == null ? null : safeNum(e?.weight, 0)),
-      calories: safeNum(e?.calories, 0),
+      sets: safeNumW(e?.sets, 0),
+      reps: safeNumW(e?.reps, 0),
+      weight: (e?.weight == null ? null : safeNumW(e?.weight, 0)),
+      calories: safeNumW(e?.calories, 0),
       equipment: e?.equipment ?? null,
       muscle_group: e?.muscle_group ?? null,
     })),
@@ -54,7 +54,7 @@ function toLocalSession(row) {
 function computeBurnedForDay(list, dayISO) {
   try {
     return Math.round((list || []).filter(w => String(w?.local_day || w?.__local_day || '') === String(dayISO))
-      .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0));
+      .reduce((s, w) => s + safeNumW(w?.totalCalories ?? w?.total_calories, 0), 0));
   } catch {
     return 0;
   }
@@ -127,7 +127,7 @@ function safeLocalMidnight(dayISO) {
   }
 }
 
-function safeNum(v, d = 0) {
+function safeNumW(v, d = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 }
@@ -136,16 +136,16 @@ function readDailyMetricsNums(row) {
   if (!row || typeof row !== 'object') return { eaten: 0, burned: 0 };
 
   const eaten =
-    safeNum(row.calories_eaten) ||
-    safeNum(row.cals_eaten) ||
-    safeNum(row.consumed) ||
-    safeNum(row.eaten) ||
+    safeNumW(row.calories_eaten) ||
+    safeNumW(row.cals_eaten) ||
+    safeNumW(row.consumed) ||
+    safeNumW(row.eaten) ||
     0;
 
   const burned =
-    safeNum(row.calories_burned) ||
-    safeNum(row.cals_burned) ||
-    safeNum(row.burned) ||
+    safeNumW(row.calories_burned) ||
+    safeNumW(row.cals_burned) ||
+    safeNumW(row.burned) ||
     0;
 
   return { eaten, burned };
@@ -156,9 +156,9 @@ function writeDailyMetricsCache(dayISO, eaten, burned, userId) {
     ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
     const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     cache[dayISO] = {
-      consumed: safeNum(eaten, 0), // canonical key used by banner
-      burned: safeNum(burned, 0),
-      net: safeNum(eaten, 0) - safeNum(burned, 0),
+      consumed: safeNumW(eaten, 0), // canonical key used by banner
+      burned: safeNumW(burned, 0),
+      net: safeNumW(eaten, 0) - safeNumW(burned, 0),
       updated_at: new Date().toISOString(),
     };
     writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
@@ -169,7 +169,7 @@ function dispatchTotals(dayISO, eaten, burned) {
   try {
     window.dispatchEvent(
       new CustomEvent('slimcal:consumed:update', {
-        detail: { date: dayISO, consumed: Math.round(safeNum(eaten, 0)) }
+        detail: { date: dayISO, consumed: Math.round(safeNumW(eaten, 0)) }
       })
     );
   } catch {}
@@ -177,7 +177,7 @@ function dispatchTotals(dayISO, eaten, burned) {
   try {
     window.dispatchEvent(
       new CustomEvent('slimcal:burned:update', {
-        detail: { date: dayISO, burned: Math.round(safeNum(burned, 0)) }
+        detail: { date: dayISO, burned: Math.round(safeNumW(burned, 0)) }
       })
     );
   } catch {}
@@ -212,7 +212,7 @@ function normalizeWorkoutForLocal(w) {
   // Use client_id if present (stable cross-device). Fall back to id.
   const cid = w?.client_id || w?.id || `cloud_${String(startedAt)}_${String(w?.total_calories || '')}`;
 
-  const total = safeNum(w?.total_calories ?? w?.totalCalories, 0);
+  const total = safeNumW(w?.total_calories ?? w?.totalCalories, 0);
 
   return {
     id: cid,
@@ -272,8 +272,8 @@ function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
           ...existing,
           exercises: keepExercises ? existing.exercises : norm.exercises,
           name: keepName ? existing.name : norm.name,
-          totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
-          total_calories: safeNum(existing?.total_calories ?? existing?.totalCalories, norm.total_calories),
+          totalCalories: safeNumW(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
+          total_calories: safeNumW(existing?.total_calories ?? existing?.totalCalories, norm.total_calories),
           local_day: existing?.local_day || existing?.__local_day || norm.local_day,
           __local_day: existing?.__local_day || existing?.local_day || norm.__local_day,
           date: existing?.date || norm.date
@@ -369,9 +369,9 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
   const rowNew = {
     user_id: userId,
     local_day: dayISO,
-    calories_eaten: safeNum(eaten, 0),
-    calories_burned: safeNum(burned, 0),
-    net_calories: safeNum(eaten, 0) - safeNum(burned, 0),
+    calories_eaten: safeNumW(eaten, 0),
+    calories_burned: safeNumW(burned, 0),
+    net_calories: safeNumW(eaten, 0) - safeNumW(burned, 0),
     updated_at: new Date().toISOString()
   };
 
@@ -389,9 +389,9 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
     const legacy = {
       user_id: userId,
       day: dayISO,
-      cals_eaten: safeNum(eaten, 0),
-      cals_burned: safeNum(burned, 0),
-      net_cals: safeNum(eaten, 0) - safeNum(burned, 0),
+      cals_eaten: safeNumW(eaten, 0),
+      cals_burned: safeNumW(burned, 0),
+      net_cals: safeNumW(eaten, 0) - safeNumW(burned, 0),
       updated_at: new Date().toISOString()
     };
 
@@ -423,7 +423,7 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
       .eq('local_day', dayISO);
 
     if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      return (data || []).reduce((s, w) => s + safeNumW(w?.total_calories, 0), 0);
     }
 
     if (!/column .*local_day.* does not exist/i.test(error?.message || '')) {
@@ -447,7 +447,7 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
       .lt('started_at', nextLocal.toISOString());
 
     if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      return (data || []).reduce((s, w) => s + safeNumW(w?.total_calories, 0), 0);
     }
 
     // If started_at isn't a column, fall back to created_at
@@ -473,7 +473,7 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
       return 0;
     }
 
-    return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    return (data || []).reduce((s, w) => s + safeNumW(w?.total_calories, 0), 0);
   } catch (e) {
     console.warn('[hydrateCloudToLocal] workouts fallback failed', e);
     return 0;
@@ -497,7 +497,7 @@ async function sumEatenFromMeals(userId, dayISO) {
       .eq('local_day', dayISO);
 
     if (!res?.error) {
-      total = (res.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+      total = (res.data || []).reduce((s, m) => s + safeNumW(m.total_calories, 0), 0);
       return total;
     }
   } catch {}
@@ -519,7 +519,7 @@ async function sumEatenFromMeals(userId, dayISO) {
       return 0;
     }
 
-    return (res2.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
+    return (res2.data || []).reduce((s, m) => s + safeNumW(m.total_calories, 0), 0);
   } catch (e) {
     console.warn('[hydrateCloudToLocal] meals fallback failed', e);
     return 0;
@@ -590,7 +590,7 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
       mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId);
 
       // If daily_metrics burned was stale, the list is a strong fallback.
-      const sumFromList = (cloudWorkouts || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      const sumFromList = (cloudWorkouts || []).reduce((s, w) => s + safeNumW(w?.total_calories, 0), 0);
       if (sumFromList > 0 && (!burned || burned <= 0)) {
         burned = sumFromList;
       }
@@ -657,7 +657,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
     }
 
     // Compute burned from cloud sessions for today
-    const burned = list.reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+    const burned = list.reduce((s, w) => s + safeNumW(w?.total_calories, 0), 0);
 
     // Update convenience key
     try {
@@ -669,12 +669,12 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
       const prev = cache[dayISO] || {};
-      const consumed = safeNum(prev?.consumed ?? prev?.calories_eaten ?? prev?.eaten ?? 0, 0);
+      const consumed = safeNumW(prev?.consumed ?? prev?.calories_eaten ?? prev?.eaten ?? 0, 0);
       cache[dayISO] = {
         ...prev,
         consumed,
-        burned: Math.round(safeNum(burned, 0)),
-        net: safeNum(consumed, 0) - safeNum(burned, 0),
+        burned: Math.round(safeNumW(burned, 0)),
+        net: safeNumW(consumed, 0) - safeNumW(burned, 0),
         updated_at: new Date().toISOString()
       };
       writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
@@ -684,7 +684,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
     if (alsoDispatch) {
       try {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
-          detail: { date: dayISO, burned: Math.round(safeNum(burned, 0)) }
+          detail: { date: dayISO, burned: Math.round(safeNumW(burned, 0)) }
         }));
       } catch {}
     }
