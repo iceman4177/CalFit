@@ -38,32 +38,6 @@ import foodData from './foodData.json';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
-// ---- Anti-clobber guard (prevents banner snapping to 0) -----------------
-function safeWriteDailyMetricsCache(userId, dayISO, nextRow) {
-  try {
-    const key = scopedKey('dailyMetricsCache', userId);
-    const raw = localStorage.getItem(key);
-    const cache = raw ? JSON.parse(raw) : {};
-    const prev = cache?.[dayISO] || {};
-    const prevConsumed = Number(prev?.consumed ?? 0) || 0;
-    const prevBurned = Number(prev?.burned ?? 0) || 0;
-    const nConsumed = Number(nextRow?.consumed ?? 0) || 0;
-    const nBurned = Number(nextRow?.burned ?? 0) || 0;
-
-    // If new values are zero but previous had real totals, keep previous.
-    cache[dayISO] = {
-      ...prev,
-      ...nextRow,
-      consumed: (nConsumed <= 0 && prevConsumed > 0) ? prevConsumed : nConsumed,
-      burned: (nBurned <= 0 && prevBurned > 0) ? prevBurned : nBurned,
-      net: ((nConsumed <= 0 && prevConsumed > 0) ? prevConsumed : nConsumed) - ((nBurned <= 0 && prevBurned > 0) ? prevBurned : nBurned),
-      updated_at: new Date().toISOString(),
-    };
-
-    localStorage.setItem(key, JSON.stringify(cache));
-  } catch {}
-}
-
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
 
@@ -597,34 +571,69 @@ export default function MealTracker({ onMealUpdate }) {
           emitConsumed(consumedTotal);
         }
 
-        // 5) Pull TODAY workouts burned (so banner & net calories are correct on new device)
-        const workoutsRes = await supabase
-          .from('workouts')
-          .select('total_calories,started_at,ended_at')
-          .eq('user_id', user.id)
-          .gte('started_at', startIso)
-          .lt('started_at', endIso);
-
+        // 5) Pull TODAY workouts burned (timezone-proof) so banner & net calories are correct on new device
         let burnedToday = 0;
-        if (!workoutsRes?.error && Array.isArray(workoutsRes?.data)) {
-          burnedToday = workoutsRes.data.reduce((s, w) => s + (Number(w?.total_calories) || 0), 0);
-        }
+        try {
+          // ✅ Prefer local_day equality (if column exists)
+          let wr = null;
+          try {
+            wr = await supabase
+              .from('workouts')
+              .select('total_calories,local_day,started_at')
+              .eq('user_id', user.id)
+              .eq('local_day', todayISO);
+          } catch {}
+
+          if (wr?.error && /column .*local_day.* does not exist/i.test(wr.error?.message || '')) {
+            // Fallback: started_at range
+            const workoutsRes = await supabase
+              .from('workouts')
+              .select('total_calories,started_at,ended_at')
+              .eq('user_id', user.id)
+              .gte('started_at', startIso)
+              .lt('started_at', endIso);
+
+            if (!workoutsRes?.error && Array.isArray(workoutsRes?.data)) {
+              burnedToday = workoutsRes.data.reduce((sum, w) => sum + (Number(w?.total_calories) || 0), 0);
+            }
+          } else if (!wr?.error && Array.isArray(wr?.data)) {
+            burnedToday = wr.data.reduce((sum, w) => sum + (Number(w?.total_calories) || 0), 0);
+          }
+        } catch {}
 
         if (!ignore) emitBurned(burnedToday);
 
-        // 6) Write dailyMetricsCache in the exact keys your UI reads
+        // 6) Write dailyMetricsCache (SCOPED) in the exact keys your UI reads (and never clobber non-zero with 0)
         try {
-          const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+          if (user?.id) ensureScopedFromLegacy(KEYS.dailyMetricsCache, user.id);
+
+          const cache = user?.id
+            ? (readScopedJSON(KEYS.dailyMetricsCache, user.id, {}) || {})
+            : (JSON.parse(localStorage.getItem(KEYS.dailyMetricsCache) || '{}') || {});
+
+          const prev = cache[todayISO] || {};
+          const prevConsumed = Number(prev?.consumed ?? prev?.calories_eaten ?? 0) || 0;
+          const prevBurned = Number(prev?.burned ?? prev?.calories_burned ?? 0) || 0;
+
+          const nextConsumed = Number(consumedTotal || 0) || 0;
+          const nextBurned = Number(burnedToday || 0) || 0;
+
           cache[todayISO] = {
-            burned: burnedToday,
-            consumed: consumedTotal,
-            net: consumedTotal - burnedToday,
-            calories_burned: burnedToday,
-            calories_eaten: consumedTotal,
-            net_calories: consumedTotal - burnedToday,
+            ...prev,
+            burned: (nextBurned === 0 && prevBurned > 0) ? prevBurned : nextBurned,
+            consumed: (nextConsumed === 0 && prevConsumed > 0) ? prevConsumed : nextConsumed,
+            net: ((nextConsumed === 0 && prevConsumed > 0) ? prevConsumed : nextConsumed) - ((nextBurned === 0 && prevBurned > 0) ? prevBurned : nextBurned),
+            calories_burned: (nextBurned === 0 && prevBurned > 0) ? prevBurned : nextBurned,
+            calories_eaten: (nextConsumed === 0 && prevConsumed > 0) ? prevConsumed : nextConsumed,
+            net_calories: ((nextConsumed === 0 && prevConsumed > 0) ? prevConsumed : nextConsumed) - ((nextBurned === 0 && prevBurned > 0) ? prevBurned : nextBurned),
             updated_at: new Date().toISOString()
           };
-          localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+
+          if (user?.id) {
+            writeScopedJSON(KEYS.dailyMetricsCache, user.id, cache);
+          } else {
+            localStorage.setItem(KEYS.dailyMetricsCache, JSON.stringify(cache));
+          }
         } catch {}
 
         // 7) Also upsert via local-first so it stays consistent everywhere

@@ -18,6 +18,17 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
+function preferLiveProp(next, prev) {
+  // Props often arrive as default 0 during async recompute. Never let that clobber a real, non-zero value.
+  if (next == null) return prev;
+  const n = Number(next);
+  const p = Number(prev);
+  if (!Number.isFinite(n)) return prev;
+  if (n === 0 && Number.isFinite(p) && p > 0) return p;
+  return n;
+}
+
+
 function readUserGoalCalories(fallback) {
   try {
     // Legacy userData cache (HealthDataForm writes this)
@@ -57,8 +68,8 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
     const cache = readTodayCache(userId, todayISO);
     const g = readUserGoalCalories(safeNum(goal || dailyGoal || 0, 0));
     return {
-      eatenNow: safeNum(consumed, cache.eaten),
-      burnedNow: safeNum(burned, cache.burned),
+      eatenNow: preferLiveProp(consumed, cache.eaten),
+      burnedNow: preferLiveProp(burned, cache.burned),
       goalNow: g,
     };
   });
@@ -67,8 +78,8 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
   useEffect(() => {
     setState((s) => ({
       ...s,
-      eatenNow: safeNum(consumed, s.eatenNow),
-      burnedNow: safeNum(burned, s.burnedNow),
+      eatenNow: preferLiveProp(consumed, s.eatenNow),
+      burnedNow: preferLiveProp(burned, s.burnedNow),
       goalNow: readUserGoalCalories(safeNum(goal || dailyGoal || s.goalNow || 0, 0)),
     }));
   }, [consumed, burned, goal, dailyGoal]);
