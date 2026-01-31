@@ -110,7 +110,7 @@ async function upsertWorkoutCloud(payload) {
   // Requires UNIQUE(user_id, client_id)
   const res = await supabase
     .from('workouts')
-    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .upsert(payload, { onConflict: 'id' })
     .select('id')
     .maybeSingle();
 
@@ -123,8 +123,7 @@ async function deleteWorkoutCloud({ user_id, client_id }) {
   const res = await supabase
     .from('workouts')
     .delete()
-    .eq('user_id', user_id)
-    .eq('client_id', client_id);
+    .eq('id', client_id);
 
   if (res?.error) throw res.error;
 }
@@ -135,7 +134,7 @@ async function upsertMealCloud(payload) {
 
   const res = await supabase
     .from('meals')
-    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .upsert(payload, { onConflict: 'id' })
     .select('id')
     .maybeSingle();
 
@@ -148,8 +147,7 @@ async function deleteMealCloud({ user_id, client_id }) {
   const res = await supabase
     .from('meals')
     .delete()
-    .eq('user_id', user_id)
-    .eq('client_id', client_id);
+    .eq('id', client_id);
 
   if (res?.error) throw res.error;
 }
@@ -315,7 +313,7 @@ export async function deleteMealLocalFirst({ user_id, client_id } = {}) {
     return { ok: true };
   } catch (e) {
     try {
-      enqueueOp({ type: 'delete', table: 'meals', user_id, client_id, payload: { user_id, client_id } });
+      enqueueOp({ type: 'delete', table: 'meals', user_id, client_id, payload: { id: client_id } });
     } catch {}
     return { ok: false, queued: true, error: String(e?.message || e) };
   }
@@ -335,19 +333,19 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   local_day,
   items,
+  exercises,
   name = 'Workout',
 } = {}) {
-  // ANTI_CLOBBER_WORKOUTS: never persist empty workouts (prevents banner/today list resetting to 0)
-  try {
-    const _items = items;
-    const _ex =
-      (typeof exercises !== 'undefined' && exercises) ||
-      (Array.isArray(_items) ? _items :
-        (_items && typeof _items === 'object' && Array.isArray(_items.exercises) ? _items.exercises : null));
-    if (!Array.isArray(_ex) || _ex.length === 0) {
-      return { ok: true, skipped: true, reason: 'empty_workout' };
-    }
-  } catch {}
+  // ✅ Meals-style: normalize workout exercises into items.exercises and prevent empty clobber
+  const _ex = Array.isArray(exercises)
+    ? exercises
+    : (items && typeof items === 'object' && Array.isArray(items.exercises) ? items.exercises : null);
+
+  if (!Array.isArray(_ex) || _ex.length === 0) {
+    return { ok: false, skipped: true, reason: 'empty_workout' };
+  }
+
+  const normalizedItems = { exercises: _ex };
 
   const nowISO = new Date().toISOString();
   const startISO = started_at || nowISO;
@@ -383,7 +381,7 @@ export async function saveWorkoutLocalFirst({
     started_at: startISO,
     ended_at: ended_at || startISO,
     local_day: dayISO, // Supabase column is date
-    items: items ?? null,
+    items: normalizedItems,
     updated_at: new Date().toISOString(),
   };
 
@@ -408,7 +406,7 @@ export async function deleteWorkoutLocalFirst({ user_id, client_id } = {}) {
     return { ok: true };
   } catch (e) {
     try {
-      enqueueOp({ type: 'delete', table: 'workouts', user_id, client_id, payload: { user_id, client_id } });
+      enqueueOp({ type: 'delete', table: 'workouts', user_id, client_id, payload: { id: client_id } });
     } catch {}
     return { ok: false, queued: true, error: String(e?.message || e) };
   }
