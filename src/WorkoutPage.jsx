@@ -12,10 +12,6 @@ function uuidv4Fallback() {
     return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, () => '0');
   }
 }
-
-// ---- UUID helpers ------------------------------------------------------------
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Container,
@@ -191,29 +187,12 @@ function getOrCreateClientId() {
 }
 
 // ✅ Stable draft workout session id (THIS is what prevents duplicates + enables upsert while typing)
-function workoutSessionKey(userId) {
-  return userId ? `slimcal:${userId}:activeWorkoutSessionId` : 'slimcal:activeWorkoutSessionId';
-}
-
-// Auto-scoped, UUID-safe active workout session id.
-// Prevents bad legacy values (non-UUID) from breaking Supabase inserts (client_id is uuid).
-function getOrCreateActiveWorkoutSessionId(userId) {
+function getOrCreateActiveWorkoutSessionId() {
   try {
-    const key = workoutSessionKey(userId);
-    let sid = localStorage.getItem(key);
-
-    // Migrate a valid legacy id into the user-scoped key if needed.
-    if ((!sid || !UUID_RE.test(String(sid))) && userId) {
-      const legacy = localStorage.getItem('slimcal:activeWorkoutSessionId');
-      if (legacy && UUID_RE.test(String(legacy))) {
-        sid = String(legacy);
-        localStorage.setItem(key, sid);
-      }
-    }
-
-    if (!sid || !UUID_RE.test(String(sid))) {
+    let sid = localStorage.getItem('slimcal:activeWorkoutSessionId');
+    if (!sid) {
       sid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : uuidv4Fallback();
-      localStorage.setItem(key, sid);
+      localStorage.setItem('slimcal:activeWorkoutSessionId', sid);
     }
     return sid;
   } catch {
@@ -221,14 +200,11 @@ function getOrCreateActiveWorkoutSessionId(userId) {
   }
 }
 
-function clearActiveWorkoutSessionId(userId) {
+function clearActiveWorkoutSessionId() {
   try {
-    localStorage.removeItem(workoutSessionKey(userId));
-    // also clear legacy key to avoid reuse across accounts/builds
     localStorage.removeItem('slimcal:activeWorkoutSessionId');
-  } catch {}
+  } catch { }
 }
-
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
@@ -306,7 +282,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
 
   // ✅ stable draft id ref for this workout session
-  const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId(user?.id));
+  const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
@@ -580,15 +556,17 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         return out;
       };
 
-      // Merge cloud sessions into SCOPED workoutHistory, preserving local exercise details if present
+      // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
       try {
-        const list = readWorkoutHistory();
-        const map = new Map();
+        const key = 'workoutHistory';
+        const raw = JSON.parse(localStorage.getItem(key) || '[]');
+        const list = Array.isArray(raw) ? raw : [];
 
+        const map = new Map();
         for (const sess of list) {
-          const cid0 = String(sess?.client_id || sess?.id || '');
-          if (!cid0) continue;
-          map.set(cid0, sess);
+          const cid = String(sess?.client_id || sess?.id || '');
+          if (!cid) continue;
+          map.set(cid, sess);
         }
 
         for (const w of cloud) {
@@ -607,7 +585,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             client_id: cid,
             date: todayUS,
             __local_day: w?.local_day || dayISO,
-            local_day: w?.local_day || dayISO,
             started_at: w?.started_at || w?.created_at || new Date().toISOString(),
             ended_at: w?.ended_at || w?.started_at || w?.created_at || new Date().toISOString(),
             createdAt: w?.started_at || w?.created_at || new Date().toISOString(),
@@ -628,7 +605,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
               ...norm,
               ...existing,
               __local_day: norm.__local_day,
-              local_day: norm.local_day,
               __workout_id: norm.__workout_id || existing.__workout_id || null,
               exercises: keepExercises ? existingExercises : norm.exercises,
               totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
@@ -668,9 +644,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }
 
         const next = [...todayMerged, ...nonToday];
-        writeWorkoutHistory(next.slice(0, 300));
-        try { localStorage.setItem(`workoutHistory:lastWrite:${user.id}`, String(Date.now())); } catch {}
-// Update burnedToday + cache so banner reflects sessions immediately
+        localStorage.setItem(key, JSON.stringify(next.slice(0, 300)));
+
+        // Update burnedToday + cache so banner reflects sessions immediately
         const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
         try { localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0))); } catch {}
 
@@ -703,8 +679,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const onBurnedUpdate = () => readTodaySessionsFromLocal();
     const onStorage = (e) => {
       if (!e) return;
-      const scopedWH = (user?.id ? scopedKey('workoutHistory', user.id) : null);
-      if (e.key === scopedWH || e.key === 'workoutHistory') readTodaySessionsFromLocal();
+      if (e.key === 'workoutHistory') readTodaySessionsFromLocal();
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
@@ -1132,6 +1107,10 @@ setNewExercise({
 
       // 1) Save workout header row (cloud + local-first queue)
       const saved = await saveWorkoutLocalFirst(session);
+      if (saved && saved.ok === false) {
+        // Surface the real reason in-console so we don't silently "hydrate back to 0".
+        console.warn('[WorkoutPage] saveWorkoutLocalFirst failed', saved);
+      }
       const workoutId = saved?.id || null;
 
       // 2) Persist exercise details as workout_sets so other devices can render breakdown
@@ -1191,25 +1170,25 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      // 3) Mark the local session as uploaded (so hydration never replaces it with a placeholder)
+      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
-        const list = readWorkoutHistory();
+        const key = 'workoutHistory';
+        const raw = JSON.parse(localStorage.getItem(key) || '[]');
+        const list = Array.isArray(raw) ? raw : [];
         const cid = String(session?.client_id || session?.id || '');
-        const idx = Array.isArray(list) ? list.findIndex(s => String(s?.client_id || s?.id || '') === cid) : -1;
+        const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
         if (idx >= 0) {
-          const next = [...list];
-          next[idx] = {
-            ...next[idx],
+          list[idx] = {
+            ...list[idx],
             uploaded: true,
-            __cloud: true,
             __draft: false,
-            __workout_id: workoutId || next[idx]?.__workout_id || null
+            __cloud: true,
+            __workout_id: workoutId || list[idx].__workout_id || null
           };
-          writeWorkoutHistory(next);
-          try { localStorage.setItem(`workoutHistory:lastWrite:${user.id}`, String(Date.now())); } catch {}
+          localStorage.setItem(key, JSON.stringify(list));
+          window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
         }
       } catch {}
-
 
       updateStreak();
 
@@ -1225,8 +1204,8 @@ setNewExercise({
     }
 
     // ✅ start fresh next time
-    clearActiveWorkoutSessionId(user?.id);
-    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId(user?.id);
+    clearActiveWorkoutSessionId();
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
     startedAtRef.current = new Date().toISOString();
 
     history.push('/history');
@@ -1240,8 +1219,8 @@ setNewExercise({
     setSaunaTemp('180');
     setCurrentStep(1);
 
-    clearActiveWorkoutSessionId(user?.id);
-    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId(user?.id);
+    clearActiveWorkoutSessionId();
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
     startedAtRef.current = new Date().toISOString();
   };
 

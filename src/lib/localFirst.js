@@ -13,30 +13,30 @@ import {
   KEYS
 } from './scopedStorage.js';
 
-// ---- UUID helpers ------------------------------------------------------------
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function uuidv4Fallback() {
-  // RFC4122-ish v4 UUID generator (Math.random fallback)
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : ((r & 0x3) | 0x8);
-    return v.toString(16);
-  });
-}
-
-
 // ---- Stable UUID per device (anon users) ------------------------------------
 function getClientId() {
   try {
     let cid = localStorage.getItem('clientId');
     if (!cid) {
-      cid = (crypto?.randomUUID?.() || `cid_${Date.now()}`).slice(0, 36);
+      cid = (crypto?.randomUUID?.() || uuidv4Fallback());
       localStorage.setItem('clientId', cid);
     }
     return cid;
   } catch {
     return 'anon';
+  }
+}
+
+// UUID v4 fallback (for environments without crypto.randomUUID)
+function uuidv4Fallback() {
+  try {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : ((r & 0x3) | 0x8);
+      return v.toString(16);
+    });
+  } catch {
+    return '00000000-0000-4000-8000-000000000000';
   }
 }
 
@@ -123,7 +123,7 @@ async function upsertWorkoutCloud(payload) {
   // Requires UNIQUE(user_id, client_id)
   const res = await supabase
     .from('workouts')
-    .upsert(payload, { onConflict: 'client_id' })
+    .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
 
@@ -146,33 +146,11 @@ async function upsertMealCloud(payload) {
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // Your DB schema has UNIQUE(client_id) (not (user_id,client_id)),
-  // so onConflict must match that unique index.
   const res = await supabase
     .from('meals')
-    .upsert(payload, { onConflict: 'client_id' })
+    .upsert(payload, { onConflict: 'user_id,client_id' })
     .select('id')
     .maybeSingle();
-
-  // If the payload contains columns that don't exist yet (schema drift),
-  // retry with minimal columns that are guaranteed in your schema.
-  if (res?.error && /column .* does not exist/i.test(res.error?.message || '')) {
-    const minimal = {
-      user_id: payload.user_id,
-      client_id: payload.client_id,
-      eaten_at: payload.eaten_at,
-      title: payload.title ?? null,
-      total_calories: payload.total_calories ?? null,
-      updated_at: payload.updated_at ?? new Date().toISOString(),
-    };
-    const res2 = await supabase
-      .from('meals')
-      .upsert(minimal, { onConflict: 'client_id' })
-      .select('id')
-      .maybeSingle();
-    if (res2?.error) throw res2.error;
-    return res2?.data || null;
-  }
 
   if (res?.error) throw res.error;
   return res?.data || null;
@@ -297,7 +275,6 @@ export async function saveMealLocalFirst({
   eaten_at,
   title,
   total_calories,
-  // optional fields (may exist in app but not necessarily in DB)
   protein_g = null,
   carbs_g = null,
   fat_g = null,
@@ -307,55 +284,38 @@ export async function saveMealLocalFirst({
   qty = 1,
   unit = 'serving',
   food_name = null,
+  local_day = null,
 } = {}) {
-  const cidRaw = client_id;
-  const cid = (cidRaw && UUID_RE.test(String(cidRaw)))
-    ? String(cidRaw)
-    : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4Fallback());
+  if (!user_id) return { ok: false, reason: 'no_user' };
 
+  const cid = client_id || (crypto?.randomUUID?.() || uuidv4Fallback());
   const eatenAt = eaten_at || new Date().toISOString();
-  const dayISO = localDayISO(new Date(eatenAt));
+  const dayISO = local_day || localDayISO(new Date(eatenAt));
 
-  // Always update local totals immediately (guest or signed-in)
-  try {
-    const cals = Math.round(safeNum(total_calories, 0));
-    if (user_id) {
-      ensureScopedFromLegacy(KEYS.dailyMetricsCache, user_id);
-      const cache = readScopedJSON(KEYS.dailyMetricsCache, user_id, {}) || {};
-      const prev = cache[dayISO] || {};
-      const prevConsumed = Math.round(safeNum(prev?.consumed ?? 0, 0));
-      const burned = Math.round(safeNum(prev?.burned ?? 0, 0));
-      const nextConsumed = Math.max(0, prevConsumed + cals);
-
-      writeDailyMetricsCache(dayISO, { consumed: nextConsumed, burned }, user_id);
-      setConvenienceTotals(dayISO, nextConsumed, burned, user_id);
-      try { localStorage.setItem('dailyMetrics:lastWrite', String(Date.now())); } catch {}
-    } else {
-      dispatchConsumed(dayISO, cals);
-    }
-  } catch {}
-
-  // Build payloads:
-  // - Cloud payload must match your current public.meals schema
-  // - Optional macros/food refs can be stored locally (history) and/or in meal_items if you extend schema later
-  const cloudPayload = user_id ? {
+  const payload = {
     user_id,
     client_id: cid,
     eaten_at: eatenAt,
+    local_day: dayISO,
     title: title || food_name || 'Meal',
     total_calories: Math.round(safeNum(total_calories, 0)),
+    protein_g: protein_g == null ? null : safeNum(protein_g, null),
+    carbs_g: carbs_g == null ? null : safeNum(carbs_g, null),
+    fat_g: fat_g == null ? null : safeNum(fat_g, null),
+    food_id,
+    portion_id,
+    portion_label,
+    qty,
+    unit,
     updated_at: new Date().toISOString(),
-  } : null;
-
-  // Guests: let MealTracker handle local history; return local result
-  if (!user_id) return { ok: true, localOnly: true, client_id: cid };
+  };
 
   try {
-    const saved = await upsertMealCloud(cloudPayload);
+    const saved = await upsertMealCloud(payload);
     return { ok: true, id: saved?.id || null, data: saved, client_id: cid };
   } catch (e) {
     try {
-      enqueueOp({ type: 'upsert', table: 'meals', user_id, client_id: cid, payload: cloudPayload });
+      enqueueOp({ type: 'upsert', table: 'meals', user_id, client_id: cid, payload });
     } catch {}
     return { ok: false, queued: true, error: String(e?.message || e), client_id: cid };
   }
@@ -388,37 +348,31 @@ export async function saveWorkoutLocalFirst({
   total_calories,
   local_day,
   items,
-  exercises, // optional legacy/local history field (array)
+  exercises,
   name = 'Workout',
 } = {}) {
+  // ANTI_CLOBBER_WORKOUTS: never persist empty workouts (prevents banner/today list resetting to 0)
+  // IMPORTANT: workouts table enforces items.exercises to be a non-empty array (check constraint).
+  const exInput = Array.isArray(exercises) ? exercises : null;
+  const exFromItems = (items && typeof items === 'object' && !Array.isArray(items) && Array.isArray(items.exercises))
+    ? items.exercises
+    : null;
+  const exArrRaw = exInput || exFromItems || [];
+  const exArr = Array.isArray(exArrRaw) ? exArrRaw : [];
+  if (exArr.length === 0) {
+    return { ok: true, skipped: true, reason: 'empty_workout' };
+  }
+
   const nowISO = new Date().toISOString();
   const startISO = started_at || nowISO;
   const dayISO = local_day || localDayISO(new Date(startISO));
 
-  // Per-session client id (UUID preferred; schema requires uuid)
-  const cidRaw = client_id;
-  const cid = (cidRaw && UUID_RE.test(String(cidRaw)))
-    ? String(cidRaw)
-    : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4Fallback());
-
-  // Derive exercises list (must be non-empty for DB check constraint)
-  const exFromItems =
-    (items && typeof items === 'object' && !Array.isArray(items) && Array.isArray(items.exercises))
-      ? items.exercises
-      : null;
-
-  const exArr = Array.isArray(exFromItems) && exFromItems.length
-    ? exFromItems
-    : (Array.isArray(exercises) ? exercises : []);
-
-  // ANTI_CLOBBER_WORKOUTS: never persist empty workouts
-  if (!Array.isArray(exArr) || exArr.length === 0) {
-    return { ok: true, skipped: true, reason: 'empty_workout' };
-  }
+  // Per-session client id (do NOT reuse device id)
+  const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 
   const total = Math.round(safeNum(total_calories, 0));
 
-  // --- Local immediate totals update (scoped if logged in) ---
+  // Update burned totals locally right away (scoped)
   if (user_id) {
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, user_id);
@@ -430,54 +384,58 @@ export async function saveWorkoutLocalFirst({
 
       writeDailyMetricsCache(dayISO, { consumed, burned: nextBurned }, user_id);
       setConvenienceTotals(dayISO, consumed, nextBurned, user_id);
-
-      // mark last local write to prevent cloud hydration clobber
-      try { localStorage.setItem('dailyMetrics:lastWrite', String(Date.now())); } catch {}
     } catch {}
   } else {
-    // guest: update banner via event (WorkoutPage writes local history)
     dispatchBurned(dayISO, total);
   }
 
-  // --- Normalize items for cloud (must be object with items.exercises non-empty array) ---
+  
+  // Build cloud-safe row matching Supabase schema (public.workouts)
   const normalizedItems = (() => {
+    // Schema requires items to be an object with non-empty items.exercises array
     if (items && typeof items === 'object' && !Array.isArray(items)) {
       if (Array.isArray(items.exercises) && items.exercises.length > 0) return items;
     }
-    // build from exArr
-    const exNorm = exArr.map((ex) => ({
-      name: ex?.name || ex?.exerciseName || '',
-      sets: ex?.sets ?? null,
-      reps: ex?.reps ?? null,
-      weight: ex?.weight ?? null,
-      calories: ex?.calories ?? null,
-    })).filter(x => String(x.name || '').trim().length > 0);
-    return { exercises: exNorm };
+    if (exArr.length > 0) {
+      return {
+        exercises: exArr.map(ex => ({
+          name: ex?.name || ex?.exerciseName || '',
+          sets: ex?.sets ?? null,
+          reps: ex?.reps ?? null,
+          weight: ex?.weight ?? null,
+          calories: ex?.calories ?? null,
+        })).filter(x => String(x.name || '').trim().length > 0)
+      };
+    }
+    return { exercises: [] };
   })();
 
   if (!normalizedItems.exercises || normalizedItems.exercises.length === 0) {
-    return { ok: true, skipped: true, reason: 'empty_workout_normalized' };
+    throw new Error('Workout must include at least 1 exercise (items.exercises required)');
   }
 
   const row = {
     user_id,
     client_id: cid,
-    started_at: startISO,
-    ended_at: ended_at || nowISO,
-    total_calories: total,
+    started_at: started_at || new Date().toISOString(),
+    ended_at: ended_at || new Date().toISOString(),
+    total_calories: safeNum(total_calories, total),
     local_day: dayISO,
     items: normalizedItems,
-    updated_at: nowISO,
+    // keep updated_at for compatibility; harmless if column exists, ignored if not
+    updated_at: new Date().toISOString(),
   };
 
-  // Guests: just return local result (WorkoutPage persists history locally)
+
+  // Guests: just return local result (WorkoutPage writes local history)
   if (!user_id) return { ok: true, localOnly: true, client_id: cid };
 
-  // Signed-in: attempt cloud upsert; queue on failure
   try {
     const saved = await upsertWorkoutCloud(row);
     return { ok: true, id: saved?.id || null, data: saved, client_id: cid };
   } catch (e) {
+    // Make failures visible; otherwise you only see GETs and think nothing happened.
+    try { console.warn('[localFirst] workouts upsert failed', e, row); } catch {}
     try {
       enqueueOp({ type: 'upsert', table: 'workouts', user_id, client_id: cid, payload: row });
     } catch {}
