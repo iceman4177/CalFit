@@ -120,8 +120,21 @@ async function runOneOp(op) {
     // IMPORTANT:
     // We rely on your DB unique constraints (like user_id+local_day or user_id+client_id)
     // So upsert will behave idempotently.
+
+    // Pick a conflict target that actually exists for each table:
+    // - workouts/meals: UNIQUE(client_id)
+    // - daily_metrics: UNIQUE(user_id, local_day)
+    // - fallback: UNIQUE(user_id, client_id) where present
+    let onConflict = null;
+    if (table === 'workouts' || table === 'meals') {
+      if (payload?.client_id) onConflict = 'client_id';
+    } else if (table === 'daily_metrics') {
+      if (payload?.user_id && payload?.local_day) onConflict = 'user_id,local_day';
+    } else if (payload?.user_id && payload?.client_id) {
+      onConflict = 'user_id,client_id';
+    }
     const res = await supabase
-      .from(table).upsert(payload, (payload?.user_id && payload?.client_id) ? { onConflict: 'user_id,client_id' } : undefined)
+      .from(table).upsert(payload, (onConflict ? { onConflict } : undefined))
       .select()
       .maybeSingle();
 

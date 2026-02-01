@@ -123,7 +123,7 @@ async function upsertWorkoutCloud(payload) {
   // Requires UNIQUE(user_id, client_id)
   const res = await supabase
     .from('workouts')
-    .upsert(payload, { onConflict: 'user_id,client_id' })
+    .upsert(payload, { onConflict: 'client_id' })
     .select('id')
     .maybeSingle();
 

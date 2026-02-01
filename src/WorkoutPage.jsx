@@ -580,17 +580,15 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         return out;
       };
 
-      // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
+      // Merge cloud sessions into SCOPED workoutHistory, preserving local exercise details if present
       try {
-        const key = 'workoutHistory';
-        const raw = JSON.parse(localStorage.getItem(key) || '[]');
-        const list = Array.isArray(raw) ? raw : [];
-
+        const list = readWorkoutHistory();
         const map = new Map();
+
         for (const sess of list) {
-          const cid = String(sess?.client_id || sess?.id || '');
-          if (!cid) continue;
-          map.set(cid, sess);
+          const cid0 = String(sess?.client_id || sess?.id || '');
+          if (!cid0) continue;
+          map.set(cid0, sess);
         }
 
         for (const w of cloud) {
@@ -609,6 +607,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             client_id: cid,
             date: todayUS,
             __local_day: w?.local_day || dayISO,
+            local_day: w?.local_day || dayISO,
             started_at: w?.started_at || w?.created_at || new Date().toISOString(),
             ended_at: w?.ended_at || w?.started_at || w?.created_at || new Date().toISOString(),
             createdAt: w?.started_at || w?.created_at || new Date().toISOString(),
@@ -629,6 +628,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
               ...norm,
               ...existing,
               __local_day: norm.__local_day,
+              local_day: norm.local_day,
               __workout_id: norm.__workout_id || existing.__workout_id || null,
               exercises: keepExercises ? existingExercises : norm.exercises,
               totalCalories: safeNum(existing?.totalCalories ?? existing?.total_calories, norm.totalCalories),
@@ -668,9 +668,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         }
 
         const next = [...todayMerged, ...nonToday];
-        localStorage.setItem(key, JSON.stringify(next.slice(0, 300)));
-
-        // Update burnedToday + cache so banner reflects sessions immediately
+        writeWorkoutHistory(next.slice(0, 300));
+        try { localStorage.setItem(`workoutHistory:lastWrite:${user.id}`, String(Date.now())); } catch {}
+// Update burnedToday + cache so banner reflects sessions immediately
         const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
         try { localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0))); } catch {}
 
@@ -703,7 +703,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const onBurnedUpdate = () => readTodaySessionsFromLocal();
     const onStorage = (e) => {
       if (!e) return;
-      if (e.key === 'workoutHistory') readTodaySessionsFromLocal();
+      const scopedWH = (user?.id ? scopedKey('workoutHistory', user.id) : null);
+      if (e.key === scopedWH || e.key === 'workoutHistory') readTodaySessionsFromLocal();
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
@@ -1190,25 +1191,25 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
+      // 3) Mark the local session as uploaded (so hydration never replaces it with a placeholder)
       try {
-        const key = 'workoutHistory';
-        const raw = JSON.parse(localStorage.getItem(key) || '[]');
-        const list = Array.isArray(raw) ? raw : [];
+        const list = readWorkoutHistory();
         const cid = String(session?.client_id || session?.id || '');
-        const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
+        const idx = Array.isArray(list) ? list.findIndex(s => String(s?.client_id || s?.id || '') === cid) : -1;
         if (idx >= 0) {
-          list[idx] = {
-            ...list[idx],
+          const next = [...list];
+          next[idx] = {
+            ...next[idx],
             uploaded: true,
-            __draft: false,
             __cloud: true,
-            __workout_id: workoutId || list[idx].__workout_id || null
+            __draft: false,
+            __workout_id: workoutId || next[idx]?.__workout_id || null
           };
-          localStorage.setItem(key, JSON.stringify(list));
-          window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
+          writeWorkoutHistory(next);
+          try { localStorage.setItem(`workoutHistory:lastWrite:${user.id}`, String(Date.now())); } catch {}
         }
       } catch {}
+
 
       updateStreak();
 
