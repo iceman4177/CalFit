@@ -26,30 +26,6 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-function sumBurnedFromLocalWorkoutHistory(userId, dayISO) {
-  try {
-    if (!userId) return 0;
-    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-    const list = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
-    const arr = Array.isArray(list) ? list : [];
-    const dayUS = dayISOToUS(dayISO);
-    return arr
-      .filter(s => {
-        const ld = String(s?.local_day || s?.__local_day || '');
-        const d = String(s?.date || '');
-        if (ld && ld === String(dayISO)) return true;
-        if (d === String(dayISO) || d === String(dayUS)) return true;
-        // last resort: derive from timestamp
-        const ts = s?.started_at || s?.createdAt || s?.created_at;
-        if (!ts) return false;
-        return localDayFromTs(ts) === String(dayISO);
-      })
-      .reduce((sum, s) => sum + safeNum(s?.total_calories ?? s?.totalCalories, 0), 0);
-  } catch {
-    return 0;
-  }
-}
-
 function readDailyMetricsNums(row) {
   if (!row || typeof row !== 'object') return { eaten: 0, burned: 0 };
 
@@ -84,11 +60,7 @@ function writeDailyMetricsCache(dayISO, eaten, burned, userId) {
     const recentlyWritten = (Date.now() - lastWrite) < (10 * 60 * 1000);
     const wouldClobberToZero = (nextConsumed === 0 && nextBurned === 0) && (prevConsumed > 0 || prevBurned > 0);
 
-    // Also protect a non-zero burned total from being overwritten by 0 when we *know* local workoutHistory still has workouts.
-    const localBurned = sumBurnedFromLocalWorkoutHistory(userId, dayISO);
-    const wouldClobberBurnedOnly = (nextBurned === 0 && prevBurned > 0) && (localBurned > 0);
-
-    if ((wouldClobberToZero || wouldClobberBurnedOnly) && recentlyWritten) {
+    if (wouldClobberToZero && recentlyWritten) {
       return; // keep local truth
     }
 

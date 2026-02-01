@@ -50,37 +50,52 @@ export async function saveWorkout(userId, workout, sets = []) {
   if (!userId) throw new Error("saveWorkout: missing userId");
   if (!workout?.started_at) throw new Error("saveWorkout: missing started_at");
 
+  const clientId = workout.client_id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : null);
+  if (!clientId) throw new Error("saveWorkout: missing client_id (uuid)");
+
+  const localDay = workout.local_day || toIsoDay(workout.started_at);
+
+  // Supabase public.workouts schema requires:
+  // - client_id (uuid, NOT NULL)
+  // - local_day (date, NOT NULL)
+  // - items jsonb object with items.exercises array length > 0 (check constraint)
+  const items = (() => {
+    const it = workout.items;
+    if (it && typeof it === 'object' && !Array.isArray(it) && Array.isArray(it.exercises) && it.exercises.length > 0) return it;
+    if (Array.isArray(workout.exercises) && workout.exercises.length > 0) {
+      return { exercises: workout.exercises };
+    }
+    return { exercises: [] };
+  })();
+
+  if (!Array.isArray(items.exercises) || items.exercises.length === 0) {
+    throw new Error("saveWorkout: items.exercises must be a non-empty array");
+  }
+
   const wRow = {
     user_id: userId,
-    client_id: workout.client_id ?? null,
+    client_id: clientId,
     started_at: workout.started_at,
     ended_at: workout.ended_at ?? null,
     goal: workout.goal ?? null,
     notes: workout.notes ?? null,
-    total_calories: workout.total_calories ?? null,
+    total_calories: workout.total_calories ?? 0,
+    local_day: localDay,
+    items,
+    updated_at: new Date().toISOString(),
   };
 
-  let w = null;
+  // Upsert using UNIQUE(user_id,client_id) (present in your schema)
+  const res = await supabase
+    .from("workouts")
+    .upsert(wRow, { onConflict: "user_id,client_id" })
+    .select()
+    .maybeSingle();
 
-  // Try upsert only if client_id exists; fall back if schema doesn't support onConflict
-  if (wRow.client_id) {
-    const res = await supabase.from("workouts").upsert(wRow, { onConflict: "client_id" }).select().maybeSingle();
-    if (!res.error && res.data) {
-      w = res.data;
-    } else if (res.error && !isOnConflictSchemaError(res.error)) {
-      // real error -> throw
-      throw res.error;
-    }
-    // if schema error -> fall through to insert
-  }
+  if (res.error) throw res.error;
+  const w = res.data;
 
-  if (!w) {
-    const { data, error } = await supabase.from("workouts").insert(wRow).select().single();
-    if (error) throw error;
-    w = data;
-  }
-
-  if (sets?.length) {
+  if (sets?.length && w?.id) {
     const rows = sets.map((s) => ({
       workout_id: w.id,
       user_id: userId,
@@ -99,9 +114,6 @@ export async function saveWorkout(userId, workout, sets = []) {
   return w;
 }
 
-// -----------------------------------------------------------------------------
-// Daily metrics (atomic upsert via RPC) + direct upsert helper
-// -----------------------------------------------------------------------------
 export async function upsertDailyMetrics(userId, day, deltaBurned = 0, deltaEaten = 0) {
   if (!userId) return;
   const isoDay = toIsoDay(day);
