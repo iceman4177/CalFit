@@ -13,6 +13,19 @@ import {
   KEYS
 } from './scopedStorage.js';
 
+// ---- UUID helpers ------------------------------------------------------------
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function uuidv4Fallback() {
+  // RFC4122-ish v4 UUID generator (Math.random fallback)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : ((r & 0x3) | 0x8);
+    return v.toString(16);
+  });
+}
+
+
 // ---- Stable UUID per device (anon users) ------------------------------------
 function getClientId() {
   try {
@@ -295,9 +308,10 @@ export async function saveMealLocalFirst({
   unit = 'serving',
   food_name = null,
 } = {}) {
-  const cid = client_id || (typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : uuidv4Fallback());
+  const cidRaw = client_id;
+  const cid = (cidRaw && UUID_RE.test(String(cidRaw)))
+    ? String(cidRaw)
+    : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4Fallback());
 
   const eatenAt = eaten_at || new Date().toISOString();
   const dayISO = localDayISO(new Date(eatenAt));
@@ -382,9 +396,10 @@ export async function saveWorkoutLocalFirst({
   const dayISO = local_day || localDayISO(new Date(startISO));
 
   // Per-session client id (UUID preferred; schema requires uuid)
-  const cid = client_id || (typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : uuidv4Fallback());
+  const cidRaw = client_id;
+  const cid = (cidRaw && UUID_RE.test(String(cidRaw)))
+    ? String(cidRaw)
+    : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4Fallback());
 
   // Derive exercises list (must be non-empty for DB check constraint)
   const exFromItems =

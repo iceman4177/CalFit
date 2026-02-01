@@ -12,6 +12,10 @@ function uuidv4Fallback() {
     return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, () => '0');
   }
 }
+
+// ---- UUID helpers ------------------------------------------------------------
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Container,
@@ -187,12 +191,29 @@ function getOrCreateClientId() {
 }
 
 // ✅ Stable draft workout session id (THIS is what prevents duplicates + enables upsert while typing)
-function getOrCreateActiveWorkoutSessionId() {
+function workoutSessionKey(userId) {
+  return userId ? `slimcal:${userId}:activeWorkoutSessionId` : 'slimcal:activeWorkoutSessionId';
+}
+
+// Auto-scoped, UUID-safe active workout session id.
+// Prevents bad legacy values (non-UUID) from breaking Supabase inserts (client_id is uuid).
+function getOrCreateActiveWorkoutSessionId(userId) {
   try {
-    let sid = localStorage.getItem('slimcal:activeWorkoutSessionId');
-    if (!sid) {
+    const key = workoutSessionKey(userId);
+    let sid = localStorage.getItem(key);
+
+    // Migrate a valid legacy id into the user-scoped key if needed.
+    if ((!sid || !UUID_RE.test(String(sid))) && userId) {
+      const legacy = localStorage.getItem('slimcal:activeWorkoutSessionId');
+      if (legacy && UUID_RE.test(String(legacy))) {
+        sid = String(legacy);
+        localStorage.setItem(key, sid);
+      }
+    }
+
+    if (!sid || !UUID_RE.test(String(sid))) {
       sid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : uuidv4Fallback();
-      localStorage.setItem('slimcal:activeWorkoutSessionId', sid);
+      localStorage.setItem(key, sid);
     }
     return sid;
   } catch {
@@ -200,11 +221,14 @@ function getOrCreateActiveWorkoutSessionId() {
   }
 }
 
-function clearActiveWorkoutSessionId() {
+function clearActiveWorkoutSessionId(userId) {
   try {
+    localStorage.removeItem(workoutSessionKey(userId));
+    // also clear legacy key to avoid reuse across accounts/builds
     localStorage.removeItem('slimcal:activeWorkoutSessionId');
-  } catch { }
+  } catch {}
 }
+
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
@@ -282,7 +306,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
 
   // ✅ stable draft id ref for this workout session
-  const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
+  const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId(user?.id));
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
@@ -1200,8 +1224,8 @@ setNewExercise({
     }
 
     // ✅ start fresh next time
-    clearActiveWorkoutSessionId();
-    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
+    clearActiveWorkoutSessionId(user?.id);
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId(user?.id);
     startedAtRef.current = new Date().toISOString();
 
     history.push('/history');
@@ -1215,8 +1239,8 @@ setNewExercise({
     setSaunaTemp('180');
     setCurrentStep(1);
 
-    clearActiveWorkoutSessionId();
-    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId();
+    clearActiveWorkoutSessionId(user?.id);
+    activeWorkoutSessionIdRef.current = getOrCreateActiveWorkoutSessionId(user?.id);
     startedAtRef.current = new Date().toISOString();
   };
 
