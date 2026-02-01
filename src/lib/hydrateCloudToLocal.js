@@ -93,7 +93,7 @@ function dispatchTotals(dayISO, eaten, burned) {
   } catch {}
 }
 
-// ---------------- Workouts → local workoutHistory (for banner + on-page history) ----------------
+// ---------------- Workouts -> local workoutHistory (for banner + on-page history) ----------------
 function dayISOToUS(dayISO) {
   try {
     // Construct local midnight for that day, then format in US locale.
@@ -215,7 +215,7 @@ function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
 async function pullWorkoutsForDay(userId, dayISO) {
   if (!supabase || !userId) return [];
 
-  // ✅ Best: local_day equality (your workouts.local_day is a DATE)
+  // [ok] Best: local_day equality (your workouts.local_day is a DATE)
   try {
     const res0 = await supabase
       .from('workouts')
@@ -320,11 +320,11 @@ async function upsertDailyMetricsCloud(userId, dayISO, eaten, burned) {
   console.warn('[hydrateCloudToLocal] daily_metrics upsert failed', res.error);
 }
 
-// ✅ NEW: Burned should be computed via local_day (no timezone mismatch)
+// [ok] NEW: Burned should be computed via local_day (no timezone mismatch)
 async function sumBurnedFromWorkouts(userId, dayISO) {
   if (!supabase || !userId) return 0;
 
-  // ✅ Best: local_day equality (DATE) — avoids any started_at null / timezone drift
+  // [ok] Best: local_day equality (DATE) - avoids any started_at null / timezone drift
   try {
     const { data, error } = await supabase
       .from('workouts')
@@ -342,7 +342,7 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
   } catch {}
 
 
-  // ✅ Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
+  // [ok] Match meals logic: use a local-day timestamp range (started_at) instead of local_day.
   // This avoids drift and works even if workouts.local_day is missing or null.
   const startLocal = safeLocalMidnight(dayISO);
   const nextLocal = new Date(startLocal.getTime() + 24 * 60 * 60 * 1000);
@@ -397,20 +397,8 @@ async function sumEatenFromMeals(userId, dayISO) {
   // Meals query also should rely on local_day if you have it.
   // But if your meals table doesn't have local_day, fallback safely.
   let total = 0;
-
-  // Attempt local_day first
-  try {
-    const res = await supabase
-      .from('meals')
-      .select('id,total_calories,local_day,eaten_at,created_at')
-      .eq('user_id', userId)
-      .eq('local_day', dayISO);
-
-    if (!res?.error) {
-      total = (res.data || []).reduce((s, m) => s + safeNum(m.total_calories, 0), 0);
-      return total;
-    }
-  } catch {}
+  // Meals table in your Supabase schema does NOT have local_day.
+  // So we always query by eaten_at using local day boundaries converted to UTC.
 
   // Fallback to eaten_at range (best effort)
   try {
@@ -439,7 +427,7 @@ async function sumEatenFromMeals(userId, dayISO) {
 /**
  * hydrateTodayTotalsFromCloud
  * - Reads daily_metrics if available
- * - If burned missing/0, computes burned from workouts table (local_day ✅)
+ * - If burned missing/0, computes burned from workouts table (local_day [ok])
  * - Writes local cache (dailyMetricsCache) so NetCalorieBanner becomes cross-device
  * - Dispatches events so UI updates immediately
  * - Repairs Supabase daily_metrics so future loads are perfect
@@ -607,7 +595,7 @@ export async function hydrateTodayWorkoutsFromCloud(user, { alsoDispatch = true 
 }
 
 
-// ---- Workouts → local hydration (cross-device) --------------------------------
+// ---- Workouts -> local hydration (cross-device) --------------------------------
 // Pulls recent workouts from Supabase and writes them into scoped local caches.
 // Includes anti-clobber: won't overwrite recent non-empty local history with empty cloud pulls.
 export async function hydrateRecentWorkoutsToLocal({ supabase, userId, days = 30 }) {

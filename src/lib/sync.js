@@ -1,7 +1,7 @@
 // src/lib/sync.js
 // Local-first queued sync engine (Supabase best-effort).
 // Provides:
-// - enqueueOp(op)  ✅ (this fixes your build error)
+// - enqueueOp(op)  [ok] (this fixes your build error)
 // - flushPending({ maxTries })
 // - attachSyncListeners()
 //
@@ -54,7 +54,7 @@ function withLock(fn) {
     );
 }
 
-// Normalize op so it’s safe + consistent
+// Normalize op so it's safe + consistent
 function normalizeOp(op) {
   const base = op && typeof op === 'object' ? op : {};
   return {
@@ -76,7 +76,7 @@ function normalizeOp(op) {
 }
 
 /**
- * ✅ enqueueOp
+ * [ok] enqueueOp
  * Adds an operation to the pending queue.
  */
 export function enqueueOp(op) {
@@ -199,12 +199,12 @@ export async function flushPending({ maxTries = 2 } = {}) {
       processed += 1;
 
       if (result.ok) {
-        // done ✅
+        // done [ok]
         continue;
       }
 
       if (!result.retry) {
-        // don't retry — drop it
+        // don't retry - drop it
         continue;
       }
 

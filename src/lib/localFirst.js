@@ -1,7 +1,7 @@
 // src/lib/localFirst.js
 // Local-first wrappers for meals + workouts + daily_metrics.
 // Goal: write local caches immediately, then sync to Supabase with stable client_id.
-// This keeps PC ↔ mobile totals in lockstep and avoids flicker.
+// This keeps PC <-> mobile totals in lockstep and avoids flicker.
 
 import { supabase } from './supabaseClient';
 import { enqueueOp } from './sync';
