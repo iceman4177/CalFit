@@ -286,6 +286,16 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
+  const draftCloudSyncTimerRef = useRef(null);
+  const lastDraftCloudSyncSigRef = useRef('');
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (draftCloudSyncTimerRef.current) clearTimeout(draftCloudSyncTimerRef.current);
+      } catch {}
+    };
+  }, []);
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
   useEffect(() => {
@@ -1042,6 +1052,26 @@ setNewExercise({
       try {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: burnedToday } }));
         window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayISO } }));
+        // ✅ Best-effort cloud upsert for logged-in users (debounced)
+        try {
+          if (user?.id) {
+            const draft = nextList && Array.isArray(nextList) ? nextList[0] : null;
+            const exCount = draft?.items?.exercises && Array.isArray(draft.items.exercises) ? draft.items.exercises.length : 0;
+            if (draft && exCount > 0 && Number(draft?.total_calories ?? 0) > 0) {
+              const sig = `${draft.client_id}|${draft.local_day}|${draft.total_calories}|${exCount}`;
+              if (lastDraftCloudSyncSigRef.current !== sig) {
+                lastDraftCloudSyncSigRef.current = sig;
+                if (draftCloudSyncTimerRef.current) clearTimeout(draftCloudSyncTimerRef.current);
+                draftCloudSyncTimerRef.current = setTimeout(() => {
+                  saveWorkoutLocalFirst(draft).catch((err) => {
+                    try { console.warn('[WorkoutPage] draft cloud upsert failed', err); } catch {}
+                  });
+                }, 650);
+              }
+            }
+          }
+        } catch {}
+
       } catch {}
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
