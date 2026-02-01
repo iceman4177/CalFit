@@ -446,13 +446,19 @@ export default function MealTracker({ onMealUpdate }) {
     } catch {}
   };
 
-  const getBurnedTodayLocal = dateUS => {
+  const getBurnedTodayLocal = (dateUS, dateISO) => {
     try {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       const all = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
-      // Your workoutHistory can have multiple workouts per day, so SUM them
-      return (Array.isArray(all) ? all : [])
-        .filter(e => e.date === dateUS)
+      const arr = Array.isArray(all) ? all : [];
+      return arr
+        .filter(w => {
+          const d = String(w?.date || '');
+          const ld = String(w?.local_day || w?.__local_day || '');
+          if (dateUS && d === String(dateUS)) return true;
+          if (dateISO && (d === String(dateISO) || ld === String(dateISO))) return true;
+          return false;
+        })
         .reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0);
     } catch {
       return 0;
@@ -460,7 +466,7 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const syncDailyMetrics = async consumedTotal => {
-    const burned = getBurnedTodayLocal(todayUS);
+    const burned = getBurnedTodayLocal(todayUS, todayISO);
 
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
@@ -473,6 +479,7 @@ export default function MealTracker({ onMealUpdate }) {
         updated_at: new Date().toISOString(),
       };
       writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+      try { localStorage.setItem(scopedKey('dailyMetrics:lastWrite', userId), String(Date.now())); } catch {}
 
       // Convenience keys (also scoped) for legacy readers
       localStorage.setItem(scopedKey('consumedToday', userId), String(consumedTotal));
