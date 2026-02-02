@@ -7,16 +7,6 @@
 
 import { supabase } from './supabaseClient';
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './scopedStorage.js';
-// --- helpers ---------------------------------------------------------------
-function isUUID(v) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ''));
-}
-
-function localDayISO(d = new Date()) {
-  const dt = new Date(d);
-  return new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-
 
 // ---------- small utils ----------
 function readLS(key, fallback) {
@@ -289,30 +279,6 @@ export async function migrateLocalToCloudOneTime(user) {
     const startedAt = w.started_at || w.startedAt || w.createdAt || new Date().toISOString();
     const endedAt = w.ended_at || w.endedAt || startedAt;
 
-    // workouts.local_day is NOT NULL — derive it if missing
-    const localDay = (w.local_day || w.__local_day || w.localDay || null) || localDayISO(new Date(startedAt));
-
-    // workouts.items (jsonb) must contain items.exercises[] with at least 1 entry (workouts_has_exercises CHECK)
-    const exFromItems = (w?.items && typeof w.items === 'object' && Array.isArray(w.items.exercises)) ? w.items.exercises : null;
-    const exFromLegacy = Array.isArray(w?.exercises) ? w.exercises : null;
-    const exArr = exFromItems || exFromLegacy || [];
-
-    const normExercises = (exArr || []).map((e) => {
-      const name = String(e?.name || e?.exerciseName || '').trim();
-      if (!name) return null;
-      return {
-        name,
-        sets: safeNum(e?.sets, 0),
-        reps: e?.reps ?? null,
-        weight: (e?.weight == null ? null : e.weight),
-        calories: safeNum(e?.calories, 0),
-        equipment: e?.equipment ?? null,
-        muscle_group: e?.muscle_group ?? e?.muscleGroup ?? null,
-      };
-    }).filter(Boolean);
-
-    if (!normExercises.length) { skippedW++; continue; }
-
     const totalCalories = safeNum(w.totalCalories ?? w.total_calories ?? w.calories ?? 0, 0);
 
     const row = {
@@ -320,15 +286,14 @@ export async function migrateLocalToCloudOneTime(user) {
       client_id: cid,
       started_at: startedAt,
       ended_at: endedAt,
-      local_day: localDay,
       total_calories: totalCalories,
-      items: { exercises: normExercises },
       goal: w.goal ?? null,
       notes: w.notes ?? null,
+      client_updated_at: new Date().toISOString(),
     };
 
     try {
-      const { error } = await supabase.from('workouts').upsert(row, { onConflict: 'client_id' });
+      const { error } = await supabase.from('workouts').upsert(row, { onConflict: 'user_id,client_id' });
       if (!error) {
         pushedW++;
         markSynced(userKey, 'workouts', cid);
@@ -354,7 +319,7 @@ export async function migrateLocalToCloudOneTime(user) {
     };
 
     try {
-      const { error } = await supabase.from('meals').upsert(row, { onConflict: 'client_id' });
+      const { error } = await supabase.from('meals').upsert(row, { onConflict: 'user_id,client_id' });
       if (!error) {
         pushedM++;
         markSynced(userKey, 'meals', cid);
