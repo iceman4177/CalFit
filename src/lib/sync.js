@@ -118,23 +118,26 @@ async function runOneOp(op) {
     }
 
     // IMPORTANT:
-    // We rely on your DB unique constraints (like user_id+local_day or user_id+client_id)
-    // So upsert will behave idempotently.
+    // PostgREST will throw 400/409 if `onConflict` doesn't match a REAL unique constraint.
+    // Use explicit per-table conflict targets (do NOT guess based on payload shape).
+    const onConflictByTable = {
+      // Your meals table is unique on client_id (single column)
+      meals: 'client_id',
+      // Workouts are unique per user + client_id
+      workouts: 'user_id,client_id',
+      // Daily metrics are unique per user + local_day
+      daily_metrics: 'user_id,local_day',
+      // Workout sets: prefer (user_id, client_id) if present, otherwise fall back
+      workout_sets: 'user_id,client_id',
+    };
 
-    // Pick a conflict target that actually exists for each table:
-    // - workouts/meals: UNIQUE(client_id)
-    // - daily_metrics: UNIQUE(user_id, local_day)
-    // - fallback: UNIQUE(user_id, client_id) where present
-    let onConflict = null;
-    if (table === 'workouts' || table === 'meals') {
-      if (payload?.client_id) onConflict = 'client_id';
-    } else if (table === 'daily_metrics') {
-      if (payload?.user_id && payload?.local_day) onConflict = 'user_id,local_day';
-    } else if (payload?.user_id && payload?.client_id) {
-      onConflict = 'user_id,client_id';
-    }
+    const onConflict = onConflictByTable[table] || (
+      (payload?.user_id && payload?.client_id) ? 'user_id,client_id' : undefined
+    );
+
     const res = await supabase
-      .from(table).upsert(payload, (onConflict ? { onConflict } : undefined))
+      .from(table)
+      .upsert(payload, onConflict ? { onConflict } : undefined)
       .select()
       .maybeSingle();
 
