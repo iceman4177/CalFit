@@ -51,6 +51,33 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
+function dayISOToUS(dayISO) {
+  try {
+    const [y, m, d] = String(dayISO).split('-').map(n => parseInt(n, 10));
+    if (!y || !m || !d) return dayISO;
+    return new Date(y, m - 1, d, 0, 0, 0, 0).toLocaleDateString('en-US');
+  } catch {
+    return dayISO;
+  }
+}
+
+function sumBurnedFromWorkoutHistory(dayISO, userId) {
+  try {
+    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+    const list = readScopedJSON(KEYS.workoutHistory, userId, []);
+    const arr = Array.isArray(list) ? list : [];
+    const dayUS = dayISOToUS(dayISO);
+
+    return Math.round(
+      arr
+        .filter(w => (w?.local_day === dayISO || w?.__local_day === dayISO || w?.date === dayUS || w?.date === dayISO))
+        .reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0)
+    );
+  } catch {
+    return 0;
+  }
+}
+
 function dispatchConsumed(dayISO, consumed) {
   try {
     window.dispatchEvent(
@@ -372,22 +399,25 @@ export async function saveWorkoutLocalFirst({
 
   const total = Math.round(safeNum(total_calories, 0));
 
-  // Update burned totals locally right away (scoped)
-  if (user_id) {
-    try {
-      ensureScopedFromLegacy(KEYS.dailyMetricsCache, user_id);
-      const cache = readScopedJSON(KEYS.dailyMetricsCache, user_id, {}) || {};
-      const prev = cache[dayISO] || {};
-      const consumed = Math.round(safeNum(prev?.consumed ?? 0, 0));
-      const prevBurned = Math.round(safeNum(prev?.burned ?? 0, 0));
-      const nextBurned = Math.max(0, prevBurned + total);
+  // Keep dailyMetricsCache consistent WITHOUT double-counting.
+// WorkoutPage writes the draft workout into workoutHistory and recomputes burnedToday as an absolute sum.
+// If we were to add `total` here on every draft upsert, burned would balloon and flicker.
+if (user_id) {
+  try {
+    const burnedAbs = sumBurnedFromWorkoutHistory(dayISO, user_id);
 
-      writeDailyMetricsCache(dayISO, { consumed, burned: nextBurned }, user_id);
-      setConvenienceTotals(dayISO, consumed, nextBurned, user_id);
-    } catch {}
-  } else {
-    dispatchBurned(dayISO, total);
-  }
+    ensureScopedFromLegacy(KEYS.dailyMetricsCache, user_id);
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, user_id, {}) || {};
+    const prev = cache[dayISO] || {};
+    const consumed = Math.round(safeNum(prev?.consumed ?? 0, 0));
+
+    writeDailyMetricsCache(dayISO, { consumed, burned: burnedAbs }, user_id);
+    setConvenienceTotals(dayISO, consumed, burnedAbs, user_id);
+
+    // mark a recent local write so cloud hydration can't wipe totals to 0
+    try { localStorage.setItem(scopedKey('dailyMetrics:lastWrite', user_id), String(Date.now())); } catch {}
+  } catch {}
+}
 
   
   // Build cloud-safe row matching Supabase schema (public.workouts)

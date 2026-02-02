@@ -252,6 +252,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       writeScopedJSON(KEYS.dailyMetricsCache, userId, cache && typeof cache === 'object' ? cache : {});
+      // ANTI_CLOBBER_TOTALS: mark a recent local write so cloud hydration can't wipe totals to 0.
+      try { localStorage.setItem(scopedKey('dailyMetrics:lastWrite', userId), String(Date.now())); } catch {}
     } catch {}
   }, [userId]);
 
@@ -295,6 +297,38 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
+
+  // ✅ Debounced cloud upsert for the active draft workout.
+  // Without this, workouts only POST on "Finish", so switching tabs/devices can look like workouts aren't syncing at all.
+  // Debounce avoids spamming Supabase while still keeping cloud + local in lockstep.
+  const draftUpsertTimerRef = useRef(null);
+  const lastDraftUpsertPayloadRef = useRef(null);
+
+  const scheduleDraftWorkoutUpsert = useCallback((payload) => {
+    if (!user?.id) return;
+    lastDraftUpsertPayloadRef.current = payload;
+
+    try {
+      if (draftUpsertTimerRef.current) clearTimeout(draftUpsertTimerRef.current);
+    } catch {}
+
+    draftUpsertTimerRef.current = setTimeout(async () => {
+      const p = lastDraftUpsertPayloadRef.current;
+      if (!p || !user?.id) return;
+      try {
+        await saveWorkoutLocalFirst(p);
+      } catch (e) {
+        console.warn('[WorkoutPage] draft workout upsert failed', e);
+      }
+    }, 650);
+  }, [user?.id]);
+
+  useEffect(() => {
+    return () => {
+      try { if (draftUpsertTimerRef.current) clearTimeout(draftUpsertTimerRef.current); } catch {}
+    };
+  }, []);
+
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
   useEffect(() => {
@@ -977,6 +1011,7 @@ setNewExercise({
       });
 
       let nextList = filtered;
+      let draftForCloud = null;
 
       const exArr = Array.isArray(nextExercises) ? nextExercises : [];
       const totalRaw = exArr.reduce((sum, ex) => sum + (Number(ex?.calories) || 0), 0);
@@ -1025,9 +1060,15 @@ setNewExercise({
         };
 
         nextList = [draft, ...filtered];
+        draftForCloud = draft;
       }
 
       writeWorkoutHistory(nextList);
+
+      // ✅ Keep Supabase in sync during the draft (debounced). This prevents "no POST" and stops cloud hydration from wiping workouts.
+      if (draftForCloud) {
+        scheduleDraftWorkoutUpsert(draftForCloud);
+      }
 
       // recompute burned for today from the persisted history (single source of truth)
       const burnedToday = nextList
@@ -1055,7 +1096,7 @@ setNewExercise({
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
     }
-  }, [readWorkoutHistory, writeWorkoutHistory, readDailyCache, writeDailyCache, userId, user?.id]);
+  }, [readWorkoutHistory, writeWorkoutHistory, readDailyCache, writeDailyCache, scheduleDraftWorkoutUpsert, userId, user?.id]);
 
 
 
@@ -1175,26 +1216,26 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
+      // 3) Mark the local session as uploaded (scoped storage)
       try {
-        const key = 'workoutHistory';
-        const raw = JSON.parse(localStorage.getItem(key) || '[]');
-        const list = Array.isArray(raw) ? raw : [];
+        const list = readWorkoutHistory();
+        const arr = Array.isArray(list) ? list : [];
         const cid = String(session?.client_id || session?.id || '');
-        const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
+        const idx = arr.findIndex(s => String(s?.client_id || s?.id || '') === cid);
+
         if (idx >= 0) {
-          list[idx] = {
-            ...list[idx],
+          const next = [...arr];
+          next[idx] = {
+            ...next[idx],
             uploaded: true,
             __draft: false,
             __cloud: true,
-            __workout_id: workoutId || list[idx].__workout_id || null
+            __workout_id: workoutId || next[idx].__workout_id || null
           };
-          localStorage.setItem(key, JSON.stringify(list));
+          writeWorkoutHistory(next);
           window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
         }
       } catch {}
-
       updateStreak();
 
       if (typeof onWorkoutLogged === 'function') {
