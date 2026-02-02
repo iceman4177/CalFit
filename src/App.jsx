@@ -68,6 +68,8 @@ import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
 
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage';
+
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 
@@ -206,32 +208,36 @@ async function heartbeatNow(session) {
 }
 
 // ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
-function normalizeLocalData() {
+function normalizeLocalData(userId) {
   const clientId = getOrCreateClientId();
 
-  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-  const whNorm = wh.map(w => ({
+  // Migrate legacy unscoped caches once per user (safe: avoids cross-user contamination)
+  ensureScopedFromLegacy(KEYS.workoutHistory, userId, 'workoutHistory');
+  ensureScopedFromLegacy(KEYS.mealHistory, userId, 'mealHistory');
+
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const whNorm = (Array.isArray(wh) ? wh : []).map(w => ({
     ...w,
     clientId: w.clientId || clientId,
     localId: w.localId || `w_${clientId}_${w.createdAt ? Date.parse(w.createdAt) : Date.now()}`,
     createdAt: w.createdAt || new Date().toISOString(),
     uploaded: typeof w.uploaded === 'boolean' ? w.uploaded : false,
   }));
-  localStorage.setItem('workoutHistory', JSON.stringify(whNorm));
+  writeScopedJSON(KEYS.workoutHistory, userId, whNorm);
 
-  const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-  const mhNorm = mh.map(day => ({
+  const mh = readScopedJSON(KEYS.mealHistory, userId, []);
+  const mhNorm = (Array.isArray(mh) ? mh : []).map(day => ({
     ...day,
     clientId: day.clientId || clientId,
     localId: day.localId || `m_${clientId}_${day.date || Date.now()}`,
     createdAt: day.createdAt || new Date().toISOString(),
     uploaded: typeof day.uploaded === 'boolean' ? day.uploaded : false,
   }));
-  localStorage.setItem('mealHistory', JSON.stringify(mhNorm));
+  writeScopedJSON(KEYS.mealHistory, userId, mhNorm);
 }
 
-function dedupLocalWorkouts() {
-  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+function dedupLocalWorkouts(userId) {
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
   if (!Array.isArray(wh) || wh.length === 0) return;
 
   const map = new Map();
@@ -245,18 +251,18 @@ function dedupLocalWorkouts() {
   }
   const dedup = Array.from(map.values());
   if (dedup.length !== wh.length) {
-    localStorage.setItem('workoutHistory', JSON.stringify(dedup));
+    writeScopedJSON(KEYS.workoutHistory, userId, dedup);
   }
 }
 
-function recomputeTodayBanners(setBurned, setConsumed) {
+function recomputeTodayBanners(setBurned, setConsumed, userId) {
   const today = new Date().toLocaleDateString('en-US');
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-  const todayRec = meals.find(m => m.date === today);
+  const workouts = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const meals    = readScopedJSON(KEYS.mealHistory, userId, []);
+  const todayRec = Array.isArray(meals) ? meals.find(m => m.date === today) : null;
 
   setBurned(
-    workouts.filter(w => w.date === today)
+    (Array.isArray(workouts) ? workouts : []).filter(w => w.date === today)
       .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
   );
   setConsumed(todayRec ? todayRec.meals.reduce((s,m) => s + (Number(m.calories) || 0), 0) : 0);
@@ -589,9 +595,9 @@ export default function App() {
 
   useEffect(() => {
     const run = () => {
-      normalizeLocalData();
-      dedupLocalWorkouts();
-      recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
+      normalizeLocalData(authUser?.id);
+      dedupLocalWorkouts(authUser?.id);
+      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
     };
     run();
 
@@ -607,24 +613,13 @@ export default function App() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, []);
+  }, [authUser?.id]);
 
   const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
   const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
 
   function refreshCalories() {
-    const today    = new Date().toLocaleDateString('en-US');
-    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-    const todayRec = meals.find(m => m.date === today);
-
-    setBurnedCalories(
-      workouts.filter(w => w.date === today)
-        .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
-    );
-    setConsumedCalories(
-      todayRec ? todayRec.meals.reduce((sum,m) => sum + (Number(m.calories) || 0), 0) : 0
-    );
+    recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
   }
 
   const message = routeTips[location.pathname] || '';
@@ -874,15 +869,10 @@ export default function App() {
             <WorkoutPage
               userData={userData}
               onWorkoutLogged={() => {
-                const today = new Date().toLocaleDateString('en-US');
-                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-                const todayRec = meals.find(m => m.date === today);
-                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+                recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
 
-                normalizeLocalData();
-                dedupLocalWorkouts();
+                normalizeLocalData(authUser?.id);
+                dedupLocalWorkouts(authUser?.id);
                 updateStreak();
               }}
             />
@@ -890,14 +880,9 @@ export default function App() {
           <Route path="/meals" render={() =>
             <MealTracker
               onMealUpdate={() => {
-                const today = new Date().toLocaleDateString('en-US');
-                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-                const todayRec = meals.find(m => m.date === today);
-                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
-                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
+                recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
 
-                normalizeLocalData();
+                normalizeLocalData(authUser?.id);
               }}
             />
           }/>
