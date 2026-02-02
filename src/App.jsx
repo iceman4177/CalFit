@@ -65,10 +65,9 @@ import { logPageView }   from './analytics';
 
 import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
+import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
 import { attachSyncListeners } from './lib/sync';
-
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage';
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
@@ -208,41 +207,107 @@ async function heartbeatNow(session) {
 }
 
 // ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
-function normalizeLocalData(userId) {
+function normalizeLocalData(userId = null) {
   const clientId = getOrCreateClientId();
 
-  // Migrate legacy unscoped caches once per user (safe: avoids cross-user contamination)
-  ensureScopedFromLegacy(KEYS.workoutHistory, userId, 'workoutHistory');
-  ensureScopedFromLegacy(KEYS.mealHistory, userId, 'mealHistory');
+  // Workouts
+  const readWorkouts = () => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+        return readScopedJSON(KEYS.workoutHistory, userId, []);
+      }
+      return JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const writeWorkouts = (list) => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+        writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
+        return;
+      }
+      localStorage.setItem('workoutHistory', JSON.stringify(Array.isArray(list) ? list : []));
+    } catch {}
+  };
 
-  const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
+  const wh = readWorkouts();
   const whNorm = (Array.isArray(wh) ? wh : []).map(w => ({
     ...w,
+    user_id: w.user_id || userId || null,
     clientId: w.clientId || clientId,
     localId: w.localId || `w_${clientId}_${w.createdAt ? Date.parse(w.createdAt) : Date.now()}`,
     createdAt: w.createdAt || new Date().toISOString(),
     uploaded: typeof w.uploaded === 'boolean' ? w.uploaded : false,
   }));
-  writeScopedJSON(KEYS.workoutHistory, userId, whNorm);
+  writeWorkouts(whNorm);
 
-  const mh = readScopedJSON(KEYS.mealHistory, userId, []);
+  // Meals
+  const readMeals = () => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.mealHistory, userId);
+        return readScopedJSON(KEYS.mealHistory, userId, []);
+      }
+      return JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const writeMeals = (list) => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.mealHistory, userId);
+        writeScopedJSON(KEYS.mealHistory, userId, Array.isArray(list) ? list : []);
+        return;
+      }
+      localStorage.setItem('mealHistory', JSON.stringify(Array.isArray(list) ? list : []));
+    } catch {}
+  };
+
+  const mh = readMeals();
   const mhNorm = (Array.isArray(mh) ? mh : []).map(day => ({
     ...day,
+    user_id: day.user_id || userId || null,
     clientId: day.clientId || clientId,
     localId: day.localId || `m_${clientId}_${day.date || Date.now()}`,
     createdAt: day.createdAt || new Date().toISOString(),
     uploaded: typeof day.uploaded === 'boolean' ? day.uploaded : false,
   }));
-  writeScopedJSON(KEYS.mealHistory, userId, mhNorm);
+  writeMeals(mhNorm);
 }
 
-function dedupLocalWorkouts(userId) {
-  const wh = readScopedJSON(KEYS.workoutHistory, userId, []);
+function dedupLocalWorkouts(userId = null) {
+  const readWorkouts = () => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+        return readScopedJSON(KEYS.workoutHistory, userId, []);
+      }
+      return JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const writeWorkouts = (list) => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+        writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
+        return;
+      }
+      localStorage.setItem('workoutHistory', JSON.stringify(Array.isArray(list) ? list : []));
+    } catch {}
+  };
+
+  const wh = readWorkouts();
   if (!Array.isArray(wh) || wh.length === 0) return;
 
   const map = new Map();
   for (const w of wh) {
-    const kcal = Math.round(Number(w.totalCalories) || 0);
+    const kcal = Math.round(Number(w.totalCalories ?? w.total_calories) || 0);
     const key = [w.date, w.name, kcal].join('|');
     const prev = map.get(key);
     if (!prev || new Date(w.createdAt || 0) > new Date(prev.createdAt || 0)) {
@@ -251,21 +316,60 @@ function dedupLocalWorkouts(userId) {
   }
   const dedup = Array.from(map.values());
   if (dedup.length !== wh.length) {
-    writeScopedJSON(KEYS.workoutHistory, userId, dedup);
+    writeWorkouts(dedup);
   }
 }
 
-function recomputeTodayBanners(setBurned, setConsumed, userId) {
-  const today = new Date().toLocaleDateString('en-US');
-  const workouts = readScopedJSON(KEYS.workoutHistory, userId, []);
-  const meals    = readScopedJSON(KEYS.mealHistory, userId, []);
-  const todayRec = Array.isArray(meals) ? meals.find(m => m.date === today) : null;
+function recomputeTodayBanners(userId, setBurned, setConsumed) {
+  const now = new Date();
+  const todayUS = now.toLocaleDateString('en-US');
+  const todayISO = (() => {
+    try {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return d.toISOString().slice(0, 10);
+    } catch {
+      return '';
+    }
+  })();
 
-  setBurned(
-    (Array.isArray(workouts) ? workouts : []).filter(w => w.date === today)
-      .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
-  );
-  setConsumed(todayRec ? todayRec.meals.reduce((s,m) => s + (Number(m.calories) || 0), 0) : 0);
+  const readWorkouts = () => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+        return readScopedJSON(KEYS.workoutHistory, userId, []);
+      }
+      return JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    } catch {
+      return [];
+    }
+  };
+
+  const readMeals = () => {
+    try {
+      if (userId) {
+        ensureScopedFromLegacy(KEYS.mealHistory, userId);
+        return readScopedJSON(KEYS.mealHistory, userId, []);
+      }
+      return JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    } catch {
+      return [];
+    }
+  };
+
+  const workouts = readWorkouts();
+  const meals = readMeals();
+  const todayRec = (Array.isArray(meals) ? meals : []).find(m => m?.date === todayUS);
+
+  const burned = (Array.isArray(workouts) ? workouts : [])
+    .filter(w => (w?.date === todayUS || w?.date === todayISO || w?.__local_day === todayISO || w?.local_day === todayISO))
+    .reduce((sum, w) => sum + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0);
+
+  const consumed = todayRec
+    ? (Array.isArray(todayRec.meals) ? todayRec.meals : []).reduce((s, m) => s + (Number(m?.calories) || 0), 0)
+    : 0;
+
+  setBurned(burned);
+  setConsumed(consumed);
 }
 // -----------------------------------------------------------------------
 
@@ -595,9 +699,9 @@ export default function App() {
 
   useEffect(() => {
     const run = () => {
-      normalizeLocalData(authUser?.id);
-      dedupLocalWorkouts(authUser?.id);
-      recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
+      normalizeLocalData(authUser?.id || null);
+      dedupLocalWorkouts(authUser?.id || null);
+      recomputeTodayBanners(authUser?.id || null, setBurnedCalories, setConsumedCalories);
     };
     run();
 
@@ -613,13 +717,24 @@ export default function App() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, [authUser?.id]);
+  }, []);
 
   const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
   const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
 
   function refreshCalories() {
-    recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
+    const today    = new Date().toLocaleDateString('en-US');
+    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+    const todayRec = meals.find(m => m.date === today);
+
+    setBurnedCalories(
+      workouts.filter(w => w.date === today)
+        .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
+    );
+    setConsumedCalories(
+      todayRec ? todayRec.meals.reduce((sum,m) => sum + (Number(m.calories) || 0), 0) : 0
+    );
   }
 
   const message = routeTips[location.pathname] || '';
@@ -869,10 +984,15 @@ export default function App() {
             <WorkoutPage
               userData={userData}
               onWorkoutLogged={() => {
-                recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
+                const today = new Date().toLocaleDateString('en-US');
+                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                const todayRec = meals.find(m => m.date === today);
+                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                normalizeLocalData(authUser?.id);
-                dedupLocalWorkouts(authUser?.id);
+                normalizeLocalData(authUser?.id || null);
+                dedupLocalWorkouts(authUser?.id || null);
                 updateStreak();
               }}
             />
@@ -880,9 +1000,14 @@ export default function App() {
           <Route path="/meals" render={() =>
             <MealTracker
               onMealUpdate={() => {
-                recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id);
+                const today = new Date().toLocaleDateString('en-US');
+                const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+                const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+                const todayRec = meals.find(m => m.date === today);
+                setBurnedCalories(workouts.filter(w => w.date === today).reduce((s,w)=>s+(Number(w.totalCalories)||0),0));
+                setConsumedCalories(todayRec ? todayRec.meals.reduce((s,m)=>s+(Number(m.calories)||0),0) : 0);
 
-                normalizeLocalData(authUser?.id);
+                normalizeLocalData(authUser?.id || null);
               }}
             />
           }/>
