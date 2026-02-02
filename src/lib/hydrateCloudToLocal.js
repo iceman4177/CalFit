@@ -144,6 +144,39 @@ function normalizeWorkoutForLocal(w) {
   };
 }
 
+// Dedupe cloud workouts by client_id to prevent double-counting if the DB has duplicates.
+// (We have seen cases where missing unique constraints allowed multiple rows with the same client_id.)
+function dedupeCloudWorkouts(workouts = []) {
+  const bestByKey = new Map();
+  for (const w of (workouts || [])) {
+    const key = w?.client_id || w?.id;
+    if (!key) continue;
+
+    const prev = bestByKey.get(key);
+    if (!prev) {
+      bestByKey.set(key, w);
+      continue;
+    }
+
+    const prevC = safeNum(prev?.total_calories, 0);
+    const curC  = safeNum(w?.total_calories, 0);
+
+    // Prefer the higher calories (draft rows sometimes get overwritten weirdly).
+    if (curC > prevC) {
+      bestByKey.set(key, w);
+      continue;
+    }
+    if (curC < prevC) continue;
+
+    // If equal calories, prefer the later timestamp (created_at/ended_at/started_at).
+    const prevT = Date.parse(prev?.ended_at || prev?.started_at || prev?.created_at || '') || 0;
+    const curT  = Date.parse(w?.ended_at || w?.started_at || w?.created_at || '') || 0;
+    if (curT > prevT) bestByKey.set(key, w);
+  }
+  return Array.from(bestByKey.values());
+}
+
+
 function mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId) {
   try {
     ensureScopedFromLegacy(KEYS.workoutHistory, userId);
@@ -329,12 +362,13 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
   try {
     const { data, error } = await supabase
       .from('workouts')
-      .select('id,total_calories,local_day')
+      .select('id,client_id,total_calories,local_day')
       .eq('user_id', userId)
       .eq('local_day', dayISO);
 
     if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      const uniq = dedupeCloudWorkouts(data || []);
+      return (uniq || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
     }
 
     if (!/column .*local_day.* does not exist/i.test(error?.message || '')) {
@@ -352,13 +386,14 @@ async function sumBurnedFromWorkouts(userId, dayISO) {
   try {
     const { data, error } = await supabase
       .from('workouts')
-      .select('id,total_calories,started_at,created_at')
+      .select('id,client_id,total_calories,started_at,created_at')
       .eq('user_id', userId)
       .gte('started_at', startLocal.toISOString())
       .lt('started_at', nextLocal.toISOString());
 
     if (!error) {
-      return (data || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
+      const uniq = dedupeCloudWorkouts(data || []);
+      return (uniq || []).reduce((s, w) => s + safeNum(w?.total_calories, 0), 0);
     }
 
     // If started_at isn't a column, fall back to created_at
@@ -484,7 +519,9 @@ export async function hydrateTodayTotalsFromCloud(user, { alsoDispatch = true } 
   // 3b) Always pull today's workouts into local workoutHistory so banner + in-page history
   // can show cross-device sessions without needing to visit /history.
   try {
-    const cloudWorkouts = await pullWorkoutsForDay(userId, dayISO);
+        const cloudWorkoutsRaw = await pullWorkoutsForDay(userId, dayISO);
+    const cloudWorkouts = dedupeCloudWorkouts(cloudWorkoutsRaw || []);
+
     if (Array.isArray(cloudWorkouts) && cloudWorkouts.length > 0) {
       mergeWorkoutsIntoLocalHistory(dayISO, cloudWorkouts, userId);
 
