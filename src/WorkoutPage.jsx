@@ -252,8 +252,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       writeScopedJSON(KEYS.dailyMetricsCache, userId, cache && typeof cache === 'object' ? cache : {});
-      // ✅ prevent cloud hydration from clobbering fresh local totals to 0
-      try { if (userId) localStorage.setItem(scopedKey('dailyMetrics:lastWrite', userId), String(Date.now())); } catch {}
     } catch {}
   }, [userId]);
 
@@ -956,91 +954,7 @@ setNewExercise({
     };
   }, [cumulativeExercises, user?.id]);
 
-  
-  // ✅ Debounced cloud sync for in-progress draft
-  // Without this, workouts won't POST until "Submit Workout", and hydration can clobber burned totals back to 0.
-  const draftCloudSyncTimerRef = useRef(null);
-
-  const scheduleDraftCloudSync = useCallback((nextExercises) => {
-    try {
-      if (!user?.id || !userId) return; // only when signed in
-      const exArr = Array.isArray(nextExercises) ? nextExercises : [];
-      if (exArr.length === 0) return;
-
-      if (draftCloudSyncTimerRef.current) clearTimeout(draftCloudSyncTimerRef.current);
-
-      draftCloudSyncTimerRef.current = setTimeout(async () => {
-        try {
-          const now = new Date();
-          const todayISO = localDayISO(now);
-
-          const totalRaw = exArr.reduce((s, ex) => s + (Number(ex?.calories) || 0), 0);
-          const total = Math.round(totalRaw * 100) / 100;
-
-          const startedAt = startedAtRef.current || now.toISOString();
-
-          const toExerciseRow = (ex) => ({
-            name: ex?.exerciseName || ex?.name || '',
-            sets: ex?.sets ?? null,
-            reps: ex?.reps ?? null,
-            weight: ex?.weight || null,
-            calories: ex?.calories ?? null
-          });
-
-          const session = {
-            client_id: activeWorkoutSessionIdRef.current,
-            user_id: user.id,
-
-            started_at: startedAt,
-            ended_at: now.toISOString(),
-            total_calories: total,
-
-            local_day: todayISO,
-            items: { exercises: exArr.map(toExerciseRow).filter(x => String(x.name || '').trim().length > 0) },
-
-            // not required for cloud, but helpful for local validation
-            exercises: exArr.map((ex) => ({
-              name: ex?.exerciseName || ex?.name || '',
-              sets: ex?.sets ?? null,
-              reps: ex?.reps ?? null,
-              weight: ex?.weight || null,
-              calories: ex?.calories ?? null
-            })),
-
-            name: (exArr[0]?.exerciseName) || 'Workout',
-          };
-
-          const res = await saveWorkoutLocalFirst(session);
-          if (res?.ok !== true && !res?.queued) {
-            console.warn('[WorkoutPage] draft workout upsert failed', res);
-          }
-
-          // ✅ Keep daily_metrics burned in sync (absolute) so banner doesn't flicker on tab switches.
-          const cache = readDailyCache();
-          const prev = cache[todayISO] || {};
-          const consumed = Math.round(Number(prev?.consumed ?? 0) || 0);
-
-          const workouts = readWorkoutHistory();
-          const todayUS = now.toLocaleDateString('en-US');
-          const burnedToday = (Array.isArray(workouts) ? workouts : [])
-            .filter(w => (w?.date === todayUS || w?.date === todayISO || w?.__local_day === todayISO || w?.local_day === todayISO))
-            .reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0);
-
-          await upsertDailyMetricsLocalFirst({
-            user_id: user.id,
-            local_day: todayISO,
-            consumed,
-            burned: burnedToday
-          });
-        } catch (e) {
-          console.warn('[WorkoutPage] draft cloud sync failed', e);
-        }
-      }, 650);
-    } catch {}
-  }, [user?.id, userId, readDailyCache, readWorkoutHistory]);
-
-
-// ✅ INSTANT banner update (workout = meal behavior)
+  // ✅ INSTANT banner update (workout = meal behavior)
   // Meals update instantly because MealTracker writes to localStorage immediately.
   // Workouts MUST do the same: as you add/remove exercises, immediately upsert a draft
   // session into localStorage.workoutHistory + update burnedToday + dispatch event.
@@ -1138,13 +1052,10 @@ setNewExercise({
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: burnedToday } }));
         window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayISO } }));
       } catch {}
-
-      // ✅ also upsert this draft to Supabase + daily_metrics (debounced)
-      scheduleDraftCloudSync(nextExercises);
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
     }
-  }, [readWorkoutHistory, writeWorkoutHistory, readDailyCache, writeDailyCache, scheduleDraftCloudSync, userId, user?.id]);
+  }, [readWorkoutHistory, writeWorkoutHistory, readDailyCache, writeDailyCache, userId, user?.id]);
 
 
 
@@ -1264,25 +1175,23 @@ setNewExercise({
         console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
       }
 
-      // 3) Mark the local session as uploaded (prevents placeholders + keeps scoped history consistent)
+      // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
+        const key = 'workoutHistory';
+        const raw = JSON.parse(localStorage.getItem(key) || '[]');
+        const list = Array.isArray(raw) ? raw : [];
         const cid = String(session?.client_id || session?.id || '');
-        if (cid) {
-          const list = readWorkoutHistory();
-          const arr = Array.isArray(list) ? list : [];
-          const idx = arr.findIndex(s => String(s?.client_id || s?.id || '') === cid);
-          if (idx >= 0) {
-            const next = [...arr];
-            next[idx] = {
-              ...next[idx],
-              uploaded: true,
-              __draft: false,
-              __cloud: true,
-              __workout_id: workoutId || next[idx].__workout_id || null
-            };
-            writeWorkoutHistory(next);
-            window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
-          }
+        const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx],
+            uploaded: true,
+            __draft: false,
+            __cloud: true,
+            __workout_id: workoutId || list[idx].__workout_id || null
+          };
+          localStorage.setItem(key, JSON.stringify(list));
+          window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
         }
       } catch {}
 
