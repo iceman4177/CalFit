@@ -250,55 +250,16 @@ function dedupLocalWorkouts() {
 }
 
 function recomputeTodayBanners(setBurned, setConsumed) {
-    // Always compute banner values from the *same* source of truth:
-    // user-scoped local histories (workoutHistory:<uid>, mealHistory:<uid>) when signed in,
-    // otherwise legacy keys for guests.
-    const uid = authUser?.id || null;
+  const today = new Date().toLocaleDateString('en-US');
+  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
+  const todayRec = meals.find(m => m.date === today);
 
-    const pad2 = (n) => String(n).padStart(2, '0');
-    const todayISO = (() => {
-      const d = new Date();
-      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    })();
-
-    const dayISOFromAny = (v) => {
-      if (!v) return null;
-      const s = String(v);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      const dt = new Date(s);
-      if (!Number.isNaN(dt.getTime())) {
-        return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
-      }
-      return null;
-    };
-
-    const readHistory = (key, fallbackKey) => {
-      if (uid) return readScopedJSON(key, uid, []);
-      try {
-        return JSON.parse(localStorage.getItem(fallbackKey) || '[]');
-      } catch {
-        return [];
-      }
-    };
-
-    const workoutHistory = readHistory(KEYS.workoutHistory, 'workoutHistory');
-    const mealHistory    = readHistory(KEYS.mealHistory, 'mealHistory');
-
-    const todaysWorkouts = (Array.isArray(workoutHistory) ? workoutHistory : []).filter((w) => {
-      const d = dayISOFromAny(w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at);
-      return d === todayISO;
-    });
-
-    const todaysMeals = (Array.isArray(mealHistory) ? mealHistory : []).filter((m) => {
-      const d = dayISOFromAny(m?.local_day || m?.__local_day || m?.day || m?.date || m?.eaten_at || m?.createdAt || m?.created_at);
-      return d === todayISO;
-    });
-
-    const burned = todaysWorkouts.reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0);
-    const eaten  = todaysMeals.reduce((s, m) => s + (Number(m?.totalCalories ?? m?.total_calories) || 0), 0);
-
-    setBurned(burned);
-    setConsumed(eaten);
+  setBurned(
+    workouts.filter(w => w.date === today)
+      .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
+  );
+  setConsumed(todayRec ? todayRec.meals.reduce((s,m) => s + (Number(m.calories) || 0), 0) : 0);
 }
 // -----------------------------------------------------------------------
 
@@ -378,21 +339,6 @@ export default function App() {
 
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
-
-  // migrate legacy (unscoped) keys into user-scoped storage once we know the uid
-  useEffect(() => {
-    if (!authUser?.id) return;
-    try {
-      ensureScopedFromLegacy(KEYS.workoutHistory, authUser.id);
-      ensureScopedFromLegacy(KEYS.mealHistory, authUser.id);
-      ensureScopedFromLegacy(KEYS.dailyMetricsCache, authUser.id);
-    } catch {}
-    // After migrating, recompute so the banner reflects the scoped histories immediately
-    recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser?.id]);
-
-
 
   useEffect(() => {
     attachSyncListeners();
@@ -666,10 +612,93 @@ export default function App() {
   const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
   const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
 
-  function refreshCalories() {
-    // Keep banner stable: always compute from the same source of truth as the pages.
-    // Signed-in users -> user-scoped local histories. Guests -> legacy keys.
-    recomputeTodayBanners(setBurnedCalories, setConsumedCalories);
+  async function refreshCalories() {
+    // Single source of truth for banner workout calories:
+    // For signed-in users, sum today's rows from Supabase `workouts` (by local_day).
+    // If the network is unavailable, fall back to localStorage histories.
+    const todayISO = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())
+      .toISOString()
+      .slice(0, 10);
+
+    const readJSON = (key, fallback) => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
+    const uid = authUser?.id || null;
+
+    const dayISOFromAny = (v) => {
+      if (!v) return null;
+      const s = String(v);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const dt = new Date(s);
+      if (!Number.isNaN(dt.getTime())) {
+        return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toISOString().slice(0, 10);
+      }
+      return null;
+    };
+
+    // ----- local fallbacks (guests + offline) -----
+    const whLocal = (() => {
+      if (uid) {
+        const scoped = readJSON(`workoutHistory:${uid}`, null);
+        if (Array.isArray(scoped)) return scoped;
+      }
+      const legacy = readJSON('workoutHistory', null);
+      return Array.isArray(legacy) ? legacy : [];
+    })();
+
+    const mhLocal = (() => {
+      if (uid) {
+        const scoped = readJSON(`mealHistory:${uid}`, null);
+        if (Array.isArray(scoped)) return scoped;
+      }
+      const legacy = readJSON('mealHistory', null);
+      return Array.isArray(legacy) ? legacy : [];
+    })();
+
+    const burnedLocal = whLocal
+      .filter((w) => {
+        const day = dayISOFromAny(
+          w.local_day || w.__local_day || w.day || w.date || w.started_at || w.createdAt || w.created_at
+        );
+        return day === todayISO;
+      })
+      .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories ?? w.calories ?? 0) || 0), 0);
+
+    const eatenLocal = mhLocal
+      .filter((m) => {
+        const day = dayISOFromAny(m.local_day || m.__local_day || m.day || m.date || m.eaten_at || m.created_at);
+        return day === todayISO;
+      })
+      .reduce((s, m) => s + (Number(m.totalCalories ?? m.total_calories ?? m.calories ?? 0) || 0), 0);
+
+    let burned = burnedLocal;
+    let eaten = eatenLocal;
+
+    // ----- cloud truth for workouts (prevents 711 vs 900 toggles) -----
+    if (uid) {
+      try {
+        const { data: rows, error } = await supabase
+          .from('workouts')
+          .select('total_calories, local_day')
+          .eq('user_id', uid)
+          .eq('local_day', todayISO);
+
+        if (!error && Array.isArray(rows)) {
+          burned = rows.reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
+        }
+      } catch {
+        // keep local fallback
+      }
+    }
+
+    setBurnedCalories(burned);
+    setConsumedCalories(eaten);
   }
 
   const message = routeTips[location.pathname] || '';
