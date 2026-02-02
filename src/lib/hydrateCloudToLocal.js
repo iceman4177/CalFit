@@ -127,6 +127,7 @@ function normalizeWorkoutForLocal(w) {
   return {
     id: cid,
     client_id: cid,
+    user_id: w?.user_id,
     // Keep both for compatibility with older code paths
     local_day: dayISO,
     __local_day: dayISO,

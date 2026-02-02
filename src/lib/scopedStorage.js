@@ -28,20 +28,66 @@ export function writeScopedJSON(base, userId, value) {
   } catch {}
 }
 
-export function ensureScopedFromLegacy(base, userId) {
-  // If legacy unscoped data exists, move it into the scoped key for the
-  // currently logged-in user (best-effort). This prevents cross-account bleed.
+export function ensureScopedFromLegacy(key, userId, legacyKey = key) {
+  // Legacy keys (unscoped) can exist from old builds. If you ever sign in with
+  // multiple accounts on the same device, blindly migrating legacy values can
+  // cross-contaminate users and cause banner flicker.
   if (!userId) return;
+
+  const sk = scopedKey(key, userId);
+
+  // Already migrated
+  if (localStorage.getItem(sk) != null) return;
+
+  // If ANY scoped keys exist for *any* user, do not migrate the unscoped value.
+  // This prevents taking a previous user's legacy cache and assigning it to a new user.
   try {
-    const scoped = scopedKey(base, userId);
-    const hasScoped = localStorage.getItem(scoped) != null;
-    const legacy = localStorage.getItem(base);
-    if (!hasScoped && legacy != null) {
-      localStorage.setItem(scoped, legacy);
-      localStorage.removeItem(base);
+    const prefix = `${key}:`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) {
+        return;
+      }
     }
-  } catch {}
+  } catch (_) {
+    // ignore
+  }
+
+  const legacy = localStorage.getItem(legacyKey);
+  if (legacy == null) return;
+
+  // If the legacy value is a JSON array/object, try to filter by userId when possible.
+  // Otherwise, migrate as-is (primarily for simple scalar legacy keys).
+  let toWrite = legacy;
+  try {
+    const parsed = JSON.parse(legacy);
+
+    const filterByUser = (v) => {
+      if (!Array.isArray(v)) return v;
+      const filtered = v.filter((item) => {
+        if (!item || typeof item !== 'object') return true;
+        const uid = item.user_id || item.userId || (item.user && item.user.id) || null;
+        return !uid || uid === userId;
+      });
+      return filtered;
+    };
+
+    const filtered = filterByUser(parsed);
+
+    // If we filtered an array down to empty AND it looked user-scoped, skip migration.
+    if (Array.isArray(parsed) && Array.isArray(filtered)) {
+      const hadAnyUserIds = parsed.some((it) => it && typeof it === 'object' && (it.user_id || it.userId || (it.user && it.user.id)));
+      if (hadAnyUserIds && filtered.length === 0) return;
+    }
+
+    toWrite = JSON.stringify(filtered);
+  } catch (_) {
+    // not JSON, keep raw
+  }
+
+  localStorage.setItem(sk, toWrite);
 }
+
 
 export const KEYS = {
   mealHistory: 'mealHistory',

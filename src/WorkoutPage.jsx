@@ -216,7 +216,16 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     try {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       const list = readScopedJSON(KEYS.workoutHistory, userId, []);
-      return Array.isArray(list) ? list : [];
+      const arr = Array.isArray(list) ? list : [];
+      // Self-heal: never let other users' sessions leak into this user's totals.
+      const cleaned = arr.filter((s) => {
+        const uid = s?.user_id || s?.userId || (s?.user && s.user.id) || null;
+        return !uid || uid === userId;
+      });
+      if (cleaned.length !== arr.length) {
+        writeScopedJSON(KEYS.workoutHistory, userId, cleaned);
+      }
+      return cleaned;
     } catch {
       return [];
     }
@@ -286,16 +295,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
-  const draftCloudSyncTimerRef = useRef(null);
-  const lastDraftCloudSyncSigRef = useRef('');
-
-  useEffect(() => {
-    return () => {
-      try {
-        if (draftCloudSyncTimerRef.current) clearTimeout(draftCloudSyncTimerRef.current);
-      } catch {}
-    };
-  }, []);
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
   useEffect(() => {
@@ -1052,26 +1051,6 @@ setNewExercise({
       try {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: burnedToday } }));
         window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayISO } }));
-        // ✅ Best-effort cloud upsert for logged-in users (debounced)
-        try {
-          if (user?.id) {
-            const draft = nextList && Array.isArray(nextList) ? nextList[0] : null;
-            const exCount = draft?.items?.exercises && Array.isArray(draft.items.exercises) ? draft.items.exercises.length : 0;
-            if (draft && exCount > 0 && Number(draft?.total_calories ?? 0) > 0) {
-              const sig = `${draft.client_id}|${draft.local_day}|${draft.total_calories}|${exCount}`;
-              if (lastDraftCloudSyncSigRef.current !== sig) {
-                lastDraftCloudSyncSigRef.current = sig;
-                if (draftCloudSyncTimerRef.current) clearTimeout(draftCloudSyncTimerRef.current);
-                draftCloudSyncTimerRef.current = setTimeout(() => {
-                  saveWorkoutLocalFirst(draft).catch((err) => {
-                    try { console.warn('[WorkoutPage] draft cloud upsert failed', err); } catch {}
-                  });
-                }, 650);
-              }
-            }
-          }
-        } catch {}
-
       } catch {}
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
@@ -1137,10 +1116,6 @@ setNewExercise({
 
       // 1) Save workout header row (cloud + local-first queue)
       const saved = await saveWorkoutLocalFirst(session);
-      if (saved && saved.ok === false) {
-        // Surface the real reason in-console so we don't silently "hydrate back to 0".
-        console.warn('[WorkoutPage] saveWorkoutLocalFirst failed', saved);
-      }
       const workoutId = saved?.id || null;
 
       // 2) Persist exercise details as workout_sets so other devices can render breakdown
