@@ -722,19 +722,11 @@ export default function App() {
   const [netSnack, setNetSnack] = useState({ open: false, type: 'online' });
   const closeNetSnack = () => setNetSnack(s => ({ ...s, open: false }));
 
-  function refreshCalories() {
-    const today    = new Date().toLocaleDateString('en-US');
-    const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const meals    = JSON.parse(localStorage.getItem('mealHistory')   || '[]');
-    const todayRec = meals.find(m => m.date === today);
-
-    setBurnedCalories(
-      workouts.filter(w => w.date === today)
-        .reduce((sum,w) => sum + (Number(w.totalCalories) || 0), 0)
-    );
-    setConsumedCalories(
-      todayRec ? todayRec.meals.reduce((sum,m) => sum + (Number(m.calories) || 0), 0) : 0
-    );
+  function refreshCalories(userIdOverride = null) {
+    // Always recompute from the canonical per-user scoped caches (prevents banner flicker
+    // caused by mixing scoped and legacy unscoped keys).
+    const uid = userIdOverride ?? authUser?.id ?? null;
+    recomputeTodayBanners(uid, setBurnedCalories, setConsumedCalories);
   }
 
   const message = routeTips[location.pathname] || '';
