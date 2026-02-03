@@ -286,6 +286,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
   useEffect(() => {
     try {
+      if (!userId) return;
       const now = new Date();
       const todayUS = now.toLocaleDateString('en-US');
       const todayISO = localDayISO(now);
@@ -321,8 +322,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       }
     } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const readTodaySessionsFromLocal = useCallback(() => {
+  }, [userId]);
+const readTodaySessionsFromLocal = useCallback(() => {
     const now = new Date();
     const todayUS = now.toLocaleDateString('en-US');
     const todayISO = localDayISO(now);
