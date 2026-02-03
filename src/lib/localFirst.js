@@ -38,6 +38,65 @@ function uuidv4Fallback() {
   } catch {
     return '00000000-0000-4000-8000-000000000000';
   }
+
+// Deterministic UUID from a string (stable across devices)
+// Used to guarantee ONE workout row per (user_id, local_day) without requiring DB schema changes.
+function stableUuidFromString(str) {
+  try {
+    const s = String(str || '');
+    // FNV-1a 32-bit
+    const fnv = (seed) => {
+      let h = seed >>> 0;
+      for (let i = 0; i < s.length; i += 1) {
+        h ^= s.charCodeAt(i);
+        // h *= 16777619 (via shifts to stay in 32-bit)
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return h >>> 0;
+    };
+
+    const h1 = fnv(0x811c9dc5);
+    const h2 = fnv(0x811c9dc5 ^ 0x9e3779b9);
+    const h3 = fnv(0x811c9dc5 ^ 0x85ebca6b);
+    const h4 = fnv(0x811c9dc5 ^ 0xc2b2ae35);
+
+    // 16 bytes from 4x32-bit hashes
+    const b = new Uint8Array(16);
+    const put32 = (off, v) => {
+      b[off + 0] = (v >>> 24) & 0xff;
+      b[off + 1] = (v >>> 16) & 0xff;
+      b[off + 2] = (v >>> 8) & 0xff;
+      b[off + 3] = (v >>> 0) & 0xff;
+    };
+    put32(0, h1); put32(4, h2); put32(8, h3); put32(12, h4);
+
+    // RFC4122 variant + v5-ish marker (deterministic)
+    b[6] = (b[6] & 0x0f) | 0x50; // version 5
+    b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+
+    const hex = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20),
+    ].join('-');
+  } catch (e) {
+    return uuidv4Fallback();
+  }
+}
+
+function isOnConflictSchemaError(err) {
+  const msg = String(err?.message || '');
+  return (
+    err?.status === 400 ||
+    /on_conflict/i.test(msg) ||
+    /no unique/i.test(msg) ||
+    /there is no unique constraint/i.test(msg) ||
+    /constraint/i.test(msg)
+  );
+}
 }
 
 // ---------------- Local-day helpers (avoid UTC drift) ----------------
@@ -122,15 +181,31 @@ async function upsertWorkoutCloud(payload) {
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // Requires UNIQUE(user_id, client_id)
-  const res = await supabase
-    .from('workouts')
-    .upsert(payload, { onConflict: 'user_id,client_id' })
-    .select('id')
-    .maybeSingle();
+  // Try the most specific onConflict first, then fall back to whatever constraint exists in your DB.
+  // This prevents silent "no insert" failures when schema differs between environments.
+  const attempts = [
+    { onConflict: 'user_id,client_id' },
+    { onConflict: 'client_id' },
+    { onConflict: 'user_id,local_day' },
+  ];
 
-  if (res?.error) throw res.error;
-  return res?.data || null;
+  let lastErr = null;
+  for (const opt of attempts) {
+    const res = await supabase
+      .from('workouts')
+      .upsert(payload, opt)
+      .select('id')
+      .maybeSingle();
+
+    if (!res?.error) return res?.data || null;
+
+    lastErr = res.error;
+    // Only retry on schema/on_conflict mismatch. Otherwise, bubble the real error.
+    if (!isOnConflictSchemaError(res.error)) throw res.error;
+  }
+
+  if (lastErr) throw lastErr;
+  return null;
 }
 
 async function deleteWorkoutCloud({ user_id, client_id }) {
@@ -369,8 +444,9 @@ export async function saveWorkoutLocalFirst({
   const startISO = started_at || nowISO;
   const dayISO = local_day || localDayISO(new Date(startISO));
 
-  // Per-session client id (do NOT reuse device id)
-  const cid = client_id || (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  // Deterministic client_id per (user_id, local_day) so all devices upsert the SAME row.
+  // Falls back to a random uuid for guests.
+  const cid = client_id || (user_id ? stableUuidFromString(`workout:${user_id}:${dayISO}`) : (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`));
 
   const total = Math.round(safeNum(total_calories, 0));
 

@@ -9,6 +9,18 @@
 
 import { supabase } from './supabaseClient';
 
+
+function isOnConflictSchemaError(err) {
+  const msg = String(err?.message || '');
+  return (
+    err?.status === 400 ||
+    /on_conflict/i.test(msg) ||
+    /no unique/i.test(msg) ||
+    /there is no unique constraint/i.test(msg) ||
+    /constraint/i.test(msg)
+  );
+}
+
 const OPS_KEY = 'slimcal:pendingOps:v1';
 const LOCK_KEY = 'slimcal:pendingOps:lock:v1';
 const LOCK_MS = 8000;
@@ -147,6 +159,21 @@ async function runOneOp(op) {
       // 42501 = insufficient privilege / RLS issues sometimes
       if (code === '42501' || /permission|rls|policy/i.test(msg)) {
         return { ok: false, retry: false, reason: 'rls' };
+      }
+
+      // Workouts schema can vary (some envs unique on client_id, others on user_id,client_id, etc).
+      // If the current onConflict target doesn't match a real constraint, retry with safer targets.
+      if (table === 'workouts' && isOnConflictSchemaError(res.error)) {
+        const fallbacks = ['client_id', 'user_id,local_day'];
+        for (const oc of fallbacks) {
+          const r2 = await supabase
+            .from(table)
+            .upsert(payload, { onConflict: oc })
+            .select()
+            .maybeSingle();
+          if (!r2?.error) return { ok: true, retry: false };
+          if (!isOnConflictSchemaError(r2.error)) return { ok: false, retry: true, reason: 'upsert-error', error: r2.error };
+        }
       }
 
       return { ok: false, retry: true, reason: 'upsert-error', error: res.error };
