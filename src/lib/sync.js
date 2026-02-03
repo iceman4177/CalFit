@@ -14,11 +14,11 @@ const LOCK_KEY = 'slimcal:pendingOps:lock:v1';
 const LOCK_MS = 8000;
 
 function nowIso() {
-  try { return new Date().toISOString(); } catch { return String(Date.now()); }
+  try { return new Date().toISOString(); } catch (e) { return String(Date.now()); }
 }
 
 function safeJsonParse(s, fallback) {
-  try { return JSON.parse(s); } catch { return fallback; }
+  try { return JSON.parse(s); } catch (e) { return fallback; }
 }
 
 function readOps() {
@@ -29,7 +29,7 @@ function readOps() {
 function writeOps(ops) {
   try {
     localStorage.setItem(OPS_KEY, JSON.stringify(Array.isArray(ops) ? ops : []));
-  } catch {}
+  } catch (e) {}
 }
 
 function withLock(fn) {
@@ -40,10 +40,10 @@ function withLock(fn) {
       return { ok: false, reason: 'locked' };
     }
     localStorage.setItem(LOCK_KEY, JSON.stringify({ until: t + LOCK_MS }));
-  } catch {}
+  } catch (e) {}
 
   const done = () => {
-    try { localStorage.removeItem(LOCK_KEY); } catch {}
+    try { localStorage.removeItem(LOCK_KEY); } catch (e) {}
   };
 
   return Promise.resolve()
@@ -127,8 +127,6 @@ async function runOneOp(op) {
       workouts: 'user_id,client_id',
       // Daily metrics are unique per user + local_day
       daily_metrics: 'user_id,local_day',
-      // Workout sets: prefer (user_id, client_id) if present, otherwise fall back
-      workout_sets: 'user_id,client_id',
     };
 
     const onConflict = onConflictByTable[table] || (
@@ -246,10 +244,10 @@ export async function flushPending({ maxTries = 2 } = {}) {
 export function attachSyncListeners() {
   try {
     const onOnline = async () => {
-      try { await flushPending({ maxTries: 2 }); } catch {}
+      try { await flushPending({ maxTries: 2 }); } catch (e) {}
     };
     const onFocus = async () => {
-      try { await flushPending({ maxTries: 1 }); } catch {}
+      try { await flushPending({ maxTries: 1 }); } catch (e) {}
     };
 
     window.addEventListener('online', onOnline);
@@ -263,7 +261,7 @@ export function attachSyncListeners() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('focus', onFocus);
     };
-  } catch {
+  } catch (e) {
     return () => {};
   }
 }

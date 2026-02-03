@@ -14,7 +14,7 @@ import {
 } from 'chart.js';
 
 import { useAuth } from './context/AuthProvider.jsx';
-import { getDailyMetricsRange, getWorkouts, getWorkoutSetsFor } from './lib/db';
+import { getDailyMetricsRange, getWorkouts } from './lib/db';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
 
@@ -28,7 +28,7 @@ function fromUSDateToISO(us) {
     const [m, d, y] = String(us).split('/').map(Number);
     if (!m || !d || !y) return null;
     return localDayISO(new Date(y, m - 1, d));
-  } catch {
+  } catch (e) {
     return null;
   }
 }
@@ -37,7 +37,7 @@ function toLocalUSFromISO(isoYYYYMMDD) {
     const [y, m, d] = String(isoYYYYMMDD).split('-').map(Number);
     if (!y || !m || !d) return String(isoYYYYMMDD);
     return new Date(y, m - 1, d).toLocaleDateString('en-US');
-  } catch {
+  } catch (e) {
     return String(isoYYYYMMDD);
   }
 }
@@ -161,18 +161,13 @@ export default function WeeklyTrend() {
         inWindow.map(async (w) => {
           const started = w.started_at || w.date || w.created_at;
           const dayISO = localDayISO(new Date(started));
-          try {
-            const sets = await getWorkoutSetsFor(w.id, user.id);
-            const kcal = calcCaloriesFromSets(sets);
-            if (kcal > 0) {
-              burnedFromSets.set(dayISO, (burnedFromSets.get(dayISO) || 0) + kcal);
-            }
-          } catch {
-            // ignore
+          const kcal = Number(w?.total_calories) || 0;
+          if (kcal > 0) {
+            burnedFromSets.set(dayISO, (burnedFromSets.get(dayISO) || 0) + kcal);
           }
-        })
+})
       );
-    } catch {
+    } catch (e) {
       // ignore
     }
 

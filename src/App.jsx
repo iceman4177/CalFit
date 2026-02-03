@@ -271,7 +271,7 @@ function hasSeenHealthForm(userId) {
   try {
     const key = getHealthSeenKeyForUser(userId);
     return localStorage.getItem(key) === 'true';
-  } catch {
+  } catch (e) {
     return false;
   }
 }
@@ -279,7 +279,7 @@ function markHealthFormSeen(userId) {
   try {
     const key = getHealthSeenKeyForUser(userId);
     localStorage.setItem(key, 'true');
-  } catch {}
+  } catch (e) {}
 }
 function hasHealthDataLocal(saved) {
   try {
@@ -287,7 +287,7 @@ function hasHealthDataLocal(saved) {
     if (hasCompleted) return true;
     const age = saved?.age;
     return !!age;
-  } catch {
+  } catch (e) {
     return !!saved?.age;
   }
 }
@@ -309,7 +309,7 @@ export default function App() {
       try {
         const { data } = await supabase.auth.getUser();
         if (mounted) setAuthUser(data?.user ?? null);
-      } catch {
+      } catch (e) {
         if (mounted) setAuthUser(null);
       }
     })();
@@ -378,7 +378,7 @@ export default function App() {
       if (!authUser?.id) {
         if (!abort) {
           setProCheck({ loading: false, isPro: false, status: null, trialEligible: true });
-          try { localStorage.setItem('isPro', 'false'); } catch {}
+          try { localStorage.setItem('isPro', 'false'); } catch (e) {}
         }
         return;
       }
@@ -399,7 +399,7 @@ export default function App() {
           trialEligible,
         });
 
-        try { localStorage.setItem('isPro', active ? 'true' : 'false'); } catch {}
+        try { localStorage.setItem('isPro', active ? 'true' : 'false'); } catch (e) {}
       } catch (e) {
         if (!abort) setProCheck(s => ({ ...s, loading: false }));
       }
@@ -484,7 +484,7 @@ export default function App() {
       try {
         localStorage.setItem('userData', JSON.stringify(merged));
         localStorage.setItem('hasCompletedHealthData', 'true');
-      } catch {}
+      } catch (e) {}
     }
 
     const normalized = { ...merged, isPremium: isProActive };
@@ -616,15 +616,15 @@ export default function App() {
     // Single source of truth for banner workout calories:
     // For signed-in users, sum today's rows from Supabase `workouts` (by local_day).
     // If the network is unavailable, fall back to localStorage histories.
-    const todayISO = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())
-      .toISOString()
-      .slice(0, 10);
+    const _now = new Date();
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const todayISO = `${_now.getFullYear()}-${pad2(_now.getMonth()+1)}-${pad2(_now.getDate())}`;
 
     const readJSON = (key, fallback) => {
       try {
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) : fallback;
-      } catch {
+      } catch (e) {
         return fallback;
       }
     };
@@ -645,19 +645,19 @@ export default function App() {
     // ----- local fallbacks (guests + offline) -----
     const whLocal = (() => {
       if (uid) {
-        const scoped = readJSON(`workoutHistory:${uid}`, null);
-        if (Array.isArray(scoped)) return scoped;
+        const scoped = readJSON(`workoutHistory:${uid}`, []);
+        return Array.isArray(scoped) ? scoped : [];
       }
-      const legacy = readJSON('workoutHistory', null);
+      const legacy = readJSON('workoutHistory', []);
       return Array.isArray(legacy) ? legacy : [];
     })();
 
     const mhLocal = (() => {
       if (uid) {
-        const scoped = readJSON(`mealHistory:${uid}`, null);
-        if (Array.isArray(scoped)) return scoped;
+        const scoped = readJSON(`mealHistory:${uid}`, []);
+        return Array.isArray(scoped) ? scoped : [];
       }
-      const legacy = readJSON('mealHistory', null);
+      const legacy = readJSON('mealHistory', []);
       return Array.isArray(legacy) ? legacy : [];
     })();
 
@@ -679,24 +679,6 @@ export default function App() {
 
     let burned = burnedLocal;
     let eaten = eatenLocal;
-
-    // ----- cloud truth for workouts (prevents 711 vs 900 toggles) -----
-    if (uid) {
-      try {
-        const { data: rows, error } = await supabase
-          .from('workouts')
-          .select('total_calories, local_day')
-          .eq('user_id', uid)
-          .eq('local_day', todayISO);
-
-        if (!error && Array.isArray(rows)) {
-          burned = rows.reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
-        }
-      } catch {
-        // keep local fallback
-      }
-    }
-
     setBurnedCalories(burned);
     setConsumedCalories(eaten);
   }
@@ -710,11 +692,11 @@ export default function App() {
 
   // ===== Coach hint state (pulsing "AI" badge) =====
   const [showCoachHint, setShowCoachHint] = useState(() => {
-    try { return localStorage.getItem('slimcal:coachHintSeen') !== '1'; } catch { return true; }
+    try { return localStorage.getItem('slimcal:coachHintSeen') !== '1'; } catch (e) { return true; }
   });
   useEffect(() => {
     if (location.pathname === '/coach' && showCoachHint) {
-      try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
+      try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
       setShowCoachHint(false);
     }
   }, [location.pathname, showCoachHint]);
@@ -778,7 +760,7 @@ export default function App() {
           onClick={() => {
             closeMore();
             if (showCoachHint) {
-              try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch {}
+              try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
               setShowCoachHint(false);
             }
           }}

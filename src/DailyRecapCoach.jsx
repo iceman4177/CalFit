@@ -25,7 +25,6 @@ import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
   getWorkouts,
-  getWorkoutSetsFor,
   getDailyMetricsRange,
   getMeals,
   getMealItemsForMealIds,
@@ -52,7 +51,7 @@ function readJsonLS(key, fallback) {
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw);
-  } catch {
+  } catch (e) {
     return fallback;
   }
 }
@@ -60,7 +59,7 @@ function readJsonLS(key, fallback) {
 function writeJsonLS(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  } catch (e) {}
 }
 
 function computeLevel(xp) {
@@ -104,7 +103,7 @@ function seededRng(seedStr) {
 function usDay(d = new Date()) {
   try {
     return new Date(d).toLocaleDateString("en-US");
-  } catch {
+  } catch (e) {
     return String(d);
   }
 }
@@ -115,7 +114,7 @@ function localISODay(d = new Date()) {
     const dt = new Date(d);
     const localMidnight = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
     return localMidnight.toISOString().slice(0, 10);
-  } catch {
+  } catch (e) {
     return String(d);
   }
 }
@@ -125,7 +124,7 @@ function toTimeLabel(ts) {
     const d = new Date(ts);
     if (Number.isNaN(d.getTime())) return "";
     return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  } catch {
+  } catch (e) {
     return "";
   }
 }
@@ -133,7 +132,7 @@ function toTimeLabel(ts) {
 function formatClock(date) {
   try {
     return new Date(date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  } catch {
+  } catch (e) {
     return "";
   }
 }
@@ -146,7 +145,7 @@ function localDayToUtcRangeInclusive(dayISO) {
     const endLocalExclusive = new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
     const to = new Date(endLocalExclusive.getTime() - 1).toISOString();
     return { from: startLocal.toISOString(), to };
-  } catch {
+  } catch (e) {
     return { from: `${dayISO}T00:00:00.000Z`, to: `${dayISO}T23:59:59.999Z` };
   }
 }
@@ -382,7 +381,7 @@ function getUserTargets() {
       lastFocus,
       raw: ud,
     };
-  } catch {
+  } catch (e) {
     return {
       dailyGoal: 0,
       goalType: "",
@@ -609,12 +608,12 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
         setRecap(String(saved.content));
         setSavedAt(saved.createdAt || null);
       }
-    } catch {}
+    } catch (e) {}
 
     try {
       const hist = JSON.parse(localStorage.getItem(recapHistoryKey) || "[]");
       setHistory(Array.isArray(hist) ? hist : []);
-    } catch {
+    } catch (e) {
       setHistory([]);
     }
   }, [recapKeyToday]);
@@ -627,7 +626,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       try {
         const ctx = await buildContext();
         if (mounted) setDayCtx(ctx);
-      } catch {
+      } catch (e) {
         if (mounted) setDayCtx(null);
       } finally {
         if (mounted) setDayCtxLoading(false);
@@ -669,7 +668,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
     try {
       localStorage.setItem(recapKeyToday, JSON.stringify(entry));
-    } catch {}
+    } catch (e) {}
 
     try {
       const prev = JSON.parse(localStorage.getItem(recapHistoryKey) || "[]");
@@ -678,7 +677,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       const next = [entry, ...filtered].slice(0, 30);
       localStorage.setItem(recapHistoryKey, JSON.stringify(next));
       setHistory(next);
-    } catch {}
+    } catch (e) {}
 
     setSavedAt(entry.createdAt);
   };
@@ -706,20 +705,25 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       const todays = ws.filter((w) => (w.started_at || "").slice(0, 10) === todayISO);
 
       for (const w of todays) {
-        const sets = await getWorkoutSetsFor(w.id, user.id);
-        const kcal = calcCaloriesFromSets(sets);
+        const exercises = (w?.items && Array.isArray(w.items.exercises)) ? w.items.exercises : [];
+const kcal = (Number(w?.total_calories) || 0) || exercises.reduce((s, ex) => s + (Number(ex?.calories) || 0), 0);
 
-        if (Array.isArray(sets) && sets.length > 0) {
-          const byEx = new Map();
-          for (const s of sets) {
-            const k = s.exercise_name || "Exercise";
-            const prev = byEx.get(k) || { exercise_name: k, sets: 0, reps: 0, weight_max: 0 };
-            prev.sets += 1;
-            prev.reps += safeNum(s.reps, 0);
-            prev.weight_max = Math.max(prev.weight_max, safeNum(s.weight, 0));
-            byEx.set(k, prev);
-          }
-          for (const v of byEx.values()) {
+if (Array.isArray(exercises) && exercises.length > 0) {
+  const byEx = new Map();
+  for (const ex of exercises) {
+    const k = String(ex?.name || ex?.exerciseName || '').trim();
+    if (!k) continue;
+    const prev = byEx.get(k) || { exercise_name: k, sets: 0, reps: 0, weight_max: 0 };
+    const setsN = Math.max(1, parseInt(ex?.sets, 10) || 1);
+    prev.sets += setsN;
+    const reps = Number(ex?.reps) || 0;
+    if (reps) prev.reps += reps * setsN;
+    const wt = Number(ex?.weight) || 0;
+    if (wt > prev.weight_max) prev.weight_max = wt;
+    byEx.set(k, prev);
+  }
+
+for (const v of byEx.values()) {
             workouts.push({
               exercise_name: v.exercise_name,
               sets: v.sets,
@@ -831,7 +835,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
         burned = Math.max(burned || 0, localCtx?.burned || 0);
         macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
       }
-    } catch {}
+    } catch (e) {}
 
     return { burned, consumed, meals, workouts, macroTotals, source: "cloud" };
   }
@@ -890,7 +894,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     try {
       const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
       if (saved?.content) return;
-    } catch {}
+    } catch (e) {}
     if (!loading && !recap && !dayCtxLoading) {
       handleGetRecap();
     }

@@ -16,7 +16,7 @@ import DailyGoalTracker from './DailyGoalTracker';
 
 // ✅ Supabase auth + readers
 import { useAuth } from './context/AuthProvider.jsx';
-import { getWorkouts, getWorkoutSetsFor, getDailyMetricsRange } from './lib/db';
+import { getWorkouts, getDailyMetricsRange } from './lib/db';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -31,7 +31,7 @@ function fromUSDateToISO(us) {
     if (!m || !d || !y) return null;
     const dt = new Date(y, m - 1, d);
     return localDayISO(dt);
-  } catch {
+  } catch (e) {
     return null;
   }
 }
@@ -41,7 +41,7 @@ function toUSDate(isoLike) {
       return isoLike;
     }
     return new Date(isoLike).toLocaleDateString('en-US');
-  } catch {
+  } catch (e) {
     return String(isoLike);
   }
 }
@@ -169,7 +169,7 @@ function aggregateByDay(sessions) {
     try {
       const [y, m, dd] = String(d._dayISO).split('-').map(Number);
       if (y && m && dd) d.dateLabel = new Date(y, m - 1, dd).toLocaleDateString('en-US');
-    } catch {}
+    } catch (e) {}
   }
 
   days.sort((a, b) => (a._dayISO < b._dayISO ? -1 : a._dayISO > b._dayISO ? 1 : 0));
@@ -222,7 +222,7 @@ export default function ProgressDashboard() {
 
       if ((!eaten || eaten === 0) && ct != null) eaten = Number(ct) || eaten;
       if ((!burned || burned === 0) && bt != null) burned = Number(bt) || burned;
-    } catch {}
+    } catch (e) {}
 
     setConsumedToday(eaten);
     setBurnedToday(burned);
@@ -246,12 +246,7 @@ export default function ProgressDashboard() {
         const serverSessions = await Promise.all(
           (base || []).map(async (w) => {
             let kcal = 0;
-            try {
-              const sets = await getWorkoutSetsFor(w.id, user.id);
-              kcal = calcCaloriesFromSets(sets);
-            } catch {
-              kcal = 0;
-            }
+            kcal = Number(w?.total_calories) || 0;
             if (!kcal || kcal <= 0) kcal = readWorkoutCaloriesFallback(w);
 
             const started = w.started_at || w.date || w.created_at;

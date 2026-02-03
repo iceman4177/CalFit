@@ -21,11 +21,34 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useAuth } from './context/AuthProvider.jsx';
-import { getWorkouts, getWorkoutSetsFor } from './lib/db';
+import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
 
+
+
+function setsFromExercises(exercises = []) {
+  const exArr = Array.isArray(exercises) ? exercises : [];
+  const rows = [];
+  for (const ex of exArr) {
+    const name = String(ex?.name || ex?.exerciseName || '').trim();
+    if (!name) continue;
+    const nSets = Math.max(1, parseInt(ex?.sets, 10) || 1);
+    const reps = ex?.reps != null ? Number(ex.reps) : 0;
+    const weight = ex?.weight != null ? Number(ex.weight) : 0;
+    const volume = ex?.volume != null ? Number(ex.volume) : 0; // minutes for cardio if used
+    for (let i = 0; i < nSets; i += 1) {
+      rows.push({
+        exercise_name: name,
+        reps: Number.isFinite(reps) ? reps : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+        volume: Number.isFinite(volume) ? volume : 0,
+      });
+    }
+  }
+  return rows;
+}
 
 function getExercisesFromWorkout(workout) {
   try {
@@ -34,7 +57,7 @@ function getExercisesFromWorkout(workout) {
       const ex = items.exercises;
       if (Array.isArray(ex) && ex.length) return ex;
     }
-  } catch {}
+  } catch (e) {}
   return null;
 }
 
@@ -61,19 +84,19 @@ function calcCaloriesFromSets(sets) {
   return Number.isFinite(vol) ? vol : 0;
 }
 
-function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
 function formatDateOnly(iso) {
   try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
-  catch { return iso; }
+  catch (e) { return iso; }
 }
-function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; } }
+function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch (e) { return iso; } }
 
 // ---- local-day helpers (avoid UTC drift) ----
 function localDayISO(d = new Date()) {
   try {
     const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     return ld.toISOString().slice(0, 10);
-  } catch {
+  } catch (e) {
     return new Date().toISOString().slice(0, 10);
   }
 }
@@ -98,7 +121,7 @@ function readTodayConsumedFromLocal() {
         safeNum(row.calories_eaten, NaN);
       if (Number.isFinite(consumed)) return consumed;
     }
-  } catch {}
+  } catch (e) {}
 
   // fallback to mealHistory
   try {
@@ -106,7 +129,7 @@ function readTodayConsumedFromLocal() {
     const rec = mh.find(m => m?.date === todayUS || m?.date === todayISO);
     if (!rec?.meals?.length) return 0;
     return rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
-  } catch {}
+  } catch (e) {}
 
   return 0;
 }
@@ -121,7 +144,7 @@ function writeDailyMetricsCache(dayISO, consumed, burned) {
       updated_at: new Date().toISOString()
     };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-  } catch {}
+  } catch (e) {}
 }
 
 function dispatchBurnedUpdate(dayISO, burned) {
@@ -131,7 +154,7 @@ function dispatchBurnedUpdate(dayISO, burned) {
         detail: { date: dayISO, burned: safeNum(burned, 0) }
       })
     );
-  } catch {}
+  } catch (e) {}
 }
 
 // --- Better display: show per-exercise summary instead of set-by-set "12 cals"
@@ -193,7 +216,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       const list = readScopedJSON(KEYS.workoutHistory, userId, []);
       return Array.isArray(list) ? list : [];
-    } catch {
+    } catch (e) {
       return [];
     }
   }, [userId]);
@@ -202,7 +225,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     try {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
-    } catch {}
+    } catch (e) {}
   }, [userId]);
 
   const [loading, setLoading] = useState(false);
@@ -249,7 +272,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
       burnedToday = (wh || [])
         .filter(w => w?.date === todayUS || w?.date === todayISO)
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-    } catch {}
+    } catch (e) {}
 
     const consumedToday = readTodayConsumedFromLocal();
 
@@ -257,7 +280,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     writeDailyMetricsCache(todayISO, consumedToday, burnedToday);
     try {
       localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
-    } catch {}
+    } catch (e) {}
 
     dispatchBurnedUpdate(todayISO, burnedToday);
 
@@ -413,7 +436,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
           setRows(seeded);
           if (onHistoryChange) onHistoryChange(sumTotals(seeded));
         }
-      } catch {}
+      } catch (e) {}
 
       setLoading(true);
       try {
@@ -425,59 +448,43 @@ export default function WorkoutHistory({ onHistoryChange }) {
           return;
         }
 
-        const withSets = await Promise.all(
-          base.map(async w => {
-            const sets = await getWorkoutSetsFor(w.id, user.id, w.client_id);
+        const withSets = base.map(w => {
+          const exercises = getExercisesFromWorkout(w);
+          const sets = setsFromExercises(exercises);
 
-            const dayUS = toUS(w.started_at);
-            const candidates = localIdx.byDay.get(dayUS) || [];
-            const fallback = bestLocalMatch(candidates, sets);
+          const dayUS = toUS(w.started_at);
+          const candidates = localIdx.byDay.get(dayUS) || [];
+          const fallback = bestLocalMatch(candidates, sets);
 
-            let total =
-              (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
-                ? Number(w.total_calories)
-                : (fallback && Number.isFinite(fallback.totalCalories))
-                  ? Number(fallback.totalCalories)
-                  : calcCaloriesFromSets(sets);
+          let total =
+            (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
+              ? Number(w.total_calories)
+              : (fallback && Number.isFinite(fallback.totalCalories))
+                ? Number(fallback.totalCalories)
+                : calcCaloriesFromSets(sets);
 
-            // clean share / list formatting
-            let exercisesForShare = [];
-            if (sets && sets.length > 0) {
-              exercisesForShare = sets.map(s => ({
-                exerciseName: s.exercise_name,
-                sets: null,
-                reps: s.reps ?? 0,
-                weight: s.weight ?? 0,
-                calories: typeof s.calories === 'number' ? s.calories : undefined,
-                exerciseType: s.exercise_type || undefined
-              }));
-            } else if (fallback?.exercises) {
-              exercisesForShare = fallback.exercises.map(e => ({
-                exerciseName: e.name,
-                sets: e.sets,
-                reps: e.reps,
-                weight: e.weight,
-                calories: e.calories,
-                exerciseType: e.exerciseType || undefined
-              }));
-            }
+          // clean share / list formatting
+          const exercisesForShare = (exercises || []).map(ex => ({
+            exerciseName: ex.name || ex.exerciseName,
+            sets: ex.sets,
+            reps: ex.reps,
+            weight: ex.weight || null,
+            calories: ex.calories,
+            exerciseType: ex.exerciseType || undefined,
+          }));
 
-            const shareLines =
-              exercisesForShare.length > 0
-                ? exercisesForShare.map(e =>
-                  `- ${e.exerciseName}${e.sets ? `: ${e.sets}×${e.reps || ''}` : e.reps ? `: ×${e.reps}` : ''}${e.weight ? ` @ ${e.weight} lb` : ''}${Number.isFinite(e.calories) ? ` (${Math.round(e.calories)} cal)` : ''}`
-                )
-                : [];
+          const shareLines = (exercises || []).map(ex =>
+            `- ${ex.name || ex.exerciseName}: ${ex.sets || 1}×${ex.reps || ''}${ex.weight ? ` @ ${ex.weight} lb` : ''} (${(Number(ex.calories) || 0).toFixed(0)} cal)`
+          );
 
-            return {
-              ...w,
-              sets,
-              total_calories: total,
-              shareLines,
-              exercisesForShare
-            };
-          })
-        );
+          return {
+            ...w,
+            sets,
+            total_calories: total,
+            shareLines,
+            exercisesForShare
+          };
+        });
 
         if (!ignore) {
           setRows(withSets);

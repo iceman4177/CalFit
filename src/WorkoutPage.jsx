@@ -8,7 +8,7 @@ function uuidv4Fallback() {
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
-  } catch {
+  } catch (e) {
     return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, () => '0');
   }
 }
@@ -65,7 +65,7 @@ const isProUser = () => {
     if (localStorage.getItem('isPro') === 'true') return true;
     const ud = JSON.parse(localStorage.getItem('userData') || '{}');
     return !!ud.isPremium;
-  } catch {
+  } catch (e) {
     return false;
   }
 };
@@ -101,27 +101,6 @@ function formatExerciseLine(ex) {
 function formatSessionExerciseDetail(ex) {
   const name = ex?.name || ex?.exerciseName || 'Exercise';
 
-  // If we have per-set rows (from workout_sets hydration), render them compactly
-  if (Array.isArray(ex?._sets) && ex._sets.length) {
-    const parts = ex._sets.slice(0, 4).map((s) => {
-      const r = (s?.reps != null && s?.reps !== '') ? String(s.reps) : '';
-      const w = (s?.weight != null && s?.weight !== '' && Number(s.weight) > 0) ? `${s.weight}lb` : '';
-      if (w && r) return `${w}×${r}`;
-      if (w) return w;
-      if (r) return `${r} reps`;
-      return '';
-    }).filter(Boolean);
-
-    const more = ex._sets.length > 4 ? ` +${ex._sets.length - 4} more` : '';
-    let suffix = parts.length ? ` — ${parts.join(', ')}${more}` : '';
-    // Cardio / timed activities: treat `volume` as minutes when no strength reps/weight present.
-    if (!suffix) {
-      const volumeMinutes = ex._sets.reduce((s, x) => s + safeNum(x?.volume, 0), 0);
-      if (volumeMinutes > 0) suffix = ` — ${Math.round(volumeMinutes)} min`;
-    }
-    return `${name}${suffix}`;
-  }
-
   const setsNum = parseInt(ex?.sets, 10);
   const reps = ex?.reps != null ? String(ex.reps).trim() : '';
   const weight = ex?.weight != null ? Number(ex.weight) : 0;
@@ -142,7 +121,7 @@ function getSessionTitle(sess) {
     const ex0 = sess?.exercises?.[0]?.name;
     if (ex0) return String(ex0);
     return name || 'Workout';
-  } catch {
+  } catch (e) {
     return 'Workout';
   }
 }
@@ -152,7 +131,7 @@ function localDayISO(d = new Date()) {
   try {
     const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     return ld.toISOString().slice(0, 10);
-  } catch {
+  } catch (e) {
     return new Date().toISOString().slice(0, 10);
   }
 }
@@ -165,7 +144,7 @@ function safeNum(v, d = 0) {
 function tryHHMM(iso) {
   try {
     return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  } catch {
+  } catch (e) {
     return '';
   }
 }
@@ -181,7 +160,7 @@ function getOrCreateClientId() {
       localStorage.setItem('clientId', cid);
     }
     return cid;
-  } catch {
+  } catch (e) {
     return 'anon';
   }
 }
@@ -195,7 +174,7 @@ function getOrCreateActiveWorkoutSessionId() {
       localStorage.setItem('slimcal:activeWorkoutSessionId', sid);
     }
     return sid;
-  } catch {
+  } catch (e) {
     return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : uuidv4Fallback();
   }
 }
@@ -203,7 +182,7 @@ function getOrCreateActiveWorkoutSessionId() {
 function clearActiveWorkoutSessionId() {
   try {
     localStorage.removeItem('slimcal:activeWorkoutSessionId');
-  } catch { }
+  } catch (e) { }
 }
 
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
@@ -226,7 +205,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
         writeScopedJSON(KEYS.workoutHistory, userId, cleaned);
       }
       return cleaned;
-    } catch {
+    } catch (e) {
       return [];
     }
   }, [userId]);
@@ -235,7 +214,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     try {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
-    } catch {}
+    } catch (e) {}
   }, [userId]);
 
   const readDailyCache = useCallback(() => {
@@ -243,7 +222,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {});
       return cache && typeof cache === 'object' ? cache : {};
-    } catch {
+    } catch (e) {
       return {};
     }
   }, [userId]);
@@ -252,7 +231,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     try {
       ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       writeScopedJSON(KEYS.dailyMetricsCache, userId, cache && typeof cache === 'object' ? cache : {});
-    } catch {}
+    } catch (e) {}
   }, [userId]);
 
   useEffect(() => {
@@ -332,7 +311,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           setCurrentCalories(total);
         }
       }
-    } catch {}
+    } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const readTodaySessionsFromLocal = useCallback(() => {
@@ -430,13 +409,13 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       if (sawDupes) {
         try {
           writeWorkoutHistory(cleaned.slice(0, 300));
-        } catch {}
+        } catch (e) {}
 
         // Update burnedToday + dailyMetricsCache burned so banner doesn't flicker/double-count
         const burnedToday = today.reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
         try {
           localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0)));
-        } catch {}
+        } catch (e) {}
         try {
           const cache = readDailyCache() || {};
           const prev = cache[todayISO] || {};
@@ -446,14 +425,14 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             updated_at: new Date().toISOString()
           };
           writeDailyCache(cache);
-        } catch {}
+        } catch (e) {}
         try {
           window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
             detail: { date: todayISO, burned: Math.round(burnedToday || 0) }
           }));
-        } catch {}
+        } catch (e) {}
       }
-    } catch {
+    } catch (e) {
       setTodaySessions([]);
     }
   }, []);
@@ -486,7 +465,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           .order('started_at', { ascending: false });
         data = res?.data;
         error = res?.error;
-      } catch {}
+      } catch (e) {}
 
       // Fallback: started_at range (older schema)
       if (error && /column .*local_day.* does not exist/i.test(error?.message || '')) {
@@ -510,66 +489,12 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
       const cloud = Array.isArray(data) ? data : [];
       if (cloud.length === 0) return;
 
-      // ✅ Pull workout_sets so we can render exercise/sets details (like meals)
-      const workoutIds = cloud.map(w => w?.id).filter(Boolean);
-      const setsByWorkout = new Map();
+      // ✅ Single source of truth: workouts.items.exercises only (no legacy_sets)
+
+// Merge cloud sessions into local workoutHistory, preserving local exercise details if present
       try {
-        if (workoutIds.length) {
-          const resS = await supabase
-            .from('workout_sets')
-            .select('workout_id,exercise_name,weight,reps,tempo,volume,created_at')
-            .eq('user_id', user.id)
-            .in('workout_id', workoutIds)
-            .order('created_at', { ascending: true });
-
-          const rows = Array.isArray(resS?.data) ? resS.data : [];
-          for (const r of rows) {
-            const wid = String(r?.workout_id || '');
-            if (!wid) continue;
-            const arr = setsByWorkout.get(wid) || [];
-            arr.push(r);
-            setsByWorkout.set(wid, arr);
-          }
-        }
-      } catch (e) {
-        console.warn('[WorkoutPage] workout_sets pull failed (continuing)', e);
-      }
-
-      const buildExercisesFromSets = (rows = []) => {
-        const by = new Map();
-        for (const r of rows) {
-          const name = String(r?.exercise_name || '').trim();
-          if (!name) continue;
-          const arr = by.get(name) || [];
-          arr.push({
-            reps: r?.reps ?? null,
-            weight: r?.weight ?? null,
-            tempo: r?.tempo ?? null,
-            volume: r?.volume ?? null
-          });
-          by.set(name, arr);
-        }
-        const out = [];
-        for (const [name, sets] of by.entries()) {
-          const repsList = sets.map(s => (s?.reps != null ? String(s.reps) : '')).filter(Boolean);
-          const maxW = sets.map(s => Number(s?.weight) || 0).reduce((m, v) => Math.max(m, v), 0);
-          out.push({
-            name,
-            sets: sets.length,
-            reps: repsList.length ? repsList.join(',') : '',
-            weight: maxW > 0 ? maxW : '',
-            calories: 0,
-            _sets: sets
-          });
-        }
-        return out;
-      };
-
-      // Merge cloud sessions into local workoutHistory, preserving local exercise details if present
-      try {
-        const key = 'workoutHistory';
-        const raw = JSON.parse(localStorage.getItem(key) || '[]');
-        const list = Array.isArray(raw) ? raw : [];
+        ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+        const list = readScopedJSON(KEYS.workoutHistory, user.id, []);
 
         const map = new Map();
         for (const sess of list) {
@@ -583,11 +508,10 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
           if (!cid) continue;
 
           const total = safeNum(w?.total_calories, 0);
-          const setsRows = setsByWorkout.get(String(w?.id || '')) || [];
-          const exercisesFromSets = buildExercisesFromSets(setsRows);
+          const exercisesFromItems = (w?.items && Array.isArray(w.items.exercises)) ? w.items.exercises : [];
 
           // Skip junk rows (old draft placeholders)
-          if (total <= 0 && exercisesFromSets.length === 0) continue;
+          if (total <= 0 && exercisesFromItems.length === 0) continue;
 
           const norm = {
             id: cid,
@@ -599,8 +523,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
             createdAt: w?.started_at || w?.created_at || new Date().toISOString(),
             totalCalories: total,
             total_calories: total,
-            name: exercisesFromSets?.[0]?.name || 'Workout',
-            exercises: exercisesFromSets,
+            name: exercisesFromItems?.[0]?.name || 'Workout',
+            exercises: exercisesFromItems,
             uploaded: true,
             __cloud: true,
             __workout_id: w?.id || null
@@ -657,19 +581,19 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
         // Update burnedToday + cache so banner reflects sessions immediately
         const burnedToday = todayMerged.reduce((s, sess) => s + safeNum(sess?.totalCalories ?? sess?.total_calories, 0), 0);
-        try { localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0))); } catch {}
+        try { localStorage.setItem((user?.id ? scopedKey('burnedToday', user.id) : 'burnedToday'), String(Math.round(burnedToday || 0))); } catch (e) {}
 
         try {
           const cache = readDailyCache() || {};
           const prev = cache[dayISO] || {};
           cache[dayISO] = { ...prev, burned: Math.round(burnedToday || 0), updated_at: new Date().toISOString() };
           writeDailyCache(cache);
-        } catch {}
+        } catch (e) {}
 
         try {
           window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: dayISO, burned: Math.round(burnedToday || 0) } }));
           window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
-        } catch {}
+        } catch (e) {}
       } catch (e) {
         console.warn('[WorkoutPage] merge cloud workouts into local failed', e);
       }
@@ -688,7 +612,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
     const onBurnedUpdate = () => readTodaySessionsFromLocal();
     const onStorage = (e) => {
       if (!e) return;
-      if (e.key === 'workoutHistory') readTodaySessionsFromLocal();
+      const uid = user?.id || userId || null;
+      const scoped = uid ? `${KEYS.workoutHistory}:${uid}` : null;
+      if (e.key === KEYS.workoutHistory || (scoped && e.key === scoped)) readTodaySessionsFromLocal();
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
@@ -713,7 +639,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const handleDismiss = (key, setter, cb) => {
     try {
       localStorage.setItem(key, 'true');
-    } catch { }
+    } catch (e) { }
     setter(false);
     if (cb) cb();
   };
@@ -1036,7 +962,7 @@ setNewExercise({
 
       try {
         localStorage.setItem((userId ? scopedKey('burnedToday', userId) : 'burnedToday'), String(Math.round(burnedToday || 0)));
-      } catch {}
+      } catch (e) {}
 
       // keep daily cache in sync (DO NOT clobber consumed)
       try {
@@ -1045,13 +971,13 @@ setNewExercise({
         const consumed = Math.round(Number(prev?.consumed ?? 0) || 0);
         cache[todayISO] = { ...prev, consumed, burned: Math.round(burnedToday || 0), updated_at: new Date().toISOString() };
         writeDailyCache(cache);
-      } catch {}
+      } catch (e) {}
 
       // broadcast so banner updates instantly everywhere
       try {
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: todayISO, burned: burnedToday } }));
         window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update', { detail: { date: todayISO } }));
-      } catch {}
+      } catch (e) {}
     } catch (e) {
       console.warn('[WorkoutPage] instantPersistWorkoutDraftToBanner failed', e);
     }
@@ -1079,7 +1005,7 @@ setNewExercise({
         window.dispatchEvent(new CustomEvent('slimcal:burned:update', {
           detail: { date: todayLocalIso, burned: burnedToday }
         }));
-      } catch { }
+      } catch (e) { }
 
       // ✅ FIX: localFirst expects { consumed, burned }
       await upsertDailyMetricsLocalFirst({
@@ -1118,68 +1044,12 @@ setNewExercise({
       const saved = await saveWorkoutLocalFirst(session);
       const workoutId = saved?.id || null;
 
-      // 2) Persist exercise details as workout_sets so other devices can render breakdown
-      try {
-        if (workoutId) {
-          // clear any prior sets for this workout (idempotent on resubmit)
-          await supabase
-            .from('workout_sets')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('workout_id', workoutId);
-
-          const rows = [];
-          for (const ex of cumulativeExercises) {
-            const name = String(ex?.exerciseName || '').trim();
-            if (!name) continue;
-
-            // For cardio/sauna/manual items, store a single row
-            const setsN = Math.max(1, parseInt(ex?.sets, 10) || 1);
-            const repsVal = ex?.reps != null && ex?.reps !== '' ? parseInt(ex.reps, 10) : null;
-            const weightVal = ex?.weight != null && ex?.weight !== '' ? Number(ex.weight) : null;
-
-            if (!weightVal && !repsVal) {
-              rows.push({
-                user_id: user.id,
-                workout_id: workoutId,
-                exercise_name: name,
-                weight: null,
-                reps: null,
-                volume: 0
-              });
-              continue;
-            }
-
-            // Strength: one row per set (matches your current schema usage)
-            for (let i = 0; i < setsN; i++) {
-              const reps = repsVal || null;
-              const weight = Number.isFinite(weightVal) ? weightVal : null;
-              const volume = (Number.isFinite(weight) ? weight : 0) * (Number.isFinite(reps) ? reps : 0);
-              rows.push({
-                user_id: user.id,
-                workout_id: workoutId,
-                exercise_name: name,
-                weight,
-                reps,
-                volume
-              });
-            }
-          }
-
-          if (rows.length) {
-            const ins = await supabase.from('workout_sets').insert(rows);
-            if (ins?.error) console.warn('[WorkoutPage] workout_sets insert error', ins.error);
-          }
-        }
-      } catch (e) {
-        console.warn('[WorkoutPage] workout_sets persistence failed (continuing)', e);
-      }
+      // 2) (removed) legacy_sets table is no longer used; exercises are stored in workouts.items.exercises
 
       // 3) Mark the local session as uploaded (prevents "synced session may load details" placeholders)
       try {
-        const key = 'workoutHistory';
-        const raw = JSON.parse(localStorage.getItem(key) || '[]');
-        const list = Array.isArray(raw) ? raw : [];
+        ensureScopedFromLegacy(KEYS.workoutHistory, user.id);
+        const list = readScopedJSON(KEYS.workoutHistory, user.id, []);
         const cid = String(session?.client_id || session?.id || '');
         const idx = list.findIndex(s => String(s?.client_id || s?.id || '') === cid);
         if (idx >= 0) {
@@ -1193,7 +1063,7 @@ setNewExercise({
           localStorage.setItem(key, JSON.stringify(list));
           window.dispatchEvent(new CustomEvent('slimcal:workoutHistory:update'));
         }
-      } catch {}
+      } catch (e) {}
 
       updateStreak();
 
