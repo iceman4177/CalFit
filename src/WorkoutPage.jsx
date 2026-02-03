@@ -132,7 +132,15 @@ function localDayISO(d = new Date()) {
     const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     return ld.toISOString().slice(0, 10);
   } catch (e) {
-    return new Date().toISOString().slice(0, 10);
+    try {
+      const now = new Date();
+      const ld = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return ld.toISOString().slice(0, 10);
+    } catch (e2) {
+      const now = new Date();
+      const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 10);
+    }
   }
 }
 
@@ -1593,69 +1601,9 @@ setNewExercise({
         </Grid>
       </Grid>
 
-      {/* ✅ Meals-style: show today's logged workouts on-page so banner stays consistent */}
-      <Paper
-        variant="outlined"
-        sx={{
-          mt: 3,
-          p: 2,
-          borderRadius: 2,
-          border: '1px solid rgba(0,0,0,0.06)',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
-        }}
-      >
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            Today’s Logged Workouts
-          </Typography>
-          {loadingTodaySessions && (
-            <Typography variant="caption" color="textSecondary">
-              Syncing…
-            </Typography>
-          )}
-        </Stack>
+      
+      {/* (Removed) Logged Workouts panel (single source of truth is current session + history) */}
 
-        {(!todaySessions || todaySessions.length === 0) ? (
-          <Typography variant="body2" color="textSecondary">
-            No workouts logged today yet.
-          </Typography>
-        ) : (
-          <Stack spacing={1}>
-            {todaySessions.map((sess, idx) => {
-              const title = sess?.name || 'Workout';
-              const kcals = Math.round(safeNum(sess?.totalCalories ?? sess?.total_calories, 0));
-              const hasDetails = Array.isArray(sess?.exercises) && sess.exercises.length > 0;
-              return (
-                <Card
-                  key={sess?.client_id || sess?.id || idx}
-                  variant="outlined"
-                  sx={{ borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}
-                >
-                  <CardContent sx={{ py: 1.25, px: 2 }}>
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 2 }}>
-                      <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
-                      <Chip label={`${kcals} kcal`} color="primary" />
-                    </Stack>
-                    {hasDetails ? (
-                      <Box sx={{ mt: 0.75 }}>
-                        {sess.exercises.slice(0, 10).map((ex, i) => (
-                          <Typography key={i} variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.4 }}>
-                            {formatSessionExerciseDetail(ex)}
-                          </Typography>
-                        ))}
-                      </Box>
-                    ) : (
-                      <Typography variant="caption" color="textSecondary">
-                        No details yet.
-                      </Typography>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </Stack>
-        )}
-      </Paper>
 
       <Box textAlign="center" sx={{ mt: 4 }}>
         <Button
