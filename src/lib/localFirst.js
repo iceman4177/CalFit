@@ -27,6 +27,25 @@ function getClientId() {
   }
 }
 
+// Stable workout-day client id (1 workout row per user per local_day).
+// This mirrors "meals-style" stability for cross-device sync.
+// Stored per (user_id, local_day) so PC + mobile upsert the same row.
+function getOrCreateWorkoutDayClientId(userId, dayISO) {
+  if (!userId || !dayISO) return null;
+  const key = `workoutDayClientId:${userId}:${dayISO}`;
+  try {
+    let cid = localStorage.getItem(key);
+    if (!cid) {
+      cid = (crypto?.randomUUID?.() || uuidv4Fallback());
+      localStorage.setItem(key, cid);
+    }
+    return cid;
+  } catch {
+    // fall back to deterministic-ish string (still stable per day)
+    return `${userId}_${dayISO}`;
+  }
+}
+
 // UUID v4 fallback (for environments without crypto.randomUUID)
 function uuidv4Fallback() {
   try {
@@ -38,65 +57,6 @@ function uuidv4Fallback() {
   } catch {
     return '00000000-0000-4000-8000-000000000000';
   }
-
-// Deterministic UUID from a string (stable across devices)
-// Used to guarantee ONE workout row per (user_id, local_day) without requiring DB schema changes.
-function stableUuidFromString(str) {
-  try {
-    const s = String(str || '');
-    // FNV-1a 32-bit
-    const fnv = (seed) => {
-      let h = seed >>> 0;
-      for (let i = 0; i < s.length; i += 1) {
-        h ^= s.charCodeAt(i);
-        // h *= 16777619 (via shifts to stay in 32-bit)
-        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-      }
-      return h >>> 0;
-    };
-
-    const h1 = fnv(0x811c9dc5);
-    const h2 = fnv(0x811c9dc5 ^ 0x9e3779b9);
-    const h3 = fnv(0x811c9dc5 ^ 0x85ebca6b);
-    const h4 = fnv(0x811c9dc5 ^ 0xc2b2ae35);
-
-    // 16 bytes from 4x32-bit hashes
-    const b = new Uint8Array(16);
-    const put32 = (off, v) => {
-      b[off + 0] = (v >>> 24) & 0xff;
-      b[off + 1] = (v >>> 16) & 0xff;
-      b[off + 2] = (v >>> 8) & 0xff;
-      b[off + 3] = (v >>> 0) & 0xff;
-    };
-    put32(0, h1); put32(4, h2); put32(8, h3); put32(12, h4);
-
-    // RFC4122 variant + v5-ish marker (deterministic)
-    b[6] = (b[6] & 0x0f) | 0x50; // version 5
-    b[8] = (b[8] & 0x3f) | 0x80; // variant 10
-
-    const hex = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-    return [
-      hex.slice(0, 8),
-      hex.slice(8, 12),
-      hex.slice(12, 16),
-      hex.slice(16, 20),
-      hex.slice(20),
-    ].join('-');
-  } catch (e) {
-    return uuidv4Fallback();
-  }
-}
-
-function isOnConflictSchemaError(err) {
-  const msg = String(err?.message || '');
-  return (
-    err?.status === 400 ||
-    /on_conflict/i.test(msg) ||
-    /no unique/i.test(msg) ||
-    /there is no unique constraint/i.test(msg) ||
-    /constraint/i.test(msg)
-  );
-}
 }
 
 // ---------------- Local-day helpers (avoid UTC drift) ----------------
@@ -181,32 +141,46 @@ async function upsertWorkoutCloud(payload) {
   const { user_id } = payload || {};
   if (!supabase || !user_id) return;
 
-  // Try the most specific onConflict first, then fall back to whatever constraint exists in your DB.
-  // This prevents silent "no insert" failures when schema differs between environments.
-  const attempts = [
-    { onConflict: 'user_id,client_id' },
-    { onConflict: 'client_id' },
-    { onConflict: 'user_id,local_day' },
-  ];
+  // IMPORTANT:
+  // Supabase/PostgREST will error if onConflict doesn't match a REAL unique constraint.
+  // Different DB setups may have UNIQUE(user_id,client_id) OR UNIQUE(client_id) OR UNIQUE(user_id,local_day).
+  // We try the safest set in order so a workout row is always created/updated like meals.
+  const conflictTargets = ['user_id,client_id', 'client_id', 'user_id,local_day'];
 
   let lastErr = null;
-  for (const opt of attempts) {
+  for (const onConflict of conflictTargets) {
     const res = await supabase
       .from('workouts')
-      .upsert(payload, opt)
+      .upsert(payload, { onConflict })
       .select('id')
       .maybeSingle();
 
     if (!res?.error) return res?.data || null;
 
     lastErr = res.error;
-    // Only retry on schema/on_conflict mismatch. Otherwise, bubble the real error.
-    if (!isOnConflictSchemaError(res.error)) throw res.error;
+
+    const msg = String(res.error?.message || '');
+    const code = String(res.error?.code || '');
+
+    // If this is "on conflict target doesn't exist", try the next target.
+    if (
+      /there is no unique or exclusion constraint/i.test(msg) ||
+      /no unique constraint/i.test(msg) ||
+      /on conflict/i.test(msg) ||
+      code === '42P10' ||
+      code === '21000'
+    ) {
+      continue;
+    }
+
+    // Otherwise it's a real error (RLS, bad columns, check constraint, etc.)
+    throw res.error;
   }
 
   if (lastErr) throw lastErr;
   return null;
 }
+
 
 async function deleteWorkoutCloud({ user_id, client_id }) {
   if (!supabase || !user_id || !client_id) return;
@@ -444,10 +418,9 @@ export async function saveWorkoutLocalFirst({
   const startISO = started_at || nowISO;
   const dayISO = local_day || localDayISO(new Date(startISO));
 
-  // Deterministic client_id per (user_id, local_day) so all devices upsert the SAME row.
-  // Falls back to a random uuid for guests.
-  const cid = client_id || (user_id ? stableUuidFromString(`workout:${user_id}:${dayISO}`) : (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`));
-
+  // Stable per-day client id when signed in (meals-style sync).
+  const cid = client_id || (user_id ? getOrCreateWorkoutDayClientId(user_id, dayISO) : null) ||
+    (crypto?.randomUUID?.() || `${getClientId()}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
   const total = Math.round(safeNum(total_calories, 0));
 
   // Update burned totals locally right away (scoped) — ABSOLUTE from today's workoutHistory

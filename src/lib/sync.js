@@ -9,18 +9,6 @@
 
 import { supabase } from './supabaseClient';
 
-
-function isOnConflictSchemaError(err) {
-  const msg = String(err?.message || '');
-  return (
-    err?.status === 400 ||
-    /on_conflict/i.test(msg) ||
-    /no unique/i.test(msg) ||
-    /there is no unique constraint/i.test(msg) ||
-    /constraint/i.test(msg)
-  );
-}
-
 const OPS_KEY = 'slimcal:pendingOps:v1';
 const LOCK_KEY = 'slimcal:pendingOps:lock:v1';
 const LOCK_MS = 8000;
@@ -151,32 +139,42 @@ async function runOneOp(op) {
       .select()
       .maybeSingle();
 
-    if (res?.error) {
+    // Workouts: try alternate conflict targets so rows always insert/update like meals.
+    // Handles cases where DB has UNIQUE(client_id) or UNIQUE(user_id,local_day) instead.
+    let resFinal = res;
+    if (resFinal?.error && table === 'workouts') {
+      const msg0 = String(resFinal.error?.message || '');
+      const code0 = String(resFinal.error?.code || '');
+      const conflictErr = /there is no unique or exclusion constraint|no unique constraint|on conflict/i.test(msg0) || code0 === '42P10';
+      if (conflictErr) {
+        const tries = ['client_id', 'user_id,local_day'];
+        for (const alt of tries) {
+          const r2 = await supabase
+            .from(table)
+            .upsert(payload, { onConflict: alt })
+            .select()
+            .maybeSingle();
+          if (!r2?.error) { resFinal = r2; break; }
+          // if still conflict-target error, continue; otherwise stop and return the real error
+          const msg2 = String(r2.error?.message || '');
+          const code2 = String(r2.error?.code || '');
+          const stillConflict = /there is no unique or exclusion constraint|no unique constraint|on conflict/i.test(msg2) || code2 === '42P10';
+          if (!stillConflict) { resFinal = r2; break; }
+        }
+      }
+    }
+
+    if (resFinal?.error) {
       // if RLS blocks, don't retry forever
-      const msg = String(res.error.message || '');
-      const code = String(res.error.code || '');
+      const msg = String(resFinal.error.message || '');
+      const code = String(resFinal.error.code || '');
 
       // 42501 = insufficient privilege / RLS issues sometimes
       if (code === '42501' || /permission|rls|policy/i.test(msg)) {
         return { ok: false, retry: false, reason: 'rls' };
       }
 
-      // Workouts schema can vary (some envs unique on client_id, others on user_id,client_id, etc).
-      // If the current onConflict target doesn't match a real constraint, retry with safer targets.
-      if (table === 'workouts' && isOnConflictSchemaError(res.error)) {
-        const fallbacks = ['client_id', 'user_id,local_day'];
-        for (const oc of fallbacks) {
-          const r2 = await supabase
-            .from(table)
-            .upsert(payload, { onConflict: oc })
-            .select()
-            .maybeSingle();
-          if (!r2?.error) return { ok: true, retry: false };
-          if (!isOnConflictSchemaError(r2.error)) return { ok: false, retry: true, reason: 'upsert-error', error: r2.error };
-        }
-      }
-
-      return { ok: false, retry: true, reason: 'upsert-error', error: res.error };
+      return { ok: false, retry: true, reason: 'upsert-error', error: resFinal.error };
     }
 
     return { ok: true, retry: false };
@@ -200,14 +198,14 @@ async function runOneOp(op) {
 
     const res = await q;
     if (res?.error) {
-      const msg = String(res.error.message || '');
-      const code = String(res.error.code || '');
+      const msg = String(resFinal.error.message || '');
+      const code = String(resFinal.error.code || '');
 
       if (code === '42501' || /permission|rls|policy/i.test(msg)) {
         return { ok: false, retry: false, reason: 'rls' };
       }
 
-      return { ok: false, retry: true, reason: 'delete-error', error: res.error };
+      return { ok: false, retry: true, reason: 'delete-error', error: resFinal.error };
     }
 
     return { ok: true, retry: false };
