@@ -21,6 +21,7 @@ import FeatureUseBadge, {
   getFreeDailyLimit,
 } from "./components/FeatureUseBadge.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
+import { useAuth } from "./context/AuthProvider.jsx";
 
 /**
  * DailyEvaluationHome (simplified + BMR/TDEE aware)
@@ -348,6 +349,9 @@ export default function DailyEvaluationHome() {
   const { isProActive } = useEntitlements();
   const pro = !!isProActive || localStorage.getItem("isPro") === "true";
 
+  const { user } = useAuth();
+  const userId = user?.id || null;
+
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // AI verdict state
@@ -365,9 +369,16 @@ export default function DailyEvaluationHome() {
     const dayISO = isoDay();
 
     const userData = safeJsonParse(localStorage.getItem("userData"), {}) || {};
-    const mealHistory = safeJsonParse(localStorage.getItem("mealHistory"), []);
-    const workoutHistory = safeJsonParse(localStorage.getItem("workoutHistory"), []);
-    const dailyCache = safeJsonParse(localStorage.getItem("dailyMetricsCache"), {});
+
+    // IMPORTANT: logged-in users use scoped history keys (prevents "0 protein"/"0 burned" flicker)
+    const uid = userId || userData?.id || userData?.user_id || null;
+    const mealKey = uid ? `mealHistory:${uid}` : "mealHistory";
+    const workoutKey = uid ? `workoutHistory:${uid}` : "workoutHistory";
+    const dailyCacheKey = uid ? `dailyMetricsCache:${uid}` : "dailyMetricsCache";
+
+    const mealHistory = safeJsonParse(localStorage.getItem(mealKey), []);
+    const workoutHistory = safeJsonParse(localStorage.getItem(workoutKey), []);
+    const dailyCache = safeJsonParse(localStorage.getItem(dailyCacheKey), {});
 
     const dayMealsRec =
       Array.isArray(mealHistory) ? mealHistory.find((d) => d?.date === dayUS) || null : null;
@@ -466,7 +477,7 @@ export default function DailyEvaluationHome() {
         components,
       },
     };
-  }, []);
+  }, [userId]);
 
   const verdict = useMemo(
     () =>
