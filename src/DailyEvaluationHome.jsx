@@ -377,6 +377,82 @@ function buildTomorrowPlan({ goalType, limiterKey, proteinTarget, proteinG, prof
   ];
 }
 
+
+function buildSmartMealSuggestions({
+  goalType,
+  proteinDelta,
+  calorieDelta,
+  calorieTarget,
+  consumed,
+  burned,
+}) {
+  const needProteinG = Math.max(0, Math.round(-proteinDelta));
+  const calOff = Math.round(Math.abs(calorieDelta || 0));
+  const underTarget = (calorieDelta || 0) < 0;
+  const overTarget = (calorieDelta || 0) > 0;
+
+  // Simple, high-signal “blocks” that feel smart but stay deterministic (no extra API calls).
+  const proteinBlocksCut = [
+    { title: "Whey isolate (water)", macro: "+25g protein", meta: "~110 kcal", detail: "Fastest way to close the gap with minimal calories." },
+    { title: "Egg whites + spinach", macro: "+30g protein", meta: "~170 kcal", detail: "High protein, low calorie, very repeatable." },
+    { title: "Tuna packet + pickles", macro: "+20g protein", meta: "~100 kcal", detail: "Zero-cook protein anchor." },
+  ];
+
+  const proteinBlocksBulk = [
+    { title: "Greek yogurt + whey", macro: "+45g protein", meta: "~320 kcal", detail: "Protein anchor + easy to hit daily." },
+    { title: "Chicken + rice bowl", macro: "+50g protein", meta: "~550 kcal", detail: "Clean calories that support training." },
+    { title: "Lean beef + potatoes", macro: "+45g protein", meta: "~600 kcal", detail: "Great for appetite + recovery." },
+  ];
+
+  const proteinBlocksMaintain = [
+    { title: "Greek yogurt + berries", macro: "+25g protein", meta: "~220 kcal", detail: "Easy win without blowing calories." },
+    { title: "Chicken salad (light dressing)", macro: "+35g protein", meta: "~350 kcal", detail: "High protein, controlled calories." },
+    { title: "Cottage cheese bowl", macro: "+28g protein", meta: "~250 kcal", detail: "Slow digesting protein for satiety." },
+  ];
+
+  const blocks =
+    goalType === "cut" ? proteinBlocksCut : goalType === "bulk" ? proteinBlocksBulk : proteinBlocksMaintain;
+
+  // If the limiter isn’t protein, still give a “smart block” that matches the situation.
+  const tightenCalBlock = underTarget
+    ? { title: "Add a controlled +300–400 kcal block", macro: "carbs + protein", meta: "today", detail: "Bring calories closer to target without guesswork." }
+    : overTarget
+      ? { title: "Swap to a lean meal next", macro: "protein + veg", meta: "low oil", detail: "Keep protein high while tightening calories." }
+      : { title: "Hold the line", macro: "repeatable meal", meta: "same timing", detail: "You’re close — repeat what’s working." };
+
+  // Build the final suggestion set with a little bit of “brain” context.
+  const suggestions = [];
+  if (needProteinG >= 15) {
+    suggestions.push(...blocks.slice(0, 3));
+  } else {
+    // If protein is close, prioritize calorie/consistency blocks.
+    suggestions.push(tightenCalBlock, blocks[0], blocks[1]);
+  }
+
+  // Add a “why” line that references actual inputs (makes it feel intelligent).
+  const whyParts = [];
+  if (calorieTarget) whyParts.push(`Calories: ${Math.round(consumed)} / ${Math.round(calorieTarget)} kcal`);
+  if (burned) whyParts.push(`Burned: ${Math.round(burned)} kcal`);
+  if (needProteinG > 0) whyParts.push(`Protein gap: ${needProteinG}g`);
+
+  const why = whyParts.length ? whyParts.join(" • ") : "";
+
+  // Headline tuned to urgency without making medical claims.
+  const headline =
+    needProteinG >= 40
+      ? "Close the protein gap fast."
+      : needProteinG >= 15
+        ? "Add one protein anchor."
+        : underTarget && calOff >= 400
+          ? "Add a controlled calorie block."
+          : overTarget && calOff >= 400
+            ? "Tighten calories with a lean swap."
+            : "Keep it repeatable.";
+
+  return { headline, why, suggestions: suggestions.slice(0, 3) };
+}
+
+
 // ----------------------------- UI ---------------------------------------------
 function CardShell({ title, subtitle, children, chip }) {
   return (
@@ -588,6 +664,20 @@ const limiter = useMemo(() => limiterCopy(bundle.derived.limiterKey, bundle.dayI
         profile: bundle.profile,
         hasMeals: bundle.derived.hasMeals,
         hasWorkout: bundle.derived.hasWorkout,
+      }),
+    [bundle]
+  );
+
+
+  const smartFix = useMemo(
+    () =>
+      buildSmartMealSuggestions({
+        goalType: bundle.targets.goalType,
+        proteinDelta: bundle.derived.proteinDelta,
+        calorieDelta: bundle.derived.calorieDelta,
+        calorieTarget: bundle.targets.calorieTarget,
+        consumed: bundle.totals.consumed,
+        burned: bundle.totals.burned,
       }),
     [bundle]
   );
@@ -1138,7 +1228,63 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                 <>Make tomorrow <strong>repeatable</strong>: pick one non-negotiable.</>
               )}
               {bundle.derived.limiterKey === "tighten_one_leak" && <>You’re close — tighten one thing and repeat.</>}
-            </Typography>
+            
+            <Box sx={{ mt: 1.2 }}>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                Smart fix (pick 1):
+              </Typography>
+
+              <Typography sx={{ fontWeight: 950, mt: 0.4 }}>{smartFix.headline}</Typography>
+
+              {smartFix.why && (
+                <Typography variant="caption" sx={{ display: "block", mt: 0.3, color: "rgba(226,232,240,0.62)" }}>
+                  {smartFix.why}
+                </Typography>
+              )}
+
+              <Stack spacing={1} sx={{ mt: 1.1 }}>
+                {smartFix.suggestions.map((s, i) => (
+                  <Box
+                    key={`${s.title}-${i}`}
+                    sx={{
+                      p: 1.1,
+                      borderRadius: 2,
+                      border: "1px solid rgba(148,163,184,0.18)",
+                      background: "rgba(2,6,23,0.10)",
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                      <Typography sx={{ fontWeight: 950 }}>{s.title}</Typography>
+                      <Chip
+                        size="small"
+                        label={`${s.macro} • ${s.meta}`}
+                        sx={{
+                          fontWeight: 900,
+                          bgcolor: "rgba(148,163,184,0.18)",
+                          color: "rgba(226,232,240,0.92)",
+                        }}
+                      />
+                    </Stack>
+
+                    <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
+                      {s.detail}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+
+              <Stack direction="row" spacing={1} sx={{ mt: 1.1 }}>
+                <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
+                  Log a meal
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
+                  Log a workout
+                </Button>
+              </Stack>
+            </Box>
+
+
+</Typography>
 
             {!bundle.derived.profileComplete && (
               <Button
