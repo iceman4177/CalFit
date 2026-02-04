@@ -30,6 +30,7 @@ import {
   Stack,
   Chip
 } from '@mui/material';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
@@ -282,6 +283,11 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ stable "started_at" so autosaves don't constantly rewrite it
   const startedAtRef = useRef(new Date().toISOString());
+
+  // ✅ UI scroll anchors (match Meals AI UX)
+  const suggestRef = useRef(null);
+  const sessionLogRef = useRef(null);
+
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
   useEffect(() => {
@@ -1251,6 +1257,12 @@ setNewExercise({
       };
     });
     setCumulativeExercises(enriched);
+
+    setTimeout(() => {
+      try {
+        sessionLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }, 80);
   };
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
@@ -1283,6 +1295,12 @@ setNewExercise({
       }
       if (!isProUser()) registerDailyFeatureUse('ai_workout');
       setShowSuggestCard(true);
+
+      setTimeout(() => {
+        try {
+          suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch {}
+      }, 50);
       return;
     }
     setShowSuggestCard(false);
@@ -1444,48 +1462,76 @@ setNewExercise({
   // --- main UI ---
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
-      <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 800 }}>
-        Workout Tracker
-      </Typography>
 
-      {/* Slim session stats strip */}
-      <Box
-        sx={{
-          mb: 2.5,
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 1,
-          flexWrap: 'wrap'
-        }}
-      >
-        <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700 }} />
-        <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} />
-        <Chip variant="outlined" label={`${sessionTotals.sets} sets`} />
+{/* ------------------- HERO: Title + Single AI CTA (match Meals) ------------------- */}
+<Card
+  sx={{
+    borderRadius: 3,
+    overflow: 'visible',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
+  }}
+>
+  <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
+    {!isProUser() && (
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+        <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+      </Box>
+    )}
+
+    <Stack
+      direction={{ xs: 'column', sm: 'row' }}
+      alignItems={{ xs: 'flex-start', sm: 'center' }}
+      justifyContent="space-between"
+      spacing={2}
+    >
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+          Workout
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Log exercises and keep calories burned synced across devices.
+        </Typography>
       </Box>
 
-      <Grid container spacing={{ xs: 3, md: 4 }}>
+      <Button
+        onClick={handleSuggestAIClick}
+        variant={showSuggestCard ? 'outlined' : 'contained'}
+        startIcon={<SmartToyOutlinedIcon />}
+        size="large"
+        sx={{ fontWeight: 700, borderRadius: 999 }}
+      >
+        {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
+      </Button>
+    </Stack>
+  </CardContent>
+</Card>
+
+{/* Slim session stats strip */}
+<Box
+  sx={{
+    mt: 2,
+    mb: 2.5,
+    display: 'flex',
+    justifyContent: 'center',
+    gap: 1,
+    flexWrap: 'wrap'
+  }}
+>
+  <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700 }} />
+  <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} />
+  <Chip variant="outlined" label={`${sessionTotals.sets} sets`} />
+</Box>
+
+{/* AI suggested workout results (auto-scroll target) */}
+<Box ref={suggestRef} sx={{ mb: 2 }}>
+  {showSuggestCard && (
+    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
+  )}
+</Box>
+
+<Grid container spacing={{ xs: 3, md: 4 }}>
         <Grid item xs={12} md={4}>
           <Stack spacing={2}>
-            <Box>
-              {!isProUser() && (
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-                  <FeatureUseBadge featureKey="ai_workout" isPro={false} />
-                </Box>
-              )}
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={handleSuggestAIClick}
-                sx={{ fontWeight: 700 }}
-              >
-                Suggest a Workout (AI)
-              </Button>
-            </Box>
-
-            {showSuggestCard && (
-              <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
-            )}
-
             <Card
               variant="outlined"
               sx={{
@@ -1510,6 +1556,7 @@ setNewExercise({
           <Stack spacing={3}>
             {cumulativeExercises.length > 0 && (
               <Paper
+                ref={sessionLogRef}
                 variant="outlined"
                 sx={{
                   p: 2,
