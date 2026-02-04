@@ -566,17 +566,17 @@ export default function DailyEvaluationHome() {
     };
   }, [userId]);
 
-  const verdict = useMemo(
-    () =>
-      verdictFromSignals({
-        hasLogs: bundle.derived.hasLogs,
-        confidenceLabel: bundle.derived.confidenceLabel,
-        score: bundle.derived.score,
-      }),
-    [bundle]
-  );
+  const baseVerdict = useMemo(
+  () =>
+    verdictFromSignals({
+      hasLogs: bundle.derived.hasLogs,
+      confidenceLabel: bundle.derived.confidenceLabel,
+      score: bundle.derived.score,
+    }),
+  [bundle]
+);
 
-  const limiter = useMemo(() => limiterCopy(bundle.derived.limiterKey, bundle.dayISO || bundle.dayUS), [bundle]);
+const limiter = useMemo(() => limiterCopy(bundle.derived.limiterKey, bundle.dayISO || bundle.dayUS), [bundle]);
 
   const tomorrowPlan = useMemo(
     () =>
@@ -591,6 +591,20 @@ export default function DailyEvaluationHome() {
       }),
     [bundle]
   );
+const verdict = useMemo(() => {
+  const v = baseVerdict;
+
+  // Give the arrow-copy actual meaning: point to the next action.
+  const nextTitleRaw = tomorrowPlan?.[0]?.title || "";
+  const nextTitle = String(nextTitleRaw || "").replace(/\.$/, "");
+
+  if ((v?.tag === "needs work" || v?.tag === "medium signal") && nextTitle) {
+    return { ...v, sub: `Next: ${nextTitle}.` };
+  }
+
+  return v;
+}, [baseVerdict, tomorrowPlan]);
+
 
   // Animate score
   useEffect(() => {
@@ -742,40 +756,79 @@ Tomorrow Plan:
     ? Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g)
     : 0;
 
-  const redFlag = useMemo(() => {
-    const dayKey = bundle.dayISO || bundle.dayUS || "";
-    // Prioritize the biggest "danger to progress" lever.
-    if (bundle.targets.proteinTarget && proteinPct < 60 && proteinGap >= 25) {
-      return {
-        label: pickVariant("redflag_protein", dayKey, [
-          "RED FLAG: PROTEIN LEAK",
-          "RED FLAG: LOW PROTEIN",
-          "RED FLAG: PROTEIN GAP",
-        ]),
-        severity: "error",
-      };
-    }
-    if (bundle.targets.calorieTarget && calQuality < 45 && calErr > 400) {
-      return {
-        label: pickVariant("redflag_cal", dayKey, [
-          "RED FLAG: CALORIE DRIFT",
-          "RED FLAG: TARGET MISSED",
-          "RED FLAG: CALORIE SWING",
-        ]),
-        severity: "warning",
-      };
-    }
-    if (bundle.totals.burned <= 0 && bundle.totals.consumed > 0) {
-      return {
-        label: pickVariant("redflag_move", dayKey, [
-          "RED FLAG: NO TRAINING LOGGED",
-          "RED FLAG: MOVEMENT MISSING",
-        ]),
-        severity: "warning",
-      };
-    }
-    return null;
-  }, [bundle.dayISO, bundle.dayUS, bundle.targets.proteinTarget, bundle.targets.calorieTarget, proteinPct, proteinGap, calQuality, calErr, bundle.totals.burned, bundle.totals.consumed]);
+  const flag = useMemo(() => {
+  const dayKey = bundle.dayISO || bundle.dayUS || "";
+
+  const proteinPctLocal = bundle.targets.proteinTarget
+    ? clamp((bundle.totals.macros.protein_g / Math.max(1, bundle.targets.proteinTarget)) * 100, 0, 200)
+    : 0;
+
+  const proteinGapLocal = bundle.targets.proteinTarget
+    ? Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g)
+    : 0;
+
+  const hasWorkout = !!bundle.derived.hasWorkout;
+  const hasCalTarget = !!bundle.targets.calorieTarget;
+
+  // RED (bad)
+  if (bundle.targets.proteinTarget && proteinPctLocal < 60 && proteinGapLocal >= 25) {
+    return {
+      label: pickVariant("flag_red_protein", dayKey, ["RED FLAG: LOW PROTEIN", "RED FLAG: PROTEIN GAP", "RED FLAG: PROTEIN LEAK"]),
+      tone: "error",
+    };
+  }
+  if (hasCalTarget && calQuality < 45 && calErr > 400) {
+    return {
+      label: pickVariant("flag_red_cal", dayKey, ["RED FLAG: CALORIE DRIFT", "RED FLAG: TARGET MISSED", "RED FLAG: CALORIE SWING"]),
+      tone: "error",
+    };
+  }
+
+  // ORANGE (meh)
+  if (!bundle.derived.profileComplete || !bundle.derived.hasMeals) {
+    return {
+      label: pickVariant("flag_orange_data", dayKey, ["ORANGE FLAG: NEEDS MORE DATA", "ORANGE FLAG: LOG 2 MEALS", "ORANGE FLAG: FINISH SETUP"]),
+      tone: "warning",
+    };
+  }
+  if (bundle.targets.proteinTarget && proteinPctLocal < 85 && proteinGapLocal >= 10) {
+    return {
+      label: pickVariant("flag_orange_protein", dayKey, ["ORANGE FLAG: PROTEIN LOW", "ORANGE FLAG: CLOSE PROTEIN GAP", "ORANGE FLAG: PROTEIN LAG"]),
+      tone: "warning",
+    };
+  }
+  if (hasCalTarget && calQuality < 70 && calErr > 250) {
+    return {
+      label: pickVariant("flag_orange_cal", dayKey, ["ORANGE FLAG: CALORIES OFF", "ORANGE FLAG: TIGHTEN TARGET", "ORANGE FLAG: CALORIE WOBBLE"]),
+      tone: "warning",
+    };
+  }
+  if (!hasWorkout && bundle.totals.consumed > 0) {
+    return {
+      label: pickVariant("flag_orange_move", dayKey, ["ORANGE FLAG: NO WORKOUT LOGGED", "ORANGE FLAG: MOVE TODAY", "ORANGE FLAG: TRAINING MISSING"]),
+      tone: "warning",
+    };
+  }
+
+  // GREEN (best)
+  return {
+    label: pickVariant("flag_green", dayKey, ["GREEN FLAG: ON TRACK", "GREEN FLAG: SOLID DAY", "GREEN FLAG: KEEP IT GOING"]),
+    tone: "success",
+  };
+}, [
+  bundle.dayISO,
+  bundle.dayUS,
+  bundle.targets.proteinTarget,
+  bundle.targets.calorieTarget,
+  bundle.totals.macros.protein_g,
+  bundle.totals.consumed,
+  bundle.derived.profileComplete,
+  bundle.derived.hasMeals,
+  bundle.derived.hasWorkout,
+  calQuality,
+  calErr,
+]);
+
 const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
   const metabolismLine = hasEstimates
@@ -832,7 +885,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
             <Chip
               label={`${scoreAnim}/100`}
               sx={{ fontWeight: 950, borderRadius: 999 }}
-              color={scoreAnim >= 88 ? "success" : scoreAnim >= 74 ? "primary" : "warning"}
+              color={flag?.tone || (scoreAnim >= 88 ? "success" : scoreAnim >= 74 ? "primary" : "warning")}
             />
           }
         >
@@ -843,11 +896,11 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
             {verdict.sub}
           </Typography>
 
-          {redFlag && (
+          {flag && (
             <Chip
               icon={<WarningAmberIcon sx={{ color: "inherit" }} />}
-              label={redFlag.label}
-              color={redFlag.severity === "error" ? "error" : "warning"}
+              label={flag.label}
+              color={flag.tone}
               sx={{ mt: 1, fontWeight: 950, borderRadius: 999 }}
             />
           )}
@@ -869,11 +922,26 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
             >
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
                 <Box sx={{ position: "relative", display: "inline-flex" }}>
+                  {/* background ring */}
+                  <CircularProgress
+                    variant="determinate"
+                    value={100}
+                    size={74}
+                    thickness={5}
+                    sx={{ color: "rgba(226,232,240,0.14)" }}
+                  />
+                  {/* foreground ring */}
                   <CircularProgress
                     variant="determinate"
                     value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
                     size={74}
                     thickness={5}
+                    sx={{
+                      color: "primary.main",
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                    }}
                   />
                   <Box
                     sx={{
@@ -907,11 +975,26 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
                 <Box sx={{ position: "relative", display: "inline-flex" }}>
+                  {/* background ring */}
                   <CircularProgress
                     variant="determinate"
-                    value={bundle.targets.calorieTarget ? calQuality : 0}
+                    value={100}
                     size={74}
                     thickness={5}
+                    sx={{ color: "rgba(226,232,240,0.14)" }}
+                  />
+                  {/* foreground ring (never invisible) */}
+                  <CircularProgress
+                    variant="determinate"
+                    value={bundle.targets.calorieTarget ? Math.max(4, calQuality) : 0}
+                    size={74}
+                    thickness={5}
+                    sx={{
+                      color: "primary.main",
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                    }}
                   />
                   <Box
                     sx={{
@@ -925,7 +1008,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                       justifyContent: "center",
                     }}
                   >
-                    <Typography variant="caption" sx={{ fontWeight: 950 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)" }}>
                       {bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
                     </Typography>
                   </Box>
@@ -981,7 +1064,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                 value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
                 sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
               />
-              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.72)" }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.86)" }}>
                 Target: {bundle.targets.proteinTarget ? `${Math.round(bundle.targets.proteinTarget)}g` : "not set"}
               </Typography>
             </Box>
@@ -995,9 +1078,9 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                 value={bundle.targets.calorieTarget ? calQuality : 0}
                 sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
               />
-              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.72)" }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.86)" }}>
                 {bundle.targets.calorieTarget
-                  ? `Target: ${Math.round(bundle.targets.calorieTarget)} kcal • Off by ${Math.round(calErr)}`
+                  ? `Target: ${Math.round(bundle.targets.calorieTarget)} kcal • Off by ${Math.round(calErr)} kcal`
                   : "Target: not set"}
               </Typography>
             </Box>
