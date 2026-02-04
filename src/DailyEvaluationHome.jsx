@@ -13,6 +13,10 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import TrackChangesIcon from "@mui/icons-material/TrackChanges";
+import RestaurantIcon from "@mui/icons-material/Restaurant";
+import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import UpgradeModal from "./components/UpgradeModal";
 import FeatureUseBadge, {
   canUseDailyFeature,
@@ -107,6 +111,27 @@ function normalizeGoalType(raw) {
   return "maintain";
 }
 
+// ---------- deterministic copy variants (avoid repetitive "lever" phrasing) ----------
+function hashStr(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function pickVariant(key, dayKey, options) {
+  if (!options || options.length === 0) return "";
+  const idx = hashStr(`${key}:${dayKey}`) % options.length;
+  return options[idx];
+}
+
+function clamp01(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
 function hasBmrInputs(profile = {}) {
   const age = Number(profile?.age || 0);
   const gender = String(profile?.gender || "").toLowerCase();
@@ -129,7 +154,7 @@ function pickPrimaryLimiter({ profileComplete, hasMeals, hasWorkout, score, prot
   return "tighten_one_leak";
 }
 
-function limiterCopy(key) {
+function limiterCopy(key, dayKey) {
   switch (key) {
     case "missing_profile":
       return {
@@ -148,26 +173,67 @@ function limiterCopy(key) {
       };
     case "protein":
       return {
-        title: "Protein was the leak.",
-        body: "Protein is the lever that makes progress repeatable.",
+        title: pickVariant("limiter_title_protein", dayKey, [
+          "Protein was the leak.",
+          "Your protein floor is low.",
+          "Protein is the limiter today.",
+          "Your day is under-proteined.",
+        ]),
+        body: pickVariant("limiter_body_protein", dayKey, [
+          "Bring protein up and the rest of the day becomes easier to win.",
+          "Hit your protein target and cravings usually calm down.",
+          "Raise protein first — it stabilizes appetite and recovery.",
+          "Lock protein early and the rest of your macros fall into place.",
+        ]),
       };
     case "energy_balance":
       return {
-        title: "Calories swung too hard.",
-        body: "Tighten your range and results become predictable.",
+        title: pickVariant("limiter_title_cal", dayKey, [
+          "Calories drifted off target.",
+          "Your calories are the swing factor.",
+          "Energy balance is the limiter.",
+          "Your target window is open.",
+        ]),
+        body: pickVariant("limiter_body_cal", dayKey, [
+          "Stay closer to target and progress becomes repeatable.",
+          "Tighten the calorie window — you’ll feel the difference tomorrow.",
+          "Pull calories into range and your score jumps fast.",
+          "Narrow the swing: consistency beats intensity.",
+        ]),
       };
     case "execution":
       return {
-        title: "Consistency is the leak.",
-        body: "The goal is a repeatable day you can run again tomorrow.",
+        title: pickVariant("limiter_title_exec", dayKey, [
+          "The plan wasn’t consistent today.",
+          "Execution was the limiter.",
+          "Your routine had gaps.",
+          "Data says: follow-through.",
+        ]),
+        body: pickVariant("limiter_body_exec", dayKey, [
+          "One small action now beats a perfect plan later.",
+          "Log one more input and the day becomes actionable.",
+          "Keep it simple: do the next obvious step.",
+          "Consistency today is momentum tomorrow.",
+        ]),
       };
     default:
       return {
-        title: "One small leak.",
-        body: "You’re close — fix one thing and tomorrow feels easy.",
+        title: pickVariant("limiter_title_default", dayKey, [
+          "Tighten one lever.",
+          "One tweak away.",
+          "Small adjustment, big win.",
+          "Close the loop.",
+        ]),
+        body: pickVariant("limiter_body_default", dayKey, [
+          "You’re close — tighten one lever and ship the day.",
+          "You’re in range. A small tweak makes it a win.",
+          "Keep going — one adjustment flips the verdict.",
+          "Solid day. Lock one lever and repeat.",
+        ]),
       };
   }
 }
+
 
 function verdictFromSignals({ hasLogs, confidenceLabel, score }) {
   if (!hasLogs) return { headline: "No signal yet.", sub: "Log meals + a workout. Then I’ll judge the day.", tag: "no data" };
@@ -321,8 +387,9 @@ function CardShell({ title, subtitle, children, chip }) {
         maxWidth: 440,
         scrollSnapAlign: "start",
         borderRadius: 3,
-        border: "1px solid rgba(2,6,23,0.10)",
-        background: "white",
+        border: "1px solid rgba(148,163,184,0.18)",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
+        color: "rgba(255,255,255,0.92)",
       }}
     >
       <CardContent sx={{ p: 2 }}>
@@ -330,7 +397,7 @@ function CardShell({ title, subtitle, children, chip }) {
           <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ fontWeight: 950, letterSpacing: -0.2 }}>{title}</Typography>
             {subtitle && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.75)" }}>
                 {subtitle}
               </Typography>
             )}
@@ -376,8 +443,20 @@ export default function DailyEvaluationHome() {
     const workoutKey = uid ? `workoutHistory:${uid}` : "workoutHistory";
     const dailyCacheKey = uid ? `dailyMetricsCache:${uid}` : "dailyMetricsCache";
 
-    const mealHistory = safeJsonParse(localStorage.getItem(mealKey), []);
-    const workoutHistory = safeJsonParse(localStorage.getItem(workoutKey), []);
+    const mealHistoryScoped = safeJsonParse(localStorage.getItem(mealKey), []);
+    const workoutHistoryScoped = safeJsonParse(localStorage.getItem(workoutKey), []);
+
+    // Fallback: if scoped keys are temporarily empty during auth bootstrapping, use legacy keys
+    const mealHistoryLegacy = safeJsonParse(localStorage.getItem("mealHistory"), []);
+    const workoutHistoryLegacy = safeJsonParse(localStorage.getItem("workoutHistory"), []);
+
+    const mealHistory = (uid && Array.isArray(mealHistoryScoped) && mealHistoryScoped.length === 0 && Array.isArray(mealHistoryLegacy) && mealHistoryLegacy.length > 0)
+      ? mealHistoryLegacy
+      : mealHistoryScoped;
+
+    const workoutHistory = (uid && Array.isArray(workoutHistoryScoped) && workoutHistoryScoped.length === 0 && Array.isArray(workoutHistoryLegacy) && workoutHistoryLegacy.length > 0)
+      ? workoutHistoryLegacy
+      : workoutHistoryScoped;
     const dailyCache = safeJsonParse(localStorage.getItem(dailyCacheKey), {});
 
     const dayMealsRec =
@@ -489,7 +568,7 @@ export default function DailyEvaluationHome() {
     [bundle]
   );
 
-  const limiter = useMemo(() => limiterCopy(bundle.derived.limiterKey), [bundle]);
+  const limiter = useMemo(() => limiterCopy(bundle.derived.limiterKey, bundle.dayISO || bundle.dayUS), [bundle]);
 
   const tomorrowPlan = useMemo(
     () =>
@@ -650,7 +729,46 @@ Tomorrow Plan:
     ? clamp(100 - (calErr / calTightnessScale) * 100, 0, 100)
     : 0;
 
-  const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
+  
+  const proteinGap = bundle.targets.proteinTarget
+    ? Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g)
+    : 0;
+
+  const redFlag = useMemo(() => {
+    const dayKey = bundle.dayISO || bundle.dayUS || "";
+    // Prioritize the biggest "danger to progress" lever.
+    if (bundle.targets.proteinTarget && proteinPct < 60 && proteinGap >= 25) {
+      return {
+        label: pickVariant("redflag_protein", dayKey, [
+          "RED FLAG: PROTEIN LEAK",
+          "RED FLAG: LOW PROTEIN",
+          "RED FLAG: PROTEIN GAP",
+        ]),
+        severity: "error",
+      };
+    }
+    if (bundle.targets.calorieTarget && calQuality < 45 && calErr > 400) {
+      return {
+        label: pickVariant("redflag_cal", dayKey, [
+          "RED FLAG: CALORIE DRIFT",
+          "RED FLAG: TARGET MISSED",
+          "RED FLAG: CALORIE SWING",
+        ]),
+        severity: "warning",
+      };
+    }
+    if (bundle.totals.burned <= 0 && bundle.totals.consumed > 0) {
+      return {
+        label: pickVariant("redflag_move", dayKey, [
+          "RED FLAG: NO TRAINING LOGGED",
+          "RED FLAG: MOVEMENT MISSING",
+        ]),
+        severity: "warning",
+      };
+    }
+    return null;
+  }, [bundle.dayISO, bundle.dayUS, bundle.targets.proteinTarget, bundle.targets.calorieTarget, proteinPct, proteinGap, calQuality, calErr, bundle.totals.burned, bundle.totals.consumed]);
+const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
   const metabolismLine = hasEstimates
     ? `BMR ${Math.round(bundle.est.bmr_est)} • TDEE ${Math.round(bundle.est.tdee_est)}`
@@ -674,7 +792,7 @@ Tomorrow Plan:
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22 }}>
             Daily Evaluation
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
             {bundle.dayUS} • quick verdict on your day
           </Typography>
         </Box>
@@ -713,33 +831,124 @@ Tomorrow Plan:
           <Typography sx={{ fontWeight: 950, lineHeight: 1.2 }}>
             {verdict.headline}
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
             {verdict.sub}
           </Typography>
+
+          {redFlag && (
+            <Chip
+              icon={<WarningAmberIcon sx={{ color: "inherit" }} />}
+              label={redFlag.label}
+              color={redFlag.severity === "error" ? "error" : "warning"}
+              sx={{ mt: 1, fontWeight: 950, borderRadius: 999 }}
+            />
+          )}
 
           <Divider sx={{ my: 1.4 }} />
 
           <Stack spacing={1}>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               <Chip size="small" label={`🍽️ Eaten: ${Math.round(bundle.totals.consumed)} kcal`} />
-              <Chip size="small" label={`🔥 Burned: ${Math.round(bundle.totals.burned)} kcal`} />
+              <Chip size="small" icon={<FitnessCenterIcon />} label={`Burned: ${Math.round(bundle.totals.burned)} kcal`} />
               <Chip size="small" label={`⚖️ Net: ${Math.round(bundle.totals.netKcal)} kcal`} />
               <Chip size="small" label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
+            </Stack>
+
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={2}
+              sx={{ alignItems: { xs: "flex-start", sm: "center" }, justifyContent: "space-between", mt: 0.5 }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
+                <Box sx={{ position: "relative", display: "inline-flex" }}>
+                  <CircularProgress
+                    variant="determinate"
+                    value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
+                    size={74}
+                    thickness={5}
+                  />
+                  <Box
+                    sx={{
+                      top: 0,
+                      left: 0,
+                      bottom: 0,
+                      right: 0,
+                      position: "absolute",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography variant="caption" sx={{ fontWeight: 950 }}>
+                      {bundle.targets.proteinTarget ? `${Math.round(clamp(proteinPct, 0, 100))}%` : "—"}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box>
+                  <Stack direction="row" spacing={0.8} alignItems="center">
+                    <RestaurantIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
+                    <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                      Protein
+                    </Typography>
+                  </Stack>
+                  <Typography sx={{ fontWeight: 950 }}>
+                    {Math.round(bundle.totals.macros.protein_g)}g
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
+                <Box sx={{ position: "relative", display: "inline-flex" }}>
+                  <CircularProgress
+                    variant="determinate"
+                    value={bundle.targets.calorieTarget ? calQuality : 0}
+                    size={74}
+                    thickness={5}
+                  />
+                  <Box
+                    sx={{
+                      top: 0,
+                      left: 0,
+                      bottom: 0,
+                      right: 0,
+                      position: "absolute",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography variant="caption" sx={{ fontWeight: 950 }}>
+                      {bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box>
+                  <Stack direction="row" spacing={0.8} alignItems="center">
+                    <TrackChangesIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
+                    <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                      Tightness
+                    </Typography>
+                  </Stack>
+                  <Typography sx={{ fontWeight: 950 }}>
+                    {bundle.targets.calorieTarget ? `Off ${Math.round(calErr)} kcal` : "Target not set"}
+                  </Typography>
+                </Box>
+              </Box>
             </Stack>
 
             <Box
               sx={{
                 p: 1.1,
                 borderRadius: 2,
-                border: "1px solid rgba(2,6,23,0.08)",
-                background: "rgba(2,6,23,0.02)",
+                border: "1px solid rgba(148,163,184,0.18)",
+                background: "rgba(255,255,255,0.04)",
               }}
             >
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+              <Typography variant="caption" sx={{ display: "block", color: "rgba(226,232,240,0.72)" }}>
                 Metabolism baseline
               </Typography>
               <Typography sx={{ fontWeight: 900 }}>{metabolismLine}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4 }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.72)" }}>
                 {targetLine}
               </Typography>
 
@@ -756,7 +965,7 @@ Tomorrow Plan:
             </Box>
 
             <Box>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
                 Protein progress
               </Typography>
               <LinearProgress
@@ -764,13 +973,13 @@ Tomorrow Plan:
                 value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
                 sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.72)" }}>
                 Target: {bundle.targets.proteinTarget ? `${Math.round(bundle.targets.proteinTarget)}g` : "not set"}
               </Typography>
             </Box>
 
             <Box>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
                 Calorie tightness
               </Typography>
               <LinearProgress
@@ -778,7 +987,7 @@ Tomorrow Plan:
                 value={bundle.targets.calorieTarget ? calQuality : 0}
                 sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.72)" }}>
                 {bundle.targets.calorieTarget
                   ? `Target: ${Math.round(bundle.targets.calorieTarget)} kcal • Off by ${Math.round(calErr)}`
                   : "Target: not set"}
@@ -786,7 +995,7 @@ Tomorrow Plan:
             </Box>
 
             <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-              <Button size="small" variant="outlined" onClick={() => history.push("/meal")}>
+              <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
                 Log Meal
               </Button>
               <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
@@ -803,14 +1012,14 @@ Tomorrow Plan:
           chip={<Chip size="small" label="limiter" sx={{ fontWeight: 900 }} />}
         >
           <Typography sx={{ fontWeight: 950 }}>{limiter.title}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.7 }}>
+          <Typography variant="body2" sx={{ mt: 0.7, color: "rgba(226,232,240,0.78)" }}>
             {limiter.body}
           </Typography>
 
           <Divider sx={{ my: 1.4 }} />
 
           <Stack spacing={1}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
               Quick read:
             </Typography>
 
@@ -859,16 +1068,16 @@ Tomorrow Plan:
           chip={<Chip size="small" label="plan" sx={{ fontWeight: 900 }} />}
         >
           <Stack spacing={1}>
-            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(2,6,23,0.08)", background: "rgba(2,6,23,0.02)" }}>
+            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.02)" }}>
               <Typography sx={{ fontWeight: 950 }}>{tomorrowPlan?.[0]?.title || "Step 1"}</Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
                 {tomorrowPlan?.[0]?.detail || ""}
               </Typography>
             </Box>
 
-            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(2,6,23,0.08)", background: "rgba(2,6,23,0.02)" }}>
+            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.02)" }}>
               <Typography sx={{ fontWeight: 950 }}>{tomorrowPlan?.[1]?.title || "Step 2"}</Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
                 {tomorrowPlan?.[1]?.detail || ""}
               </Typography>
             </Box>
@@ -878,7 +1087,7 @@ Tomorrow Plan:
             <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
               <Box>
                 <Typography sx={{ fontWeight: 950 }}>AI Coach Verdict</Typography>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
                   {pro ? "PRO: unlimited" : `Free: ${remainingAi}/${limitAi} left today`}
                 </Typography>
               </Box>
@@ -908,7 +1117,7 @@ Tomorrow Plan:
         </CardShell>
       </Box>
 
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+      <Typography variant="caption" sx={{ display: "block", mt: 1, color: "rgba(226,232,240,0.65)" }}>
         Tip: swipe/scroll the cards → this is meant to feel quick, not overwhelming.
       </Typography>
 
