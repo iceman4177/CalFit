@@ -7,7 +7,7 @@
 //   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
 //   Supabase when possible; fallback to in-memory counter if table/policy missing.
 //
-// Features supported: 'workout', 'meal', 'coach'.
+// Features supported: 'workout', 'meal', 'coach', 'daily_eval_verdict'.
 //
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
@@ -940,5 +940,68 @@ export default async function handler(req, res) {
     }
   }
 
+
+  if (feature === "daily_eval_verdict" || feature === "daily_eval") {
+    try {
+      // If OpenAI is unavailable, return a deterministic, snappy fallback.
+      if (!openai) {
+        const p = String(prompt || "");
+        const grabNum = (label) => {
+          const m = p.match(new RegExp(`${label}:\\s*([0-9]+)`, "i"));
+          return m ? parseInt(m[1], 10) : null;
+        };
+
+        const consumed = grabNum("Consumed") ?? 0;
+        const burned = grabNum("Burned") ?? 0;
+        const net = grabNum("Net") ?? (consumed - burned);
+        const protein = grabNum("Protein") ?? 0;
+
+        const goalMatch = p.match(/Goal:\s*([a-z_]+)/i);
+        const goalType = (goalMatch?.[1] || "maintain").toUpperCase();
+
+        const limiterMatch = p.match(/Limiter:\s*([a-z_]+)/i);
+        const limiter = limiterMatch?.[1] || "execution";
+
+        const planLines = [];
+        const m1 = p.match(/Tomorrow Plan:\s*\n1\)\s*(.+)\n2\)\s*(.+)/i);
+        if (m1?.[1]) planLines.push(`• ${m1[1].trim()}`);
+        if (m1?.[2]) planLines.push(`• ${m1[2].trim()}`);
+
+        const text =
+`${goalType} check: ${consumed} in, ${burned} out → net ${net}. Protein at ${protein}g — that's your lever today.
+Main leak: ${limiter.replace(/_/g, " ")}. Fix that and your score jumps fast.
+${planLines.slice(0, 2).join("\n")}`.trim();
+
+        res.status(200).json({ text });
+        return;
+      }
+
+      // OpenAI path: we accept a raw 'prompt' and return plain text.
+      const call = openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "You are SlimCal Coach. Be concise, punchy, and actionable." },
+          { role: "user", content: String(prompt || "").slice(0, 12000) },
+        ],
+        temperature: 0.5,
+        max_tokens: 280,
+      });
+
+      const completion = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+      const text = completion?.choices?.[0]?.message?.content?.trim();
+
+      if (!text) {
+        res.status(502).json({ error: "AI timed out", reason: "timeout" });
+        return;
+      }
+
+      res.status(200).json({ text });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] daily_eval_verdict error:", e);
+      res.status(500).json({ error: "AI verdict failed" });
+      return;
+    }
+  }
   res.status(400).json({ error: "Unsupported feature" });
 }

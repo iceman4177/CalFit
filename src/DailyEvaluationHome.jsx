@@ -362,7 +362,7 @@ export default function DailyEvaluationHome() {
   // Score animation
   const [scoreAnim, setScoreAnim] = useState(0);
 
-  const FEATURE_KEY = "daily_eval";
+  const FEATURE_KEY = "daily_eval_verdict";
 
   const bundle = useMemo(() => {
     const dayUS = usDay();
@@ -640,7 +640,15 @@ Tomorrow Plan:
     ? Math.abs(bundle.totals.consumed - bundle.targets.calorieTarget)
     : Math.abs(bundle.totals.netKcal);
 
-  const calQuality = clamp(100 - (calErr / 700) * 100, 0, 100);
+  // Calorie tightness: show *some* signal even when you're far off target.
+  // Scale is proportional to the target so the bar doesn't sit at 0 all day on bulk/cut swings.
+  const calTightnessScale = bundle.targets.calorieTarget
+    ? Math.max(900, bundle.targets.calorieTarget * 0.7)
+    : 700;
+
+  const calQuality = bundle.targets.calorieTarget
+    ? clamp(100 - (calErr / calTightnessScale) * 100, 0, 100)
+    : 0;
 
   const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
@@ -771,7 +779,9 @@ Tomorrow Plan:
                 sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
               />
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.6 }}>
-                Target: {bundle.targets.calorieTarget ? `${Math.round(bundle.targets.calorieTarget)} kcal` : "not set"}
+                {bundle.targets.calorieTarget
+                  ? `Target: ${Math.round(bundle.targets.calorieTarget)} kcal • Off by ${Math.round(calErr)}`
+                  : "Target: not set"}
               </Typography>
             </Box>
 
