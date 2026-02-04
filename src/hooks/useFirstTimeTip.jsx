@@ -1,13 +1,7 @@
 // src/hooks/useFirstTimeTip.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Typography
-} from '@mui/material';
+// NOTE: Field/tool tip dialogs have been fully disabled (UX request).
+// This hook is kept for API compatibility across the codebase.
+import React from 'react';
 
 /**
  * Hook for one-off tip dialogs, with optional post-close callback.
@@ -22,56 +16,14 @@ export default function useFirstTimeTip(
   message,
   { auto = false } = {}
 ) {
-  const [open, setOpen] = useState(false);
-  const callbackRef = useRef(null);
-
-  // Auto-show on mount if requested
-  useEffect(() => {
-    if (auto && message && !localStorage.getItem(storageKey)) {
-      setOpen(true);
-      localStorage.setItem(storageKey, 'true');
-    }
-  }, [storageKey, message, auto]);
-
-  /**
-   * Manually trigger the tip, and optionally run a callback after close.
-   * @param {()=>void} afterClose
-   */
-  const trigger = (afterClose) => {
-    if (!localStorage.getItem(storageKey) && message) {
-      if (typeof afterClose === 'function') {
-        callbackRef.current = afterClose;
-      }
-      setOpen(true);
-      localStorage.setItem(storageKey, 'true');
-    } else {
-      if (typeof afterClose === 'function') {
-        afterClose();
-      }
-    }
-  };
-
-  const handleClose = () => {
-    setOpen(false);
-    if (typeof callbackRef.current === 'function') {
-      callbackRef.current();
-      callbackRef.current = null;
-    }
-  };
-
+  // Tips disabled: always render nothing, and trigger immediately continues.
   function Tip() {
-    return (
-      <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Tip</DialogTitle>
-        <DialogContent>
-          <Typography>{message}</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Got it</Button>
-        </DialogActions>
-      </Dialog>
-    );
+    return null;
   }
+
+  const trigger = (afterClose) => {
+    if (typeof afterClose === 'function') afterClose();
+  };
 
   return [Tip, trigger];
 }

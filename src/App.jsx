@@ -332,7 +332,7 @@ function hasHealthDataLocal(saved) {
 export default function App() {
   const history      = useHistory();
   const location     = useLocation();
-  const promptedRef  = useRef(false);
+  // Meal reminders/notifications have been removed (UX request).
 
   useReferral();
 
@@ -463,23 +463,7 @@ export default function App() {
     .reduce((sum, e) => sum + (e.meals?.length || 0), 0);
   useVariableRewards({ workoutsCount, mealsCount });
 
-  const missedMeals = []; // meal prompts disabled
-  const [promptOpen, setPromptOpen] = useState(false);
-  useEffect(() => {
-    if (
-      localStorage.getItem('hasCompletedHealthData') === 'true' &&
-      !promptedRef.current &&
-      missedMeals.length > 0 &&
-      location.pathname !== '/meals' &&
-      !trialActive
-    ) {
-      promptedRef.current = true;
-      setPromptOpen(true);
-    }
-  }, [missedMeals, location.pathname, trialActive]);
-
-  const handleClosePrompt = () => setPromptOpen(false);
-  const handleGoToMeals   = () => { setPromptOpen(false); history.push('/meals'); };
+  // (meal reminders removed)
 
   const [burnedCalories, setBurnedCalories]     = useState(0);
   const [consumedCalories, setConsumedCalories] = useState(0);
@@ -874,17 +858,7 @@ export default function App() {
         <PageTracker />
         {message && <PageTip />}
 
-        <Dialog open={promptOpen} onClose={handleClosePrompt}>
-          <DialogTitle>Meal Reminder</DialogTitle>
-          <DialogContent>
-            {missedMeals.map(meal => (
-              <Typography key={meal}>🍽 Don’t forget to log your <strong>{meal}</strong>!</Typography>
-            ))}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleGoToMeals}>Ok</Button>
-          </DialogActions>
-        </Dialog>
+        {/* Meal reminders removed */}
 
         <AmbassadorModal
           open={ambassadorOpen}
