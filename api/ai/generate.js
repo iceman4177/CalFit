@@ -945,7 +945,7 @@ export default async function handler(req, res) {
     try {
       // If OpenAI is unavailable, return a deterministic, snappy fallback.
       if (!openai) {
-        const p = String(prompt || "");
+        const p = String(body?.prompt || body?.text || body?.message || "");
         const grabNum = (label) => {
           const m = p.match(new RegExp(`${label}:\\s*([0-9]+)`, "i"));
           return m ? parseInt(m[1], 10) : null;
@@ -981,7 +981,7 @@ ${planLines.slice(0, 2).join("\n")}`.trim();
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: "You are SlimCal Coach. Be concise, punchy, and actionable." },
-          { role: "user", content: String(prompt || "").slice(0, 12000) },
+          { role: "user", content: String(body?.prompt || body?.text || body?.message || "").slice(0, 12000) },
         ],
         temperature: 0.5,
         max_tokens: 280,

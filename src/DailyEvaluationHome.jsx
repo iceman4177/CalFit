@@ -421,6 +421,14 @@ export default function DailyEvaluationHome() {
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
+  const macroChipSx = {
+    bgcolor: "rgba(255,255,255,0.10)",
+    color: "rgba(255,255,255,0.92)",
+    border: "1px solid rgba(255,255,255,0.18)",
+    backdropFilter: "blur(6px)",
+    "& .MuiChip-icon": { color: "rgba(255,255,255,0.92)" },
+  };
+
   // AI verdict state
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVerdict, setAiVerdict] = useState("");
@@ -848,10 +856,10 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
           <Stack spacing={1}>
             <Stack direction="row" spacing={1} flexWrap="wrap">
-              <Chip size="small" label={`🍽️ Eaten: ${Math.round(bundle.totals.consumed)} kcal`} />
-              <Chip size="small" icon={<FitnessCenterIcon />} label={`Burned: ${Math.round(bundle.totals.burned)} kcal`} />
-              <Chip size="small" label={`⚖️ Net: ${Math.round(bundle.totals.netKcal)} kcal`} />
-              <Chip size="small" label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
+              <Chip size="small" sx={macroChipSx} label={`🍽️ Eaten: ${Math.round(bundle.totals.consumed)} kcal`} />
+              <Chip size="small" sx={macroChipSx} icon={<FitnessCenterIcon />} label={`Burned: ${Math.round(bundle.totals.burned)} kcal`} />
+              <Chip size="small" sx={macroChipSx} label={`⚖️ Net: ${Math.round(bundle.totals.netKcal)} kcal`} />
+              <Chip size="small" sx={macroChipSx} label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
             </Stack>
 
             <Stack
