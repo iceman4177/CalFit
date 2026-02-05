@@ -847,7 +847,44 @@ Tomorrow Plan:
     : 0;
 
   
-  const proteinGap = bundle.targets.proteinTarget
+  
+  // Extra targets (used for the “Personalized targets” rings)
+  const normGoal = normalizeGoalType(bundle.targets.goalType);
+  const carbsTarget = bundle.targets.carbsTarget
+    ? Number(bundle.targets.carbsTarget)
+    : normGoal === "bulk"
+      ? 220
+      : normGoal === "cut"
+        ? 170
+        : 200;
+
+  const fatsTarget = bundle.targets.fatsTarget
+    ? Number(bundle.targets.fatsTarget)
+    : normGoal === "bulk"
+      ? 64
+      : normGoal === "cut"
+        ? 55
+        : 60;
+
+  const caloriesTarget = bundle.targets.calorieTarget ? Number(bundle.targets.calorieTarget) : 0;
+
+  const weightLbs = Number(bundle.profile?.weight_lbs || bundle.profile?.weight || 0) || 0;
+  const waterTargetOz = weightLbs > 0 ? clamp(Math.round(weightLbs * 0.67), 80, 140) : 122;
+  const electrolytesTargetMg = 818;
+
+  // We don't currently track water/electrolytes consumption in-app; keep progress at 0 until we do.
+  const waterOz = Number(bundle.totals?.water_oz || 0) || 0;
+  const electrolytesMg = Number(bundle.totals?.electrolytes_mg || 0) || 0;
+
+  const pctOf = (v, t) => (t > 0 ? clamp((Number(v || 0) / t) * 100, 0, 100) : 0);
+
+  const carbsPct = pctOf(bundle.totals.macros.carbs_g, carbsTarget);
+  const fatsPct = pctOf(bundle.totals.macros.fats_g, fatsTarget);
+  const caloriesPct = pctOf(bundle.totals.consumed, caloriesTarget);
+  const waterPct = pctOf(waterOz, waterTargetOz);
+  const electrolytesPct = pctOf(electrolytesMg, electrolytesTargetMg);
+
+const proteinGap = bundle.targets.proteinTarget
     ? Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g)
     : 0;
 
@@ -936,7 +973,50 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
       : `Target ${Math.round(bundle.targets.calorieTarget)}`
     : "Set a calorie target";
 
-  return (
+  
+  const Ring = ({ pct, size, title, value, tone = "primary.main" }) => {
+    const v = clamp(Number(pct || 0), 0, 100);
+    return (
+      <Box sx={{ position: "relative", width: size, height: size, flex: "0 0 auto" }}>
+        <CircularProgress
+          variant="determinate"
+          value={100}
+          size={size}
+          thickness={5}
+          sx={{ color: "rgba(226,232,240,0.14)" }}
+        />
+        <CircularProgress
+          variant="determinate"
+          value={v}
+          size={size}
+          thickness={5}
+          sx={{ color: tone, position: "absolute", left: 0, top: 0 }}
+        />
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
+            px: 0.5,
+          }}
+        >
+          <Box>
+            <Typography sx={{ fontWeight: 950, fontSize: size >= 86 ? 18 : size >= 66 ? 14 : 12, lineHeight: 1.05 }}>
+              {value}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)", fontSize: size >= 86 ? 12 : 11 }}>
+              {title}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  };
+
+return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
       <Stack
         direction={{ xs: "column", sm: "row" }}
@@ -984,9 +1064,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
             />
           }
         >
-          <Typography sx={{ fontWeight: 950, lineHeight: 1.2 }}>
-            {verdict.headline}
-          </Typography>
+          <Typography sx={{ fontWeight: 950, lineHeight: 1.2 }}>{verdict.headline}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
             {verdict.sub}
           </Typography>
@@ -1010,117 +1088,65 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
               <Chip size="small" sx={macroChipSx} label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
             </Stack>
 
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={2}
-              sx={{ alignItems: { xs: "flex-start", sm: "center" }, justifyContent: "space-between", mt: 0.5 }}
+            {/* Rings */}
+            <Box
+              sx={{
+                mt: 0.8,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 1.2,
+                alignItems: "center",
+              }}
             >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
-                <Box sx={{ position: "relative", display: "inline-flex" }}>
-                  {/* background ring */}
-                  <CircularProgress
-                    variant="determinate"
-                    value={100}
-                    size={74}
-                    thickness={5}
-                    sx={{ color: "rgba(226,232,240,0.14)" }}
-                  />
-                  {/* foreground ring */}
-                  <CircularProgress
-                    variant="determinate"
-                    value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
-                    size={74}
-                    thickness={5}
-                    sx={{
-                      color: "primary.main",
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      top: 0,
-                      left: 0,
-                      bottom: 0,
-                      right: 0,
-                      position: "absolute",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Typography variant="caption" sx={{ fontWeight: 950 }}>
-                      {bundle.targets.proteinTarget ? `${Math.round(clamp(proteinPct, 0, 100))}%` : "—"}
-                    </Typography>
-                  </Box>
-                </Box>
-                <Box>
-                  <Stack direction="row" spacing={0.8} alignItems="center">
-                    <RestaurantIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
-                    <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                      Protein
-                    </Typography>
-                  </Stack>
-                  <Typography sx={{ fontWeight: 950 }}>
-                    {Math.round(bundle.totals.macros.protein_g)}g
-                  </Typography>
-                </Box>
-              </Box>
-
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.4 }}>
-                <Box sx={{ position: "relative", display: "inline-flex" }}>
-                  {/* background ring */}
-                  <CircularProgress
-                    variant="determinate"
-                    value={100}
-                    size={74}
-                    thickness={5}
-                    sx={{ color: "rgba(226,232,240,0.14)" }}
-                  />
-                  {/* foreground ring (never invisible) */}
-                  <CircularProgress
-                    variant="determinate"
-                    value={bundle.targets.calorieTarget ? Math.max(4, calQuality) : 0}
-                    size={74}
-                    thickness={5}
-                    sx={{
-                      color: "primary.main",
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      top: 0,
-                      left: 0,
-                      bottom: 0,
-                      right: 0,
-                      position: "absolute",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Typography variant="caption" sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)" }}>
-                      {bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
-                    </Typography>
-                  </Box>
-                </Box>
+              {/* Big: Calorie tightness */}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
+                <Ring
+                  pct={bundle.targets.calorieTarget ? calQuality : 0}
+                  size={96}
+                  title="Tightness"
+                  value={bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
+                  tone="primary.main"
+                />
                 <Box>
                   <Stack direction="row" spacing={0.8} alignItems="center">
                     <TrackChangesIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
                     <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                      Tightness
+                      Calorie drift
                     </Typography>
                   </Stack>
                   <Typography sx={{ fontWeight: 950 }}>
-                    {bundle.targets.calorieTarget ? `Off ${Math.round(calErr)} kcal` : "Target not set"}
+                    {bundle.targets.calorieTarget ? `Off ${Math.round(calErr)} kcal` : "Set a target"}
                   </Typography>
                 </Box>
               </Box>
-            </Stack>
+
+              {/* Medium macros */}
+              <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+                <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={72} title="Protein" value={`${Math.round(bundle.totals.macros.protein_g)}g`} />
+                <Ring pct={carbsPct} size={72} title="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} />
+                <Ring pct={fatsPct} size={72} title="Fats" value={`${Math.round(bundle.totals.macros.fats_g)}g`} />
+              </Box>
+
+              {/* Medium calories target (no duplicate tightness) */}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
+                <Ring
+                  pct={caloriesPct}
+                  size={72}
+                  title="Calories"
+                  value={caloriesTarget ? `${Math.round(bundle.totals.consumed)}` : "—"}
+                  tone="primary.main"
+                />
+                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                  today vs target
+                </Typography>
+              </Box>
+
+              {/* Small: water + electrolytes */}
+              <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+                <Ring pct={waterPct} size={58} title="Water" value={`${Math.round(waterOz)}oz`} tone="primary.main" />
+                <Ring pct={electrolytesPct} size={58} title="Electrolytes" value={`${Math.round(electrolytesMg)}mg`} tone="primary.main" />
+              </Box>
+            </Box>
 
             <Box
               sx={{
@@ -1128,6 +1154,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                 borderRadius: 2,
                 border: "1px solid rgba(148,163,184,0.18)",
                 background: "rgba(255,255,255,0.04)",
+                mt: 0.8,
               }}
             >
               <Typography variant="caption" sx={{ display: "block", color: "rgba(226,232,240,0.72)" }}>
@@ -1137,17 +1164,6 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
               <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.72)" }}>
                 {targetLine}
               </Typography>
-
-              {!bundle.derived.profileComplete && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  onClick={() => history.push("/health")}
-                  sx={{ mt: 1, fontWeight: 900, borderRadius: 999 }}
-                >
-                  Finish Health Setup
-                </Button>
-              )}
             </Box>
 
             <Box>
@@ -1179,173 +1195,6 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                   : "Target: not set"}
               </Typography>
             </Box>
-
-            
-{/* Extra edge: variety beyond protein/calories */}
-          <Box sx={{ mt: 1.6 }}>
-            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-              Personalized targets:
-            </Typography>
-
-            {(() => {
-              const gt = String(bundle.profile.goalType || "").toLowerCase();
-              const w = Number(bundle.profile.weight || 0);
-              const act = String(bundle.profile.activityLevel || "").toLowerCase();
-
-              const carbsToday = Number(bundle.macros?.carbs_g || 0);
-              const proteinToday = Number(bundle.macros?.protein_g || 0);
-              const fatToday = Number(bundle.macros?.fat_g || 0);
-              const eatenToday = Number(bundle.totals?.eaten || 0);
-
-              const baseCarb = w > 0 ? (gt === "cut" ? 1.0 : gt === "bulk" ? 1.5 : 1.2) * w : (gt === "cut" ? 160 : gt === "bulk" ? 240 : 200);
-              const carbTarget = Math.round(clamp(baseCarb, 120, 400));
-
-              const proteinTarget = Math.round(clamp(w > 0 ? (gt === "cut" ? 0.9 : gt === "bulk" ? 0.8 : 0.85) * w : (bundle.targets?.proteinTarget || 150), 120, 240));
-              const fatTarget = Math.round(clamp(w > 0 ? (gt === "cut" ? 0.30 : gt === "bulk" ? 0.40 : 0.35) * w : (gt === "cut" ? 55 : gt === "bulk" ? 80 : 70), 45, 120));
-
-              const calTarget = Number(bundle.targets?.calorieTarget || 3150);
-
-              const baseWater = w > 0 ? 0.6 * w : 110; // oz/day heuristic
-              const waterBoost = act.includes("high") ? 24 : act.includes("moderate") ? 12 : 0;
-              const waterTarget = Math.round(clamp(baseWater + waterBoost, 80, 180));
-
-              const burnedToday = Number(bundle.totals?.burned || 0);
-              const elecTarget = Math.round(clamp(500 + (burnedToday > 0 ? (burnedToday / 300) * 200 : 0), 500, 1200));
-
-              const pct = (val, target) => {
-                const t = Number(target || 0);
-                if (!t || t <= 0) return 0;
-                return clamp((Number(val || 0) / t) * 100, 0, 100);
-              };
-
-              // Small donut w/ label (Jarvis-style mini gauges)
-              const MiniRing = ({ label, valueText, pctValue, subLabel }) => (
-                <Box
-                  sx={{
-                    flex: 1,
-                    minWidth: 0,
-                    p: 1.1,
-                    borderRadius: 2,
-                    border: "1px solid rgba(148,163,184,0.18)",
-                    background: "rgba(2,6,23,0.06)",
-                  }}
-                >
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Box sx={{ position: "relative", width: 54, height: 54, flex: "0 0 auto" }}>
-                      {/* track */}
-                      <CircularProgress
-                        variant="determinate"
-                        value={100}
-                        size={54}
-                        thickness={5}
-                        sx={{ color: "rgba(148,163,184,0.22)" }}
-                      />
-                      {/* value */}
-                      <CircularProgress
-                        variant="determinate"
-                        value={Math.max(2, Number(pctValue || 0))}  // keep visible at ~0
-                        size={54}
-                        thickness={5}
-                        sx={{
-                          position: "absolute",
-                          left: 0,
-                          top: 0,
-                          color: "rgba(59,130,246,0.95)",
-                        }}
-                      />
-                      <Box
-                        sx={{
-                          position: "absolute",
-                          inset: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexDirection: "column",
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 950, fontSize: 12, color: "rgba(226,232,240,0.96)", lineHeight: 1 }}>
-                          {valueText}
-                        </Typography>
-                        <Typography sx={{ fontSize: 10, color: "rgba(226,232,240,0.62)", lineHeight: 1 }}>
-                          {subLabel}
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 950, color: "rgba(226,232,240,0.92)", lineHeight: 1.1 }}>
-                        {label}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.70)" }}>
-                        {subLabel === "target" ? "recommended" : "today vs target"}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </Box>
-              );
-
-              return (
-                <Stack spacing={1} sx={{ mt: 0.9 }}>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                    <MiniRing
-                      label="Protein"
-                      valueText={`${Math.round(proteinToday)}g`}
-                      pctValue={pct(proteinToday, proteinTarget)}
-                      subLabel={`${proteinTarget}g`}
-                    />
-                    <MiniRing
-                      label="Carbs"
-                      valueText={`${Math.round(carbsToday)}g`}
-                      pctValue={pct(carbsToday, carbTarget)}
-                      subLabel={`${carbTarget}g`}
-                    />
-                  </Stack>
-
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                    <MiniRing
-                      label="Fats"
-                      valueText={`${Math.round(fatToday)}g`}
-                      pctValue={pct(fatToday, fatTarget)}
-                      subLabel={`${fatTarget}g`}
-                    />
-                    <MiniRing
-                      label="Calories"
-                      valueText={`${Math.round(eatenToday)}`}
-                      pctValue={pct(eatenToday, calTarget)}
-                      subLabel={`${Math.round(calTarget)}k`}
-                    />
-                  </Stack>
-
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                    <MiniRing
-                      label="Water"
-                      valueText={`${waterTarget}oz`}
-                      pctValue={100}
-                      subLabel="target"
-                    />
-                    <MiniRing
-                      label="Electrolytes"
-                      valueText={`${elecTarget}mg`}
-                      pctValue={100}
-                      subLabel="target"
-                    />
-                  </Stack>
-
-                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.62)" }}>
-                    Based on your profile + today’s logs.
-                  </Typography>
-                </Stack>
-              );
-            })()}
-          </Box>
-<Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-              <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
-                Log Meal
-              </Button>
-              <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
-                Log Workout
-              </Button>
-            </Stack>
           </Stack>
         </CardShell>
 
@@ -1362,118 +1211,105 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
 
           <Divider sx={{ my: 1.4 }} />
 
-          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-            Quick read:
-          </Typography>
-
-          <Typography variant="body2" sx={{ mt: 0.6 }}>
-            {bundle.derived.limiterKey === "protein" && (
-              <>
-                You’re <strong>{Math.abs(Math.round(bundle.derived.proteinDelta))}g</strong> under your protein target.
-              </>
-            )}
-            {bundle.derived.limiterKey === "energy_balance" && bundle.targets.calorieTarget > 0 && (
-              <>
-                You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs your target.
-              </>
-            )}
-            {bundle.derived.limiterKey === "missing_meals" && (
-              <>Log at least <strong>2 meals</strong> so your verdict is grounded.</>
-            )}
-            {bundle.derived.limiterKey === "missing_training" && (
-              <>Log <strong>one workout</strong> so the day has a training signal.</>
-            )}
-            {bundle.derived.limiterKey === "missing_profile" && (
-              <>Finish setup so targets are based on your <strong>BMR/TDEE</strong>.</>
-            )}
-            {bundle.derived.limiterKey === "execution" && (
-              <>Pick one non‑negotiable and make tomorrow repeatable.</>
-            )}
-            {bundle.derived.limiterKey === "tighten_one_leak" && (
-              <>You’re close — tighten one lever and repeat.</>
-            )}
-          </Typography>
-
-          {/* Smart fix suggestions */}
-          <Box sx={{ mt: 1.4 }}>
+          <Stack spacing={1}>
             <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-              Smart fix (pick 1):
+              Quick read:
             </Typography>
 
-            <Typography sx={{ fontWeight: 950, mt: 0.4 }}>{smartFix.headline}</Typography>
+            <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.90)" }}>
+              {bundle.derived.limiterKey === "protein" && (
+                <>
+                  Your protein is <strong>{Math.round(bundle.derived.proteinDelta)}</strong>g under target.
+                </>
+              )}
+              {bundle.derived.limiterKey === "energy_balance" && bundle.targets.calorieTarget > 0 && (
+                <>
+                  You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs target.
+                </>
+              )}
+              {bundle.derived.limiterKey === "missing_meals" && (
+                <>
+                  You need at least <strong>2 meals</strong> logged for a real verdict.
+                </>
+              )}
+              {bundle.derived.limiterKey === "missing_training" && (
+                <>
+                  Log <strong>one workout</strong> and your day becomes measurable.
+                </>
+              )}
+              {bundle.derived.limiterKey === "missing_profile" && (
+                <>
+                  Finish setup so your target is grounded in <strong>BMR/TDEE</strong>.
+                </>
+              )}
+              {bundle.derived.limiterKey === "execution" && <>Make tomorrow repeatable: pick one non-negotiable.</>}
+              {bundle.derived.limiterKey === "tighten_one_leak" && <>You’re close — tighten one thing and repeat.</>}
+            </Typography>
 
-            {smartFix.why && (
-              <Typography variant="caption" sx={{ display: "block", mt: 0.3, color: "rgba(226,232,240,0.62)" }}>
-                {smartFix.why}
+            <Box sx={{ mt: 1.2 }}>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                Smart fix (pick 1):
               </Typography>
+
+              <Typography sx={{ fontWeight: 950, mt: 0.4 }}>{smartFix.headline}</Typography>
+
+              {smartFix.why && (
+                <Typography variant="caption" sx={{ display: "block", mt: 0.3, color: "rgba(226,232,240,0.62)" }}>
+                  {smartFix.why}
+                </Typography>
+              )}
+
+              <Stack spacing={1} sx={{ mt: 1.1 }}>
+                {smartFix.suggestions.map((s, i) => (
+                  <Box
+                    key={`${s.title}-${i}`}
+                    sx={{
+                      p: 1.1,
+                      borderRadius: 2,
+                      border: "1px solid rgba(148,163,184,0.18)",
+                      background: "rgba(2,6,23,0.10)",
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                      <Typography sx={{ fontWeight: 950 }}>{s.title}</Typography>
+                      <Chip
+                        size="small"
+                        label={`${s.macro} • ${s.meta}`}
+                        sx={{
+                          fontWeight: 900,
+                          bgcolor: "rgba(148,163,184,0.18)",
+                          color: "rgba(226,232,240,0.92)",
+                        }}
+                      />
+                    </Stack>
+
+                    <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
+                      {s.detail}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+
+            {!bundle.derived.profileComplete && (
+              <Button
+                variant="contained"
+                onClick={() => history.push("/health")}
+                sx={{ fontWeight: 950, borderRadius: 999, mt: 0.5 }}
+              >
+                Finish Health Setup
+              </Button>
             )}
-
-            <Stack spacing={1} sx={{ mt: 1.1 }}>
-              {smartFix.suggestions.map((s, i) => (
-                <Box
-                  key={`${s.title}-${i}`}
-                  sx={{
-                    p: 1.1,
-                    borderRadius: 2,
-                    border: "1px solid rgba(148,163,184,0.18)",
-                    background: "rgba(2,6,23,0.10)",
-                  }}
-                >
-                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                    <Typography sx={{ fontWeight: 950 }}>{s.title}</Typography>
-                    <Chip
-                      size="small"
-                      label={`${s.macro} • ${s.meta}`}
-                      sx={{
-                        fontWeight: 900,
-                        bgcolor: "rgba(148,163,184,0.18)",
-                        color: "rgba(226,232,240,0.92)",
-                      }}
-                    />
-                  </Stack>
-
-                  <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
-                    {s.detail}
-                  </Typography>
-                </Box>
-              ))}
-            </Stack>
-          </Box>
-
-          
-{!bundle.derived.profileComplete && (
-            <Button
-              variant="contained"
-              onClick={() => history.push("/health")}
-              sx={{ fontWeight: 950, borderRadius: 999, mt: 1.4 }}
-            >
-              Finish Health Setup
-            </Button>
-          )}
+          </Stack>
         </CardShell>
-{/* Card 3: Tomorrow plan + AI */}
+
+        {/* Card 3: AI Verdict + Actions */}
         <CardShell
-          title="Tomorrow Plan"
-          subtitle="2 steps, no overthinking"
-          chip={<Chip size="small" label="plan" sx={{ fontWeight: 900 }} />}
+          title="AI Coach Verdict"
+          subtitle="your final report card"
+          chip={<Chip size="small" label="verdict" sx={{ fontWeight: 900 }} />}
         >
-          <Stack spacing={1}>
-            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.02)" }}>
-              <Typography sx={{ fontWeight: 950 }}>{tomorrowPlan?.[0]?.title || "Step 1"}</Typography>
-              <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
-                {tomorrowPlan?.[0]?.detail || ""}
-              </Typography>
-            </Box>
-
-            <Box sx={{ p: 1.1, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.02)" }}>
-              <Typography sx={{ fontWeight: 950 }}>{tomorrowPlan?.[1]?.title || "Step 2"}</Typography>
-              <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
-                {tomorrowPlan?.[1]?.detail || ""}
-              </Typography>
-            </Box>
-
-            <Divider sx={{ my: 1.2 }} />
-
+          <Stack spacing={1.2}>
             <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
               <Box>
                 <Typography sx={{ fontWeight: 950 }}>AI Coach Verdict</Typography>
@@ -1492,55 +1328,78 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
               </Button>
             </Stack>
 
-            {!aiVerdict && !aiLoading && (
-              <Box
-                sx={{
-                  mt: 1.2,
-                  p: 1.2,
-                  borderRadius: 2,
-                  border: "1px solid rgba(148,163,184,0.18)",
-                  background: "rgba(2,6,23,0.06)",
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-              >
-                <Box
-                  sx={{
-                    position: "absolute",
-                    inset: 0,
-                    opacity: 0.10,
-                    background:
-                      "repeating-linear-gradient(180deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px, transparent 1px, transparent 6px)",
-                    pointerEvents: "none",
-                  }}
-                />
-                <Stack spacing={0.6} sx={{ position: "relative" }}>
-                  <Typography sx={{ fontWeight: 950 }}>Tap Get Verdict to run the scan.</Typography>
-                  <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
-                    I’ll fuse your health profile, meals, workouts, and goal into a single actionable verdict.
-                  </Typography>
-                  <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", pt: 0.6 }}>
-                    <Chip size="small" label="profile" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
-                    <Chip size="small" label="meals" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
-                    <Chip size="small" label="workouts" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
-                    <Chip size="small" label="targets" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
-                  </Stack>
-                </Stack>
-              </Box>
-            )}
-
-
             {aiError && (
-              <Typography color="error" variant="body2" sx={{ mt: 1 }}>
+              <Typography color="error" variant="body2" sx={{ mt: 0.5 }}>
                 {aiError}
               </Typography>
             )}
 
-            {aiVerdict && (
-              <Box sx={{ mt: 1.2, p: 1.2, borderRadius: 2, border: "1px solid rgba(2,6,23,0.10)", background: "rgba(2,6,23,0.02)" }}>
-                <Typography sx={{ whiteSpace: "pre-wrap" }}>{aiVerdict}</Typography>
+            {aiVerdict ? (
+              <Box
+                sx={{
+                  mt: 0.5,
+                  p: 1.2,
+                  borderRadius: 2,
+                  border: "1px solid rgba(148,163,184,0.18)",
+                  background: "rgba(2,6,23,0.10)",
+                }}
+              >
+                <Typography sx={{ whiteSpace: "pre-wrap", color: "rgba(226,232,240,0.92)" }}>
+                  {aiVerdict}
+                </Typography>
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  mt: 0.5,
+                  p: 1.2,
+                  borderRadius: 2,
+                  border: "1px dashed rgba(148,163,184,0.22)",
+                  background: "rgba(2,6,23,0.06)",
+                }}
+              >
+                <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.70)" }}>
+                  Tap <strong>Get Verdict</strong> for a personalized breakdown based on your health profile, meals, and workouts.
+                </Typography>
               </Box>
             )}
+
+            <Divider sx={{ my: 0.6 }} />
+
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+              Actions (fix what’s missing):
+            </Typography>
+
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              <Button
+                size="small"
+                variant={bundle.derived.limiterKey === "missing_meals" || bundle.derived.limiterKey === "protein" ? "contained" : "outlined"}
+                onClick={() => history.push("/meals")}
+                sx={{ borderRadius: 999, fontWeight: 900 }}
+              >
+                Log Meal
+              </Button>
+
+              <Button
+                size="small"
+                variant={bundle.derived.limiterKey === "missing_training" ? "contained" : "outlined"}
+                onClick={() => history.push("/workout")}
+                sx={{ borderRadius: 999, fontWeight: 900 }}
+              >
+                Log Workout
+              </Button>
+
+              {!bundle.derived.profileComplete && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => history.push("/health")}
+                  sx={{ borderRadius: 999, fontWeight: 900 }}
+                >
+                  Finish Health Setup
+                </Button>
+              )}
+            </Stack>
           </Stack>
         </CardShell>
       </Box>
