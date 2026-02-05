@@ -1180,121 +1180,11 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
               </Typography>
             </Box>
 
-            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-              <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
-                Log Meal
-              </Button>
-              <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
-                Log Workout
-              </Button>
-            </Stack>
-          </Stack>
-        </CardShell>
-
-        {/* Card 2: Limiter */}
-        <CardShell
-          title="Your #1 Fix"
-          subtitle="what moves the needle fastest"
-          chip={<Chip size="small" label="limiter" sx={{ fontWeight: 900 }} />}
-        >
-          <Typography sx={{ fontWeight: 950 }}>{limiter.title}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.7, color: "rgba(226,232,240,0.78)" }}>
-            {limiter.body}
-          </Typography>
-
-          <Divider sx={{ my: 1.4 }} />
-
-          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-            Quick read:
-          </Typography>
-
-          <Typography variant="body2" sx={{ mt: 0.6 }}>
-            {bundle.derived.limiterKey === "protein" && (
-              <>
-                You’re <strong>{Math.abs(Math.round(bundle.derived.proteinDelta))}g</strong> under your protein target.
-              </>
-            )}
-            {bundle.derived.limiterKey === "energy_balance" && bundle.targets.calorieTarget > 0 && (
-              <>
-                You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs your target.
-              </>
-            )}
-            {bundle.derived.limiterKey === "missing_meals" && (
-              <>Log at least <strong>2 meals</strong> so your verdict is grounded.</>
-            )}
-            {bundle.derived.limiterKey === "missing_training" && (
-              <>Log <strong>one workout</strong> so the day has a training signal.</>
-            )}
-            {bundle.derived.limiterKey === "missing_profile" && (
-              <>Finish setup so targets are based on your <strong>BMR/TDEE</strong>.</>
-            )}
-            {bundle.derived.limiterKey === "execution" && (
-              <>Pick one non‑negotiable and make tomorrow repeatable.</>
-            )}
-            {bundle.derived.limiterKey === "tighten_one_leak" && (
-              <>You’re close — tighten one lever and repeat.</>
-            )}
-          </Typography>
-
-          {/* Smart fix suggestions */}
-          <Box sx={{ mt: 1.4 }}>
-            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-              Smart fix (pick 1):
-            </Typography>
-
-            <Typography sx={{ fontWeight: 950, mt: 0.4 }}>{smartFix.headline}</Typography>
-
-            {smartFix.why && (
-              <Typography variant="caption" sx={{ display: "block", mt: 0.3, color: "rgba(226,232,240,0.62)" }}>
-                {smartFix.why}
-              </Typography>
-            )}
-
-            <Stack spacing={1} sx={{ mt: 1.1 }}>
-              {smartFix.suggestions.map((s, i) => (
-                <Box
-                  key={`${s.title}-${i}`}
-                  sx={{
-                    p: 1.1,
-                    borderRadius: 2,
-                    border: "1px solid rgba(148,163,184,0.18)",
-                    background: "rgba(2,6,23,0.10)",
-                  }}
-                >
-                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                    <Typography sx={{ fontWeight: 950 }}>{s.title}</Typography>
-                    <Chip
-                      size="small"
-                      label={`${s.macro} • ${s.meta}`}
-                      sx={{
-                        fontWeight: 900,
-                        bgcolor: "rgba(148,163,184,0.18)",
-                        color: "rgba(226,232,240,0.92)",
-                      }}
-                    />
-                  </Stack>
-
-                  <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
-                    {s.detail}
-                  </Typography>
-                </Box>
-              ))}
-            </Stack>
-
-            <Stack direction="row" spacing={1} sx={{ mt: 1.1 }}>
-              <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
-                Log a meal
-              </Button>
-              <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
-                Log a workout
-              </Button>
-            </Stack>
-          </Box>
-
-          {/* Extra edge: variety beyond protein/calories */}
+            
+{/* Extra edge: variety beyond protein/calories */}
           <Box sx={{ mt: 1.6 }}>
             <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-              Extra edge (personalized targets):
+              Personalized targets:
             </Typography>
 
             {(() => {
@@ -1442,12 +1332,115 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                   </Stack>
 
                   <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.62)" }}>
-                    These are heuristics based on your profile + today’s logs. (We’ll get smarter as you log more.)
+                    Based on your profile + today’s logs.
                   </Typography>
                 </Stack>
               );
             })()}
           </Box>
+<Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+              <Button size="small" variant="outlined" onClick={() => history.push("/meals")}>
+                Log Meal
+              </Button>
+              <Button size="small" variant="outlined" onClick={() => history.push("/workout")}>
+                Log Workout
+              </Button>
+            </Stack>
+          </Stack>
+        </CardShell>
+
+        {/* Card 2: Limiter */}
+        <CardShell
+          title="Your #1 Fix"
+          subtitle="what moves the needle fastest"
+          chip={<Chip size="small" label="limiter" sx={{ fontWeight: 900 }} />}
+        >
+          <Typography sx={{ fontWeight: 950 }}>{limiter.title}</Typography>
+          <Typography variant="body2" sx={{ mt: 0.7, color: "rgba(226,232,240,0.78)" }}>
+            {limiter.body}
+          </Typography>
+
+          <Divider sx={{ my: 1.4 }} />
+
+          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+            Quick read:
+          </Typography>
+
+          <Typography variant="body2" sx={{ mt: 0.6 }}>
+            {bundle.derived.limiterKey === "protein" && (
+              <>
+                You’re <strong>{Math.abs(Math.round(bundle.derived.proteinDelta))}g</strong> under your protein target.
+              </>
+            )}
+            {bundle.derived.limiterKey === "energy_balance" && bundle.targets.calorieTarget > 0 && (
+              <>
+                You’re <strong>{Math.round(bundle.derived.calorieDelta)}</strong> kcal vs your target.
+              </>
+            )}
+            {bundle.derived.limiterKey === "missing_meals" && (
+              <>Log at least <strong>2 meals</strong> so your verdict is grounded.</>
+            )}
+            {bundle.derived.limiterKey === "missing_training" && (
+              <>Log <strong>one workout</strong> so the day has a training signal.</>
+            )}
+            {bundle.derived.limiterKey === "missing_profile" && (
+              <>Finish setup so targets are based on your <strong>BMR/TDEE</strong>.</>
+            )}
+            {bundle.derived.limiterKey === "execution" && (
+              <>Pick one non‑negotiable and make tomorrow repeatable.</>
+            )}
+            {bundle.derived.limiterKey === "tighten_one_leak" && (
+              <>You’re close — tighten one lever and repeat.</>
+            )}
+          </Typography>
+
+          {/* Smart fix suggestions */}
+          <Box sx={{ mt: 1.4 }}>
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+              Smart fix (pick 1):
+            </Typography>
+
+            <Typography sx={{ fontWeight: 950, mt: 0.4 }}>{smartFix.headline}</Typography>
+
+            {smartFix.why && (
+              <Typography variant="caption" sx={{ display: "block", mt: 0.3, color: "rgba(226,232,240,0.62)" }}>
+                {smartFix.why}
+              </Typography>
+            )}
+
+            <Stack spacing={1} sx={{ mt: 1.1 }}>
+              {smartFix.suggestions.map((s, i) => (
+                <Box
+                  key={`${s.title}-${i}`}
+                  sx={{
+                    p: 1.1,
+                    borderRadius: 2,
+                    border: "1px solid rgba(148,163,184,0.18)",
+                    background: "rgba(2,6,23,0.10)",
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                    <Typography sx={{ fontWeight: 950 }}>{s.title}</Typography>
+                    <Chip
+                      size="small"
+                      label={`${s.macro} • ${s.meta}`}
+                      sx={{
+                        fontWeight: 900,
+                        bgcolor: "rgba(148,163,184,0.18)",
+                        color: "rgba(226,232,240,0.92)",
+                      }}
+                    />
+                  </Stack>
+
+                  <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
+                    {s.detail}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          </Box>
+
+          
 {!bundle.derived.profileComplete && (
             <Button
               variant="contained"
@@ -1498,6 +1491,44 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
                 {aiLoading ? <CircularProgress size={22} /> : "Get Verdict"}
               </Button>
             </Stack>
+
+            {!aiVerdict && !aiLoading && (
+              <Box
+                sx={{
+                  mt: 1.2,
+                  p: 1.2,
+                  borderRadius: 2,
+                  border: "1px solid rgba(148,163,184,0.18)",
+                  background: "rgba(2,6,23,0.06)",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+              >
+                <Box
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    opacity: 0.10,
+                    background:
+                      "repeating-linear-gradient(180deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px, transparent 1px, transparent 6px)",
+                    pointerEvents: "none",
+                  }}
+                />
+                <Stack spacing={0.6} sx={{ position: "relative" }}>
+                  <Typography sx={{ fontWeight: 950 }}>Tap Get Verdict to run the scan.</Typography>
+                  <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.78)" }}>
+                    I’ll fuse your health profile, meals, workouts, and goal into a single actionable verdict.
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", pt: 0.6 }}>
+                    <Chip size="small" label="profile" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
+                    <Chip size="small" label="meals" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
+                    <Chip size="small" label="workouts" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
+                    <Chip size="small" label="targets" sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }} />
+                  </Stack>
+                </Stack>
+              </Box>
+            )}
+
 
             {aiError && (
               <Typography color="error" variant="body2" sx={{ mt: 1 }}>
