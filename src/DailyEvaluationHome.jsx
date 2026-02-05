@@ -351,8 +351,12 @@ function buildTomorrowPlan({ goalType, limiterKey, proteinTarget, proteinG, prof
   }
 
   if (limiterKey === "missing_training") {
+    // Time-aware language: if it's still early enough, suggest logging a workout today.
+    // This avoids odd copy like "log a workout tomorrow" at 3pm.
+    const hour = new Date().getHours();
+    const whenWord = hour < 20 ? "today" : "tomorrow";
     return [
-      { title: "Log a workout tomorrow.", detail: trainFix },
+      { title: `Log a workout ${whenWord}.`, detail: trainFix },
       { title: "Keep calories tighter.", detail: calFix },
     ];
   }
@@ -831,10 +835,11 @@ Tomorrow Plan:
     ? Math.abs(bundle.totals.consumed - bundle.targets.calorieTarget)
     : Math.abs(bundle.totals.netKcal);
 
-  // Calorie tightness: show *some* signal even when you're far off target.
-  // Scale is proportional to the target so the bar doesn't sit at 0 all day on bulk/cut swings.
+  // Calorie tightness: % close to target for *today*.
+  // Use target itself as the scale so being under by (target - eaten + burned) doesn't collapse to 0 too early.
+  // Example: target 3150, consumed 920, burned 0 => off 2230 => tightness ~29% (not 0%).
   const calTightnessScale = bundle.targets.calorieTarget
-    ? Math.max(900, bundle.targets.calorieTarget * 0.7)
+    ? Math.max(500, bundle.targets.calorieTarget)
     : 700;
 
   const calQuality = bundle.targets.calorieTarget
