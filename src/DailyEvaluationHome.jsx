@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Tooltip,
 } from "@mui/material";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
@@ -23,20 +24,22 @@ import UpgradeModal from "./components/UpgradeModal";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
-  getFreeDailyLimit,
 } from "./components/FeatureUseBadge.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 
 /**
- * DailyEvaluationHome — Option B + Win-first
- * Card 1: ultra-minimal rings (Calories / Protein / Exercise) + mini rings (Carbs / Fats)
- * Card 2: super-simple "Pick 1 fix → Do it now" (no slider)
- * Card 3: Win ✅ / Not Yet ⚠️ reveal (grade hidden behind tap), AI verdict gated (3/day free)
+ * DailyEvaluationHome — Win-first, production polish
+ * UI-only updates:
+ * - Clearer header contrast (works on light backgrounds)
+ * - Rings rearranged: Calories center → macros row (Protein/Carbs/Fats) → Exercise bottom
+ * - Macros now show "current / target" (protein uses target; carbs/fats use soft caps for context)
+ * - Fix card choices adapt to goal (no "skip snack" for bulk)
+ * - Removed 1/3, 2/3, 3/3 badges everywhere except AI coach section
+ * - Replaced confusing "tap to show details" with clear affordance + always-visible summary
+ * - Removed "Loose pattern" text; replaced with actionable microcopy
  *
- * IMPORTANT: This file intentionally avoids changing any sync/storage/math logic.
- * Only UI + copy + interaction changes.
+ * IMPORTANT: No changes to underlying math/sync/gating logic beyond UI presentation & copy.
  */
 
 // ----------------------------- helpers ---------------------------------------
@@ -116,6 +119,13 @@ function normalizeGoalType(raw) {
   return "maintain";
 }
 
+function prettyGoal(goalType) {
+  const g = normalizeGoalType(goalType);
+  if (g === "cut") return "Lean down";
+  if (g === "bulk") return "Build muscle";
+  return "Maintain";
+}
+
 function hasBmrInputs(profile = {}) {
   const age = Number(profile?.age || 0);
   const gender = String(profile?.gender || "").toLowerCase();
@@ -126,21 +136,6 @@ function hasBmrInputs(profile = {}) {
   const okGender = gender === "male" || gender === "female";
   const okHeight = ft > 0 || inch > 0;
   return age > 0 && okGender && w > 0 && okHeight && !!act;
-}
-
-// ---------- deterministic copy variants (stable per day) ----------
-function hashStr(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-function pickVariant(key, dayKey, options) {
-  if (!options || options.length === 0) return "";
-  const idx = hashStr(`${key}:${dayKey}`) % options.length;
-  return options[idx];
 }
 
 // ----------------------------- scoring ----------------------------------------
@@ -203,6 +198,29 @@ function computeScore({
   return { score: clamp(score, 0, 100), components: { calS, pS, tS } };
 }
 
+function gradeFromScore(s) {
+  const n = Number(s || 0);
+  if (n >= 93) return "A";
+  if (n >= 86) return "A-";
+  if (n >= 80) return "B+";
+  if (n >= 74) return "B";
+  if (n >= 68) return "B-";
+  if (n >= 62) return "C+";
+  if (n >= 56) return "C";
+  if (n >= 50) return "C-";
+  if (n >= 44) return "D";
+  return "F";
+}
+
+// “Win” is presentation only (UI layer), based on existing score + confidence + logs.
+function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
+  if (!profileComplete) return { state: "notyet", reason: "Finish setup to personalize." };
+  if (!hasLogs) return { state: "notyet", reason: "Log at least one meal or workout." };
+  if (confidenceLabel === "Low") return { state: "notyet", reason: "Log a bit more so it’s accurate." };
+  if (score >= 74) return { state: "win", reason: "Solid day. Repeat this." };
+  return { state: "notyet", reason: "Close. Do one fix to win." };
+}
+
 // ----------------------------- UI primitives ---------------------------------
 function CardShell({ title, subtitle, children, chip }) {
   return (
@@ -221,7 +239,7 @@ function CardShell({ title, subtitle, children, chip }) {
       <CardContent sx={{ p: 2 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
           <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ fontWeight: 950, letterSpacing: -0.2, color: "rgba(255,255,255,0.92)" }}>
+            <Typography sx={{ fontWeight: 950, letterSpacing: -0.2, color: "rgba(255,255,255,0.94)" }}>
               {title}
             </Typography>
             {subtitle && (
@@ -230,7 +248,7 @@ function CardShell({ title, subtitle, children, chip }) {
               </Typography>
             )}
           </Box>
-          {chip}
+          {chip || null}
         </Stack>
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
         {children}
@@ -239,7 +257,7 @@ function CardShell({ title, subtitle, children, chip }) {
   );
 }
 
-function Ring({ pct, size, label, value, tone = "primary.main" }) {
+function Ring({ pct, size, label, value, subvalue, tone = "primary.main" }) {
   const v = clamp(Number(pct || 0), 0, 100);
   return (
     <Box sx={{ position: "relative", width: size, height: size, flex: "0 0 auto" }}>
@@ -265,52 +283,32 @@ function Ring({ pct, size, label, value, tone = "primary.main" }) {
           alignItems: "center",
           justifyContent: "center",
           textAlign: "center",
-          px: 0.5,
+          px: 0.6,
         }}
       >
         <Box>
           <Typography
             sx={{
               fontWeight: 950,
-              fontSize: size >= 92 ? 18 : size >= 70 ? 14 : 12,
+              fontSize: size >= 120 ? 20 : size >= 92 ? 16 : 12,
               lineHeight: 1.05,
-              color: "rgba(255,255,255,0.92)",
+              color: "rgba(255,255,255,0.94)",
             }}
           >
             {value}
           </Typography>
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontSize: size >= 92 ? 12 : 11 }}>
+          {subvalue ? (
+            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontSize: 11 }}>
+              {subvalue}
+            </Typography>
+          ) : null}
+          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontSize: 11 }}>
             {label}
           </Typography>
         </Box>
       </Box>
     </Box>
   );
-}
-
-function gradeFromScore(s) {
-  const n = Number(s || 0);
-  if (n >= 93) return "A";
-  if (n >= 86) return "A-";
-  if (n >= 80) return "B+";
-  if (n >= 74) return "B";
-  if (n >= 68) return "B-";
-  if (n >= 62) return "C+";
-  if (n >= 56) return "C";
-  if (n >= 50) return "C-";
-  if (n >= 44) return "D";
-  return "F";
-}
-
-// “Win” is an interpretation layer (UI-only), not new math.
-// We call it a “Win” when score is reasonably high AND user has enough signal.
-// This avoids “you won!” when they logged nothing.
-function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
-  if (!profileComplete) return { state: "notyet", reason: "Finish setup to personalize your win." };
-  if (!hasLogs) return { state: "notyet", reason: "Log at least 1 meal or a workout." };
-  if (confidenceLabel === "Low") return { state: "notyet", reason: "Log a bit more so it’s accurate." };
-  if (score >= 74) return { state: "win", reason: "Solid day. Repeat this." };
-  return { state: "notyet", reason: "You’re close. Pick 1 fix to win." };
 }
 
 // ----------------------------- main ------------------------------------------
@@ -325,7 +323,7 @@ export default function DailyEvaluationHome() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Card 1 interactions
-  const [activeRing, setActiveRing] = useState(null); // "calories" | "protein" | "exercise" | "carbs" | "fats" | null
+  const [activeRing, setActiveRing] = useState(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const holdTimerRef = useRef(null);
   const startHold = (key) => {
@@ -340,26 +338,17 @@ export default function DailyEvaluationHome() {
     holdTimerRef.current = null;
   };
 
-  // Card 3: reveal grade details (hidden by default)
   const [showGradeDetails, setShowGradeDetails] = useState(false);
 
-  // AI verdict state (unchanged gating)
+  // AI verdict state
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiError, setAiError] = useState("");
 
-  // animated score badge
+  // score badge animation
   const [scoreAnim, setScoreAnim] = useState(0);
 
   const FEATURE_KEY = "daily_eval_verdict";
-
-  const macroChipSx = {
-    bgcolor: "rgba(255,255,255,0.10)",
-    color: "rgba(255,255,255,0.92)",
-    border: "1px solid rgba(255,255,255,0.18)",
-    backdropFilter: "blur(6px)",
-    "& .MuiChip-icon": { color: "rgba(255,255,255,0.92)" },
-  };
 
   const bundle = useMemo(() => {
     const dayUS = usDay();
@@ -367,7 +356,7 @@ export default function DailyEvaluationHome() {
 
     const userData = safeJsonParse(localStorage.getItem("userData"), {}) || {};
 
-    // scoped keys (prevents cross-user flicker)
+    // scoped keys
     const uid = userId || userData?.id || userData?.user_id || null;
     const mealKey = uid ? `mealHistory:${uid}` : "mealHistory";
     const workoutKey = uid ? `workoutHistory:${uid}` : "workoutHistory";
@@ -439,15 +428,13 @@ export default function DailyEvaluationHome() {
       hasWorkout,
     });
 
-    const tdeeDelta = tdeeEst ? Math.round(calorieTarget - tdeeEst) : 0;
-
     return {
       dayUS,
       dayISO,
       profile: userData,
       targets: { calorieTarget, proteinTarget: pTarget, goalType },
       totals: { consumed: consumedFinal, burned: burnedFinal, netKcal, macros },
-      est: { bmr_est: bmrEst || 0, tdee_est: tdeeEst || 0, tdee_delta: tdeeDelta },
+      est: { bmr_est: bmrEst || 0, tdee_est: tdeeEst || 0 },
       derived: {
         profileComplete,
         hasMeals,
@@ -460,7 +447,6 @@ export default function DailyEvaluationHome() {
     };
   }, [userId]);
 
-  // score animation
   useEffect(() => {
     let raf = null;
     const target = clamp(bundle.derived.score, 0, 100);
@@ -476,25 +462,7 @@ export default function DailyEvaluationHome() {
     return () => raf && cancelAnimationFrame(raf);
   }, [bundle.derived.score]);
 
-  // chips
-  const goalChip = (() => {
-    const g = normalizeGoalType(bundle.targets.goalType);
-    const map = {
-      cut: { label: "CUT", color: "secondary" },
-      maintain: { label: "MAINTAIN", color: "info" },
-      bulk: { label: "BULK", color: "success" },
-    };
-    const x = map[g] || map.maintain;
-    return <Chip size="small" label={x.label} color={x.color} sx={{ fontWeight: 950 }} />;
-  })();
-
-  const confidenceChip = (() => {
-    const c = bundle.derived.confidenceLabel;
-    const color = c === "High" ? "success" : c === "Medium" ? "primary" : "warning";
-    return <Chip size="small" label={`Confidence: ${c}`} color={color} sx={{ fontWeight: 900 }} />;
-  })();
-
-  // Calories “on track %” based on target (doesn't collapse to 0 when under)
+  // Calories “on track %” based on target (doesn't collapse when under)
   const calErr = bundle.targets.calorieTarget
     ? Math.abs(bundle.totals.consumed - bundle.targets.calorieTarget)
     : Math.abs(bundle.totals.netKcal);
@@ -511,90 +479,32 @@ export default function DailyEvaluationHome() {
     ? clamp((bundle.totals.macros.protein_g / Math.max(1, bundle.targets.proteinTarget)) * 100, 0, 100)
     : 0;
 
-  // Carbs/fats: if no targets exist yet, show ring progress based on "reasonable daily cap" so it's still meaningful.
-  // This is UI-only. It does NOT change actual scoring.
-  const carbsCap = 260;
-  const fatCap = 90;
-  const carbsPct = clamp((bundle.totals.macros.carbs_g / carbsCap) * 100, 0, 100);
-  const fatsPct = clamp((bundle.totals.macros.fat_g / fatCap) * 100, 0, 100);
+  // Soft caps (UI-only context). Not used in scoring.
+  const carbsCap = normalizeGoalType(bundle.targets.goalType) === "bulk" ? 320 : 260;
+  const fatCap = normalizeGoalType(bundle.targets.goalType) === "bulk" ? 110 : 90;
 
-  // Exercise ring: based on burn relative to ~220 “good baseline”
+  const carbsPct = clamp((bundle.totals.macros.carbs_g / Math.max(1, carbsCap)) * 100, 0, 100);
+  const fatsPct = clamp((bundle.totals.macros.fat_g / Math.max(1, fatCap)) * 100, 0, 100);
+
   const exercisePct = bundle.derived.hasWorkout ? clamp((bundle.totals.burned / 220) * 100, 0, 100) : 0;
 
-  // “flag” chip (kept simple)
   const proteinGap = bundle.targets.proteinTarget
     ? Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g)
     : 0;
 
   const flag = useMemo(() => {
-    const dayKey = bundle.dayISO || bundle.dayUS || "";
     if (!bundle.derived.profileComplete || !bundle.derived.hasMeals) {
-      return { label: pickVariant("flag_data", dayKey, ["ORANGE FLAG: NEEDS DATA", "ORANGE FLAG: LOG 2 MEALS", "ORANGE FLAG: FINISH SETUP"]), tone: "warning" };
+      return { label: "NEEDS DATA", tone: "warning" };
     }
     if (bundle.targets.proteinTarget && proteinGap >= 25) {
-      return { label: pickVariant("flag_protein", dayKey, ["RED FLAG: PROTEIN GAP", "RED FLAG: LOW PROTEIN", "RED FLAG: PROTEIN LEAK"]), tone: "error" };
+      return { label: "PROTEIN LOW", tone: "error" };
     }
     if (bundle.targets.calorieTarget && calErr > 450) {
-      return { label: pickVariant("flag_cal", dayKey, ["ORANGE FLAG: CALORIES OFF", "ORANGE FLAG: CALORIE DRIFT", "ORANGE FLAG: TARGET MISSED"]), tone: "warning" };
+      return { label: "CALORIES OFF", tone: "warning" };
     }
-    return { label: pickVariant("flag_green", dayKey, ["GREEN FLAG: ON TRACK", "GREEN FLAG: SOLID DAY", "GREEN FLAG: KEEP IT GOING"]), tone: "success" };
-  }, [bundle, proteinGap, calErr]);
+    return { label: "ON TRACK", tone: "success" };
+  }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.targets.proteinTarget, proteinGap, bundle.targets.calorieTarget, calErr]);
 
-  const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
-
-  // ---------------- Card 2: 5-year-old simple fixes ----------------
-  // No sliders. No “math.” Just pick 1 and do it.
-  const fixOptions = useMemo(() => {
-    // Keep it to 3 max. Humans freeze when you give too many choices.
-    const opts = [];
-
-    if (!bundle.derived.profileComplete) {
-      opts.push({ key: "finish_setup", label: "Finish Setup", hint: "So targets are accurate", go: "/health" });
-      opts.push({ key: "log_meal", label: "Log a Meal", hint: "So I can judge today", go: "/meals" });
-      opts.push({ key: "log_workout", label: "Log Workout", hint: "So exercise counts", go: "/workout" });
-      return opts;
-    }
-
-    if (!bundle.derived.hasMeals) {
-      opts.push({ key: "log_meal", label: "Log a Meal", hint: "Fastest way to improve accuracy", go: "/meals" });
-      opts.push({ key: "add_protein", label: "Eat Protein", hint: "Chicken, eggs, shake", go: "/meals" });
-      opts.push({ key: "small_dinner", label: "Smaller Dinner", hint: "Stay near target", go: "/meals" });
-      return opts;
-    }
-
-    if (!bundle.derived.hasWorkout) {
-      opts.push({ key: "log_workout", label: "Log Workout", hint: "Makes your day count", go: "/workout" });
-      opts.push({ key: "walk", label: "10-min Walk", hint: "Quick win", go: "/workout" });
-      opts.push({ key: "eat_protein", label: "Eat Protein", hint: "Easiest macro fix", go: "/meals" });
-      return opts;
-    }
-
-    // If protein gap is big, make protein the #1
-    if (bundle.targets.proteinTarget && proteinGap >= 20) {
-      opts.push({ key: "eat_protein", label: "Eat Protein", hint: `Add ~${Math.round(Math.min(30, proteinGap))}g`, go: "/meals" });
-      opts.push({ key: "log_meal", label: "Log a Meal", hint: "Keep the day accurate", go: "/meals" });
-      opts.push({ key: "small_snack", label: "Skip Snack", hint: "Easiest calorie win", go: "/meals" });
-      return opts;
-    }
-
-    // Otherwise: keep it very simple
-    opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Stay on track", go: "/meals" });
-    opts.push({ key: "log_workout", label: "Log Workout", hint: "Keep exercise counted", go: "/workout" });
-    opts.push({ key: "skip_snack", label: "Skip Snack", hint: "Easy calorie win", go: "/meals" });
-    return opts;
-  }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.derived.hasWorkout, bundle.targets.proteinTarget, proteinGap]);
-
-  const [selectedFix, setSelectedFix] = useState(null);
-  useEffect(() => {
-    if (!selectedFix || !fixOptions.some((o) => o.key === selectedFix)) {
-      setSelectedFix(fixOptions?.[0]?.key || null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixOptions]);
-
-  const selectedFixObj = useMemo(() => fixOptions.find((o) => o.key === selectedFix) || null, [fixOptions, selectedFix]);
-
-  // ---------------- Card 3: Win-first psychology ----------------
   const win = useMemo(
     () =>
       computeWinState({
@@ -606,10 +516,79 @@ export default function DailyEvaluationHome() {
     [bundle]
   );
 
-  // AI (unchanged gating)
-  const remainingAi = getDailyRemaining(FEATURE_KEY);
-  const limitAi = getFreeDailyLimit(FEATURE_KEY);
+  // ---------------- Fix options adapt to goal ----------------
+  const fixOptions = useMemo(() => {
+    const opts = [];
+    const g = normalizeGoalType(bundle.targets.goalType);
 
+    if (!bundle.derived.profileComplete) {
+      opts.push({ key: "finish_setup", label: "Finish Setup", hint: "So targets are accurate", go: "/health" });
+      opts.push({ key: "log_meal", label: "Log a Meal", hint: "So I can judge today", go: "/meals" });
+      opts.push({ key: "log_workout", label: "Log Workout", hint: "So exercise counts", go: "/workout" });
+      return opts;
+    }
+
+    if (!bundle.derived.hasMeals) {
+      opts.push({ key: "log_meal", label: "Log a Meal", hint: "Fastest way to improve accuracy", go: "/meals" });
+      if (g === "bulk") {
+        opts.push({ key: "add_calories", label: "Add a Meal", hint: "Hit surplus today", go: "/meals" });
+        opts.push({ key: "add_protein", label: "Eat Protein", hint: "Build muscle faster", go: "/meals" });
+      } else {
+        opts.push({ key: "add_protein", label: "Eat Protein", hint: "Easy macro win", go: "/meals" });
+        opts.push({ key: "small_dinner", label: "Smaller Dinner", hint: "Stay near target", go: "/meals" });
+      }
+      return opts;
+    }
+
+    if (!bundle.derived.hasWorkout) {
+      opts.push({ key: "log_workout", label: "Log Workout", hint: "Make your day count", go: "/workout" });
+      if (g === "bulk") {
+        opts.push({ key: "lift", label: "Lift Today", hint: "Even 30–45 min", go: "/workout" });
+        opts.push({ key: "eat_protein", label: "Eat Protein", hint: "Anchor your day", go: "/meals" });
+      } else {
+        opts.push({ key: "walk", label: "10-min Walk", hint: "Quick win", go: "/workout" });
+        opts.push({ key: "eat_protein", label: "Eat Protein", hint: "Easiest macro fix", go: "/meals" });
+      }
+      return opts;
+    }
+
+    if (bundle.targets.proteinTarget && proteinGap >= 20) {
+      opts.push({ key: "eat_protein", label: "Eat Protein", hint: `Add ~${Math.round(Math.min(30, proteinGap))}g`, go: "/meals" });
+      if (g === "bulk") {
+        opts.push({ key: "add_carbs", label: "Add Carbs", hint: "Fuel training", go: "/meals" });
+        opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Keep the day accurate", go: "/meals" });
+      } else {
+        opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Keep the day accurate", go: "/meals" });
+        opts.push({ key: "reduce_cal", label: "Tighten Calories", hint: "Small portion win", go: "/meals" });
+      }
+      return opts;
+    }
+
+    // Default: goal-aware
+    opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Stay accurate", go: "/meals" });
+    opts.push({ key: "log_workout", label: "Log Workout", hint: "Keep exercise counted", go: "/workout" });
+    if (g === "bulk") {
+      opts.push({ key: "add_meal", label: "Add Meal", hint: "Hit surplus", go: "/meals" });
+    } else {
+      opts.push({ key: "tighten", label: "Tighten Calories", hint: "Easy win today", go: "/meals" });
+    }
+    return opts;
+  }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.derived.hasWorkout, bundle.targets.proteinTarget, proteinGap, bundle.targets.goalType]);
+
+  const [selectedFix, setSelectedFix] = useState(null);
+  useEffect(() => {
+    if (!selectedFix || !fixOptions.some((o) => o.key === selectedFix)) {
+      setSelectedFix(fixOptions?.[0]?.key || null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixOptions]);
+
+  const selectedFixObj = useMemo(
+    () => fixOptions.find((o) => o.key === selectedFix) || null,
+    [fixOptions, selectedFix]
+  );
+
+  // AI gating (unchanged)
   const openUpgrade = () => setUpgradeOpen(true);
 
   const handleGenerateAiVerdict = async () => {
@@ -617,11 +596,11 @@ export default function DailyEvaluationHome() {
     setAiVerdict("");
 
     if (!pro) {
-      if (!canUseDailyFeature(FEATURE_KEY)) {
+      if (!canUseDailyFeature("daily_eval_verdict")) {
         openUpgrade();
         return;
       }
-      registerDailyFeatureUse(FEATURE_KEY);
+      registerDailyFeatureUse("daily_eval_verdict");
     }
 
     setAiLoading(true);
@@ -632,14 +611,14 @@ export default function DailyEvaluationHome() {
       const payload = {
         feature: "daily_eval_verdict",
         prompt: `
-You are SlimCal Coach. Write a short, punchy verdict for today's day.
+You are SlimCal Coach. Write a short, punchy message for the user about today.
 
 Rules:
 - 2–4 sentences max.
-- supportive, simple language, no rambling.
-- MUST use numbers: calories consumed, burned, net, protein, carbs, fats (if available), and targets if available.
-- Mention the user's goal type (${goalType}).
-- End with 2 bullet points: "Tomorrow: ___" and "Do this: ___".
+- Supportive, simple language (not clinical).
+- MUST use numbers: calories consumed, burned, net, protein, carbs, fats, and targets if available.
+- Mention goal type (${goalType}) in plain language.
+- End with 2 bullet points: "Next: ___" and "Do this: ___".
 - If BMR/TDEE are provided, mention it in 1 short clause.
 
 Data:
@@ -675,7 +654,7 @@ Win state: ${win.state}
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data?.error || data?.message || "AI verdict failed.";
+        const msg = data?.error || data?.message || "Coach message failed.";
         throw new Error(msg);
       }
 
@@ -687,10 +666,10 @@ Win state: ${win.state}
         data?.choices?.[0]?.message?.content ||
         "";
 
-      if (!String(text || "").trim()) throw new Error("No AI text returned.");
+      if (!String(text || "").trim()) throw new Error("No coach message returned.");
       setAiVerdict(String(text).trim());
     } catch (e) {
-      setAiError(e?.message || "AI verdict failed.");
+      setAiError(e?.message || "Coach message failed.");
     } finally {
       setAiLoading(false);
     }
@@ -714,14 +693,21 @@ Win state: ${win.state}
     }
   };
 
-  // Breakdown dialog
+  const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
   const metabolismLine = hasEstimates
     ? `BMR ${Math.round(bundle.est.bmr_est)} • TDEE ${Math.round(bundle.est.tdee_est)}`
     : "Set up Health Data to unlock BMR/TDEE";
 
   const targetLine = bundle.targets.calorieTarget
-    ? `Target ${Math.round(bundle.targets.calorieTarget)}`
+    ? `Target ${Math.round(bundle.targets.calorieTarget)} kcal`
     : "Set a calorie target";
+
+  const headerText = "rgba(2,6,23,0.92)";
+  const headerSub = "rgba(2,6,23,0.62)";
+
+  const goalText = `${prettyGoal(bundle.targets.goalType)} • Data: ${
+    bundle.derived.confidenceLabel === "High" ? "Strong" : bundle.derived.confidenceLabel === "Medium" ? "Okay" : "Low"
+  }`;
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
@@ -730,25 +716,30 @@ Win state: ${win.state}
         spacing={1}
         alignItems={{ xs: "flex-start", sm: "center" }}
         justifyContent="space-between"
+        sx={{ mb: 1 }}
       >
         <Box>
-          <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(255,255,255,0.92)" }}>
+          <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: headerText }}>
             Daily Evaluation
           </Typography>
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)" }}>
+          <Typography variant="caption" sx={{ color: headerSub }}>
             {bundle.dayUS} • swipe → pick 1 → win
           </Typography>
         </Box>
 
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
-          {goalChip}
-          {confidenceChip}
-          {!pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={false} labelPrefix="AI" />}
-          {pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={true} labelPrefix="AI" />}
-        </Stack>
+        <Chip
+          label={goalText}
+          sx={{
+            fontWeight: 950,
+            borderRadius: 999,
+            bgcolor: "rgba(2,6,23,0.06)",
+            color: "rgba(2,6,23,0.84)",
+            border: "1px solid rgba(2,6,23,0.10)",
+          }}
+        />
       </Stack>
 
-      {/* Breakdown sheet */}
+      {/* Breakdown dialog */}
       <Dialog open={showBreakdown} onClose={() => setShowBreakdown(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)", bgcolor: "rgba(2,6,23,0.98)" }}>
           Breakdown
@@ -772,15 +763,21 @@ Win state: ${win.state}
 
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Protein</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.protein_g)} g</Typography>
+              <Typography sx={{ fontWeight: 900 }}>
+                {Math.round(bundle.totals.macros.protein_g)} / {Math.round(bundle.targets.proteinTarget || 0)} g
+              </Typography>
             </Stack>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Carbs</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.carbs_g)} g</Typography>
+              <Typography sx={{ fontWeight: 900 }}>
+                {Math.round(bundle.totals.macros.carbs_g)} / {carbsCap} g
+              </Typography>
             </Stack>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Fats</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.fat_g)} g</Typography>
+              <Typography sx={{ fontWeight: 900 }}>
+                {Math.round(bundle.totals.macros.fat_g)} / {fatCap} g
+              </Typography>
             </Stack>
 
             <Divider sx={{ borderColor: "rgba(148,163,184,0.18)" }} />
@@ -799,10 +796,10 @@ Win state: ${win.state}
         </DialogActions>
       </Dialog>
 
-      {/* Swipeable card row */}
+      {/* Swipeable cards */}
       <Box
         sx={{
-          mt: 2,
+          mt: 1.5,
           display: "flex",
           gap: 1.5,
           overflowX: "auto",
@@ -811,10 +808,10 @@ Win state: ${win.state}
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {/* Card 1: Scoreboard */}
+        {/* Card 1: Today */}
         <CardShell
           title="Today"
-          subtitle="Tap a circle"
+          subtitle="Tap a ring • hold for breakdown"
           chip={
             <Chip
               label={`${scoreAnim}/100`}
@@ -823,29 +820,31 @@ Win state: ${win.state}
             />
           }
         >
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-            1/3 • Scoreboard
-          </Typography>
+          <Stack spacing={1.25} sx={{ mt: 0.4 }} alignItems="center">
+            {/* Calories (center) */}
+            <Box
+              onPointerDown={() => startHold("calories")}
+              onPointerUp={endHold}
+              onPointerLeave={endHold}
+              onClick={() => setActiveRing((v) => (v === "calories" ? null : "calories"))}
+              sx={{ cursor: "pointer" }}
+            >
+              <Ring
+                pct={bundle.targets.calorieTarget ? calQuality : 0}
+                size={140}
+                label="Calories"
+                value={bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
+                subvalue={
+                  bundle.targets.calorieTarget
+                    ? `${Math.round(bundle.totals.consumed)} / ${Math.round(bundle.targets.calorieTarget)} kcal`
+                    : `${Math.round(bundle.totals.consumed)} kcal`
+                }
+                tone="primary.main"
+              />
+            </Box>
 
-          <Stack spacing={1.25} sx={{ mt: 1.2 }} alignItems="center">
-            {/* Main rings */}
-            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Box
-                onPointerDown={() => startHold("calories")}
-                onPointerUp={endHold}
-                onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "calories" ? null : "calories"))}
-                sx={{ cursor: "pointer" }}
-              >
-                <Ring
-                  pct={bundle.targets.calorieTarget ? calQuality : 0}
-                  size={112}
-                  label="Calories"
-                  value={bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
-                  tone="primary.main"
-                />
-              </Box>
-
+            {/* Macros row */}
+            <Stack direction="row" spacing={1.1} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Box
                 onPointerDown={() => startHold("protein")}
                 onPointerUp={endHold}
@@ -855,32 +854,14 @@ Win state: ${win.state}
               >
                 <Ring
                   pct={proteinPct}
-                  size={112}
+                  size={92}
                   label="Protein"
                   value={`${Math.round(bundle.totals.macros.protein_g)}g`}
+                  subvalue={bundle.targets.proteinTarget ? `of ${Math.round(bundle.targets.proteinTarget)}g` : null}
                   tone="success.main"
                 />
               </Box>
 
-              <Box
-                onPointerDown={() => startHold("exercise")}
-                onPointerUp={endHold}
-                onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "exercise" ? null : "exercise"))}
-                sx={{ cursor: "pointer" }}
-              >
-                <Ring
-                  pct={exercisePct}
-                  size={112}
-                  label="Exercise"
-                  value={bundle.derived.hasWorkout ? `${Math.round(bundle.totals.burned)} kcal` : "—"}
-                  tone="warning.main"
-                />
-              </Box>
-            </Stack>
-
-            {/* Mini rings for carbs & fats (adds info without clutter) */}
-            <Stack direction="row" spacing={1} justifyContent="center" alignItems="center" sx={{ width: "100%" }}>
               <Box
                 onPointerDown={() => startHold("carbs")}
                 onPointerUp={endHold}
@@ -888,7 +869,14 @@ Win state: ${win.state}
                 onClick={() => setActiveRing((v) => (v === "carbs" ? null : "carbs"))}
                 sx={{ cursor: "pointer" }}
               >
-                <Ring pct={carbsPct} size={78} label="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} tone="info.main" />
+                <Ring
+                  pct={carbsPct}
+                  size={92}
+                  label="Carbs"
+                  value={`${Math.round(bundle.totals.macros.carbs_g)}g`}
+                  subvalue={`of ${carbsCap}g`}
+                  tone="info.main"
+                />
               </Box>
 
               <Box
@@ -898,19 +886,41 @@ Win state: ${win.state}
                 onClick={() => setActiveRing((v) => (v === "fats" ? null : "fats"))}
                 sx={{ cursor: "pointer" }}
               >
-                <Ring pct={fatsPct} size={78} label="Fats" value={`${Math.round(bundle.totals.macros.fat_g)}g`} tone="secondary.main" />
+                <Ring
+                  pct={fatsPct}
+                  size={92}
+                  label="Fats"
+                  value={`${Math.round(bundle.totals.macros.fat_g)}g`}
+                  subvalue={`of ${fatCap}g`}
+                  tone="secondary.main"
+                />
               </Box>
             </Stack>
 
-            {/* Simple status lines */}
-            <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.86)", textAlign: "center" }}>
-              {bundle.derived.score >= 74 ? "Close." : "Loose pattern."}
-            </Typography>
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.68)", textAlign: "center" }}>
-              Tap a circle to see what to do.
+            {/* Exercise bottom */}
+            <Box
+              onPointerDown={() => startHold("exercise")}
+              onPointerUp={endHold}
+              onPointerLeave={endHold}
+              onClick={() => setActiveRing((v) => (v === "exercise" ? null : "exercise"))}
+              sx={{ cursor: "pointer" }}
+            >
+              <Ring
+                pct={exercisePct}
+                size={116}
+                label="Exercise"
+                value={bundle.derived.hasWorkout ? `${Math.round(bundle.totals.burned)} kcal` : "—"}
+                subvalue={bundle.derived.hasWorkout ? "logged" : "none logged"}
+                tone="warning.main"
+              />
+            </Box>
+
+            {/* Action microcopy */}
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
+              Tap a ring to see what matters today.
             </Typography>
 
-            {/* Tap-to-reveal panel (still short) */}
+            {/* Short tap panel */}
             {activeRing && (
               <Box
                 sx={{
@@ -924,15 +934,12 @@ Win state: ${win.state}
                 {activeRing === "calories" && (
                   <Stack spacing={0.6} alignItems="center">
                     <Typography sx={{ fontWeight: 950 }}>Calories</Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
                       {bundle.targets.calorieTarget
                         ? (bundle.totals.consumed <= bundle.targets.calorieTarget
-                          ? `You have ~${Math.round(bundle.targets.calorieTarget - bundle.totals.consumed)} calories left.`
-                          : `You’re ~${Math.round(bundle.totals.consumed - bundle.targets.calorieTarget)} over target.`)
-                        : "Set a calorie target to unlock accurate scoring."}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-                      Press & hold any circle for full breakdown.
+                          ? `You have ~${Math.round(bundle.targets.calorieTarget - bundle.totals.consumed)} kcal left.`
+                          : `You’re ~${Math.round(bundle.totals.consumed - bundle.targets.calorieTarget)} kcal over.`)
+                        : "Set a calorie target for accuracy."}
                     </Typography>
                   </Stack>
                 )}
@@ -940,13 +947,10 @@ Win state: ${win.state}
                 {activeRing === "protein" && (
                   <Stack spacing={0.6} alignItems="center">
                     <Typography sx={{ fontWeight: 950 }}>Protein</Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
                       {bundle.targets.proteinTarget
-                        ? (proteinGap > 0 ? `You’re short ~${Math.round(proteinGap)}g. Eat protein next.` : "You hit your protein target. Great.")
-                        : "Set a protein target to make this meaningful."}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-                      Easiest win: chicken, eggs, greek yogurt, shake.
+                        ? (proteinGap > 0 ? `Short ~${Math.round(proteinGap)}g. Add protein next.` : "You hit your protein target. ✅")
+                        : "Set a protein target."}
                     </Typography>
                   </Stack>
                 )}
@@ -954,11 +958,8 @@ Win state: ${win.state}
                 {activeRing === "exercise" && (
                   <Stack spacing={0.6} alignItems="center">
                     <Typography sx={{ fontWeight: 950 }}>Exercise</Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
-                      {bundle.derived.hasWorkout ? "Workout logged ✅" : "No workout logged yet ⚠️"}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-                      If you worked out, log it so it counts.
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
+                      {bundle.derived.hasWorkout ? "Workout logged ✅" : "No workout logged yet."}
                     </Typography>
                   </Stack>
                 )}
@@ -966,11 +967,10 @@ Win state: ${win.state}
                 {activeRing === "carbs" && (
                   <Stack spacing={0.6} alignItems="center">
                     <Typography sx={{ fontWeight: 950 }}>Carbs</Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
-                      Carbs help training. Keep them reasonable for your goal.
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-                      Press & hold for breakdown.
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
+                      {normalizeGoalType(bundle.targets.goalType) === "bulk"
+                        ? "Carbs fuel training. Keep them steady."
+                        : "Keep carbs reasonable for your goal."}
                     </Typography>
                   </Stack>
                 )}
@@ -978,46 +978,36 @@ Win state: ${win.state}
                 {activeRing === "fats" && (
                   <Stack spacing={0.6} alignItems="center">
                     <Typography sx={{ fontWeight: 950 }}>Fats</Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.74)", textAlign: "center" }}>
-                      Fats support hormones & hunger control. Don’t go crazy.
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-                      Press & hold for breakdown.
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
+                      "Fats support hormones & hunger. Keep them consistent."
                     </Typography>
                   </Stack>
                 )}
               </Box>
             )}
 
+            {/* Simple flag */}
             {flag && (
               <Chip
                 icon={<WarningAmberIcon sx={{ color: "inherit" }} />}
                 label={flag.label}
                 color={flag.tone}
-                sx={{ mt: 0.5, fontWeight: 950, borderRadius: 999 }}
+                sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }}
               />
             )}
 
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 0.5 }}>
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 0.2 }}>
               <InfoOutlinedIcon sx={{ fontSize: 18, color: "rgba(255,255,255,0.62)" }} />
               <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-                Tap a circle • Swipe for the fix • Press & hold for details
+                Tap a ring • Hold for breakdown • Swipe for your fix
               </Typography>
             </Stack>
           </Stack>
         </CardShell>
 
-        {/* Card 2: Pick 1 fix (no slider) */}
-        <CardShell
-          title="Fix"
-          subtitle="Pick 1 thing"
-          chip={<Chip size="small" label="2/3" sx={{ fontWeight: 950, borderRadius: 999, ...macroChipSx }} />}
-        >
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-            2/3 • Do this now
-          </Typography>
-
-          <Stack spacing={1.2} sx={{ mt: 1.1 }} alignItems="center">
+        {/* Card 2: Fix */}
+        <CardShell title="Fix" subtitle="Pick one thing and do it">
+          <Stack spacing={1.2} sx={{ mt: 0.4 }} alignItems="center">
             <Typography sx={{ fontWeight: 950, textAlign: "center" }}>
               Step 1: Pick one
             </Typography>
@@ -1080,23 +1070,24 @@ Win state: ${win.state}
             </Button>
 
             <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-              One tap. One action. Then swipe to see if you won.
+              One tap. One action. Then swipe to your win.
             </Typography>
           </Stack>
         </CardShell>
 
-        {/* Card 3: Win-first */}
+        {/* Card 3: Coach (only place we show AI badge) */}
         <CardShell
-          title="Win"
-          subtitle="Your status today"
-          chip={<Chip size="small" label="3/3" sx={{ fontWeight: 950, borderRadius: 999, ...macroChipSx }} />}
+          title="Coach"
+          subtitle="Your personal message"
+          chip={
+            <FeatureUseBadge
+              featureKey={FEATURE_KEY}
+              isPro={pro}
+              labelPrefix="Coach"
+            />
+          }
         >
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-            3/3 • Reveal
-          </Typography>
-
-          <Stack spacing={1.1} sx={{ mt: 1.1 }} alignItems="center">
-            {/* Big win/not yet badge */}
+          <Stack spacing={1.1} sx={{ mt: 0.4 }} alignItems="center">
             <Box
               sx={{
                 width: 200,
@@ -1116,7 +1107,7 @@ Win state: ${win.state}
               </Typography>
             </Box>
 
-            {/* Hidden grade (tap to reveal) */}
+            {/* Always-visible numbers + clear tap affordance */}
             <Box
               onClick={() => setShowGradeDetails((v) => !v)}
               sx={{
@@ -1129,32 +1120,40 @@ Win state: ${win.state}
               }}
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.86)" }}>
-                  {showGradeDetails ? `Grade: ${gradeFromScore(bundle.derived.score)} (${bundle.derived.score}/100)` : "Tap to see details"}
+                <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.90)" }}>
+                  Your numbers
                 </Typography>
                 <Chip
                   size="small"
-                  label={showGradeDetails ? "HIDE" : "SHOW"}
-                  sx={{ fontWeight: 950, borderRadius: 999, ...macroChipSx }}
+                  label={showGradeDetails ? "HIDE" : "TAP"}
+                  sx={{
+                    fontWeight: 950,
+                    borderRadius: 999,
+                    bgcolor: "rgba(255,255,255,0.10)",
+                    color: "rgba(255,255,255,0.92)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                  }}
                 />
               </Stack>
 
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", display: "block", mt: 0.6 }}>
+                Calories {Math.round(bundle.totals.consumed)} • Exercise {Math.round(bundle.totals.burned)} • Protein {Math.round(bundle.totals.macros.protein_g)}g
+              </Typography>
+
               {showGradeDetails && (
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.65)", display: "block", mt: 0.5 }}>
-                  Calories: {Math.round(bundle.totals.consumed)} • Exercise: {Math.round(bundle.totals.burned)} • Net: {Math.round(bundle.totals.netKcal)} •
-                  Protein: {Math.round(bundle.totals.macros.protein_g)}g • Carbs: {Math.round(bundle.totals.macros.carbs_g)}g • Fats: {Math.round(bundle.totals.macros.fat_g)}g
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)", display: "block", mt: 0.5 }}>
+                  Carbs {Math.round(bundle.totals.macros.carbs_g)}g • Fats {Math.round(bundle.totals.macros.fat_g)}g • Net {Math.round(bundle.totals.netKcal)} kcal • Grade {gradeFromScore(bundle.derived.score)} ({bundle.derived.score}/100)
                 </Typography>
               )}
             </Box>
 
-            {/* AI Coach (gated) */}
             <Button
               onClick={handleGenerateAiVerdict}
               variant="contained"
               disabled={aiLoading}
               sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
             >
-              {aiLoading ? "Coach is grading…" : "Get Coach Verdict"}
+              {aiLoading ? "Writing…" : "Get my coach message"}
             </Button>
 
             {!!aiError && (
@@ -1173,14 +1172,14 @@ Win state: ${win.state}
                   background: "rgba(15,23,42,0.6)",
                 }}
               >
-                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Coach Verdict</Typography>
+                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Coach check‑in</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
                   {aiVerdict}
                 </Typography>
               </Box>
             )}
 
-            {/* Actions (centered, matching palette) */}
+            {/* Actions */}
             <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center" sx={{ width: "100%" }}>
               <Button
                 variant="contained"
@@ -1204,7 +1203,7 @@ Win state: ${win.state}
                   onClick={() => history.push("/health")}
                   sx={{ borderRadius: 999, fontWeight: 950 }}
                 >
-                  Finish Health Setup
+                  Finish Setup
                 </Button>
               )}
 
@@ -1220,15 +1219,11 @@ Win state: ${win.state}
             </Stack>
 
             <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-              Remaining coach uses today: {Math.max(0, remainingAi)} / {limitAi}
+              Tip: hold any ring on the first card for a full breakdown.
             </Typography>
           </Stack>
         </CardShell>
       </Box>
-
-      <Typography variant="caption" sx={{ display: "block", mt: 1, color: "rgba(255,255,255,0.55)" }}>
-        Tip: Don’t overthink. Swipe → pick 1 → do it.
-      </Typography>
 
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Box>
