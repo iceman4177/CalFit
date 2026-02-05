@@ -877,6 +877,8 @@ Tomorrow Plan:
   const electrolytesMg = Number(bundle.totals?.electrolytes_mg || 0) || 0;
 
   const pctOf = (v, t) => (t > 0 ? clamp((Number(v || 0) / t) * 100, 0, 100) : 0);
+  const safeNum = (n) => (Number.isFinite(Number(n)) ? Number(n) : 0);
+  const safeInt = (n) => Math.round(safeNum(n));
 
   const carbsPct = pctOf(bundle.totals.macros.carbs_g, carbsTarget);
   const fatsPct = pctOf(bundle.totals.macros.fat_g, fatsTarget);
@@ -1007,7 +1009,7 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
             <Typography sx={{ fontWeight: 950, fontSize: size >= 86 ? 18 : size >= 66 ? 14 : 12, lineHeight: 1.05 }}>
               {value}
             </Typography>
-            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)", fontSize: size >= 86 ? 12 : 11 }}>
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)", fontSize: size >= 86 ? 12 : 11 }}>
               {title}
             </Typography>
           </Box>
@@ -1028,7 +1030,7 @@ return (
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22 }}>
             Daily Evaluation
           </Typography>
-          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
             {bundle.dayUS} • quick verdict on your day
           </Typography>
         </Box>
@@ -1065,7 +1067,7 @@ return (
           }
         >
           <Typography sx={{ fontWeight: 950, lineHeight: 1.2 }}>{verdict.headline}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
+          <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.85)" }}>
             {verdict.sub}
           </Typography>
 
@@ -1102,14 +1104,14 @@ return (
                 <Box sx={{ minWidth: 160, textAlign: "center" }}>
                   <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center">
                     <TrackChangesIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
-                    <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                    <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
                       Calories to goal
                     </Typography>
                   </Stack>
                   <Typography sx={{ fontWeight: 950, mt: 0.2, textAlign: "center" }}>
                     {bundle.targets.calorieTarget ? (bundle.totals.consumed <= bundle.targets.calorieTarget ? `Left ${Math.round(bundle.targets.calorieTarget - bundle.totals.consumed)} kcal` : `Over ${Math.round(bundle.totals.consumed - bundle.targets.calorieTarget)} kcal`) : "Set a target"}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)", textAlign: "center", whiteSpace: "nowrap" }}>
+                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)", textAlign: "center", whiteSpace: "nowrap" }}>
                     Target {Math.round(bundle.targets.calorieTarget || 0)} kcal
                   </Typography>
                 </Box>
@@ -1123,14 +1125,14 @@ return (
 
               {/* Row 2: Macro rings */}
               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={78} title="Protein" value={`${Math.round(bundle.totals.macros.protein_g)}g`} />
-                <Ring pct={carbsPct} size={78} title="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} />
-                <Ring pct={fatsPct} size={78} title="Fats" value={`${Math.round(bundle.totals.macros.fat_g)}g`} />
+                <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={78} title="Protein" value={`${safeInt(bundle.totals.macros.protein_g)}g`} />
+                <Ring pct={carbsPct} size={78} title="Carbs" value={`${safeInt(bundle.totals.macros.carbs_g)}g`} />
+                <Ring pct={fatsPct} size={78} title="Fats" value={`${safeInt(bundle.totals.macros.fat_g)}g`} />
                 <Ring
                   pct={caloriesPct}
                   size={78}
                   title="Calories"
-                  value={caloriesTarget ? `${Math.round(bundle.totals.consumed)}` : "—"}
+                  value={caloriesTarget ? `${safeInt(bundle.totals.consumed)}` : "—"}
                   tone="primary.main"
                 />
               </Box>
@@ -1145,11 +1147,11 @@ return (
                 mt: 0.8,
               }}
             >
-              <Typography variant="caption" sx={{ display: "block", color: "rgba(226,232,240,0.72)" }}>
+              <Typography variant="caption" sx={{ display: "block", color: "rgba(226,232,240,0.82)" }}>
                 Metabolism baseline
               </Typography>
               <Typography sx={{ fontWeight: 900 }}>{metabolismLine}</Typography>
-              <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.72)" }}>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.82)" }}>
                 {targetLine}
               </Typography>
             </Box>
@@ -1163,14 +1165,14 @@ return (
           chip={<Chip size="small" label="limiter" sx={{ fontWeight: 900 }} />}
         >
           <Typography sx={{ fontWeight: 950 }}>{limiter.title}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.7, color: "rgba(226,232,240,0.78)" }}>
+          <Typography variant="body2" sx={{ mt: 0.7, color: "rgba(226,232,240,0.85)" }}>
             {limiter.body}
           </Typography>
 
           <Divider sx={{ my: 1.4 }} />
 
           <Stack spacing={1}>
-            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
               Quick read:
             </Typography>
 
@@ -1205,7 +1207,7 @@ return (
             </Typography>
 
             <Box sx={{ mt: 1.2 }}>
-              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
                 Smart fix (pick 1):
               </Typography>
 
@@ -1241,7 +1243,7 @@ return (
                       />
                     </Stack>
 
-                    <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.78)" }}>
+                    <Typography variant="body2" sx={{ mt: 0.5, color: "rgba(226,232,240,0.85)" }}>
                       {s.detail}
                     </Typography>
                   </Box>
@@ -1270,7 +1272,7 @@ return (
           <Stack spacing={1.2}>
             <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
               <Box>
-                                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
                   {pro ? "PRO: unlimited" : `Free: ${remainingAi}/${limitAi} left today`}
                 </Typography>
               </Box>
@@ -1323,25 +1325,16 @@ return (
 
             <Divider sx={{ my: 0.6 }} />
 
-            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+            <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>
               Actions (fix what’s missing):
             </Typography>
 
             <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center" sx={{ width: '100%' }}>
               <Button
                 size="small"
-                variant={bundle.derived.limiterKey === "missing_meals" || bundle.derived.limiterKey === "protein" ? "contained" : "outlined"}
-                onClick={() => history.push("/meals")}
-                sx={{ borderRadius: 999, fontWeight: 900 }}
-              >
-                Log Meal
-              </Button>
-
-              <Button
-                size="small"
-                variant={bundle.derived.limiterKey === "missing_training" ? "contained" : "outlined"}
+                variant="contained"
                 onClick={() => history.push("/workout")}
-                sx={{ borderRadius: 999, fontWeight: 900 }}
+                sx={{ borderRadius: 999, fontWeight: 900, px: 2.2, backgroundColor: "rgba(59,130,246,0.74)", "&:hover": { backgroundColor: "rgba(59,130,246,0.9)" } }}
               >
                 Log Workout
               </Button>
