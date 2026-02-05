@@ -1294,107 +1294,161 @@ const hasEstimates = !!bundle.est.bmr_est && !!bundle.est.tdee_est;
           {/* Extra edge: variety beyond protein/calories */}
           <Box sx={{ mt: 1.6 }}>
             <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-              Extra edge (personalized):
+              Extra edge (personalized targets):
             </Typography>
 
             {(() => {
               const gt = String(bundle.profile.goalType || "").toLowerCase();
               const w = Number(bundle.profile.weight || 0);
-              const carbsToday = Number(bundle.macros?.carbs_g || 0);
               const act = String(bundle.profile.activityLevel || "").toLowerCase();
+
+              const carbsToday = Number(bundle.macros?.carbs_g || 0);
+              const proteinToday = Number(bundle.macros?.protein_g || 0);
+              const fatToday = Number(bundle.macros?.fat_g || 0);
+              const eatenToday = Number(bundle.totals?.eaten || 0);
+
               const baseCarb = w > 0 ? (gt === "cut" ? 1.0 : gt === "bulk" ? 1.5 : 1.2) * w : (gt === "cut" ? 160 : gt === "bulk" ? 240 : 200);
               const carbTarget = Math.round(clamp(baseCarb, 120, 400));
-              const carbDelta = carbTarget - carbsToday;
+
+              const proteinTarget = Math.round(clamp(w > 0 ? (gt === "cut" ? 0.9 : gt === "bulk" ? 0.8 : 0.85) * w : (bundle.targets?.proteinTarget || 150), 120, 240));
+              const fatTarget = Math.round(clamp(w > 0 ? (gt === "cut" ? 0.30 : gt === "bulk" ? 0.40 : 0.35) * w : (gt === "cut" ? 55 : gt === "bulk" ? 80 : 70), 45, 120));
+
+              const calTarget = Number(bundle.targets?.calorieTarget || 3150);
 
               const baseWater = w > 0 ? 0.6 * w : 110; // oz/day heuristic
               const waterBoost = act.includes("high") ? 24 : act.includes("moderate") ? 12 : 0;
               const waterTarget = Math.round(clamp(baseWater + waterBoost, 80, 180));
-              const waterNudge = waterTarget; // we don't track water yet; show target
 
-              const suppLine =
-                gt === "bulk"
-                  ? "Creatine 5g daily (optional) • electrolytes on training days"
-                  : gt === "cut"
-                  ? "Electrolytes + fiber focus • magnesium at night (optional)"
-                  : "Fiber + electrolytes • keep sodium consistent";
+              const burnedToday = Number(bundle.totals?.burned || 0);
+              const elecTarget = Math.round(clamp(500 + (burnedToday > 0 ? (burnedToday / 300) * 200 : 0), 500, 1200));
+
+              const pct = (val, target) => {
+                const t = Number(target || 0);
+                if (!t || t <= 0) return 0;
+                return clamp((Number(val || 0) / t) * 100, 0, 100);
+              };
+
+              // Small donut w/ label (Jarvis-style mini gauges)
+              const MiniRing = ({ label, valueText, pctValue, subLabel }) => (
+                <Box
+                  sx={{
+                    flex: 1,
+                    minWidth: 0,
+                    p: 1.1,
+                    borderRadius: 2,
+                    border: "1px solid rgba(148,163,184,0.18)",
+                    background: "rgba(2,6,23,0.06)",
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box sx={{ position: "relative", width: 54, height: 54, flex: "0 0 auto" }}>
+                      {/* track */}
+                      <CircularProgress
+                        variant="determinate"
+                        value={100}
+                        size={54}
+                        thickness={5}
+                        sx={{ color: "rgba(148,163,184,0.22)" }}
+                      />
+                      {/* value */}
+                      <CircularProgress
+                        variant="determinate"
+                        value={Math.max(2, Number(pctValue || 0))}  // keep visible at ~0
+                        size={54}
+                        thickness={5}
+                        sx={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          color: "rgba(59,130,246,0.95)",
+                        }}
+                      />
+                      <Box
+                        sx={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexDirection: "column",
+                        }}
+                      >
+                        <Typography sx={{ fontWeight: 950, fontSize: 12, color: "rgba(226,232,240,0.96)", lineHeight: 1 }}>
+                          {valueText}
+                        </Typography>
+                        <Typography sx={{ fontSize: 10, color: "rgba(226,232,240,0.62)", lineHeight: 1 }}>
+                          {subLabel}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 950, color: "rgba(226,232,240,0.92)", lineHeight: 1.1 }}>
+                        {label}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.70)" }}>
+                        {subLabel === "target" ? "recommended" : "today vs target"}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              );
 
               return (
                 <Stack spacing={1} sx={{ mt: 0.9 }}>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                    <Box
-                      sx={{
-                        flex: 1,
-                        p: 1.1,
-                        borderRadius: 2,
-                        border: "1px solid rgba(148,163,184,0.18)",
-                        background: "rgba(2,6,23,0.06)",
-                      }}
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                        <Typography sx={{ fontWeight: 950 }}>Carbs</Typography>
-                        <Chip
-                          size="small"
-                          label={`${carbsToday.toFixed(0)}g / ${carbTarget}g`}
-                          sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }}
-                        />
-                      </Stack>
-                      <Typography variant="body2" sx={{ mt: 0.4, color: "rgba(226,232,240,0.78)" }}>
-                        {carbDelta > 0 ? `Aim for +${Math.round(carbDelta)}g carbs to support your ${gt || "goal"}.` : "Carbs are on track for today."}
-                      </Typography>
-                    </Box>
-
-                    <Box
-                      sx={{
-                        flex: 1,
-                        p: 1.1,
-                        borderRadius: 2,
-                        border: "1px solid rgba(148,163,184,0.18)",
-                        background: "rgba(2,6,23,0.06)",
-                      }}
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                        <Typography sx={{ fontWeight: 950 }}>Hydration</Typography>
-                        <Chip
-                          size="small"
-                          label={`${waterTarget} oz target`}
-                          sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }}
-                        />
-                      </Stack>
-                      <Typography variant="body2" sx={{ mt: 0.4, color: "rgba(226,232,240,0.78)" }}>
-                        Hit your water target — it helps pumps, appetite control, and recovery.
-                      </Typography>
-                    </Box>
+                    <MiniRing
+                      label="Protein"
+                      valueText={`${Math.round(proteinToday)}g`}
+                      pctValue={pct(proteinToday, proteinTarget)}
+                      subLabel={`${proteinTarget}g`}
+                    />
+                    <MiniRing
+                      label="Carbs"
+                      valueText={`${Math.round(carbsToday)}g`}
+                      pctValue={pct(carbsToday, carbTarget)}
+                      subLabel={`${carbTarget}g`}
+                    />
                   </Stack>
 
-                  <Box
-                    sx={{
-                      p: 1.1,
-                      borderRadius: 2,
-                      border: "1px solid rgba(148,163,184,0.18)",
-                      background: "rgba(2,6,23,0.06)",
-                    }}
-                  >
-                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                      <Typography sx={{ fontWeight: 950 }}>Recovery stack</Typography>
-                      <Chip
-                        size="small"
-                        label="optional"
-                        sx={{ fontWeight: 900, bgcolor: "rgba(148,163,184,0.18)", color: "rgba(226,232,240,0.92)" }}
-                      />
-                    </Stack>
-                    <Typography variant="body2" sx={{ mt: 0.4, color: "rgba(226,232,240,0.78)" }}>
-                      {suppLine}
-                    </Typography>
-                    <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.62)" }}>
-                      (Not medical advice — common options lifters use.)
-                    </Typography>
-                  </Box>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <MiniRing
+                      label="Fats"
+                      valueText={`${Math.round(fatToday)}g`}
+                      pctValue={pct(fatToday, fatTarget)}
+                      subLabel={`${fatTarget}g`}
+                    />
+                    <MiniRing
+                      label="Calories"
+                      valueText={`${Math.round(eatenToday)}`}
+                      pctValue={pct(eatenToday, calTarget)}
+                      subLabel={`${Math.round(calTarget)}k`}
+                    />
+                  </Stack>
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <MiniRing
+                      label="Water"
+                      valueText={`${waterTarget}oz`}
+                      pctValue={100}
+                      subLabel="target"
+                    />
+                    <MiniRing
+                      label="Electrolytes"
+                      valueText={`${elecTarget}mg`}
+                      pctValue={100}
+                      subLabel="target"
+                    />
+                  </Stack>
+
+                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.62)" }}>
+                    These are heuristics based on your profile + today’s logs. (We’ll get smarter as you log more.)
+                  </Typography>
                 </Stack>
               );
             })()}
           </Box>
-
-          {!bundle.derived.profileComplete && (
+{!bundle.derived.profileComplete && (
             <Button
               variant="contained"
               onClick={() => history.push("/health")}
