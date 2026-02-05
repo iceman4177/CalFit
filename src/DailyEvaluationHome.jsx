@@ -16,10 +16,16 @@ import {
   DialogContent,
   DialogActions,
   Tooltip,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
 } from "@mui/material";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import RadioButtonUncheckedRoundedIcon from "@mui/icons-material/RadioButtonUncheckedRounded";
 import UpgradeModal from "./components/UpgradeModal";
 import FeatureUseBadge, {
   canUseDailyFeature,
@@ -298,11 +304,11 @@ function Ring({ pct, size, label, value, subvalue, tone = "primary.main" }) {
             {value}
           </Typography>
           {subvalue ? (
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontSize: 11 }}>
+            <Typography component="div" variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontSize: 11, display: "block" }}>
               {subvalue}
             </Typography>
           ) : null}
-          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontSize: 11 }}>
+          <Typography component="div" variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontSize: 11, display: "block" }}>
             {label}
           </Typography>
         </Box>
@@ -380,6 +386,7 @@ export default function DailyEvaluationHome() {
     const dailyCache = safeJsonParse(localStorage.getItem(dailyCacheKey), {});
 
     const dayMealsRec = Array.isArray(mealHistory) ? mealHistory.find((d) => d?.date === dayUS) || null : null;
+    const mealsCount = Number(dayMealsRec?.meals?.length || 0) || 0;
 
     const consumed = sumMealsCalories(dayMealsRec);
     const macros = sumMealsMacros(dayMealsRec);
@@ -440,6 +447,7 @@ export default function DailyEvaluationHome() {
         hasMeals,
         hasWorkout,
         hasLogs,
+        mealsCount,
         confidenceLabel,
         score,
         components,
@@ -517,76 +525,146 @@ export default function DailyEvaluationHome() {
   );
 
   // ---------------- Fix options adapt to goal ----------------
-  const fixOptions = useMemo(() => {
-    const opts = [];
+  
+  // Card 2: Checklist items (UI-only). These auto-check as the user logs meals/workouts.
+  const actionItems = useMemo(() => {
+    const items = [];
     const g = normalizeGoalType(bundle.targets.goalType);
+    const hour = new Date().getHours();
 
+    const mealsCount = Number(bundle.derived.mealsCount || 0) || 0;
+    const hasMeals = !!bundle.derived.hasMeals;
+    const hasWorkout = !!bundle.derived.hasWorkout;
+
+    const calorieTarget = Number(bundle.targets.calorieTarget || 0) || 0;
+    const proteinTarget = Number(bundle.targets.proteinTarget || 0) || 0;
+
+    const consumed = Number(bundle.totals.consumed || 0) || 0;
+    const burned = Number(bundle.totals.burned || 0) || 0;
+
+    const protein = Number(bundle.totals.macros.protein_g || 0) || 0;
+    const carbs = Number(bundle.totals.macros.carbs_g || 0) || 0;
+    const fats = Number(bundle.totals.macros.fat_g || 0) || 0;
+
+    // If profile isn't complete, keep the first checklist item laser-focused.
     if (!bundle.derived.profileComplete) {
-      opts.push({ key: "finish_setup", label: "Finish Setup", hint: "So targets are accurate", go: "/health" });
-      opts.push({ key: "log_meal", label: "Log a Meal", hint: "So I can judge today", go: "/meals" });
-      opts.push({ key: "log_workout", label: "Log Workout", hint: "So exercise counts", go: "/workout" });
-      return opts;
+      items.push({
+        key: "finish_setup",
+        label: "Finish your setup",
+        sub: "So your targets are accurate",
+        done: false,
+        go: "/health",
+        cta: "Finish setup",
+      });
+      items.push({
+        key: "log_first_meal",
+        label: "Log your first meal",
+        sub: "So today can be evaluated",
+        done: hasMeals,
+        go: "/meals",
+        cta: "Log meal",
+      });
+      items.push({
+        key: "log_workout",
+        label: "Log your workout",
+        sub: "So exercise counts",
+        done: hasWorkout,
+        go: "/workout",
+        cta: "Log workout",
+      });
+      return items;
     }
 
-    if (!bundle.derived.hasMeals) {
-      opts.push({ key: "log_meal", label: "Log a Meal", hint: "Fastest way to improve accuracy", go: "/meals" });
-      if (g === "bulk") {
-        opts.push({ key: "add_calories", label: "Add a Meal", hint: "Hit surplus today", go: "/meals" });
-        opts.push({ key: "add_protein", label: "Eat Protein", hint: "Build muscle faster", go: "/meals" });
-      } else {
-        opts.push({ key: "add_protein", label: "Eat Protein", hint: "Easy macro win", go: "/meals" });
-        opts.push({ key: "small_dinner", label: "Smaller Dinner", hint: "Stay near target", go: "/meals" });
-      }
-      return opts;
-    }
+    // Meal cadence: breakfast → lunch → dinner (based on time + how many meals logged).
+    const mealStep = (() => {
+      if (mealsCount <= 0) return hour < 11 ? "breakfast" : hour < 16 ? "your first meal" : "your next meal";
+      if (mealsCount === 1) return hour < 16 ? "lunch" : "your next meal";
+      if (mealsCount === 2) return hour < 19 ? "dinner" : "your next meal";
+      return "your next meal";
+    })();
 
-    if (!bundle.derived.hasWorkout) {
-      opts.push({ key: "log_workout", label: "Log Workout", hint: "Make your day count", go: "/workout" });
-      if (g === "bulk") {
-        opts.push({ key: "lift", label: "Lift Today", hint: "Even 30–45 min", go: "/workout" });
-        opts.push({ key: "eat_protein", label: "Eat Protein", hint: "Anchor your day", go: "/meals" });
-      } else {
-        opts.push({ key: "walk", label: "10-min Walk", hint: "Quick win", go: "/workout" });
-        opts.push({ key: "eat_protein", label: "Eat Protein", hint: "Easiest macro fix", go: "/meals" });
-      }
-      return opts;
-    }
+    items.push({
+      key: "log_meal_cadence",
+      label: `Log ${mealStep}`,
+      sub: "Keeps the day accurate",
+      done: mealsCount >= (hour < 11 ? 1 : hour < 16 ? 2 : hour < 19 ? 3 : 3),
+      go: "/meals",
+      cta: "Log meal",
+    });
 
-    if (bundle.targets.proteinTarget && proteinGap >= 20) {
-      opts.push({ key: "eat_protein", label: "Eat Protein", hint: `Add ~${Math.round(Math.min(30, proteinGap))}g`, go: "/meals" });
-      if (g === "bulk") {
-        opts.push({ key: "add_carbs", label: "Add Carbs", hint: "Fuel training", go: "/meals" });
-        opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Keep the day accurate", go: "/meals" });
-      } else {
-        opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Keep the day accurate", go: "/meals" });
-        opts.push({ key: "reduce_cal", label: "Tighten Calories", hint: "Small portion win", go: "/meals" });
-      }
-      return opts;
-    }
-
-    // Default: goal-aware
-    opts.push({ key: "log_meal", label: "Log Next Meal", hint: "Stay accurate", go: "/meals" });
-    opts.push({ key: "log_workout", label: "Log Workout", hint: "Keep exercise counted", go: "/workout" });
-    if (g === "bulk") {
-      opts.push({ key: "add_meal", label: "Add Meal", hint: "Hit surplus", go: "/meals" });
+    // Protein anchor (works for all goals).
+    if (proteinTarget > 0) {
+      items.push({
+        key: "protein_anchor",
+        label: "Hit protein",
+        sub: `${Math.round(protein)} / ${Math.round(proteinTarget)} g`,
+        done: protein >= proteinTarget,
+        go: "/meals",
+        cta: "Add protein",
+      });
     } else {
-      opts.push({ key: "tighten", label: "Tighten Calories", hint: "Easy win today", go: "/meals" });
+      items.push({
+        key: "protein_anchor",
+        label: "Add protein",
+        sub: "Protein makes everything easier",
+        done: protein >= 120,
+        go: "/meals",
+        cta: "Add protein",
+      });
     }
-    return opts;
-  }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.derived.hasWorkout, bundle.targets.proteinTarget, proteinGap, bundle.targets.goalType]);
 
-  const [selectedFix, setSelectedFix] = useState(null);
-  useEffect(() => {
-    if (!selectedFix || !fixOptions.some((o) => o.key === selectedFix)) {
-      setSelectedFix(fixOptions?.[0]?.key || null);
+    // Goal-sensitive next step:
+    // - Bulk: carbs + calories matter.
+    // - Cut: keep calories near target.
+    if (g === "bulk") {
+      items.push({
+        key: "add_carbs",
+        label: "Fuel with carbs",
+        sub: `${Math.round(carbs)} g carbs logged`,
+        done: carbs >= 140, // UI-only threshold (keeps it simple)
+        go: "/meals",
+        cta: "Add carbs",
+      });
+
+      if (calorieTarget > 0) {
+        items.push({
+          key: "hit_calories",
+          label: "Get close to your calories",
+          sub: `${Math.round(consumed)} / ${Math.round(calorieTarget)} kcal`,
+          done: consumed >= Math.max(0, calorieTarget * 0.9),
+          go: "/meals",
+          cta: "Add food",
+        });
+      }
+    } else if (g === "cut") {
+      if (calorieTarget > 0) {
+        const err = Math.abs(consumed - calorieTarget);
+        items.push({
+          key: "stay_on_target",
+          label: "Stay near your calories",
+          sub: `${Math.round(consumed)} / ${Math.round(calorieTarget)} kcal`,
+          done: err <= 220,
+          go: "/meals",
+          cta: "Log food",
+        });
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixOptions]);
 
-  const selectedFixObj = useMemo(
-    () => fixOptions.find((o) => o.key === selectedFix) || null,
-    [fixOptions, selectedFix]
-  );
+    // Training / movement
+    items.push({
+      key: "training",
+      label: hasWorkout ? "Workout logged" : "Log your workout",
+      sub: hasWorkout ? `${Math.round(burned)} kcal logged` : "Counts toward your day",
+      done: hasWorkout,
+      go: "/workout",
+      cta: hasWorkout ? "View workout" : "Log workout",
+    });
+
+    // Keep list compact: show at most 5 items to avoid overwhelm.
+    return items.slice(0, 5);
+  }, [bundle]);
+
+  const nextAction = useMemo(() => actionItems.find((x) => !x.done) || null, [actionItems]);
 
   // AI gating (unchanged)
   const openUpgrade = () => setUpgradeOpen(true);
@@ -1005,77 +1083,80 @@ Win state: ${win.state}
           </Stack>
         </CardShell>
 
-        {/* Card 2: Fix */}
-        <CardShell title="Fix" subtitle="Pick one thing and do it">
+        
+        {/* Card 2: Fix (Checklist) */}
+        <CardShell title="Fix" subtitle="Check these off to win">
           <Stack spacing={1.2} sx={{ mt: 0.4 }} alignItems="center">
             <Typography sx={{ fontWeight: 950, textAlign: "center" }}>
-              Step 1: Pick one
+              Your checklist
             </Typography>
 
-            <Stack spacing={1} sx={{ width: "100%" }}>
-              {fixOptions.map((o) => {
-                const active = o.key === selectedFix;
-                return (
-                  <Box
-                    key={o.key}
-                    onClick={() => setSelectedFix(o.key)}
+            <Box sx={{ width: "100%" }}>
+              <List sx={{ p: 0 }}>
+                {actionItems.map((it) => (
+                  <ListItem
+                    key={it.key}
                     sx={{
-                      p: 1.1,
+                      px: 1.1,
+                      py: 0.9,
+                      mb: 0.9,
                       borderRadius: 2,
-                      cursor: "pointer",
-                      border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid rgba(148,163,184,0.18)",
-                      background: active ? "rgba(59,130,246,0.14)" : "rgba(15,23,42,0.55)",
+                      border: "1px solid rgba(148,163,184,0.18)",
+                      background: it.done ? "rgba(34,197,94,0.10)" : "rgba(15,23,42,0.55)",
                     }}
+                    secondaryAction={
+                      it.done ? null : (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => history.push(it.go)}
+                          sx={{ borderRadius: 999, fontWeight: 950, px: 2.0 }}
+                        >
+                          {it.cta || "Do"}
+                        </Button>
+                      )
+                    }
                   >
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)" }}>{o.label}</Typography>
-                        <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>{o.hint}</Typography>
-                      </Box>
-                      <Chip
-                        size="small"
-                        label={active ? "SELECTED" : "TAP"}
-                        color={active ? "primary" : "default"}
-                        sx={{
-                          fontWeight: 950,
-                          borderRadius: 999,
-                          ...(active
-                            ? {}
-                            : {
-                                bgcolor: "rgba(255,255,255,0.08)",
-                                color: "rgba(255,255,255,0.86)",
-                                border: "1px solid rgba(255,255,255,0.16)",
-                              }),
-                        }}
-                      />
-                    </Stack>
-                  </Box>
-                );
-              })}
-            </Stack>
+                    <ListItemIcon sx={{ minWidth: 38, color: it.done ? "success.main" : "rgba(255,255,255,0.70)" }}>
+                      {it.done ? <CheckCircleRoundedIcon /> : <RadioButtonUncheckedRoundedIcon />}
+                    </ListItemIcon>
 
-            <Typography sx={{ fontWeight: 950, textAlign: "center" }}>
-              Step 2: Do it
-            </Typography>
+                    <ListItemText
+                      primary={
+                        <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)" }}>
+                          {it.label}
+                        </Typography>
+                      }
+                      secondary={
+                        it.sub ? (
+                          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)" }}>
+                            {it.sub}
+                          </Typography>
+                        ) : null
+                      }
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
 
             <Button
               variant="contained"
-              onClick={() => {
-                if (!selectedFixObj) return;
-                history.push(selectedFixObj.go);
-              }}
+              disabled={!nextAction}
+              onClick={() => nextAction && history.push(nextAction.go)}
               sx={{ mt: 0.2, borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
             >
-              Do this now
+              {nextAction ? `Do next: ${nextAction.cta || "Go"}` : "All set ✅"}
             </Button>
 
             <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-              One tap. One action. Then swipe to your win.
+              As you log meals/workouts, these check off automatically.
             </Typography>
           </Stack>
         </CardShell>
 
         {/* Card 3: Coach (only place we show AI badge) */}
+ (only place we show AI badge) */}
         <CardShell
           title="Coach"
           subtitle="Your personal message"
