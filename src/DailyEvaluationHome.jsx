@@ -879,7 +879,7 @@ Tomorrow Plan:
   const pctOf = (v, t) => (t > 0 ? clamp((Number(v || 0) / t) * 100, 0, 100) : 0);
 
   const carbsPct = pctOf(bundle.totals.macros.carbs_g, carbsTarget);
-  const fatsPct = pctOf(bundle.totals.macros.fats_g, fatsTarget);
+  const fatsPct = pctOf(bundle.totals.macros.fat_g, fatsTarget);
   const caloriesPct = pctOf(bundle.totals.consumed, caloriesTarget);
   const waterPct = pctOf(waterOz, waterTargetOz);
   const electrolytesPct = pctOf(electrolytesMg, electrolytesTargetMg);
@@ -1081,7 +1081,7 @@ return (
           <Divider sx={{ my: 1.4 }} />
 
           <Stack spacing={1}>
-            <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center">
               <Chip size="small" sx={macroChipSx} label={`🍽️ Eaten: ${Math.round(bundle.totals.consumed)} kcal`} />
               <Chip size="small" sx={macroChipSx} icon={<FitnessCenterIcon />} label={`Burned: ${Math.round(bundle.totals.burned)} kcal`} />
               <Chip size="small" sx={macroChipSx} label={`⚖️ Net: ${Math.round(bundle.totals.netKcal)} kcal`} />
@@ -1095,21 +1095,21 @@ return (
                 <Ring
                   pct={bundle.targets.calorieTarget ? calQuality : 0}
                   size={112}
-                  title="Tightness"
+                  title="On track"
                   value={bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
                   tone="primary.main"
                 />
-                <Box sx={{ flex: 1 }}>
-                  <Stack direction="row" spacing={0.8} alignItems="center">
+                <Box sx={{ minWidth: 160, textAlign: "center" }}>
+                  <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center">
                     <TrackChangesIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
                     <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                      Calorie drift
+                      Calories to goal
                     </Typography>
                   </Stack>
-                  <Typography sx={{ fontWeight: 950, mt: 0.2 }}>
-                    {bundle.targets.calorieTarget ? `Off ${Math.round(calErr)} kcal` : "Set a target"}
+                  <Typography sx={{ fontWeight: 950, mt: 0.2, textAlign: "center" }}>
+                    {bundle.targets.calorieTarget ? (bundle.totals.consumed <= bundle.targets.calorieTarget ? `Left ${Math.round(bundle.targets.calorieTarget - bundle.totals.consumed)} kcal` : `Over ${Math.round(bundle.totals.consumed - bundle.targets.calorieTarget)} kcal`) : "Set a target"}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)", textAlign: "center", whiteSpace: "nowrap" }}>
                     Target {Math.round(bundle.targets.calorieTarget || 0)} kcal
                   </Typography>
                 </Box>
@@ -1125,7 +1125,7 @@ return (
               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
                 <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={78} title="Protein" value={`${Math.round(bundle.totals.macros.protein_g)}g`} />
                 <Ring pct={carbsPct} size={78} title="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} />
-                <Ring pct={fatsPct} size={78} title="Fats" value={`${Math.round(bundle.totals.macros.fats_g)}g`} />
+                <Ring pct={fatsPct} size={78} title="Fats" value={`${Math.round(bundle.totals.macros.fat_g)}g`} />
                 <Ring
                   pct={caloriesPct}
                   size={78}
@@ -1327,7 +1327,7 @@ return (
               Actions (fix what’s missing):
             </Typography>
 
-            <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center" sx={{ width: '100%' }}>
               <Button
                 size="small"
                 variant={bundle.derived.limiterKey === "missing_meals" || bundle.derived.limiterKey === "protein" ? "contained" : "outlined"}
