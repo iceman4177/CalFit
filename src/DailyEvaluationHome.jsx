@@ -1088,65 +1088,53 @@ return (
               <Chip size="small" sx={macroChipSx} label={`🥩 Protein: ${Math.round(bundle.totals.macros.protein_g)} g`} />
             </Stack>
 
-            {/* Rings */}
-            <Box
-              sx={{
-                mt: 0.8,
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 1.2,
-                alignItems: "center",
-              }}
-            >
-              {/* Big: Calorie tightness */}
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
+            {/* Rings */} 
+            <Stack spacing={1.2} sx={{ mt: 0.8 }}>
+              {/* Row 1: Tightness (primary) + drift */}
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.2 }}>
                 <Ring
                   pct={bundle.targets.calorieTarget ? calQuality : 0}
-                  size={96}
+                  size={112}
                   title="Tightness"
                   value={bundle.targets.calorieTarget ? `${Math.round(calQuality)}%` : "—"}
                   tone="primary.main"
                 />
-                <Box>
+                <Box sx={{ flex: 1 }}>
                   <Stack direction="row" spacing={0.8} alignItems="center">
                     <TrackChangesIcon sx={{ fontSize: 18, color: "rgba(226,232,240,0.85)" }} />
                     <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
                       Calorie drift
                     </Typography>
                   </Stack>
-                  <Typography sx={{ fontWeight: 950 }}>
+                  <Typography sx={{ fontWeight: 950, mt: 0.2 }}>
                     {bundle.targets.calorieTarget ? `Off ${Math.round(calErr)} kcal` : "Set a target"}
                   </Typography>
+                  <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                    Target {Math.round(bundle.targets.calorieTarget || 0)} kcal
+                  </Typography>
                 </Box>
+
+                {/* Small utility rings */}
+                <Stack direction="row" spacing={1}>
+                  <Ring pct={waterPct} size={56} title="Water" value={`${Math.round(waterOz)}oz`} tone="primary.main" />
+                  <Ring pct={electrolytesPct} size={56} title="Electrolytes" value={`${Math.round(electrolytesMg)}mg`} tone="primary.main" />
+                </Stack>
               </Box>
 
-              {/* Medium macros */}
-              <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-                <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={72} title="Protein" value={`${Math.round(bundle.totals.macros.protein_g)}g`} />
-                <Ring pct={carbsPct} size={72} title="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} />
-                <Ring pct={fatsPct} size={72} title="Fats" value={`${Math.round(bundle.totals.macros.fats_g)}g`} />
-              </Box>
-
-              {/* Medium calories target (no duplicate tightness) */}
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
+              {/* Row 2: Macro rings */}
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                <Ring pct={pctOf(bundle.totals.macros.protein_g, bundle.targets.proteinTarget || 0)} size={78} title="Protein" value={`${Math.round(bundle.totals.macros.protein_g)}g`} />
+                <Ring pct={carbsPct} size={78} title="Carbs" value={`${Math.round(bundle.totals.macros.carbs_g)}g`} />
+                <Ring pct={fatsPct} size={78} title="Fats" value={`${Math.round(bundle.totals.macros.fats_g)}g`} />
                 <Ring
                   pct={caloriesPct}
-                  size={72}
+                  size={78}
                   title="Calories"
                   value={caloriesTarget ? `${Math.round(bundle.totals.consumed)}` : "—"}
                   tone="primary.main"
                 />
-                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                  today vs target
-                </Typography>
               </Box>
-
-              {/* Small: water + electrolytes */}
-              <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-                <Ring pct={waterPct} size={58} title="Water" value={`${Math.round(waterOz)}oz`} tone="primary.main" />
-                <Ring pct={electrolytesPct} size={58} title="Electrolytes" value={`${Math.round(electrolytesMg)}mg`} tone="primary.main" />
-              </Box>
-            </Box>
+            </Stack>
 
             <Box
               sx={{
@@ -1163,36 +1151,6 @@ return (
               <Typography sx={{ fontWeight: 900 }}>{metabolismLine}</Typography>
               <Typography variant="caption" sx={{ display: "block", mt: 0.4, color: "rgba(226,232,240,0.72)" }}>
                 {targetLine}
-              </Typography>
-            </Box>
-
-            <Box>
-              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                Protein progress
-              </Typography>
-              <LinearProgress
-                variant="determinate"
-                value={bundle.targets.proteinTarget ? clamp(proteinPct, 0, 100) : 0}
-                sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
-              />
-              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.86)" }}>
-                Target: {bundle.targets.proteinTarget ? `${Math.round(bundle.targets.proteinTarget)}g` : "not set"}
-              </Typography>
-            </Box>
-
-            <Box>
-              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
-                Calorie tightness
-              </Typography>
-              <LinearProgress
-                variant="determinate"
-                value={bundle.targets.calorieTarget ? calQuality : 0}
-                sx={{ height: 10, borderRadius: 999, mt: 0.6 }}
-              />
-              <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "rgba(226,232,240,0.86)" }}>
-                {bundle.targets.calorieTarget
-                  ? `Target: ${Math.round(bundle.targets.calorieTarget)} kcal • Off by ${Math.round(calErr)} kcal`
-                  : "Target: not set"}
               </Typography>
             </Box>
           </Stack>
@@ -1312,8 +1270,7 @@ return (
           <Stack spacing={1.2}>
             <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
               <Box>
-                <Typography sx={{ fontWeight: 950 }}>AI Coach Verdict</Typography>
-                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
+                                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.72)" }}>
                   {pro ? "PRO: unlimited" : `Free: ${remainingAi}/${limitAi} left today`}
                 </Typography>
               </Box>
