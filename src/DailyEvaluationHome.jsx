@@ -759,26 +759,33 @@ export default function DailyEvaluationHome() {
   }, [bundle, hydrationDone]);
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
-  
 
-  // Card 2: quests pagination (5 at a time)
-  const QUESTS_PER_PAGE = 5;
-  const [questPage, setQuestPage] = useState(0);
-
-  const questTotalPages = useMemo(() => Math.max(1, Math.ceil(checklist.length / QUESTS_PER_PAGE)), [checklist.length]);
-  const questPageClamped = useMemo(() => Math.min(questTotalPages - 1, Math.max(0, questPage)), [questPage, questTotalPages]);
-
-  useEffect(() => {
-    // keep page in range when list changes or on new day
-    setQuestPage((p) => Math.min(questTotalPages - 1, Math.max(0, p)));
-  }, [questTotalPages, bundle.dayUS]);
-
+  // Card 2: quests (time-windowed, no paging)
+  // Goal: show a single Morning / Afternoon / Night plan (max 5 items total) to keep it digestible.
   const questItems = useMemo(() => {
-    const start = questPageClamped * QUESTS_PER_PAGE;
-    return checklist.slice(start, start + QUESTS_PER_PAGE);
-  }, [checklist, questPageClamped]);
+    const quotas = { morning: 2, afternoon: 2, night: 1 };
+    const out = [];
+    (["morning", "afternoon", "night"]).forEach((win) => {
+      const group = checklist.filter((q) => (q.window || "morning") === win);
+      const take = Math.max(0, Math.min(quotas[win] || 0, group.length));
+      out.push(...group.slice(0, take));
+    });
+    // If we have fewer than 5 (e.g., some windows empty), fill from remaining in order.
+    if (out.length < 5) {
+      const seen = new Set(out.map((q) => q.key));
+      for (const q of checklist) {
+        if (out.length >= 5) break;
+        if (!seen.has(q.key)) {
+          out.push(q);
+          seen.add(q.key);
+        }
+      }
+    }
+    return out.slice(0, 5);
+  }, [checklist]);
 
   const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
+
 // AI gating
   const remainingAi = getDailyRemaining("daily_eval_verdict");
   const limitAi = getFreeDailyLimit("daily_eval_verdict");
@@ -947,12 +954,24 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         {/* Card 2 */}
         <CardShell title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
-            <Box sx={{ width: "100%", textAlign: "center" }}>
+            <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
-                {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You’re done for now ✅"}
-              </Typography>
-            </Box>
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ width: "100%", flexWrap: "wrap" }}>
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
+                  {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You’re done for now ✅"}
+                </Typography>
+                {nextStep?.action ? (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => history.push(nextStep.action)}
+                    sx={{ borderRadius: 999, fontWeight: 950, px: 2.2, textTransform: "none" }}
+                  >
+                    {nextStep.action === "/meals" ? "Meals" : nextStep.action === "/workout" ? "Workout" : "Go"}
+                  </Button>
+                ) : null}
+              </Stack>
+            </Stack>
 
             <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
               <List disablePadding>
@@ -961,9 +980,6 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                   if (!group.length) return null;
 
                   const winLabel = winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night";
-
-                  const firstActionIdx = group.findIndex((q) => !q.done && (q.manual || q.action));
-
                   return (
                     <Box key={winKey} sx={{ width: "100%" }}>
                       <Typography variant="caption" sx={{ display: "block", px: 1.2, pt: 1.0, pb: 0.6, color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
@@ -975,23 +991,20 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                         const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
 
                         const isHydrate = it.manual && it.key === "rehydrate";
-
-                        const actionLabel =
-                          it.manual ? (it.done ? "Undo" : "Check") : it.action === "/meals" ? "Meals" : it.action === "/workout" ? "Workout" : it.action ? "Go" : "";
-
-                        // Reduce redundancy: only the *next* actionable step in each time window shows a button.
-                        // Hydration stays manually toggleable (even when done).
-                        const canAct = isHydrate ? true : (!it.done && (it.manual || it.action) && (gIdx === firstActionIdx));
-
                         return (
                           <ListItemButton
                             key={it.key}
                             disableRipple
+                            onClick={() => {
+                              if (!it.done && !isHydrate && it.action) {
+                                history.push(it.action);
+                              }
+                            }}
                             sx={{
                               px: 1.2,
                               py: 1.0,
                               borderTop: "1px solid rgba(148,163,184,0.12)",
-                              cursor: "default",
+                              cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
                               opacity: it.done ? 0.92 : 1,
                             }}
                           >
@@ -1025,22 +1038,19 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                                 }}
                               />
                             ) : (
-                              canAct && (
+                              isHydrate ? (
                                 <Button
                                   size="small"
-                                  variant={it.manual ? "outlined" : "contained"}
-                                  onClick={() => {
-                                    if (it.manual && it.key === "rehydrate") {
-                                      toggleHydration();
-                                      return;
-                                    }
-                                    if (it.action) history.push(it.action);
+                                  variant="outlined"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleHydration();
                                   }}
-                                  sx={{ borderRadius: 999, fontWeight: 950, px: 1.6, textTransform: "none" }}
+                                  sx={{ borderRadius: 999, fontWeight: 950, px: 1.8, textTransform: "none" }}
                                 >
-                                  {actionLabel}
+                                  {it.done ? "Undo" : "Check"}
                                 </Button>
-                              )
+                              ) : null
                             )}
                           </ListItemButton>
                         );
@@ -1051,35 +1061,13 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
               </List>
             </Box>
 
-            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ pt: 0.4 }}>
-              <Button
-                variant="outlined"
-                disabled={questPageClamped === 0}
-                onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
-                sx={{ borderRadius: 999, fontWeight: 950, px: 2.6 }}
-              >
-                Prev
-              </Button>
+            
 
-              <Chip
-                label={`${questPageClamped + 1}/${questTotalPages}`}
-                sx={{ fontWeight: 950, borderRadius: 999, bgcolor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.86)" }}
-              />
-
-              <Button
-                variant="outlined"
-                disabled={questPageClamped >= questTotalPages - 1}
-                onClick={() => setQuestPage((p) => Math.min(questTotalPages - 1, p + 1))}
-                sx={{ borderRadius: 999, fontWeight: 950, px: 2.6 }}
-              >
-                Next
-              </Button>
-            </Stack>
           </Stack>
         </CardShell>
 
 {/* Card 3 */}
-        <CardShell title="Coach" subtitle="Your daily recap" right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}>
+        <CardShell title="Coach" subtitle="Your daily recap">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
