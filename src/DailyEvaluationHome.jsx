@@ -311,6 +311,37 @@ function getMealLoggedHourPST(meal) {
   if (!ts) return null;
   const h = getHourInTimeZone(ts, "America/Los_Angeles");
   return Number.isFinite(h) ? h : null;
+
+function getMealText(meal) {
+  try {
+    if (!meal || typeof meal !== "object") return "";
+    const parts = [];
+    if (typeof meal.title === "string") parts.push(meal.title);
+    if (typeof meal.name === "string") parts.push(meal.name);
+    if (typeof meal.meal_name === "string") parts.push(meal.meal_name);
+
+    const items = Array.isArray(meal.items) ? meal.items : Array.isArray(meal.foods) ? meal.foods : Array.isArray(meal.entries) ? meal.entries : [];
+    for (const it of items) {
+      if (it && typeof it === "object") {
+        if (typeof it.name === "string") parts.push(it.name);
+        if (typeof it.title === "string") parts.push(it.title);
+        if (typeof it.food === "string") parts.push(it.food);
+      } else if (typeof it === "string") {
+        parts.push(it);
+      }
+    }
+    return parts.join(" ").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isBreakfastLikeText(t) {
+  if (!t) return false;
+  const s = String(t).toLowerCase();
+  // lightweight keywords; time-of-day still dominates
+  return /(egg|eggs|oat|oats|oatmeal|cereal|yogurt|toast|bagel|pancake|waffle|bacon|sausage|coffee|banana|berries|granola|protein shake|shake)/.test(s);
+}
 }
 
 function bucketMealWindowPST(hour) {
@@ -398,7 +429,7 @@ function buildChecklist({
     window: "morning",
     title: "Log breakfast",
     subtitle: "Quick meal + 30g protein",
-    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
+    done: hasB,
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
@@ -410,7 +441,7 @@ function buildChecklist({
     window: "afternoon",
     title: "Log lunch",
     subtitle: "Keep momentum (protein + carbs)",
-    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour >= 11 && hour <= 15),
+    done: hasL,
     action: "/meals",
     priority: 3,
     hiddenWhenDone: false,
@@ -422,7 +453,7 @@ function buildChecklist({
     window: "night",
     title: "Log dinner",
     subtitle: "Close the day (protein-focused)",
-    done: hasD || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
+    done: hasD,
     action: "/meals",
     priority: 4,
     hiddenWhenDone: false,
@@ -579,12 +610,22 @@ export default function DailyEvaluationHome() {
     const macros = sumMealsMacros(dayMealsRec);
     const mealsCount = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals.length : 0;
     const mealsArr = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals : [];
-    const mealHoursPST = mealsArr.map(getMealLoggedHourPST).filter((h) => typeof h === "number");
+    const mealEntriesPST = mealsArr
+      .map((m) => ({ hour: getMealLoggedHourPST(m), text: getMealText(m) }))
+      .filter((e) => typeof e.hour === "number");
 
-    // Count meals by time window (PST) so we can do smarter inference.
-    const bucketCounts = mealHoursPST.reduce(
-      (acc, h) => {
-        const b = bucketMealWindowPST(h);
+    // Count meals by time window (PST) with a tiny food-based tie-breaker.
+    // Time-of-day is the primary truth; food text only helps around lunch when users eat a "late breakfast".
+    const bucketCounts = mealEntriesPST.reduce(
+      (acc, e) => {
+        let b = bucketMealWindowPST(e.hour);
+
+        // If it's around early lunch (<=1pm) and the foods look breakfast-like, treat it as breakfast
+        // (but only when we haven't already logged breakfast).
+        if (b === "lunch" && acc.breakfast === 0 && e.hour <= 13 && isBreakfastLikeText(e.text)) {
+          b = "breakfast";
+        }
+
         if (b) acc[b] = (acc[b] || 0) + 1;
         return acc;
       },
