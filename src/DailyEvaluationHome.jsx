@@ -580,15 +580,36 @@ export default function DailyEvaluationHome() {
     const mealsCount = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals.length : 0;
     const mealsArr = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals : [];
     const mealHoursPST = mealsArr.map(getMealLoggedHourPST).filter((h) => typeof h === "number");
-    const mealBuckets = {
-      breakfast: mealHoursPST.some((h) => bucketMealWindowPST(h) === "breakfast"),
-      lunch: mealHoursPST.some((h) => bucketMealWindowPST(h) === "lunch"),
-      dinner: mealHoursPST.some((h) => bucketMealWindowPST(h) === "dinner"),
-      late: mealHoursPST.some((h) => bucketMealWindowPST(h) === "late"),
-    };
+
+    // Count meals by time window (PST) so we can do smarter inference.
+    const bucketCounts = mealHoursPST.reduce(
+      (acc, h) => {
+        const b = bucketMealWindowPST(h);
+        if (b) acc[b] = (acc[b] || 0) + 1;
+        return acc;
+      },
+      { breakfast: 0, lunch: 0, dinner: 0, late: 0 }
+    );
 
     const nowHourPST = getHourInTimeZone(new Date(), "America/Los_Angeles");
 
+    // UX rule: If it's past breakfast time (>= 12pm) and the user logged *a* meal but none were in the breakfast window,
+    // treat their first logged meal as "breakfast" so the checklist stays intuitive.
+    if (nowHourPST >= 12 && bucketCounts.breakfast === 0 && mealsArr.length > 0) {
+      if (bucketCounts.lunch > 0) bucketCounts.lunch -= 1;
+      else if (bucketCounts.dinner > 0) bucketCounts.dinner -= 1;
+      else if (bucketCounts.late > 0) bucketCounts.late -= 1;
+      bucketCounts.breakfast = 1;
+    }
+
+    const mealBuckets = {
+      breakfast: bucketCounts.breakfast > 0,
+      lunch: bucketCounts.lunch > 0,
+      dinner: bucketCounts.dinner > 0,
+      late: bucketCounts.late > 0,
+    };
+
+    
 
     const burned = sumWorkoutsCalories(workoutHistory, dayUS);
 
@@ -750,23 +771,38 @@ export default function DailyEvaluationHome() {
     const mealsCount = Number(bundle?.totals?.mealsCount) || 0;
     const hasWorkout = !!bundle?.derived?.hasWorkout;
 
+    // Setup + hydration
     if (!bundle?.derived?.profileComplete) tags.push({ label: "SETUP", tone: "warning" });
-    if (!hydrationDone) tags.push({ label: "HYDRATE", tone: "info" });
+    if (!hydrationDone) tags.push({ label: "HYDRATION", tone: "info" });
 
     // Meal windows (PST)
-    if (hour >= 11 && !(bundle?.derived?.mealBuckets?.lunch)) tags.push({ label: "LUNCH", tone: "primary" });
-    if (hour >= 16 && !(bundle?.derived?.mealBuckets?.dinner)) tags.push({ label: "DINNER", tone: "primary" });
+    if (hour >= 16 && !(bundle?.derived?.mealBuckets?.dinner)) tags.push({ label: "DINNER NEEDED", tone: "primary" });
     if (mealsCount < 3 && hour >= 14) tags.push({ label: "MEALS LOW", tone: "primary" });
 
+    // Macros (avoid duplicating the main flag)
     const pT = Number(bundle?.targets?.proteinTarget) || 0;
     const pNow = Number(bundle?.totals?.macros?.protein_g) || 0;
-    if (pT > 0 && (pT - pNow) >= 25) tags.push({ label: "PROTEIN", tone: "error" });
+    if (flag?.label !== "PROTEIN LOW" && pT > 0 && (pT - pNow) >= 25) {
+      tags.push({ label: "PROTEIN LOW", tone: "error" });
+    }
 
-    if (!hasWorkout && hour >= 13) tags.push({ label: "MOVE", tone: "info" });
+    const cT = Number(bundle?.targets?.carbTarget) || 0;
+    const cNow = Number(bundle?.totals?.macros?.carb_g) || 0;
+    if (cT > 0 && cNow / Math.max(1, cT) < 0.45) tags.push({ label: "CARBS LOW", tone: "warning" });
 
-    // Keep it clean: show up to 3 extra tags (flag already covers main)
+    // Burn status (context)
+    const burned = Number(bundle?.totals?.burned) || 0;
+    if (hasWorkout) {
+      if (burned < 150 && hour >= 15) tags.push({ label: "BURN LOW", tone: "warning" });
+      else if (burned < 350) tags.push({ label: "BURN MODERATE", tone: "info" });
+      else tags.push({ label: "BURN HIGH", tone: "success" });
+    } else if (hour >= 13) {
+      tags.push({ label: "WORKOUT NEEDED", tone: "info" });
+    }
+
+    // Keep it clean: show up to 3 extra tags (main flag already covers one key issue)
     return tags.slice(0, 3);
-  }, [bundle, hydrationDone]);
+  }, [bundle, hydrationDone, flag]);
 
 
   // checklist (uses manual hydrationDone)
@@ -991,7 +1027,6 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                   <Chip
                     key={t.label}
                     size="small"
-                    variant="outlined"
                     label={t.label}
                     color={t.tone}
                     sx={{ borderRadius: 999, fontWeight: 950 }}
