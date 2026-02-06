@@ -37,10 +37,13 @@ import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 
 /**
- * DailyEvaluationHome — Win-first + Checklist Fixes
- * - Card 1: Calories center, macros row (protein/carbs/fats), exercise bottom
- * - Card 2: Dynamic checklist (ordered, goal-aware, time-aware) with auto-check
- * - Card 3: Personal coach message (AI verdict), gating unchanged
+ * DailyEvaluationHome — Win-first + Action Checklist v2
+ * - Card 1: Calories + Exercise top row; macros row below
+ * - Card 2: Goal-aware, time-aware checklist with:
+ *    - Manual morning "Rehydrate" checkbox (stored per-day)
+ *    - Meal step that never jumps to "dinner" from a single morning entry
+ *    - Specific action steps (remaining grams, clear intent)
+ * - Card 3: Personal coach message (AI), gating unchanged
  *
  * IMPORTANT: UI/copy only. No change to persistence/sync logic.
  */
@@ -212,7 +215,7 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
   if (!hasLogs) return { state: "notyet", reason: "Log at least 1 meal or a workout." };
   if (confidenceLabel === "Low") return { state: "notyet", reason: "Log a bit more so it’s accurate." };
   if (score >= 74) return { state: "win", reason: "Solid day. Repeat this." };
-  return { state: "notyet", reason: "Close. Do one fix to win." };
+  return { state: "notyet", reason: "Close. Do the next step to win." };
 }
 
 // ----------------------------- UI primitives ---------------------------------
@@ -265,7 +268,7 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
       />
       <Box sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 0.8 }}>
         <Box>
-          <Typography sx={{ fontWeight: 950, fontSize: size >= 112 ? 18 : 14, lineHeight: 1.05, color: "rgba(255,255,255,0.94)" }}>
+          <Typography sx={{ fontWeight: 950, fontSize: size >= 140 ? 18 : 14, lineHeight: 1.05, color: "rgba(255,255,255,0.94)" }}>
             {primary}
           </Typography>
           {secondary && (
@@ -283,33 +286,36 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
 }
 
 // ----------------------------- checklist logic --------------------------------
-function getMealSlotLabel(mealsLoggedToday, hour) {
-  if (mealsLoggedToday <= 0) return hour < 11 ? "Log breakfast" : hour < 15 ? "Log your first meal" : "Log your next meal";
-  if (mealsLoggedToday === 1) return hour < 15 ? "Log lunch" : "Log your next meal";
-  if (mealsLoggedToday === 2) return "Log dinner";
-  return "Log a snack";
+function getMealStep({ hour, mealsCount }) {
+  // We do NOT assume mealsCount == “meal events” because users may log individual foods.
+  // So keep it conservative:
+  // 0 -> breakfast, 1 -> next meal, 2 -> dinner later, >=3 -> optional snack.
+  if (mealsCount <= 0) return { step: "breakfast", title: hour < 11 ? "Log breakfast" : "Log your first meal" };
+  if (mealsCount === 1) return { step: "next", title: hour < 15 ? "Log lunch" : "Log your next meal" };
+  if (mealsCount === 2) return { step: "next", title: hour < 17 ? "Log your next meal" : "Log dinner" };
+  if (mealsCount >= 3) return { step: "snack", title: "Log a snack (optional)" };
+  return { step: "next", title: "Log your next meal" };
 }
 
 function buildChecklist({
   goalType,
   profileComplete,
-  hasMeals,
-  hasWorkout,
   mealsCount,
+  hasWorkout,
   proteinG,
   carbsG,
   fatG,
   proteinTarget,
-  calorieTarget,
-  consumed,
-  burned,
+  carbsTarget,
+  fatTarget,
+  dayHydrationDone,
 }) {
   const g = normalizeGoalType(goalType);
   const hour = new Date().getHours();
 
   const items = [];
 
-  // 0) setup
+  // Setup (hide when done)
   items.push({
     key: "setup",
     title: "Finish setup",
@@ -318,98 +324,92 @@ function buildChecklist({
     action: "/health",
     priority: 0,
     hiddenWhenDone: true,
+    manual: false,
   });
 
-  // 1) morning rehydrate (simple daily ritual)
-  const morning = hour < 12;
+  // Manual hydration checkbox (only relevant morning-ish, but user controls it)
   items.push({
     key: "rehydrate",
     title: "Rehydrate",
-    subtitle: morning ? "Water + electrolytes (fast win)" : "Water (quick reset)",
-    done: !morning, // auto-check after morning to avoid lingering task
+    subtitle: hour < 12 ? "Water + electrolytes" : "Water (quick reset)",
+    done: !!dayHydrationDone,
     action: null,
     priority: 1,
     hiddenWhenDone: false,
+    manual: true,
   });
 
-  // 2) meal logging (dynamic slot)
-  const mealTitle = getMealSlotLabel(mealsCount, hour);
+  // Meal logging step (time-aware, but never marks “done” just because you logged *something*)
+  const mealStep = getMealStep({ hour, mealsCount });
+  const mealDone = mealsCount >= 1 && mealStep.step === "snack"; // only truly “done” when they've logged 3+ entries
   items.push({
-    key: "log_meal",
-    title: mealTitle,
+    key: "meal_step",
+    title: mealStep.title,
     subtitle: "So today counts",
-    done: !!hasMeals,
+    done: mealDone,
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
+    manual: false,
   });
 
-  // 3) macro nudges depend on goal
+  // Specific protein action
   const pGap = Math.max(0, (Number(proteinTarget) || 0) - (Number(proteinG) || 0));
+  const pNeed = Math.round(Math.min(45, pGap || 0));
 
-  if (g === "bulk") {
+  if ((Number(proteinTarget) || 0) > 0) {
     items.push({
       key: "protein",
-      title: pGap > 0 ? "Add protein" : "Protein hit",
-      subtitle: pGap > 0 ? `Add ~${Math.round(Math.min(35, pGap))}g` : "Keep it steady",
-      done: pGap <= 0 && proteinTarget > 0,
+      title: pGap > 0 ? "Hit protein target" : "Protein on track",
+      subtitle: pGap > 0 ? `Add ~${pNeed}g protein` : "Keep it steady",
+      done: pGap <= 0,
       action: "/meals",
       priority: 3,
       hiddenWhenDone: false,
-    });
-
-    // carbs are useful for bulk/training
-    items.push({
-      key: "carbs",
-      title: "Add carbs",
-      subtitle: "Fuel training",
-      done: (Number(carbsG) || 0) >= 120, // UI-only threshold for “enough”
-      action: "/meals",
-      priority: 4,
-      hiddenWhenDone: false,
-    });
-  } else if (g === "cut") {
-    items.push({
-      key: "protein",
-      title: pGap > 0 ? "Add protein" : "Protein hit",
-      subtitle: pGap > 0 ? `Add ~${Math.round(Math.min(35, pGap))}g` : "Keeps hunger down",
-      done: pGap <= 0 && proteinTarget > 0,
-      action: "/meals",
-      priority: 3,
-      hiddenWhenDone: false,
-    });
-    items.push({
-      key: "walk",
-      title: "10‑min walk",
-      subtitle: "Easy calorie win",
-      done: (Number(burned) || 0) >= 120,
-      action: "/workout",
-      priority: 4,
-      hiddenWhenDone: false,
-    });
-  } else {
-    // maintain
-    items.push({
-      key: "protein",
-      title: pGap > 0 ? "Add protein" : "Protein steady",
-      subtitle: pGap > 0 ? `Add ~${Math.round(Math.min(30, pGap))}g` : "Nice",
-      done: pGap <= 0 && proteinTarget > 0,
-      action: "/meals",
-      priority: 3,
-      hiddenWhenDone: false,
-    });
-    items.push({
-      key: "walk",
-      title: "Move 10 minutes",
-      subtitle: "Keeps your day clean",
-      done: (Number(burned) || 0) >= 120,
-      action: "/workout",
-      priority: 4,
-      hiddenWhenDone: false,
+      manual: false,
     });
   }
 
-  // 4) workout log / exercise
+  // Goal-aware fuel step (bulk: carbs; cut: steps; maintain: move)
+  if (g === "bulk") {
+    const cGap = Math.max(0, (Number(carbsTarget) || 0) - (Number(carbsG) || 0));
+    const cNeed = Math.round(Math.min(90, cGap || 0));
+
+    items.push({
+      key: "fuel",
+      title: cGap > 0 ? "Fuel training (carbs)" : "Carbs on track",
+      subtitle: cGap > 0 ? `Add ~${cNeed}g carbs` : "Nice",
+      done: cGap <= 0,
+      action: "/meals",
+      priority: 4,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  } else if (g === "cut") {
+    items.push({
+      key: "steps",
+      title: "10‑min walk",
+      subtitle: "Easy deficit win",
+      done: false, // we can't reliably detect steps; keep as a gentle action
+      action: "/workout",
+      priority: 4,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  } else {
+    items.push({
+      key: "move",
+      title: "Move 10 minutes",
+      subtitle: "Keeps your day clean",
+      done: false,
+      action: "/workout",
+      priority: 4,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  }
+
+  // Workout logging (detectable)
   items.push({
     key: "workout",
     title: hasWorkout ? "Workout logged" : "Log workout",
@@ -418,15 +418,15 @@ function buildChecklist({
     action: "/workout",
     priority: 5,
     hiddenWhenDone: false,
+    manual: false,
   });
 
-  // order + prune to avoid overwhelm (max 5 visible)
+  // Order + prune (max 6 visible; checklist feels satisfying)
   const visible = items
     .filter((it) => !(it.hiddenWhenDone && it.done))
     .sort((a, b) => a.priority - b.priority);
 
-  // ensure at least one actionable item visible
-  return visible.slice(0, 5);
+  return visible.slice(0, 6);
 }
 
 // ----------------------------- main ------------------------------------------
@@ -579,6 +579,28 @@ export default function DailyEvaluationHome() {
     };
   }, [userId]);
 
+  // per-day hydration manual checkbox
+  const hydrationKey = useMemo(() => {
+    const uid = userId || bundle?.profile?.id || bundle?.profile?.user_id || "guest";
+    return `dailyEvalHydrationDone:${uid}:${bundle.dayISO}`;
+  }, [userId, bundle?.profile, bundle.dayISO]);
+
+  const [hydrationDone, setHydrationDone] = useState(() => safeJsonParse(localStorage.getItem(hydrationKey), false) === true);
+  useEffect(() => {
+    const v = safeJsonParse(localStorage.getItem(hydrationKey), false) === true;
+    setHydrationDone(v);
+  }, [hydrationKey]);
+
+  const toggleHydration = () => {
+    const next = !hydrationDone;
+    setHydrationDone(next);
+    try {
+      localStorage.setItem(hydrationKey, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
   // score animation
   useEffect(() => {
     let raf = null;
@@ -635,29 +657,28 @@ export default function DailyEvaluationHome() {
     return { label: "ON TRACK", tone: "success" };
   }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.targets.proteinTarget, proteinGap, bundle.targets.calorieTarget, calErr]);
 
-  // checklist
+  // checklist (uses manual hydrationDone)
   const checklist = useMemo(() => {
     return buildChecklist({
       goalType: bundle.targets.goalType,
       profileComplete: bundle.derived.profileComplete,
-      hasMeals: bundle.derived.hasMeals,
-      hasWorkout: bundle.derived.hasWorkout,
       mealsCount: bundle.totals.mealsCount,
+      hasWorkout: bundle.derived.hasWorkout,
       proteinG: bundle.totals.macros.protein_g,
       carbsG: bundle.totals.macros.carbs_g,
       fatG: bundle.totals.macros.fat_g,
       proteinTarget: bundle.targets.proteinTarget,
-      calorieTarget: bundle.targets.calorieTarget,
-      consumed: bundle.totals.consumed,
-      burned: bundle.totals.burned,
+      carbsTarget: bundle.targets.carbsTarget,
+      fatTarget: bundle.targets.fatTarget,
+      dayHydrationDone: hydrationDone,
     });
-  }, [bundle]);
+  }, [bundle, hydrationDone]);
 
-  const nextTodo = useMemo(() => checklist.find((i) => !i.done && i.action) || null, [checklist]);
+  const nextTodo = useMemo(() => checklist.find((i) => !i.done && (i.action || i.manual)) || null, [checklist]);
 
   // AI gating
-  const remainingAi = getDailyRemaining(FEATURE_KEY);
-  const limitAi = getFreeDailyLimit(FEATURE_KEY);
+  const remainingAi = getDailyRemaining("daily_eval_verdict");
+  const limitAi = getFreeDailyLimit("daily_eval_verdict");
 
   const openUpgrade = () => setUpgradeOpen(true);
 
@@ -666,11 +687,11 @@ export default function DailyEvaluationHome() {
     setAiVerdict("");
 
     if (!pro) {
-      if (!canUseDailyFeature(FEATURE_KEY)) {
+      if (!canUseDailyFeature("daily_eval_verdict")) {
         openUpgrade();
         return;
       }
-      registerDailyFeatureUse(FEATURE_KEY);
+      registerDailyFeatureUse("daily_eval_verdict");
     }
 
     setAiLoading(true);
@@ -750,7 +771,6 @@ Win: ${win.state}
     }
   };
 
-  // ring breakdown dialog text
   const metabolismLine =
     bundle.est.bmr_est && bundle.est.tdee_est
       ? `BMR ${Math.round(bundle.est.bmr_est)} • TDEE ${Math.round(bundle.est.tdee_est)}`
@@ -764,7 +784,7 @@ Win: ${win.state}
             Daily Evaluation
           </Typography>
           <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
-            {bundle.dayUS} • swipe → pick 1 → win
+            {bundle.dayUS} • swipe → do next → win
           </Typography>
         </Box>
 
@@ -840,145 +860,107 @@ Win: ${win.state}
           }
         >
           <Stack spacing={1.2} alignItems="center">
-            {/* Calories center */}
-            <Box
-              onPointerDown={() => startHold("calories")}
-              onPointerUp={endHold}
-              onPointerLeave={endHold}
-              onClick={() => setActiveRing((v) => (v === "calories" ? null : "calories"))}
-              sx={{ cursor: "pointer" }}
-            >
-              <Ring
-                pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={150}
-                title="Calories"
-                primary={`${Math.round(calQuality)}%`}
-                secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
-                tone="primary.main"
-              />
-            </Box>
-
-            {/* Macros row */}
-            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%" }}>
+            {/* Top row: Calories + Exercise */}
+            <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Box
-                onPointerDown={() => startHold("protein")}
+                onPointerDown={() => startHold("calories")}
                 onPointerUp={endHold}
                 onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "protein" ? null : "protein"))}
+                onClick={() => setActiveRing((v) => (v === "calories" ? null : "calories"))}
                 sx={{ cursor: "pointer" }}
               >
                 <Ring
-                  pct={proteinPct}
-                  size={92}
-                  title="Protein"
-                  primary={`${Math.round(bundle.totals.macros.protein_g)}g`}
-                  secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`}
-                  tone="success.main"
+                  pct={bundle.targets.calorieTarget ? calQuality : 0}
+                  size={148}
+                  title="Calories"
+                  primary={`${Math.round(calQuality)}%`}
+                  secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
+                  tone="primary.main"
                 />
               </Box>
 
               <Box
-                onPointerDown={() => startHold("carbs")}
+                onPointerDown={() => startHold("exercise")}
                 onPointerUp={endHold}
                 onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "carbs" ? null : "carbs"))}
+                onClick={() => setActiveRing((v) => (v === "exercise" ? null : "exercise"))}
                 sx={{ cursor: "pointer" }}
               >
                 <Ring
-                  pct={carbsPct}
-                  size={92}
-                  title="Carbs"
-                  primary={`${Math.round(bundle.totals.macros.carbs_g)}g`}
-                  secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`}
-                  tone="info.main"
-                />
-              </Box>
-
-              <Box
-                onPointerDown={() => startHold("fats")}
-                onPointerUp={endHold}
-                onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "fats" ? null : "fats"))}
-                sx={{ cursor: "pointer" }}
-              >
-                <Ring
-                  pct={fatsPct}
-                  size={92}
-                  title="Fats"
-                  primary={`${Math.round(bundle.totals.macros.fat_g)}g`}
-                  secondary={`of ${Math.round(bundle.targets.fatTarget)}g`}
-                  tone="secondary.main"
+                  pct={exercisePct}
+                  size={148}
+                  title="Exercise"
+                  primary={`${Math.round(bundle.totals.burned)} kcal`}
+                  secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
+                  tone="warning.main"
                 />
               </Box>
             </Stack>
 
-            {/* Exercise bottom */}
-            <Box
-              onPointerDown={() => startHold("exercise")}
-              onPointerUp={endHold}
-              onPointerLeave={endHold}
-              onClick={() => setActiveRing((v) => (v === "exercise" ? null : "exercise"))}
-              sx={{ cursor: "pointer" }}
-            >
-              <Ring
-                pct={exercisePct}
-                size={124}
-                title="Exercise"
-                primary={`${Math.round(bundle.totals.burned)} kcal`}
-                secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
-                tone="warning.main"
-              />
-            </Box>
+            {/* Macros row */}
+            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
+              <Box onPointerDown={() => startHold("protein")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "protein" ? null : "protein"))} sx={{ cursor: "pointer" }}>
+                <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              </Box>
+
+              <Box onPointerDown={() => startHold("carbs")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "carbs" ? null : "carbs"))} sx={{ cursor: "pointer" }}>
+                <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              </Box>
+
+              <Box onPointerDown={() => startHold("fats")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "fats" ? null : "fats"))} sx={{ cursor: "pointer" }}>
+                <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
+              </Box>
+            </Stack>
 
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               Tap a ring to see what matters today.
             </Typography>
 
-            <Chip
-              icon={<WarningAmberIcon sx={{ color: "inherit" }} />}
-              label={flag.label}
-              color={flag.tone}
-              sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }}
-            />
+            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
 
             <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 0.3 }}>
               <InfoOutlinedIcon sx={{ fontSize: 18, color: "rgba(255,255,255,0.62)" }} />
               <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-                Tap a ring • Hold for breakdown • Swipe for your fix
+                Tap a ring • Hold for breakdown • Swipe for your steps
               </Typography>
             </Stack>
           </Stack>
         </CardShell>
 
-        {/* Card 2: Checklist */}
-        <CardShell title="Fix" subtitle="Pick one thing and do it">
+        {/* Card 2 */}
+        <CardShell title="Fix" subtitle="Do the next step">
           <Stack spacing={1.1} alignItems="center">
-            <Typography sx={{ fontWeight: 950, textAlign: "center" }}>Today’s checklist</Typography>
+            <Typography sx={{ fontWeight: 950, textAlign: "center" }}>Today’s steps</Typography>
 
             <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
               <List disablePadding>
                 {checklist.map((it, idx) => {
                   const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
-                  const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.50)";
-                  const isActionable = !!it.action && !it.done;
+                  const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
+                  const isActionable = !it.done && (it.action || it.manual);
+
                   return (
                     <ListItemButton
                       key={it.key}
-                      disabled={!it.action}
                       onClick={() => {
+                        if (it.manual && it.key === "rehydrate") {
+                          toggleHydration();
+                          return;
+                        }
                         if (it.action) history.push(it.action);
                       }}
                       sx={{
                         px: 1.2,
                         py: 1.0,
                         borderTop: idx === 0 ? "none" : "1px solid rgba(148,163,184,0.12)",
-                        cursor: it.action ? "pointer" : "default",
-                        opacity: it.done ? 0.78 : 1,
+                        cursor: it.action || it.manual ? "pointer" : "default",
+                        opacity: it.done ? 0.92 : 1, // do NOT grey it out hard
                       }}
                     >
                       <ListItemIcon sx={{ minWidth: 34 }}>
                         <Icon sx={{ fontSize: 20, color: iconColor }} />
                       </ListItemIcon>
+
                       <ListItemText
                         primary={
                           <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
@@ -991,14 +973,11 @@ Win: ${win.state}
                           </Typography>
                         }
                       />
+
                       {isActionable && (
-                        <Chip
-                          size="small"
-                          label="DO"
-                          color="primary"
-                          sx={{ fontWeight: 950, borderRadius: 999 }}
-                        />
+                        <Chip size="small" label={it.manual ? "TAP" : "DO"} color="primary" sx={{ fontWeight: 950, borderRadius: 999 }} />
                       )}
+
                       {it.done && (
                         <Chip
                           size="small"
@@ -1021,31 +1000,30 @@ Win: ${win.state}
             <Button
               variant="contained"
               onClick={() => {
-                if (nextTodo?.action) history.push(nextTodo.action);
+                if (!nextTodo) return;
+                if (nextTodo.manual && nextTodo.key === "rehydrate") {
+                  toggleHydration();
+                  return;
+                }
+                if (nextTodo.action) history.push(nextTodo.action);
               }}
-              disabled={!nextTodo?.action}
+              disabled={!nextTodo}
               sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
             >
-              {nextTodo?.action ? "Do next" : "All done"}
+              {nextTodo ? "Do next" : "All done"}
             </Button>
 
             <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)", textAlign: "center" }}>
-              Each item checks off automatically as you log.
+              Steps check off as you log (and hydration is manual).
             </Typography>
           </Stack>
         </CardShell>
 
-        {/* Card 3: Coach */}
+        {/* Card 3 */}
         <CardShell
           title="Coach"
           subtitle="Your personal message"
-          right={
-            <FeatureUseBadge
-              featureKey={FEATURE_KEY}
-              isPro={pro}
-              labelPrefix="Coach"
-            />
-          }
+          right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}
         >
           <Stack spacing={1.1} alignItems="center">
             <Box
@@ -1102,17 +1080,12 @@ Win: ${win.state}
                 </Typography>
               ) : (
                 <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.65)", mt: 0.6, display: "block" }}>
-                  Tap to reveal details (grade + totals)
+                  Tap to reveal totals + grade
                 </Typography>
               )}
             </Box>
 
-            <Button
-              onClick={handleGenerateAiVerdict}
-              variant="contained"
-              disabled={aiLoading}
-              sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
-            >
+            <Button onClick={handleGenerateAiVerdict} variant="contained" disabled={aiLoading} sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}>
               {aiLoading ? "Writing…" : "Get my coach message"}
             </Button>
 
@@ -1123,15 +1096,7 @@ Win: ${win.state}
             )}
 
             {!!aiVerdict && (
-              <Box
-                sx={{
-                  width: "100%",
-                  p: 1.2,
-                  borderRadius: 2,
-                  border: "1px solid rgba(148,163,184,0.18)",
-                  background: "rgba(15,23,42,0.6)",
-                }}
-              >
+              <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)" }}>
                 <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Message</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
                   {aiVerdict}
