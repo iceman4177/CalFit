@@ -308,9 +308,12 @@ function buildChecklist({
   const hour = new Date().getHours();
 
   const items = [];
+  const push = (it) => items.push(it);
 
-  items.push({
+  // Morning
+  push({
     key: "setup",
+    window: "morning",
     title: "Finish setup",
     subtitle: "So your targets are accurate",
     done: !!profileComplete,
@@ -320,10 +323,11 @@ function buildChecklist({
     manual: false,
   });
 
-  // Manual hydration checkbox
-  items.push({
+  // Manual hydration checkbox (morning routine)
+  push({
     key: "rehydrate",
-    title: "Rehydrate",
+    window: "morning",
+    title: "Hydrate",
     subtitle: hour < 12 ? "Water + electrolytes" : "Water (quick reset)",
     done: !!dayHydrationDone,
     action: null,
@@ -332,82 +336,128 @@ function buildChecklist({
     manual: true,
   });
 
-  // Meal step
-  const mealStep = getMealStep({ hour, mealsCount });
-  const mealDone = mealsCount >= 3; // only truly “done” when they've logged multiple meals
-  items.push({
-    key: "meal_step",
-    title: mealStep.title,
-    subtitle: "So today counts",
-    done: mealDone,
+  // Meals as chronological checkpoints
+  push({
+    key: "meal_morning",
+    window: "morning",
+    title: "Log breakfast",
+    subtitle: "Start your day strong",
+    done: (Number(mealsCount) || 0) >= 1,
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
     manual: false,
   });
 
-  // Protein target (specific remaining)
-  const pGap = Math.max(0, (Number(proteinTarget) || 0) - (Number(proteinG) || 0));
-  const pNeed = Math.round(Math.min(60, pGap || 0));
-  if ((Number(proteinTarget) || 0) > 0) {
-    items.push({
-      key: "protein",
-      title: pGap > 0 ? "Hit protein target" : "Protein on track",
-      subtitle: pGap > 0 ? `Add ~${pNeed}g protein` : "Nice",
+  push({
+    key: "meal_afternoon",
+    window: "afternoon",
+    title: "Log lunch",
+    subtitle: "Keeps your day on track",
+    done: (Number(mealsCount) || 0) >= 2,
+    action: "/meals",
+    priority: 3,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+
+  push({
+    key: "meal_night",
+    window: "night",
+    title: "Log dinner",
+    subtitle: "So today counts",
+    done: (Number(mealsCount) || 0) >= 3,
+    action: "/meals",
+    priority: 4,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+
+  // Protein checkpoint (afternoon) + finish target (night)
+  const pT = Number(proteinTarget) || 0;
+  const pNow = Number(proteinG) || 0;
+  if (pT > 0) {
+    const half = Math.round(pT * 0.5);
+    const needHalf = Math.max(0, half - pNow);
+    push({
+      key: "protein_half",
+      window: "afternoon",
+      title: pNow >= half ? "Protein checkpoint" : "Hit protein checkpoint",
+      subtitle: pNow >= half ? "Nice — keep going" : `Get to ~${half}g (add ~${Math.round(Math.min(45, needHalf))}g)`,
+      done: pNow >= half,
+      action: "/meals",
+      priority: 5,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+
+    const pGap = Math.max(0, pT - pNow);
+    push({
+      key: "protein_full",
+      window: "night",
+      title: pGap > 0 ? "Hit protein target" : "Protein target hit",
+      subtitle: pGap > 0 ? `Add ~${Math.round(Math.min(60, pGap))}g protein` : "Done ✅",
       done: pGap <= 0,
       action: "/meals",
-      priority: 3,
+      priority: 6,
       hiddenWhenDone: false,
       manual: false,
     });
   }
 
-  // Goal-aware fuel step
+  // Goal-aware fuel / movement steps
   if (g === "bulk") {
-    const cGap = Math.max(0, (Number(carbsTarget) || 0) - (Number(carbsG) || 0));
-    const cNeed = Math.round(Math.min(110, cGap || 0));
-    items.push({
-      key: "fuel",
-      title: cGap > 0 ? "Fuel training (carbs)" : "Carbs on track",
-      subtitle: cGap > 0 ? `Add ~${cNeed}g carbs` : "Nice",
-      done: cGap <= 0,
-      action: "/meals",
-      priority: 4,
-      hiddenWhenDone: false,
-      manual: false,
-    });
+    const cT = Number(carbsTarget) || 0;
+    const cNow = Number(carbsG) || 0;
+    if (cT > 0) {
+      const cGap = Math.max(0, cT - cNow);
+      push({
+        key: "fuel",
+        window: "night",
+        title: cGap > 0 ? "Fuel training (carbs)" : "Carbs on track",
+        subtitle: cGap > 0 ? `Add ~${Math.round(Math.min(110, cGap))}g carbs` : "Nice",
+        done: cGap <= 0,
+        action: "/meals",
+        priority: 7,
+        hiddenWhenDone: false,
+        manual: false,
+      });
+    }
   } else if (g === "cut") {
-    items.push({
-      key: "steps",
+    push({
+      key: "walk",
+      window: "afternoon",
       title: "10‑min walk",
       subtitle: "Easy deficit win",
-      done: false,
+      done: !!hasWorkout,
       action: "/workout",
-      priority: 4,
+      priority: 7,
       hiddenWhenDone: false,
       manual: false,
     });
   } else {
-    items.push({
+    push({
       key: "move",
+      window: "afternoon",
       title: "Move 10 minutes",
       subtitle: "Keeps your day clean",
-      done: false,
+      done: !!hasWorkout,
       action: "/workout",
-      priority: 4,
+      priority: 7,
       hiddenWhenDone: false,
       manual: false,
     });
   }
 
-  // Workout
-  items.push({
+  // Workout (best in afternoon/evening)
+  push({
     key: "workout",
+    window: hour < 15 ? "afternoon" : "night",
     title: hasWorkout ? "Workout logged" : "Log workout",
     subtitle: hasWorkout ? "Counts toward your day" : "So exercise counts",
     done: !!hasWorkout,
     action: "/workout",
-    priority: 5,
+    priority: 8,
     hiddenWhenDone: false,
     manual: false,
   });
@@ -415,8 +465,9 @@ function buildChecklist({
   return items
     .filter((it) => !(it.hiddenWhenDone && it.done))
     .sort((a, b) => a.priority - b.priority)
-    .slice(0, 8);
+    .slice(0, 12);
 }
+
 
 // ----------------------------- main ------------------------------------------
 export default function DailyEvaluationHome() {
@@ -761,8 +812,8 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
   const topSubtitle = `${bundle.dayUS} • swipe → do steps → win`;
 
   const coachHelper = pro
-    ? "Tap to reveal your personal win move for today."
-    : `Tap to reveal your personal win move (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
+    ? "Generate your daily recap verdict for today."
+    : `Generate your daily recap verdict (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
@@ -839,65 +890,90 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
               <List disablePadding>
-                {questItems.map((it, idx) => {
-                  const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
-                  const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
-                  const isActionable = !it.done && (it.action || it.manual);
+                {["morning", "afternoon", "night"].map((winKey) => {
+                  const group = questItems.filter((q) => (q.window || "morning") === winKey);
+                  if (!group.length) return null;
+
+                  const winLabel = winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night";
 
                   return (
-                    <ListItemButton
-                      key={it.key}
-                      onClick={() => {
-                        if (!isActionable) return;
-                        if (it.manual && it.key === "rehydrate") {
-                          toggleHydration();
-                          return;
-                        }
-                        if (it.action) history.push(it.action);
-                      }}
-                      sx={{
-                        px: 1.2,
-                        py: 1.0,
-                        borderTop: idx === 0 ? "none" : "1px solid rgba(148,163,184,0.12)",
-                        cursor: isActionable ? "pointer" : "default",
-                        opacity: it.done ? 0.92 : 1,
-                      }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 34 }}>
-                        <Icon sx={{ fontSize: 20, color: iconColor }} />
-                      </ListItemIcon>
+                    <Box key={winKey} sx={{ width: "100%" }}>
+                      <Typography variant="caption" sx={{ display: "block", px: 1.2, pt: 1.0, pb: 0.6, color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                        {winLabel}
+                      </Typography>
 
-                      <ListItemText
-                        primary={
-                          <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
-                            {it.title}
-                          </Typography>
-                        }
-                        secondary={
-                          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
-                            {it.subtitle}
-                          </Typography>
-                        }
-                      />
+                      {group.map((it, gIdx) => {
+                        const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
+                        const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
 
-                      {it.done && (
-                        <Chip
-                          size="small"
-                          label="DONE"
-                          sx={{
-                            fontWeight: 950,
-                            borderRadius: 999,
-                            bgcolor: "rgba(34,197,94,0.14)",
-                            color: "rgba(255,255,255,0.86)",
-                            border: "1px solid rgba(34,197,94,0.35)",
-                          }}
-                        />
-                      )}
+                        const actionLabel =
+                          it.manual ? "Check" : it.action === "/meals" ? "Meals" : it.action === "/workout" ? "Workout" : it.action ? "Go" : "";
 
-                      {!it.done && isActionable && (
-                        <Chip size="small" label={it.manual ? "TAP" : "DO"} color="primary" sx={{ fontWeight: 950, borderRadius: 999 }} />
-                      )}
-                    </ListItemButton>
+                        const canAct = !it.done && (it.manual || it.action);
+
+                        return (
+                          <ListItemButton
+                            key={it.key}
+                            disableRipple
+                            sx={{
+                              px: 1.2,
+                              py: 1.0,
+                              borderTop: "1px solid rgba(148,163,184,0.12)",
+                              cursor: "default",
+                              opacity: it.done ? 0.92 : 1,
+                            }}
+                          >
+                            <ListItemIcon sx={{ minWidth: 34 }}>
+                              <Icon sx={{ fontSize: 20, color: iconColor }} />
+                            </ListItemIcon>
+
+                            <ListItemText
+                              primary={
+                                <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
+                                  {it.title}
+                                </Typography>
+                              }
+                              secondary={
+                                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
+                                  {it.subtitle}
+                                </Typography>
+                              }
+                            />
+
+                            {it.done ? (
+                              <Chip
+                                size="small"
+                                label="DONE"
+                                sx={{
+                                  fontWeight: 950,
+                                  borderRadius: 999,
+                                  bgcolor: "rgba(34,197,94,0.14)",
+                                  color: "rgba(255,255,255,0.86)",
+                                  border: "1px solid rgba(34,197,94,0.35)",
+                                }}
+                              />
+                            ) : (
+                              canAct && (
+                                <Button
+                                  size="small"
+                                  variant={it.manual ? "outlined" : "contained"}
+                                  onClick={() => {
+                                    if (it.manual && it.key === "rehydrate") {
+                                      toggleHydration();
+                                      return;
+                                    }
+                                    if (it.action) history.push(it.action);
+                                  }}
+                                  sx={{ borderRadius: 999, fontWeight: 950, px: 1.6, textTransform: "none" }}
+                                >
+                                  {actionLabel}
+                                </Button>
+                              )
+                            )}
+                          </ListItemButton>
+                        );
+                      })}
+                    </Box>
                   );
                 })}
               </List>
@@ -931,67 +1007,20 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         </CardShell>
 
 {/* Card 3 */}
-        <CardShell title="Coach" subtitle="Your personal win move" right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}>
+        <CardShell title="Coach" subtitle="Your daily recap" right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}>
           <Stack spacing={1.1} alignItems="center">
-            <Box
-              sx={{
-                width: "100%",
-                borderRadius: 3,
-                border: "1px solid rgba(148,163,184,0.18)",
-                background: win.state === "win" ? "rgba(34,197,94,0.12)" : "rgba(245,158,11,0.10)",
-                p: 1.6,
-                textAlign: "center",
-              }}
-            >
-              <Typography sx={{ fontWeight: 950, fontSize: 22 }}>
-                {win.state === "win" ? "WIN ✅" : "NOT YET ⚠️"}
-              </Typography>
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
-                {win.reason}
-              </Typography>
-            </Box>
-
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
             </Typography>
 
-
-            <Stack spacing={1.0} sx={{ width: "100%", pt: 0.4 }} alignItems="center">
-              <Button
-                variant="outlined"
-                fullWidth
-                onClick={() => history.push("/meals")}
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.1 }}
-              >
-                Log a meal
-              </Button>
-
-              <Button
-                variant="outlined"
-                fullWidth
-                onClick={() => history.push("/workout")}
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.1 }}
-              >
-                Log a workout
-              </Button>
-
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={() => history.push("/coach")}
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.15 }}
-              >
-                Get daily recap
-              </Button>
-            </Stack>
-
             <Button
-              onClick={handleGenerateAiVerdict}
               variant="contained"
+              fullWidth
+              onClick={handleGenerateAiVerdict}
               disabled={aiLoading}
-              sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
+              sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.4 }}
             >
-              {aiLoading ? "Revealing…" : "Reveal my win move"}
+              {aiLoading ? "Generating…" : "Get daily recap"}
             </Button>
 
             {!!aiError && (
@@ -1002,13 +1031,13 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {!aiVerdict && !aiLoading && !aiError && (
               <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)", textAlign: "center" }}>
-                It uses what you logged today and tells you the fastest win.
+                Uses what you logged today and gives you the fastest path to a win.
               </Typography>
             )}
 
             {!!aiVerdict && (
               <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)" }}>
-                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your message</Typography>
+                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your recap</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
                   {aiVerdict}
                 </Typography>
