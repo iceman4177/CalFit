@@ -311,6 +311,7 @@ function getMealLoggedHourPST(meal) {
   if (!ts) return null;
   const h = getHourInTimeZone(ts, "America/Los_Angeles");
   return Number.isFinite(h) ? h : null;
+}
 
 function getMealText(meal) {
   try {
