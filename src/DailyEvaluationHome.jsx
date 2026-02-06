@@ -24,7 +24,6 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 
 import UpgradeModal from "./components/UpgradeModal";
 import FeatureUseBadge, {
@@ -37,13 +36,10 @@ import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 
 /**
- * DailyEvaluationHome — Win-first + Action Checklist v2
- * - Card 1: Calories + Exercise top row; macros row below
- * - Card 2: Goal-aware, time-aware checklist with:
- *    - Manual morning "Rehydrate" checkbox (stored per-day)
- *    - Meal step that never jumps to "dinner" from a single morning entry
- *    - Specific action steps (remaining grams, clear intent)
- * - Card 3: Personal coach message (AI), gating unchanged
+ * DailyEvaluationHome — Win-first + Action Steps v3
+ * - Card 1: Scoreboard rings (no press/hold breakdown UX; rings already communicate)
+ * - Card 2: Checklist + "Next 5 steps" panel (button no longer navigates)
+ * - Card 3: Coach-only panel (curiosity CTA + helper text). No "Your numbers" block.
  *
  * IMPORTANT: UI/copy only. No change to persistence/sync logic.
  */
@@ -215,7 +211,7 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
   if (!hasLogs) return { state: "notyet", reason: "Log at least 1 meal or a workout." };
   if (confidenceLabel === "Low") return { state: "notyet", reason: "Log a bit more so it’s accurate." };
   if (score >= 74) return { state: "win", reason: "Solid day. Repeat this." };
-  return { state: "notyet", reason: "Close. Do the next step to win." };
+  return { state: "notyet", reason: "Close. Do one more step to win." };
 }
 
 // ----------------------------- UI primitives ---------------------------------
@@ -287,9 +283,7 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
 
 // ----------------------------- checklist logic --------------------------------
 function getMealStep({ hour, mealsCount }) {
-  // We do NOT assume mealsCount == “meal events” because users may log individual foods.
-  // So keep it conservative:
-  // 0 -> breakfast, 1 -> next meal, 2 -> dinner later, >=3 -> optional snack.
+  // Conservative: a single morning food log should never become “dinner”.
   if (mealsCount <= 0) return { step: "breakfast", title: hour < 11 ? "Log breakfast" : "Log your first meal" };
   if (mealsCount === 1) return { step: "next", title: hour < 15 ? "Log lunch" : "Log your next meal" };
   if (mealsCount === 2) return { step: "next", title: hour < 17 ? "Log your next meal" : "Log dinner" };
@@ -315,7 +309,6 @@ function buildChecklist({
 
   const items = [];
 
-  // Setup (hide when done)
   items.push({
     key: "setup",
     title: "Finish setup",
@@ -327,7 +320,7 @@ function buildChecklist({
     manual: false,
   });
 
-  // Manual hydration checkbox (only relevant morning-ish, but user controls it)
+  // Manual hydration checkbox
   items.push({
     key: "rehydrate",
     title: "Rehydrate",
@@ -339,9 +332,9 @@ function buildChecklist({
     manual: true,
   });
 
-  // Meal logging step (time-aware, but never marks “done” just because you logged *something*)
+  // Meal step
   const mealStep = getMealStep({ hour, mealsCount });
-  const mealDone = mealsCount >= 1 && mealStep.step === "snack"; // only truly “done” when they've logged 3+ entries
+  const mealDone = mealsCount >= 3; // only truly “done” when they've logged multiple meals
   items.push({
     key: "meal_step",
     title: mealStep.title,
@@ -353,15 +346,14 @@ function buildChecklist({
     manual: false,
   });
 
-  // Specific protein action
+  // Protein target (specific remaining)
   const pGap = Math.max(0, (Number(proteinTarget) || 0) - (Number(proteinG) || 0));
-  const pNeed = Math.round(Math.min(45, pGap || 0));
-
+  const pNeed = Math.round(Math.min(60, pGap || 0));
   if ((Number(proteinTarget) || 0) > 0) {
     items.push({
       key: "protein",
       title: pGap > 0 ? "Hit protein target" : "Protein on track",
-      subtitle: pGap > 0 ? `Add ~${pNeed}g protein` : "Keep it steady",
+      subtitle: pGap > 0 ? `Add ~${pNeed}g protein` : "Nice",
       done: pGap <= 0,
       action: "/meals",
       priority: 3,
@@ -370,11 +362,10 @@ function buildChecklist({
     });
   }
 
-  // Goal-aware fuel step (bulk: carbs; cut: steps; maintain: move)
+  // Goal-aware fuel step
   if (g === "bulk") {
     const cGap = Math.max(0, (Number(carbsTarget) || 0) - (Number(carbsG) || 0));
-    const cNeed = Math.round(Math.min(90, cGap || 0));
-
+    const cNeed = Math.round(Math.min(110, cGap || 0));
     items.push({
       key: "fuel",
       title: cGap > 0 ? "Fuel training (carbs)" : "Carbs on track",
@@ -390,7 +381,7 @@ function buildChecklist({
       key: "steps",
       title: "10‑min walk",
       subtitle: "Easy deficit win",
-      done: false, // we can't reliably detect steps; keep as a gentle action
+      done: false,
       action: "/workout",
       priority: 4,
       hiddenWhenDone: false,
@@ -409,7 +400,7 @@ function buildChecklist({
     });
   }
 
-  // Workout logging (detectable)
+  // Workout
   items.push({
     key: "workout",
     title: hasWorkout ? "Workout logged" : "Log workout",
@@ -421,12 +412,10 @@ function buildChecklist({
     manual: false,
   });
 
-  // Order + prune (max 6 visible; checklist feels satisfying)
-  const visible = items
+  return items
     .filter((it) => !(it.hiddenWhenDone && it.done))
-    .sort((a, b) => a.priority - b.priority);
-
-  return visible.slice(0, 6);
+    .sort((a, b) => a.priority - b.priority)
+    .slice(0, 8);
 }
 
 // ----------------------------- main ------------------------------------------
@@ -440,33 +429,16 @@ export default function DailyEvaluationHome() {
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-  // ring breakdown
-  const [activeRing, setActiveRing] = useState(null);
-  const [showBreakdown, setShowBreakdown] = useState(false);
-  const holdTimerRef = useRef(null);
-
-  const startHold = (key) => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = setTimeout(() => {
-      setActiveRing(key);
-      setShowBreakdown(true);
-    }, 520);
-  };
-  const endHold = () => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = null;
-  };
-
-  // Card 3 details
-  const [showNumbers, setShowNumbers] = useState(false);
-
   // AI verdict state (gating unchanged)
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiError, setAiError] = useState("");
 
-  // animated score badge
+  // score badge animation
   const [scoreAnim, setScoreAnim] = useState(0);
+
+  // Card 2: "Next 5" panel
+  const [nextPanelOpen, setNextPanelOpen] = useState(false);
 
   const FEATURE_KEY = "daily_eval_verdict";
 
@@ -520,7 +492,6 @@ export default function DailyEvaluationHome() {
       Number(localStorage.getItem("protein_target_daily_g") || 0) ||
       0;
 
-    // if you have macro targets in profile, prefer them; otherwise fall back to reasonable defaults
     const carbsTarget =
       Number(userData?.carbTargets?.daily_g) ||
       Number(localStorage.getItem("carb_target_daily_g") || 0) ||
@@ -606,7 +577,7 @@ export default function DailyEvaluationHome() {
     let raf = null;
     const target = clamp(bundle.derived.score, 0, 100);
     const start = performance.now();
-    const dur = 700;
+    const dur = 650;
     const tick = (t) => {
       const p = clamp((t - start) / dur, 0, 1);
       const e = 1 - Math.pow(1 - p, 3);
@@ -646,7 +617,7 @@ export default function DailyEvaluationHome() {
   const proteinGap = Math.max(0, bundle.targets.proteinTarget - bundle.totals.macros.protein_g);
   const flag = useMemo(() => {
     if (!bundle.derived.profileComplete || !bundle.derived.hasMeals) {
-      return { label: "ORANGE FLAG: NEEDS DATA", tone: "warning" };
+      return { label: "NEEDS MORE LOGS", tone: "warning" };
     }
     if (bundle.targets.proteinTarget && proteinGap >= 25) {
       return { label: "PROTEIN LOW", tone: "error" };
@@ -674,7 +645,8 @@ export default function DailyEvaluationHome() {
     });
   }, [bundle, hydrationDone]);
 
-  const nextTodo = useMemo(() => checklist.find((i) => !i.done && (i.action || i.manual)) || null, [checklist]);
+  const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
+  const nextFive = useMemo(() => remainingSteps.slice(0, 5), [remainingSteps]);
 
   // AI gating
   const remainingAi = getDailyRemaining("daily_eval_verdict");
@@ -705,10 +677,10 @@ export default function DailyEvaluationHome() {
 You are SlimCal Coach. Write a short, personal message for the user.
 Rules:
 - 2–4 sentences max.
-- supportive, simple language.
+- punchy + motivating (not robotic).
 - Use numbers: calories eaten, exercise, net, protein, carbs, fats; include targets when available.
 - Mention goal type (${goalType}).
-- End with 2 bullets: "Next: ___" and "Tonight: ___".
+- End with 1 line: "Win move: ___" (one specific action).
 Data:
 Day: ${bundle.dayUS}
 Goal: ${goalType}
@@ -720,7 +692,8 @@ Carbs: ${Math.round(bundle.totals.macros.carbs_g)} / ${Math.round(bundle.targets
 Fats: ${Math.round(bundle.totals.macros.fat_g)} / ${Math.round(bundle.targets.fatTarget)} g
 Metabolism: ${hasEst ? `BMR ${Math.round(bundle.est.bmr_est)}, TDEE ${Math.round(bundle.est.tdee_est)}` : "n/a"}
 Confidence: ${bundle.derived.confidenceLabel}
-Win: ${win.state}
+Score: ${bundle.derived.score}/100
+Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 `.trim(),
       };
 
@@ -771,10 +744,11 @@ Win: ${win.state}
     }
   };
 
-  const metabolismLine =
-    bundle.est.bmr_est && bundle.est.tdee_est
-      ? `BMR ${Math.round(bundle.est.bmr_est)} • TDEE ${Math.round(bundle.est.tdee_est)}`
-      : "Set up Health Data to unlock BMR/TDEE";
+  const topSubtitle = `${bundle.dayUS} • swipe → do steps → win`;
+
+  const coachHelper = pro
+    ? "Tap to reveal your personal win move for today."
+    : `Tap to reveal your personal win move (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
@@ -784,62 +758,62 @@ Win: ${win.state}
             Daily Evaluation
           </Typography>
           <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
-            {bundle.dayUS} • swipe → do next → win
+            {topSubtitle}
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
-          {!pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={false} labelPrefix="Coach" />}
-          {pro && <FeatureUseBadge featureKey={FEATURE_KEY} isPro={true} labelPrefix="Coach" />}
+          <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
 
-      {/* Breakdown */}
-      <Dialog open={showBreakdown} onClose={() => setShowBreakdown(false)} fullWidth maxWidth="xs">
-        <DialogTitle sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)", bgcolor: "rgba(2,6,23,0.98)" }}>
-          Breakdown
-        </DialogTitle>
-        <DialogContent sx={{ bgcolor: "rgba(2,6,23,0.98)", color: "rgba(255,255,255,0.80)" }}>
-          <Stack spacing={1.2} sx={{ mt: 0.5 }}>
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Calories</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.consumed)} / {bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal</Typography>
-            </Stack>
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Exercise</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.burned)} kcal</Typography>
-            </Stack>
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Net</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.netKcal)} kcal</Typography>
-            </Stack>
+      {/* Card 2: Next 5 steps panel */}
+      <Dialog open={nextPanelOpen} onClose={() => setNextPanelOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 950 }}>Your next 5</DialogTitle>
+        <DialogContent>
+          {nextFive.length === 0 ? (
+            <Typography sx={{ color: "rgba(2,6,23,0.70)" }}>You’re done for now ✅</Typography>
+          ) : (
+            <Stack spacing={1}>
+              {nextFive.map((it) => (
+                <Box
+                  key={it.key}
+                  sx={{
+                    p: 1.2,
+                    borderRadius: 2,
+                    border: "1px solid rgba(148,163,184,0.18)",
+                    background: "rgba(15,23,42,0.05)",
+                  }}
+                >
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 900 }}>{it.title}</Typography>
+                      <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
+                        {it.subtitle}
+                      </Typography>
+                    </Box>
 
-            <Divider sx={{ borderColor: "rgba(148,163,184,0.18)" }} />
-
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Protein</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.protein_g)} / {Math.round(bundle.targets.proteinTarget)} g</Typography>
+                    <Button
+                      variant="contained"
+                      onClick={() => {
+                        if (it.manual && it.key === "rehydrate") {
+                          toggleHydration();
+                          return;
+                        }
+                        if (it.action) history.push(it.action);
+                      }}
+                      sx={{ borderRadius: 999, fontWeight: 950, px: 2.2 }}
+                    >
+                      {it.manual ? "Tap" : "Do"}
+                    </Button>
+                  </Stack>
+                </Box>
+              ))}
             </Stack>
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Carbs</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.carbs_g)} / {Math.round(bundle.targets.carbsTarget)} g</Typography>
-            </Stack>
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>Fats</Typography>
-              <Typography sx={{ fontWeight: 900 }}>{Math.round(bundle.totals.macros.fat_g)} / {Math.round(bundle.targets.fatTarget)} g</Typography>
-            </Stack>
-
-            <Divider sx={{ borderColor: "rgba(148,163,184,0.18)" }} />
-
-            <Box sx={{ mt: 0.3, p: 1, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)" }}>
-              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-                {metabolismLine}
-              </Typography>
-            </Box>
-          </Stack>
+          )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: "rgba(2,6,23,0.98)" }}>
-          <Button onClick={() => setShowBreakdown(false)} sx={{ borderRadius: 999, fontWeight: 900 }}>
+        <DialogActions>
+          <Button onClick={() => setNextPanelOpen(false)} sx={{ borderRadius: 999, fontWeight: 900 }}>
             Close
           </Button>
         </DialogActions>
@@ -850,7 +824,7 @@ Win: ${win.state}
         {/* Card 1 */}
         <CardShell
           title="Today"
-          subtitle="Tap a ring • hold for breakdown"
+          subtitle="Your scoreboard"
           right={
             <Chip
               label={`${scoreAnim}/100`}
@@ -862,68 +836,33 @@ Win: ${win.state}
           <Stack spacing={1.2} alignItems="center">
             {/* Top row: Calories + Exercise */}
             <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Box
-                onPointerDown={() => startHold("calories")}
-                onPointerUp={endHold}
-                onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "calories" ? null : "calories"))}
-                sx={{ cursor: "pointer" }}
-              >
-                <Ring
-                  pct={bundle.targets.calorieTarget ? calQuality : 0}
-                  size={148}
-                  title="Calories"
-                  primary={`${Math.round(calQuality)}%`}
-                  secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
-                  tone="primary.main"
-                />
-              </Box>
+              <Ring
+                pct={bundle.targets.calorieTarget ? calQuality : 0}
+                size={148}
+                title="Calories"
+                primary={`${Math.round(calQuality)}%`}
+                secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
+                tone="primary.main"
+              />
 
-              <Box
-                onPointerDown={() => startHold("exercise")}
-                onPointerUp={endHold}
-                onPointerLeave={endHold}
-                onClick={() => setActiveRing((v) => (v === "exercise" ? null : "exercise"))}
-                sx={{ cursor: "pointer" }}
-              >
-                <Ring
-                  pct={exercisePct}
-                  size={148}
-                  title="Exercise"
-                  primary={`${Math.round(bundle.totals.burned)} kcal`}
-                  secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
-                  tone="warning.main"
-                />
-              </Box>
+              <Ring
+                pct={exercisePct}
+                size={148}
+                title="Exercise"
+                primary={`${Math.round(bundle.totals.burned)} kcal`}
+                secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
+                tone="warning.main"
+              />
             </Stack>
 
             {/* Macros row */}
             <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Box onPointerDown={() => startHold("protein")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "protein" ? null : "protein"))} sx={{ cursor: "pointer" }}>
-                <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              </Box>
-
-              <Box onPointerDown={() => startHold("carbs")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "carbs" ? null : "carbs"))} sx={{ cursor: "pointer" }}>
-                <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              </Box>
-
-              <Box onPointerDown={() => startHold("fats")} onPointerUp={endHold} onPointerLeave={endHold} onClick={() => setActiveRing((v) => (v === "fats" ? null : "fats"))} sx={{ cursor: "pointer" }}>
-                <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
-              </Box>
+              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
             </Stack>
-
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
-              Tap a ring to see what matters today.
-            </Typography>
 
             <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
-
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 0.3 }}>
-              <InfoOutlinedIcon sx={{ fontSize: 18, color: "rgba(255,255,255,0.62)" }} />
-              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)" }}>
-                Tap a ring • Hold for breakdown • Swipe for your steps
-              </Typography>
-            </Stack>
           </Stack>
         </CardShell>
 
@@ -954,7 +893,7 @@ Win: ${win.state}
                         py: 1.0,
                         borderTop: idx === 0 ? "none" : "1px solid rgba(148,163,184,0.12)",
                         cursor: it.action || it.manual ? "pointer" : "default",
-                        opacity: it.done ? 0.92 : 1, // do NOT grey it out hard
+                        opacity: it.done ? 0.92 : 1,
                       }}
                     >
                       <ListItemIcon sx={{ minWidth: 34 }}>
@@ -999,32 +938,16 @@ Win: ${win.state}
 
             <Button
               variant="contained"
-              onClick={() => {
-                if (!nextTodo) return;
-                if (nextTodo.manual && nextTodo.key === "rehydrate") {
-                  toggleHydration();
-                  return;
-                }
-                if (nextTodo.action) history.push(nextTodo.action);
-              }}
-              disabled={!nextTodo}
+              onClick={() => setNextPanelOpen(true)}
               sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
             >
-              {nextTodo ? "Do next" : "All done"}
+              Show my next 5
             </Button>
-
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)", textAlign: "center" }}>
-              Steps check off as you log (and hydration is manual).
-            </Typography>
           </Stack>
         </CardShell>
 
         {/* Card 3 */}
-        <CardShell
-          title="Coach"
-          subtitle="Your personal message"
-          right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}
-        >
+        <CardShell title="Coach" subtitle="Your personal win move" right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}>
           <Stack spacing={1.1} alignItems="center">
             <Box
               sx={{
@@ -1044,49 +967,17 @@ Win: ${win.state}
               </Typography>
             </Box>
 
-            <Box
-              onClick={() => setShowNumbers((v) => !v)}
-              sx={{
-                width: "100%",
-                p: 1.1,
-                borderRadius: 2,
-                cursor: "pointer",
-                border: "1px solid rgba(148,163,184,0.18)",
-                background: "rgba(15,23,42,0.55)",
-              }}
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
+              {coachHelper}
+            </Typography>
+
+            <Button
+              onClick={handleGenerateAiVerdict}
+              variant="contained"
+              disabled={aiLoading}
+              sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}
             >
-              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.90)" }}>
-                  Your numbers
-                </Typography>
-                <Chip
-                  size="small"
-                  label={showNumbers ? "HIDE" : "TAP"}
-                  sx={{
-                    fontWeight: 950,
-                    borderRadius: 999,
-                    bgcolor: "rgba(255,255,255,0.10)",
-                    color: "rgba(255,255,255,0.92)",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                  }}
-                />
-              </Stack>
-
-              {showNumbers ? (
-                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", mt: 0.6 }}>
-                  Calories {Math.round(bundle.totals.consumed)} / {bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} •
-                  Exercise {Math.round(bundle.totals.burned)} •
-                  Protein {Math.round(bundle.totals.macros.protein_g)}g • Carbs {Math.round(bundle.totals.macros.carbs_g)}g • Fats {Math.round(bundle.totals.macros.fat_g)}g
-                </Typography>
-              ) : (
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.65)", mt: 0.6, display: "block" }}>
-                  Tap to reveal totals + grade
-                </Typography>
-              )}
-            </Box>
-
-            <Button onClick={handleGenerateAiVerdict} variant="contained" disabled={aiLoading} sx={{ borderRadius: 999, fontWeight: 950, px: 3.2, py: 1.1 }}>
-              {aiLoading ? "Writing…" : "Get my coach message"}
+              {aiLoading ? "Revealing…" : "Reveal my win move"}
             </Button>
 
             {!!aiError && (
@@ -1095,9 +986,15 @@ Win: ${win.state}
               </Typography>
             )}
 
+            {!aiVerdict && !aiLoading && !aiError && (
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)", textAlign: "center" }}>
+                It uses what you logged today and tells you the fastest win.
+              </Typography>
+            )}
+
             {!!aiVerdict && (
               <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)" }}>
-                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Message</Typography>
+                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your message</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
                   {aiVerdict}
                 </Typography>
@@ -1105,24 +1002,10 @@ Win: ${win.state}
             )}
 
             <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center" sx={{ width: "100%" }}>
-              <Button variant="contained" onClick={() => history.push("/meals")} sx={{ borderRadius: 999, fontWeight: 950, px: 2.6, py: 1.05 }}>
-                Log Meal
-              </Button>
-              <Button variant="contained" onClick={() => history.push("/workout")} sx={{ borderRadius: 999, fontWeight: 950, px: 2.6, py: 1.05 }}>
-                Log Workout
-              </Button>
               <Button variant="outlined" startIcon={<IosShareIcon />} disabled={!aiVerdict && !bundle.derived.hasLogs} onClick={handleShare} sx={{ borderRadius: 999, fontWeight: 950 }}>
                 Share
               </Button>
             </Stack>
-
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-              Tip: hold any ring on the first card for a full breakdown.
-            </Typography>
-
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
-              {pro ? "Pro unlocked." : `Free coach uses left today: ${Math.max(0, remainingAi)} / ${limitAi}`}
-            </Typography>
           </Stack>
         </CardShell>
       </Box>
