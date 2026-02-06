@@ -343,7 +343,6 @@ function isBreakfastLikeText(t) {
   // lightweight keywords; time-of-day still dominates
   return /(egg|eggs|oat|oats|oatmeal|cereal|yogurt|toast|bagel|pancake|waffle|bacon|sausage|coffee|banana|berries|granola|protein shake|shake)/.test(s);
 }
-}
 
 function bucketMealWindowPST(hour) {
   if (hour == null) return null;
