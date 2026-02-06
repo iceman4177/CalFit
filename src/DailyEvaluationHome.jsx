@@ -313,28 +313,25 @@ function getMealLoggedHourPST(meal) {
   return Number.isFinite(h) ? h : null;
 }
 
-function getMealText(meal) {
-  try {
-    if (!meal || typeof meal !== "object") return "";
-    const parts = [];
-    if (typeof meal.title === "string") parts.push(meal.title);
-    if (typeof meal.name === "string") parts.push(meal.name);
-    if (typeof meal.meal_name === "string") parts.push(meal.meal_name);
+function getMealTsMs(meal) {
+  const ts =
+    meal?.eaten_at ||
+    meal?.eatenAt ||
+    meal?.createdAt ||
+    meal?.created_at ||
+    meal?.loggedAt ||
+    meal?.time ||
+    meal?.timestamp ||
+    meal?.ts ||
+    null;
+  if (!ts) return null;
+  const ms = new Date(ts).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
 
-    const items = Array.isArray(meal.items) ? meal.items : Array.isArray(meal.foods) ? meal.foods : Array.isArray(meal.entries) ? meal.entries : [];
-    for (const it of items) {
-      if (it && typeof it === "object") {
-        if (typeof it.name === "string") parts.push(it.name);
-        if (typeof it.title === "string") parts.push(it.title);
-        if (typeof it.food === "string") parts.push(it.food);
-      } else if (typeof it === "string") {
-        parts.push(it);
-      }
-    }
-    return parts.join(" ").toLowerCase();
-  } catch {
-    return "";
-  }
+function getMealText(meal) {
+  const t = meal?.title || meal?.name || meal?.label || "";
+  return typeof t === "string" ? t : String(t || "");
 }
 
 function isBreakfastLikeText(t) {
@@ -342,6 +339,35 @@ function isBreakfastLikeText(t) {
   const s = String(t).toLowerCase();
   // lightweight keywords; time-of-day still dominates
   return /(egg|eggs|oat|oats|oatmeal|cereal|yogurt|toast|bagel|pancake|waffle|bacon|sausage|coffee|banana|berries|granola|protein shake|shake)/.test(s);
+}
+
+function groupMealsIntoEventsPST(mealsArr) {
+  const MIN_GAP_MS = 45 * 60 * 1000; // 45 minutes = one "meal event"
+  const rows = (Array.isArray(mealsArr) ? mealsArr : [])
+    .map((m) => ({ ms: getMealTsMs(m), text: getMealText(m) }))
+    .filter((r) => Number.isFinite(r.ms))
+    .sort((a, b) => a.ms - b.ms);
+
+  const events = [];
+  for (const r of rows) {
+    const last = events[events.length - 1];
+    if (last && r.ms - last.ms <= MIN_GAP_MS) {
+      last.texts.push(r.text);
+      last.msEnd = r.ms;
+    } else {
+      events.push({ msStart: r.ms, msEnd: r.ms, texts: [r.text] });
+    }
+  }
+
+  return events.map((e) => {
+    const hourPST = getHourInTimeZone(new Date(e.msStart), "America/Los_Angeles");
+    return {
+      hourPST: Number.isFinite(hourPST) ? hourPST : null,
+      text: e.texts.filter(Boolean).join(" "),
+      msStart: e.msStart,
+      msEnd: e.msEnd,
+    };
+  });
 }
 
 function bucketMealWindowPST(hour) {
@@ -429,7 +455,7 @@ function buildChecklist({
     window: "morning",
     title: "Log breakfast",
     subtitle: "Quick meal + 30g protein",
-    done: hasB,
+    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
@@ -441,7 +467,7 @@ function buildChecklist({
     window: "afternoon",
     title: "Log lunch",
     subtitle: "Keep momentum (protein + carbs)",
-    done: hasL,
+    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour >= 11 && hour <= 15),
     action: "/meals",
     priority: 3,
     hiddenWhenDone: false,
@@ -453,7 +479,7 @@ function buildChecklist({
     window: "night",
     title: "Log dinner",
     subtitle: "Close the day (protein-focused)",
-    done: hasD,
+    done: hasD || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
     action: "/meals",
     priority: 4,
     hiddenWhenDone: false,
@@ -610,22 +636,13 @@ export default function DailyEvaluationHome() {
     const macros = sumMealsMacros(dayMealsRec);
     const mealsCount = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals.length : 0;
     const mealsArr = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals : [];
-    const mealEntriesPST = mealsArr
-      .map((m) => ({ hour: getMealLoggedHourPST(m), text: getMealText(m) }))
-      .filter((e) => typeof e.hour === "number");
+    const mealEvents = groupMealsIntoEventsPST(mealsArr);
+    const mealHoursPST = mealEvents.map((e) => e.hourPST).filter((h) => typeof h === "number");
 
-    // Count meals by time window (PST) with a tiny food-based tie-breaker.
-    // Time-of-day is the primary truth; food text only helps around lunch when users eat a "late breakfast".
-    const bucketCounts = mealEntriesPST.reduce(
-      (acc, e) => {
-        let b = bucketMealWindowPST(e.hour);
-
-        // If it's around early lunch (<=1pm) and the foods look breakfast-like, treat it as breakfast
-        // (but only when we haven't already logged breakfast).
-        if (b === "lunch" && acc.breakfast === 0 && e.hour <= 13 && isBreakfastLikeText(e.text)) {
-          b = "breakfast";
-        }
-
+    // Count meals by time window (PST) so we can do smarter inference.
+    const bucketCounts = mealHoursPST.reduce(
+      (acc, h) => {
+        const b = bucketMealWindowPST(h);
         if (b) acc[b] = (acc[b] || 0) + 1;
         return acc;
       },
@@ -636,11 +653,17 @@ export default function DailyEvaluationHome() {
 
     // UX rule: If it's past breakfast time (>= 12pm) and the user logged *a* meal but none were in the breakfast window,
     // treat their first logged meal as "breakfast" so the checklist stays intuitive.
-    if (nowHourPST >= 12 && bucketCounts.breakfast === 0 && mealsArr.length > 0) {
+    if (nowHourPST >= 12 && nowHourPST < 16 && bucketCounts.breakfast === 0 && mealEvents.length > 0) {
+      const firstEvt = mealEvents[0];
+      const firstHour = Number(firstEvt?.hourPST);
+      const firstLooksBreakfast = isBreakfastLikeText(firstEvt?.text);
+      // Only apply the "first meal counts as breakfast" UX rule when it's plausibly breakfast/early-day.
+      if (firstLooksBreakfast || (Number.isFinite(firstHour) && firstHour <= 15)) {
       if (bucketCounts.lunch > 0) bucketCounts.lunch -= 1;
       else if (bucketCounts.dinner > 0) bucketCounts.dinner -= 1;
       else if (bucketCounts.late > 0) bucketCounts.late -= 1;
       bucketCounts.breakfast = 1;
+      }
     }
 
     const mealBuckets = {
