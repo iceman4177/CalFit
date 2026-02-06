@@ -282,19 +282,70 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
 }
 
 // ----------------------------- checklist logic --------------------------------
-function getMealStep({ hour, mealsCount }) {
-  // Conservative: a single morning food log should never become “dinner”.
-  if (mealsCount <= 0) return { step: "breakfast", title: hour < 11 ? "Log breakfast" : "Log your first meal" };
-  if (mealsCount === 1) return { step: "next", title: hour < 15 ? "Log lunch" : "Log your next meal" };
-  if (mealsCount === 2) return { step: "next", title: hour < 17 ? "Log your next meal" : "Log dinner" };
-  if (mealsCount >= 3) return { step: "snack", title: "Log a snack (optional)" };
-  return { step: "next", title: "Log your next meal" };
+
+function getHourInTimeZone(dateLike, timeZone) {
+  try {
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    const hourStr = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone }).format(d);
+    const h = parseInt(hourStr, 10);
+    return Number.isFinite(h) ? h : d.getHours();
+  } catch {
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    return d.getHours();
+  }
+}
+
+function getMealLoggedHourPST(meal) {
+  if (!meal || typeof meal !== "object") return null;
+  const ts =
+    meal.eaten_at ||
+    meal.eatenAt ||
+    meal.logged_at ||
+    meal.loggedAt ||
+    meal.created_at ||
+    meal.createdAt ||
+    meal.time ||
+    meal.timestamp ||
+    meal.ts ||
+    null;
+  if (!ts) return null;
+  const h = getHourInTimeZone(ts, "America/Los_Angeles");
+  return Number.isFinite(h) ? h : null;
+}
+
+function bucketMealWindowPST(hour) {
+  if (hour == null) return null;
+  // breakfast: 4-10, lunch: 11-15, dinner: 16-21, late: 22-3
+  if (hour >= 4 && hour <= 10) return "breakfast";
+  if (hour >= 11 && hour <= 15) return "lunch";
+  if (hour >= 16 && hour <= 21) return "dinner";
+  return "late";
+}
+
+function getMealStep({ nowHourPST, mealBuckets }) {
+  const hasBreakfast = !!mealBuckets?.breakfast;
+  const hasLunch = !!mealBuckets?.lunch;
+  const hasDinner = !!mealBuckets?.dinner;
+
+  // If we can infer meal timing, prefer accuracy over simple counts.
+  if (!hasBreakfast && nowHourPST < 11) return { step: "breakfast", title: "Log breakfast" };
+  if (!hasBreakfast) return { step: "first", title: "Log your first meal" };
+
+  if (!hasLunch && nowHourPST < 16) return { step: "lunch", title: "Log lunch" };
+  if (!hasLunch) return { step: "next", title: "Log your next meal" };
+
+  if (!hasDinner && nowHourPST >= 16) return { step: "dinner", title: "Log dinner" };
+  if (!hasDinner) return { step: "next", title: "Log your next meal" };
+
+  return { step: "snack", title: "Log a snack (optional)" };
 }
 
 function buildChecklist({
   goalType,
   profileComplete,
   mealsCount,
+  mealBuckets,
+  nowHourPST,
   hasWorkout,
   proteinG,
   carbsG,
@@ -305,7 +356,8 @@ function buildChecklist({
   dayHydrationDone,
 }) {
   const g = normalizeGoalType(goalType);
-  const hour = new Date().getHours();
+  const hour = Number.isFinite(nowHourPST) ? nowHourPST : getHourInTimeZone(new Date(), "America/Los_Angeles");
+
 
   const items = [];
   const push = (it) => items.push(it);
@@ -316,7 +368,7 @@ function buildChecklist({
     window: "morning",
     title: "Finish setup",
     subtitle: "So your targets are accurate",
-    done: !!profileComplete,
+    done: (mealBuckets?.dinner === true) || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
     action: "/health",
     priority: 0,
     hiddenWhenDone: true,
@@ -336,13 +388,17 @@ function buildChecklist({
     manual: true,
   });
 
-  // Meals as chronological checkpoints
+  // Meals as chronological checkpoints (time-aware in Pacific time)
+  const hasB = mealBuckets?.breakfast === true;
+  const hasL = mealBuckets?.lunch === true;
+  const hasD = mealBuckets?.dinner === true;
+
   push({
     key: "meal_morning",
     window: "morning",
     title: "Log breakfast",
     subtitle: "Start your day strong",
-    done: (Number(mealsCount) || 0) >= 1,
+    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour < 16),
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
@@ -354,7 +410,7 @@ function buildChecklist({
     window: "afternoon",
     title: "Log lunch",
     subtitle: "Keeps your day on track",
-    done: (Number(mealsCount) || 0) >= 2,
+    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour < 16 && hasB),
     action: "/meals",
     priority: 3,
     hiddenWhenDone: false,
@@ -366,14 +422,13 @@ function buildChecklist({
     window: "night",
     title: "Log dinner",
     subtitle: "So today counts",
-    done: (Number(mealsCount) || 0) >= 3,
+    done: hasD || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
     action: "/meals",
     priority: 4,
     hiddenWhenDone: false,
     manual: false,
   });
-
-  // Protein checkpoint (afternoon) + finish target (night)
+// Protein checkpoint (afternoon) + finish target (night)
   const pT = Number(proteinTarget) || 0;
   const pNow = Number(proteinG) || 0;
   if (pT > 0) {
@@ -523,6 +578,17 @@ export default function DailyEvaluationHome() {
     const consumed = sumMealsCalories(dayMealsRec);
     const macros = sumMealsMacros(dayMealsRec);
     const mealsCount = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals.length : 0;
+    const mealsArr = Array.isArray(dayMealsRec?.meals) ? dayMealsRec.meals : [];
+    const mealHoursPST = mealsArr.map(getMealLoggedHourPST).filter((h) => typeof h === "number");
+    const mealBuckets = {
+      breakfast: mealHoursPST.some((h) => bucketMealWindowPST(h) === "breakfast"),
+      lunch: mealHoursPST.some((h) => bucketMealWindowPST(h) === "lunch"),
+      dinner: mealHoursPST.some((h) => bucketMealWindowPST(h) === "dinner"),
+      late: mealHoursPST.some((h) => bucketMealWindowPST(h) === "late"),
+    };
+
+    const nowHourPST = getHourInTimeZone(new Date(), "America/Los_Angeles");
+
 
     const burned = sumWorkoutsCalories(workoutHistory, dayUS);
 
@@ -896,6 +962,8 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
                   const winLabel = winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night";
 
+                  const firstActionIdx = group.findIndex((q) => !q.done && (q.manual || q.action));
+
                   return (
                     <Box key={winKey} sx={{ width: "100%" }}>
                       <Typography variant="caption" sx={{ display: "block", px: 1.2, pt: 1.0, pb: 0.6, color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
@@ -906,10 +974,14 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                         const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
                         const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
 
-                        const actionLabel =
-                          it.manual ? "Check" : it.action === "/meals" ? "Meals" : it.action === "/workout" ? "Workout" : it.action ? "Go" : "";
+                        const isHydrate = it.manual && it.key === "rehydrate";
 
-                        const canAct = !it.done && (it.manual || it.action);
+                        const actionLabel =
+                          it.manual ? (it.done ? "Undo" : "Check") : it.action === "/meals" ? "Meals" : it.action === "/workout" ? "Workout" : it.action ? "Go" : "";
+
+                        // Reduce redundancy: only the *next* actionable step in each time window shows a button.
+                        // Hydration stays manually toggleable (even when done).
+                        const canAct = isHydrate ? true : (!it.done && (it.manual || it.action) && (gIdx === firstActionIdx));
 
                         return (
                           <ListItemButton
@@ -940,7 +1012,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                               }
                             />
 
-                            {it.done ? (
+                            {it.done && !isHydrate ? (
                               <Chip
                                 size="small"
                                 label="DONE"
