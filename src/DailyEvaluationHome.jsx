@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useHistory } from "react-router-dom";
 import {
-
   Box,
   Button,
   Card,
@@ -10,13 +9,16 @@ import {
   Chip,
   CircularProgress,
   Divider,
-  LinearProgress,
   Stack,
   Typography,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
@@ -416,76 +418,6 @@ function buildChecklist({
     .slice(0, 8);
 }
 
-
-// -------------------- Quests (FREE) -------------------------------------------
-function seededRng(seedStr = "") {
-  // deterministic RNG in [0,1)
-  let h = 2166136261;
-  const s = String(seedStr || "");
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return function rng() {
-    h += 0x6D2B79F5;
-    let t = Math.imul(h ^ (h >>> 15), 1 | h);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function buildQuestPool({ proteinTarget }) {
-  const pt = Number(proteinTarget) || 170;
-  const lunchProtein = Math.min(60, Math.max(30, Math.round(pt * 0.35 || 40)));
-
-  return [
-    {
-      id: "breakfast_before_11",
-      label: "Log breakfast before 11am",
-      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
-      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
-    },
-    {
-      id: "protein_by_lunch",
-      label: `Hit ${lunchProtein}g protein by lunch`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
-    },
-    {
-      id: "log_3_meals",
-      label: "Log 3 meals today",
-      progress: ({ mealsCount }) => ({ value: mealsCount, goal: 3 }),
-      complete: ({ mealsCount }) => mealsCount >= 3,
-    },
-    {
-      id: "burn_150",
-      label: "Burn 150+ cals",
-      progress: ({ burned }) => ({ value: burned, goal: 150 }),
-      complete: ({ burned }) => burned >= 150,
-    },
-    {
-      id: "burn_300",
-      label: "Burn 300+ cals",
-      progress: ({ burned }) => ({ value: burned, goal: 300 }),
-      complete: ({ burned }) => burned >= 300,
-    },
-    {
-      id: "hit_protein_goal",
-      label: `Hit protein goal (${pt}g)`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: pt }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= pt,
-    },
-  ];
-}
-
-function pickDailyQuests({ dayKey, proteinTarget }) {
-  const rng = seededRng(`${dayKey}|quests`);
-  const pool = buildQuestPool({ proteinTarget });
-  const shuffled = [...pool].sort(() => rng() - 0.5);
-  const maxShown = Math.min(6, shuffled.length);
-  return shuffled.slice(0, maxShown).map((q) => ({ ...q, locked: false }));
-}
-
 // ----------------------------- main ------------------------------------------
 export default function DailyEvaluationHome() {
   const history = useHistory();
@@ -504,9 +436,6 @@ export default function DailyEvaluationHome() {
 
   // score badge animation
   const [scoreAnim, setScoreAnim] = useState(0);
-
-  // Card 2: quests paging (keeps it uncluttered)
-  const [questPage, setQuestPage] = useState(0);
   const FEATURE_KEY = "daily_eval_verdict";
 
   const bundle = useMemo(() => {
@@ -713,28 +642,27 @@ export default function DailyEvaluationHome() {
   }, [bundle, hydrationDone]);
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
-  const focusStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
+  
 
-  const quests = useMemo(() => {
-    return pickDailyQuests({
-      dayKey: bundle.dayISO,
-      proteinTarget: bundle.targets.proteinTarget || 170,
-    });
-  }, [bundle.dayISO, bundle.targets.proteinTarget]);
-
+  // Card 2: quests pagination (5 at a time)
   const QUESTS_PER_PAGE = 5;
-  const questPages = useMemo(() => Math.max(1, Math.ceil((quests?.length || 0) / QUESTS_PER_PAGE)), [quests]);
-  const questsPageItems = useMemo(() => {
-    const page = clamp(questPage, 0, questPages - 1);
-    const start = page * QUESTS_PER_PAGE;
-    return (quests || []).slice(start, start + QUESTS_PER_PAGE);
-  }, [quests, questPage, questPages]);
+  const [questPage, setQuestPage] = useState(0);
 
+  const questTotalPages = useMemo(() => Math.max(1, Math.ceil(checklist.length / QUESTS_PER_PAGE)), [checklist.length]);
+  const questPageClamped = useMemo(() => Math.min(questTotalPages - 1, Math.max(0, questPage)), [questPage, questTotalPages]);
 
   useEffect(() => {
-    setQuestPage((p) => clamp(p, 0, questPages - 1));
-  }, [questPages]);
-  // AI gating
+    // keep page in range when list changes or on new day
+    setQuestPage((p) => Math.min(questTotalPages - 1, Math.max(0, p)));
+  }, [questTotalPages, bundle.dayUS]);
+
+  const questItems = useMemo(() => {
+    const start = questPageClamped * QUESTS_PER_PAGE;
+    return checklist.slice(start, start + QUESTS_PER_PAGE);
+  }, [checklist, questPageClamped]);
+
+  const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
+// AI gating
   const remainingAi = getDailyRemaining("daily_eval_verdict");
   const limitAi = getFreeDailyLimit("daily_eval_verdict");
 
@@ -852,7 +780,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
-      {/* Cards */}
+{/* Cards */}
       <Box sx={{ mt: 2, display: "flex", gap: 1.5, overflowX: "auto", pb: 1, scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
         {/* Card 1 */}
         <CardShell
@@ -904,87 +832,105 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           <Stack spacing={1.1} alignItems="center">
             <Box sx={{ width: "100%", textAlign: "center" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", mt: 0.4 }}>
-                {focusStep ? `${focusStep.title} — ${focusStep.subtitle}` : "You’re on track. Keep it clean and stay consistent."}
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
+                {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You’re done for now ✅"}
               </Typography>
             </Box>
 
-            <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)", p: 1.2 }}>
-              <Stack spacing={1.0}>
-                {questsPageItems.map((q) => {
-                  const now = new Date();
-                  const mealsCount = bundle.totals.mealsCount || 0;
-                  const burned = Number(bundle.totals.burned || 0);
-                  const proteinSoFar = Number(bundle.totals.macros.protein_g || 0);
-
-                  const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
-                  const done = q.complete({ mealsCount, burned, proteinSoFar, now });
-                  const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
+            <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
+              <List disablePadding>
+                {questItems.map((it, idx) => {
+                  const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
+                  const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
+                  const isActionable = !it.done && (it.action || it.manual);
 
                   return (
-                    <Box
-                      key={q.id}
+                    <ListItemButton
+                      key={it.key}
+                      onClick={() => {
+                        if (!isActionable) return;
+                        if (it.manual && it.key === "rehydrate") {
+                          toggleHydration();
+                          return;
+                        }
+                        if (it.action) history.push(it.action);
+                      }}
                       sx={{
-                        p: 1.1,
-                        borderRadius: 1.8,
-                        border: "1px solid rgba(148,163,184,0.16)",
-                        background: done ? "rgba(34,197,94,0.10)" : "rgba(2,6,23,0.12)",
+                        px: 1.2,
+                        py: 1.0,
+                        borderTop: idx === 0 ? "none" : "1px solid rgba(148,163,184,0.12)",
+                        cursor: isActionable ? "pointer" : "default",
+                        opacity: it.done ? 0.92 : 1,
                       }}
                     >
-                      <Stack direction="row" spacing={1.1} alignItems="center">
-                        <Box sx={{ width: 26, textAlign: "center", fontSize: 18 }}>
-                          {done ? "✅" : "🎯"}
-                        </Box>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>{q.label}</Typography>
-                          <LinearProgress
-                            variant="determinate"
-                            value={pct}
-                            sx={{
-                              mt: 0.8,
-                              height: 8,
-                              borderRadius: 999,
-                              backgroundColor: "rgba(255,255,255,0.10)",
-                            }}
-                          />
-                          <Typography variant="caption" sx={{ display: "block", mt: 0.55, color: "rgba(255,255,255,0.68)" }}>
-                            {`${Math.min(prog.value, prog.goal)} / ${prog.goal}`}
+                      <ListItemIcon sx={{ minWidth: 34 }}>
+                        <Icon sx={{ fontSize: 20, color: iconColor }} />
+                      </ListItemIcon>
+
+                      <ListItemText
+                        primary={
+                          <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
+                            {it.title}
                           </Typography>
-                        </Box>
-                      </Stack>
-                    </Box>
+                        }
+                        secondary={
+                          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
+                            {it.subtitle}
+                          </Typography>
+                        }
+                      />
+
+                      {it.done && (
+                        <Chip
+                          size="small"
+                          label="DONE"
+                          sx={{
+                            fontWeight: 950,
+                            borderRadius: 999,
+                            bgcolor: "rgba(34,197,94,0.14)",
+                            color: "rgba(255,255,255,0.86)",
+                            border: "1px solid rgba(34,197,94,0.35)",
+                          }}
+                        />
+                      )}
+
+                      {!it.done && isActionable && (
+                        <Chip size="small" label={it.manual ? "TAP" : "DO"} color="primary" sx={{ fontWeight: 950, borderRadius: 999 }} />
+                      )}
+                    </ListItemButton>
                   );
                 })}
-              </Stack>
-
-              <Stack direction="row" spacing={1} justifyContent="center" alignItems="center" sx={{ mt: 1.1 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => setQuestPage((p) => clamp(p - 1, 0, questPages - 1))}
-                  disabled={questPage <= 0}
-                  sx={{ borderRadius: 999, fontWeight: 950 }}
-                >
-                  Prev
-                </Button>
-                <Chip
-                  label={`${clamp(questPage, 0, questPages - 1) + 1}/${questPages}`}
-                  sx={{ fontWeight: 950, borderRadius: 999, color: "rgba(255,255,255,0.86)" }}
-                  variant="outlined"
-                />
-                <Button
-                  variant="outlined"
-                  onClick={() => setQuestPage((p) => clamp(p + 1, 0, questPages - 1))}
-                  disabled={questPage >= questPages - 1}
-                  sx={{ borderRadius: 999, fontWeight: 950 }}
-                >
-                  Next
-                </Button>
-              </Stack>
+              </List>
             </Box>
+
+            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ pt: 0.4 }}>
+              <Button
+                variant="outlined"
+                disabled={questPageClamped === 0}
+                onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
+                sx={{ borderRadius: 999, fontWeight: 950, px: 2.6 }}
+              >
+                Prev
+              </Button>
+
+              <Chip
+                label={`${questPageClamped + 1}/${questTotalPages}`}
+                sx={{ fontWeight: 950, borderRadius: 999, bgcolor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.86)" }}
+              />
+
+              <Button
+                variant="outlined"
+                disabled={questPageClamped >= questTotalPages - 1}
+                onClick={() => setQuestPage((p) => Math.min(questTotalPages - 1, p + 1))}
+                sx={{ borderRadius: 999, fontWeight: 950, px: 2.6 }}
+              >
+                Next
+              </Button>
+            </Stack>
           </Stack>
         </CardShell>
 
-        {/* Card 3 */}
+{/* Card 3 */}
         <CardShell title="Coach" subtitle="Your personal win move" right={<FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />}>
           <Stack spacing={1.1} alignItems="center">
             <Box
@@ -1009,28 +955,31 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
               {coachHelper}
             </Typography>
 
-            <Stack spacing={1} sx={{ width: "100%" }}>
+
+            <Stack spacing={1.0} sx={{ width: "100%", pt: 0.4 }} alignItems="center">
               <Button
                 variant="outlined"
-                onClick={() => history.push("/meals")}
                 fullWidth
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.05 }}
+                onClick={() => history.push("/meals")}
+                sx={{ borderRadius: 999, fontWeight: 950, py: 1.1 }}
               >
                 Log a meal
               </Button>
+
               <Button
                 variant="outlined"
-                onClick={() => history.push("/workout")}
                 fullWidth
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.05 }}
+                onClick={() => history.push("/workout")}
+                sx={{ borderRadius: 999, fontWeight: 950, py: 1.1 }}
               >
                 Log a workout
               </Button>
+
               <Button
                 variant="contained"
-                onClick={() => history.push("/coach")}
                 fullWidth
-                sx={{ borderRadius: 999, fontWeight: 950, py: 1.05 }}
+                onClick={() => history.push("/coach")}
+                sx={{ borderRadius: 999, fontWeight: 950, py: 1.15 }}
               >
                 Get daily recap
               </Button>
