@@ -597,6 +597,23 @@ export default function DailyEvaluationHome() {
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiError, setAiError] = useState("");
 
+  // per-device per-day cache for AI verdict text
+  const dayISOForRecap = isoDay();
+  const recapCacheKey = userId ? `dailyEvalRecap:${userId}:${dayISOForRecap}` : null;
+
+  useEffect(() => {
+    if (!recapCacheKey) return;
+    try {
+      const cached = localStorage.getItem(recapCacheKey);
+      if (cached && !String(aiVerdict || "").trim()) {
+        setAiVerdict(cached);
+      }
+    } catch {
+      // ignore cache errors
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recapCacheKey]);
+
   // score badge animation
   const [scoreAnim, setScoreAnim] = useState(0);
   const FEATURE_KEY = "daily_eval_verdict";
@@ -931,7 +948,7 @@ export default function DailyEvaluationHome() {
 
   const handleGenerateAiVerdict = async () => {
     setAiError("");
-    setAiVerdict("");
+    // keep cached verdict visible while generating a new one
 
     if (!pro) {
       if (!canUseDailyFeature("daily_eval_verdict")) {
@@ -994,6 +1011,11 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
       if (!String(text || "").trim()) throw new Error("No coach text returned.");
       setAiVerdict(String(text).trim());
+      try {
+        if (recapCacheKey) localStorage.setItem(recapCacheKey, String(text).trim());
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setAiError(e?.message || "Coach message failed.");
     } finally {
