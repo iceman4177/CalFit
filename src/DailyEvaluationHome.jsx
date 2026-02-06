@@ -367,9 +367,9 @@ function buildChecklist({
     key: "setup",
     window: "morning",
     title: "Finish setup",
-    subtitle: "So your targets are accurate",
-    done: (mealBuckets?.dinner === true) || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
-    action: "/health",
+    subtitle: "So workout + targets are accurate",
+    done: !!profileComplete,
+    action: "/workout",
     priority: 0,
     hiddenWhenDone: true,
     manual: false,
@@ -397,8 +397,8 @@ function buildChecklist({
     key: "meal_morning",
     window: "morning",
     title: "Log breakfast",
-    subtitle: "Start your day strong",
-    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour < 16),
+    subtitle: "Quick meal + 30g protein",
+    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,
@@ -409,8 +409,8 @@ function buildChecklist({
     key: "meal_afternoon",
     window: "afternoon",
     title: "Log lunch",
-    subtitle: "Keeps your day on track",
-    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour < 16 && hasB),
+    subtitle: "Keep momentum (protein + carbs)",
+    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour >= 11 && hour <= 15),
     action: "/meals",
     priority: 3,
     hiddenWhenDone: false,
@@ -421,7 +421,7 @@ function buildChecklist({
     key: "meal_night",
     window: "night",
     title: "Log dinner",
-    subtitle: "So today counts",
+    subtitle: "Close the day (protein-focused)",
     done: hasD || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
     action: "/meals",
     priority: 4,
@@ -520,7 +520,7 @@ function buildChecklist({
   return items
     .filter((it) => !(it.hiddenWhenDone && it.done))
     .sort((a, b) => a.priority - b.priority)
-    .slice(0, 12);
+    .slice(0, 18);
 }
 
 
@@ -659,6 +659,8 @@ export default function DailyEvaluationHome() {
         confidenceLabel,
         score,
         components,
+        mealBuckets,
+        nowHourPST,
       },
     };
   }, [userId]);
@@ -741,12 +743,40 @@ export default function DailyEvaluationHome() {
     return { label: "ON TRACK", tone: "success" };
   }, [bundle.derived.profileComplete, bundle.derived.hasMeals, bundle.targets.proteinTarget, proteinGap, bundle.targets.calorieTarget, calErr]);
 
+
+  const fixTags = useMemo(() => {
+    const tags = [];
+    const hour = getHourInTimeZone(new Date(), "America/Los_Angeles");
+    const mealsCount = Number(bundle?.totals?.mealsCount) || 0;
+    const hasWorkout = !!bundle?.derived?.hasWorkout;
+
+    if (!bundle?.derived?.profileComplete) tags.push({ label: "SETUP", tone: "warning" });
+    if (!hydrationDone) tags.push({ label: "HYDRATE", tone: "info" });
+
+    // Meal windows (PST)
+    if (hour >= 11 && !(bundle?.derived?.mealBuckets?.lunch)) tags.push({ label: "LUNCH", tone: "primary" });
+    if (hour >= 16 && !(bundle?.derived?.mealBuckets?.dinner)) tags.push({ label: "DINNER", tone: "primary" });
+    if (mealsCount < 3 && hour >= 14) tags.push({ label: "MEALS LOW", tone: "primary" });
+
+    const pT = Number(bundle?.targets?.proteinTarget) || 0;
+    const pNow = Number(bundle?.totals?.macros?.protein_g) || 0;
+    if (pT > 0 && (pT - pNow) >= 25) tags.push({ label: "PROTEIN", tone: "error" });
+
+    if (!hasWorkout && hour >= 13) tags.push({ label: "MOVE", tone: "info" });
+
+    // Keep it clean: show up to 3 extra tags (flag already covers main)
+    return tags.slice(0, 3);
+  }, [bundle, hydrationDone]);
+
+
   // checklist (uses manual hydrationDone)
   const checklist = useMemo(() => {
     return buildChecklist({
       goalType: bundle.targets.goalType,
       profileComplete: bundle.derived.profileComplete,
       mealsCount: bundle.totals.mealsCount,
+      mealBuckets: bundle.derived.mealBuckets,
+      nowHourPST: bundle.derived.nowHourPST,
       hasWorkout: bundle.derived.hasWorkout,
       proteinG: bundle.totals.macros.protein_g,
       carbsG: bundle.totals.macros.carbs_g,
@@ -760,29 +790,36 @@ export default function DailyEvaluationHome() {
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
 
-  // Card 2: quests (time-windowed, no paging)
-  // Goal: show a single Morning / Afternoon / Night plan (max 5 items total) to keep it digestible.
-  const questItems = useMemo(() => {
-    const quotas = { morning: 2, afternoon: 2, night: 1 };
-    const out = [];
-    (["morning", "afternoon", "night"]).forEach((win) => {
-      const group = checklist.filter((q) => (q.window || "morning") === win);
-      const take = Math.max(0, Math.min(quotas[win] || 0, group.length));
-      out.push(...group.slice(0, take));
-    });
-    // If we have fewer than 5 (e.g., some windows empty), fill from remaining in order.
-    if (out.length < 5) {
-      const seen = new Set(out.map((q) => q.key));
-      for (const q of checklist) {
-        if (out.length >= 5) break;
-        if (!seen.has(q.key)) {
-          out.push(q);
-          seen.add(q.key);
-        }
-      }
+  // Card 2: quests (time-windowed, paged)
+  // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
+  const [questPage, setQuestPage] = useState(0);
+
+  const questPages = useMemo(() => {
+    const pageSize = 5;
+    const pages = [];
+    const src = Array.isArray(checklist) ? checklist : [];
+    for (let i = 0; i < src.length; i += pageSize) {
+      pages.push(src.slice(i, i + pageSize));
     }
-    return out.slice(0, 5);
+    return pages.length ? pages : [[]];
   }, [checklist]);
+
+  useEffect(() => {
+    // Clamp page when checklist changes
+    setQuestPage((p) => {
+      const max = Math.max(0, (questPages?.length || 1) - 1);
+      return Math.min(Math.max(0, p), max);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questPages.length]);
+
+  const questItems = useMemo(() => {
+    const p = Math.max(0, Math.min(questPage, (questPages?.length || 1) - 1));
+    return questPages[p] || [];
+  }, [questPages, questPage]);
+
+  const canPrevQuest = questPage > 0;
+  const canNextQuest = questPage < (questPages.length - 1);
 
   const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
 
@@ -948,6 +985,20 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             </Stack>
 
             <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
+            {fixTags.length ? (
+              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap" }}>
+                {fixTags.map((t) => (
+                  <Chip
+                    key={t.label}
+                    size="small"
+                    variant="outlined"
+                    label={t.label}
+                    color={t.tone}
+                    sx={{ borderRadius: 999, fontWeight: 950 }}
+                  />
+                ))}
+              </Stack>
+            ) : null}
           </Stack>
         </CardShell>
 
@@ -1061,7 +1112,33 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
               </List>
             </Box>
 
-            
+            {/* Paging */}
+            {questPages.length > 1 ? (
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
+                <Button
+                  variant="outlined"
+                  disabled={!canPrevQuest}
+                  onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
+                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
+                >
+                  Prev
+                </Button>
+                <Chip
+                  size="small"
+                  label={`${questPage + 1}/${questPages.length}`}
+                  sx={{ borderRadius: 999, fontWeight: 950 }}
+                />
+                <Button
+                  variant="outlined"
+                  disabled={!canNextQuest}
+                  onClick={() => setQuestPage((p) => Math.min(questPages.length - 1, p + 1))}
+                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
+                >
+                  Next
+                </Button>
+              </Stack>
+            ) : null}
+
 
           </Stack>
         </CardShell>
