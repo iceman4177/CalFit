@@ -714,7 +714,7 @@ async function hydrateTodayFromCloudIfNeeded(trigger = "mount") {
     try {
       const mealsRes = await supabase
         .from("meals")
-        .select("client_id,title,total_calories,eaten_at")
+        .select("client_id,title,total_calories,eaten_at,protein_g,carbs_g,fat_g,food_id,portion_id,portion_label,qty,unit")
         .eq("user_id", uid)
         .gte("eaten_at", lookbackIso)
         .order("eaten_at", { ascending: true })
@@ -735,6 +735,18 @@ async function hydrateTodayFromCloudIfNeeded(trigger = "mount") {
           client_id: cid,
           name: m?.title || "Meal",
           calories: Number(m?.total_calories) || 0,
+
+          // ✅ pull macros/meta so mobile rings don't show 0 when meals exist
+          protein_g: Number(m?.protein_g) || 0,
+          carbs_g: Number(m?.carbs_g) || 0,
+          fat_g: Number(m?.fat_g) || 0,
+
+          food_id: m?.food_id ?? null,
+          portion_id: m?.portion_id ?? null,
+          portion_label: m?.portion_label ?? null,
+          qty: m?.qty ?? 1,
+          unit: m?.unit ?? "serving",
+
           createdAt: m?.eaten_at || new Date().toISOString(),
         };
       });
