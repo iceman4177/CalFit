@@ -761,18 +761,7 @@ export default function App() {
       </Stack>
 
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
-        <MenuItem component={NavLink} to="/achievements" onClick={closeMore}>
-          <EmojiEventsIcon fontSize="small"/> Achievements
-        </MenuItem>
-        <MenuItem component={NavLink} to="/calorie-log" onClick={closeMore}>
-          <ListIcon fontSize="small"/> Calorie Log
-        </MenuItem>
-        <MenuItem component={NavLink} to="/summary" onClick={closeMore}>
-          <AssessmentIcon fontSize="small"/> Summary
-        </MenuItem>
-        <MenuItem component={NavLink} to="/waitlist" onClick={closeMore}>
-          <InfoIcon fontSize="small"/> Waitlist
-        </MenuItem><MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
+        <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
           <InfoIcon fontSize="small"/> Edit Info
         </MenuItem>
 
