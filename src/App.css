@@ -5,6 +5,8 @@ body, html, #root {
   margin: 0;
   padding: 0;
   height: 100%;
+  width: 100%;
+  overflow-x: hidden; /* prevent horizontal scroll on mobile */
 }
 
 /* Use a system font or your preferred font (Material UI uses Roboto by default) */
@@ -12,6 +14,7 @@ body {
   font-family: 'Roboto', sans-serif;
   background-color: #f4f6f8; /* Light grey background */
   color: #333; /* Dark text for readability */
+  overflow-x: hidden;
 }
 
 /* Optional: You can add any additional global styles here */

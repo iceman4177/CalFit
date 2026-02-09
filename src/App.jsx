@@ -79,9 +79,12 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
+// Hide Recap Coach from navigation (page remains accessible via direct URL).
+const SHOW_COACH_NAV = false;
+
 const routeTips = {
   '/':            'Daily Evaluation: swipe cards for verdict → stakes → diagnosis → insight.',
-  '/coach':        'Recap Coach (retention): your Daily Recap + Quests + XP live here. Log meals/workouts then come back.',
+  '/coach':        'Recap Coach (hidden): legacy page retained for compatibility.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
@@ -773,37 +776,39 @@ export default function App() {
           <InfoIcon fontSize="small"/> Edit Info
         </MenuItem>
 
-        {/* ✅ Retention: Recap Coach lives in More now */}
-        <MenuItem
-          component={NavLink}
-          to="/coach"
-          onClick={() => {
-            closeMore();
-            if (showCoachHint) {
-              try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
-              setShowCoachHint(false);
-            }
-          }}
-        >
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <ChatIcon fontSize="small" />
-            Recap Coach
-            <Chip
-              label="AI"
-              size="small"
-              color="primary"
-              sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
-            />
-            {showCoachHint && (
+        {/* Recap Coach page is kept for compatibility but hidden from nav by default */}
+        {SHOW_COACH_NAV && (
+          <MenuItem
+            component={NavLink}
+            to="/coach"
+            onClick={() => {
+              closeMore();
+              if (showCoachHint) {
+                try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
+                setShowCoachHint(false);
+              }
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <ChatIcon fontSize="small" />
+              Recap Coach
               <Chip
-                label="NEW"
+                label="AI"
                 size="small"
-                color="warning"
+                color="primary"
                 sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
               />
-            )}
-          </span>
-        </MenuItem>
+              {showCoachHint && (
+                <Chip
+                  label="NEW"
+                  size="small"
+                  color="warning"
+                  sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
+                />
+              )}
+            </span>
+          </MenuItem>
+        )}
       </Menu>
     </Box>
   );
