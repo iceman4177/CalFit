@@ -1,6 +1,7 @@
 // src/components/Header.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { useTheme } from '@mui/material/styles';
 import { AppBar,
   Toolbar,
   Box,
@@ -8,7 +9,10 @@ import { AppBar,
   IconButton,
   Typography,
   Stack,
-  Chip } from '@mui/material';
+  Chip,
+  Menu,
+  MenuItem,
+  useMediaQuery } from '@mui/material';
 import { useEntitlements } from '../context/EntitlementsContext.jsx';
 import { supabase } from '../lib/supabaseClient';
 import { openBillingPortal } from '../lib/billing';
@@ -26,6 +30,9 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
   // Preserve existing pro logic
   const { isProActive, entitlements, features } = useEntitlements();
   const location = useLocation();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
 
   // Derive ambassador flag without disturbing old behavior
   const hasAmbassador =
@@ -33,7 +40,10 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
     !!(Array.isArray(features) && features.includes('ambassador_badge'));
 
   // auth state (so we can decide whether to open OAuth first)
-  const [authUser, setAuthUser] = useState(null);
+  
+  const [accountAnchor, setAccountAnchor] = useState(null);
+  const accountOpen = Boolean(accountAnchor);
+const [authUser, setAuthUser] = useState(null);
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -242,27 +252,69 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
         {/* Plan action + quick sign-in */}
         <Stack direction="row" spacing={1} alignItems="center">
           <Button
-            variant={pro ? 'outlined' : 'contained'}
-            color={ctaColor}
+            variant={isMobile ? 'outlined' : (pro ? 'outlined' : 'contained')}
+            color={isMobile ? 'primary' : ctaColor}
             onClick={handlePrimaryCta}
             disabled={!pro && trialEligLoading}
-            sx={{ borderRadius: 10, textTransform: 'none', fontWeight: 800 }}
+            size={isMobile ? 'small' : 'medium'}
+            sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 900, px: isMobile ? 1.25 : 2, py: isMobile ? 0.6 : 0.9 }}
           >
-            {ctaLabel}
+            {isMobile ? (pro ? 'Pro' : (trialEligible ? 'Try Pro' : 'Upgrade')) : ctaLabel}
           </Button>
 
-          {!authUser && (
-            
-              <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }}>
+          {authUser ? (
+            <>
+              <IconButton
+                onClick={(e) => setAccountAnchor(e.currentTarget)}
+                size="small"
+                sx={{ ml: 0.5 }}
+                aria-label="Account"
+              >
                 <img
                   src="https://www.svgrepo.com/show/475656/google-color.svg"
-                  alt="Sign in"
+                  alt="Account"
                   width={20}
                   height={20}
                   style={{ display: 'block' }}
                 />
               </IconButton>
-            
+
+              <Menu
+                anchorEl={accountAnchor}
+                open={accountOpen}
+                onClose={() => setAccountAnchor(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                <MenuItem
+                  onClick={() => {
+                    setAccountAnchor(null);
+                    window.location.assign('/edit-info');
+                  }}
+                >
+                  Edit targets
+                </MenuItem>
+                <MenuItem
+                  onClick={async () => {
+                    setAccountAnchor(null);
+                    await supabase.auth.signOut();
+                    window.location.assign('/');
+                  }}
+                >
+                  Sign out
+                </MenuItem>
+              </Menu>
+            </>
+          ) : (
+            <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }} aria-label="Sign in">
+              <img
+                src="https://www.svgrepo.com/show/475656/google-color.svg"
+                alt="Sign in"
+                width={20}
+                height={20}
+                style={{ display: 'block' }}
+              />
+            </IconButton>
           )}
         </Stack>
       </Toolbar>

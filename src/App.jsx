@@ -725,82 +725,8 @@ export default function App() {
   }, [location.pathname, showCoachHint]);
 
   // === Quick Actions (Acquisition-forward) ===
-  const navBar = (
-    <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <Stack direction={{ xs:'column', sm:'row' }} spacing={2} justifyContent="center">
-        {/* ✅ New hero quick action: Evaluate */}
-        
-          <Button component={NavLink} to="/" variant="outlined" startIcon={<AssessmentIcon />}>
-            EVALUATE
-          </Button>
-        
+  // navBar (legacy hero buttons) removed for production launch.
 
-        
-          <Button component={NavLink} to="/workout" variant="contained" color="primary" startIcon={<FitnessCenterIcon />}>
-            WORKOUT
-          </Button>
-        
-
-        
-          <Button component={NavLink} to="/meals" variant="contained" color="secondary" startIcon={<RestaurantIcon />}>
-            MEALS
-          </Button>
-        
-
-        
-          <Button onClick={() => setInviteOpen(true)} variant="outlined" startIcon={<CampaignIcon />}>
-            INVITE
-          </Button>
-        
-
-        
-          <Button onClick={openMore} variant="outlined" startIcon={<MoreVertIcon />}>
-            MORE
-          </Button>
-        
-      </Stack>
-
-      <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={closeMore}>
-        <MenuItem component={NavLink} to="/edit-info" onClick={closeMore}>
-          <InfoIcon fontSize="small"/> Edit Info
-        </MenuItem>
-
-        {/* Recap Coach page is kept for compatibility but hidden from nav by default */}
-        {SHOW_COACH_NAV && (
-          <MenuItem
-            component={NavLink}
-            to="/coach"
-            onClick={() => {
-              closeMore();
-              if (showCoachHint) {
-                try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
-                setShowCoachHint(false);
-              }
-            }}
-          >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <ChatIcon fontSize="small" />
-              Recap Coach
-              <Chip
-                label="AI"
-                size="small"
-                color="primary"
-                sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
-              />
-              {showCoachHint && (
-                <Chip
-                  label="NEW"
-                  size="small"
-                  color="warning"
-                  sx={{ height: 18, borderRadius: '8px', fontWeight: 800, ml: 0.5 }}
-                />
-              )}
-            </span>
-          </MenuItem>
-        )}
-      </Menu>
-    </Box>
-  );
 
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -848,7 +774,7 @@ export default function App() {
     <>
       <Header logoSrc="/slimcal-logo.svg" showBeta={false} />
 
-      <Container maxWidth="md" sx={{ py:4 }}>
+      <Container maxWidth="md" sx={{ pt: { xs: 2, md: 4 }, pb: { xs: 10, md: 4 } }}>
         <PageTracker />
         {message && <PageTip />}
 
@@ -864,14 +790,15 @@ export default function App() {
           streak={streak}
         />
 
-        <Box sx={{ textAlign: 'center', mb: 2 }}>
-          <Typography variant="h2" color="primary">Slimcal.ai</Typography>
-          <Typography variant="body1" color="textSecondary">
-            Track your workouts, meals, and calories all in one place.
-          </Typography>
+        
+        {!authUser && (
+          <Box sx={{ textAlign: 'center', mb: { xs: 2, md: 3 }, mt: { xs: 1, md: 2 } }}>
+            <Typography variant="h2" color="primary">Slimcal.ai</Typography>
+            <Typography variant="body1" color="textSecondary">
+              Track your workouts, meals, and calories all in one place.
+            </Typography>
 
-          {!authUser && (
-            <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2 }}>
+            <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 2, flexWrap: 'wrap' }}>
               <Button variant="contained" onClick={() => startOAuth(false)}>
                 LOGIN
               </Button>
@@ -879,42 +806,17 @@ export default function App() {
                 TRY PRO FREE
               </Button>
             </Stack>
-          )}
+          </Box>
+        )}
 
-          {showLoggedInCta && (
-            <Button
-              variant="contained"
-              sx={{ mt: 2 }}
-              onClick={() => setUpgradeOpen(true)}
-            >
-              {loggedInCtaLabel}
-            </Button>
-          )}
 
-          {authUser && (
-            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <Typography variant="body2">
-                Signed in as {authUser.email}
-              </Typography>
-              {hasAmbassadorBadge && (
-                <Chip
-                  label="Ambassador"
-                  color="warning"
-                  size="small"
-                  sx={{ fontWeight: 600 }}
-                />
-              )}
-              <Button size="small" onClick={async () => { await supabase.auth.signOut(); }}>
-                SIGN OUT
-              </Button>
-            </Box>
-          )}
-        </Box>
-
-        <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
-        <StreakBanner streak={streak} />
-        <SocialProofBanner />
-        {navBar}
+        {authUser && location.pathname === '/dashboard' && (
+          <>
+            <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
+            <StreakBanner streak={streak} />
+            <SocialProofBanner />
+          </>
+        )}
 
         <Switch>
           <Route path="/auth/callback" component={AuthCallback} />
