@@ -117,9 +117,9 @@ function sumMealsMacros(dayRec) {
   if (!Array.isArray(meals)) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
   return meals.reduce(
     (acc, m) => {
-      acc.protein_g += Number(m?.protein_g ?? m?.macros?.protein ?? 0) || 0;
-      acc.carbs_g += Number(m?.carbs_g ?? m?.macros?.carbs ?? 0) || 0;
-      acc.fat_g += Number(m?.fat_g ?? m?.macros?.fat ?? 0) || 0;
+      acc.protein_g += Number(m?.protein_g ?? m?.macros?.protein_g ?? m?.macros?.protein ?? m?.macros?.p ?? 0) || 0;
+      acc.carbs_g += Number(m?.carbs_g ?? m?.macros?.carbs_g ?? m?.macros?.carbs ?? m?.macros?.c ?? 0) || 0;
+      acc.fat_g += Number(m?.fat_g ?? m?.macros?.fat_g ?? m?.macros?.fat ?? m?.macros?.f ?? 0) || 0;
       return acc;
     },
     { protein_g: 0, carbs_g: 0, fat_g: 0 }
