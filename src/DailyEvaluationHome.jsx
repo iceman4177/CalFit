@@ -250,8 +250,11 @@ function CardShell({ title, subtitle, children, right }) {
     <Card
       elevation={0}
       sx={{
-        minWidth: { xs: 310, sm: 360 },
-        maxWidth: 440,
+        // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
+        // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
+        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
+        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
+        height: { xs: "100%", sm: "auto" },
         scrollSnapAlign: "start",
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
@@ -259,7 +262,15 @@ function CardShell({ title, subtitle, children, right }) {
         color: "rgba(255,255,255,0.92)",
       }}
     >
-      <CardContent sx={{ p: 2 }}>
+      <CardContent
+        sx={{
+          p: 2,
+          height: { xs: "100%", sm: "auto" },
+          display: { xs: "flex", sm: "block" },
+          flexDirection: { xs: "column", sm: "initial" },
+          minHeight: 0,
+        }}
+      >
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
           <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ fontWeight: 950, letterSpacing: -0.2, color: "rgba(255,255,255,0.94)" }}>
@@ -274,7 +285,17 @@ function CardShell({ title, subtitle, children, right }) {
           {right}
         </Stack>
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-        {children}
+        {/* Mobile: allow the inside of the card to scroll without breaking the full-screen layout. */}
+        <Box
+          sx={{
+            flex: { xs: 1, sm: "unset" },
+            minHeight: 0,
+            overflowY: { xs: "auto", sm: "visible" },
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
+          {children}
+        </Box>
       </CardContent>
     </Card>
   );
@@ -1284,8 +1305,21 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
     : `Generate your daily recap verdict (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1150, mx: "auto" }}>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
+    <Box
+      sx={{
+        // Mobile-first: let the carousel own the viewport height.
+        p: { xs: 0, sm: 3 },
+        maxWidth: { xs: "100%", sm: 1150 },
+        mx: "auto",
+      }}
+    >
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={1}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+        sx={{ display: { xs: "none", sm: "flex" } }}
+      >
         <Box>
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(2,6,23,0.98)" }}>
             Daily Evaluation
@@ -1300,7 +1334,24 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         </Stack>
       </Stack>
 {/* Cards */}
-      <Box sx={{ mt: 2, display: "flex", gap: 1.5, overflowX: "auto", pb: 1, scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
+        <Box
+        sx={{
+          mt: { xs: 0, sm: 2 },
+          px: { xs: 2, sm: 0 },
+          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
+          height: {
+            xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
+            sm: "auto",
+          },
+          display: "flex",
+          gap: 1.5,
+          overflowX: "auto",
+          overflowY: { xs: "hidden", sm: "visible" },
+          pb: { xs: 0, sm: 1 },
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         {/* Card 1 */}
         <CardShell
           title="Today"
