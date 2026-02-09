@@ -34,6 +34,7 @@ import FeatureUseBadge, {
 } from "./components/FeatureUseBadge.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
+import { supabase } from "./lib/supabaseClient.js";
 
 /**
  * DailyEvaluationHome — Win-first + Action Steps v3
@@ -73,6 +74,35 @@ function usDay(d = new Date()) {
     return new Date(d).toLocaleDateString("en-US");
   } catch {
     return "";
+  }
+}
+
+function isoDayInTZ(d = new Date(), tz = "America/Los_Angeles") {
+  try {
+    const dt = new Date(d);
+    // en-CA yields YYYY-MM-DD
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(dt);
+  } catch {
+    return isoDay(d);
+  }
+}
+
+function usDayInTZ(d = new Date(), tz = "America/Los_Angeles") {
+  try {
+    const dt = new Date(d);
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    }).format(dt);
+  } catch {
+    return usDay(d);
   }
 }
 
@@ -590,6 +620,26 @@ export default function DailyEvaluationHome() {
   const { user } = useAuth();
   const userId = user?.id || null;
 
+
+const [dataTick, setDataTick] = useState(0);
+
+// Recompute derived Daily Eval data when meals/workouts update (local-first + cross-device hydrations)
+useEffect(() => {
+  const bump = () => setDataTick((t) => t + 1);
+
+  window.addEventListener("storage", bump);
+  window.addEventListener("slimcal:consumed:update", bump);
+  window.addEventListener("slimcal:burned:update", bump);
+  window.addEventListener("slimcal:workoutHistory:update", bump);
+
+  return () => {
+    window.removeEventListener("storage", bump);
+    window.removeEventListener("slimcal:consumed:update", bump);
+    window.removeEventListener("slimcal:burned:update", bump);
+    window.removeEventListener("slimcal:workoutHistory:update", bump);
+  };
+}, []);
+
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // AI verdict state (gating unchanged)
@@ -613,6 +663,192 @@ export default function DailyEvaluationHome() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recapCacheKey]);
+
+// Ensure Daily Eval has TODAY meals/workouts on this device (read-only cloud pull → local merge).
+// This makes DailyEval look consistent across devices without changing the write/sync pipeline.
+const hydrateRef = useRef({ lastMs: 0, inflight: false });
+
+async function hydrateTodayFromCloudIfNeeded(trigger = "mount") {
+  if (!userId || !supabase) return;
+  const tz = "America/Los_Angeles";
+  const now = new Date();
+  const dayISO = isoDayInTZ(now, tz);
+  const dayUS = usDayInTZ(now, tz);
+
+  const ref = hydrateRef.current;
+  const nowMs = Date.now();
+  // Cooldown to avoid spam (focus, mount, etc.)
+  if (ref.inflight) return;
+  if (nowMs - (ref.lastMs || 0) < 20_000) return; // 20s
+
+  ref.inflight = true;
+  try {
+    const uid = userId;
+    const mealKey = uid ? `mealHistory:${uid}` : "mealHistory";
+    const workoutKey = uid ? `workoutHistory:${uid}` : "workoutHistory";
+
+    const lookbackIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+    // ---------------- meals ----------------
+    try {
+      const mealsRes = await supabase
+        .from("meals")
+        .select("client_id,title,total_calories,eaten_at")
+        .eq("user_id", uid)
+        .gte("eaten_at", lookbackIso)
+        .order("eaten_at", { ascending: true })
+        .limit(500);
+
+      const cloudRaw = Array.isArray(mealsRes?.data) ? mealsRes.data : [];
+      const cloudToday = cloudRaw.filter((m) => {
+        const dt = new Date(m?.eaten_at || "");
+        if (Number.isNaN(dt.getTime())) return false;
+        return isoDayInTZ(dt, tz) === dayISO;
+      });
+
+      const cloudMeals = cloudToday.map((m) => {
+        const cid =
+          m?.client_id ||
+          `cloud_${String(m?.eaten_at || "")}_${String(m?.title || "")}_${String(m?.total_calories || "")}`;
+        return {
+          client_id: cid,
+          name: m?.title || "Meal",
+          calories: Number(m?.total_calories) || 0,
+          createdAt: m?.eaten_at || new Date().toISOString(),
+        };
+      });
+
+      if (cloudMeals.length > 0) {
+        const localHist = safeJsonParse(localStorage.getItem(mealKey), []);
+        const hist = Array.isArray(localHist) ? localHist : [];
+        const existingToday = hist.find((d) => d?.date === dayUS) || null;
+        const existingMeals = Array.isArray(existingToday?.meals) ? existingToday.meals : [];
+
+        const mergedMap = new Map();
+        for (const lm of existingMeals) {
+          const cid =
+            lm?.client_id ||
+            `local_${String(lm?.name || "")}_${String(lm?.createdAt || "")}_${String(lm?.calories || 0)}`;
+          mergedMap.set(cid, { ...lm, client_id: cid });
+        }
+        for (const cm of cloudMeals) {
+          if (!mergedMap.has(cm.client_id)) mergedMap.set(cm.client_id, cm);
+        }
+
+        const merged = Array.from(mergedMap.values()).sort((a, b) => {
+          const ta = new Date(a?.createdAt || 0).getTime();
+          const tb = new Date(b?.createdAt || 0).getTime();
+          return ta - tb;
+        });
+
+        const rest = hist.filter((d) => d?.date !== dayUS);
+        rest.push({ date: dayUS, meals: merged });
+
+        localStorage.setItem(mealKey, JSON.stringify(rest));
+      }
+    } catch (e) {
+      // ignore cloud pull issues on DailyEval
+    }
+
+    // ---------------- workouts ----------------
+    try {
+      let rows = [];
+      let wError = null;
+
+      // Prefer local_day equality (same as WorkoutPage)
+      const wRes = await supabase
+        .from("workouts")
+        .select("id,client_id,total_calories,started_at,ended_at,created_at,local_day,items")
+        .eq("user_id", uid)
+        .eq("local_day", dayISO)
+        .order("started_at", { ascending: false });
+
+      if (wRes?.error) {
+        wError = wRes.error;
+      } else {
+        rows = Array.isArray(wRes?.data) ? wRes.data : [];
+      }
+
+      // Fallback: started_at lookback filter if local_day isn't available
+      if (wError && /column .*local_day.* does not exist/i.test(String(wError?.message || ""))) {
+        const wRes2 = await supabase
+          .from("workouts")
+          .select("id,client_id,total_calories,started_at,ended_at,created_at,items")
+          .eq("user_id", uid)
+          .gte("started_at", lookbackIso)
+          .order("started_at", { ascending: false });
+
+        const raw2 = Array.isArray(wRes2?.data) ? wRes2.data : [];
+        rows = raw2.filter((w) => {
+          const dt = new Date(w?.started_at || w?.created_at || "");
+          if (Number.isNaN(dt.getTime())) return false;
+          return isoDayInTZ(dt, tz) === dayISO;
+        });
+      }
+
+      if (rows.length > 0) {
+        const localHist = safeJsonParse(localStorage.getItem(workoutKey), []);
+        const hist = Array.isArray(localHist) ? localHist : [];
+
+        const mergedMap = new Map();
+        for (const lw of hist) {
+          const cid = lw?.client_id || lw?.id || `local_${String(lw?.createdAt || "")}`;
+          mergedMap.set(cid, lw);
+        }
+
+        for (const w of rows) {
+          const cid = w?.client_id || w?.id || `cloud_${String(w?.started_at || w?.created_at || "")}`;
+          if (!mergedMap.has(cid)) {
+            const total = Number(w?.total_calories) || 0;
+            const started = w?.started_at || w?.created_at || new Date().toISOString();
+            mergedMap.set(cid, {
+              id: cid,
+              client_id: cid,
+              date: dayUS,
+              __local_day: w?.local_day || dayISO,
+              started_at: started,
+              ended_at: w?.ended_at || null,
+              createdAt: started,
+              totalCalories: total,
+              total_calories: total,
+              name: (Array.isArray(w?.items) && w.items?.[0]?.name) || "Workout",
+              exercises: Array.isArray(w?.items) ? w.items : [],
+            });
+          }
+        }
+
+        const merged = Array.from(mergedMap.values());
+        localStorage.setItem(workoutKey, JSON.stringify(merged));
+      }
+    } catch (e) {
+      // ignore cloud pull issues on DailyEval
+    }
+
+    // Recompute derived data on this device
+    setDataTick((t) => t + 1);
+    ref.lastMs = Date.now();
+  } finally {
+    hydrateRef.current.inflight = false;
+  }
+}
+
+useEffect(() => {
+  hydrateTodayFromCloudIfNeeded("mount");
+  const onFocus = () => hydrateTodayFromCloudIfNeeded("focus");
+  const onVis = () => {
+    if (document.visibilityState === "visible") hydrateTodayFromCloudIfNeeded("visible");
+  };
+
+  window.addEventListener("focus", onFocus);
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    window.removeEventListener("focus", onFocus);
+    document.removeEventListener("visibilitychange", onVis);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [userId]);
+
 
   // score badge animation
   const [scoreAnim, setScoreAnim] = useState(0);
@@ -765,7 +1001,7 @@ export default function DailyEvaluationHome() {
         nowHourPST,
       },
     };
-  }, [userId]);
+  }, [userId, dataTick]);
 
   // per-day hydration manual checkbox
   const hydrationKey = useMemo(() => {
