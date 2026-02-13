@@ -252,10 +252,9 @@ function CardShell({ title, subtitle, children, right }) {
       sx={{
         // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
         // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        minWidth: { xs: "100%", sm: 360 },
-        maxWidth: { xs: "100%", sm: 440 },
+        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
+        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
         height: { xs: "100%", sm: "auto" },
-        flex: { xs: "0 0 100%", sm: "0 0 auto" },
         scrollSnapAlign: "start",
         scrollSnapStop: "always",
         borderRadius: 3,
@@ -268,7 +267,6 @@ function CardShell({ title, subtitle, children, right }) {
         sx={{
           p: 2,
           height: { xs: "100%", sm: "auto" },
-        flex: { xs: "0 0 100%", sm: "0 0 auto" },
           display: { xs: "flex", sm: "block" },
           flexDirection: { xs: "column", sm: "initial" },
           minHeight: 0,
@@ -288,12 +286,11 @@ function CardShell({ title, subtitle, children, right }) {
           {right}
         </Stack>
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-        {/* Mobile: allow the inside of the card to scroll without breaking the full-screen layout. */}
+        {/* Mobile: keep paging scroll authoritative; size content to fit (avoids gesture conflicts). */}
         <Box
           sx={{
             flex: { xs: 1, sm: "unset" },
             minHeight: 0,
-            overflowY: { xs: "auto", sm: "visible" },
             WebkitOverflowScrolling: "touch",
           }}
         >
@@ -316,7 +313,8 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
         thickness={5}
         sx={{ color: tone, position: "absolute", left: 0, top: 0 }}
       />
-      <Box sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 0.8 }}>
+      <Box sx={{ position: "absolute", inset: 0, display: "flex",
+          flexDirection: { xs: "column", sm: "row" }, alignItems: "center", justifyContent: "center", textAlign: "center", px: 0.8 }}>
         <Box>
           <Typography sx={{ fontWeight: 950, fontSize: size >= 140 ? 18 : 14, lineHeight: 1.05, color: "rgba(255,255,255,0.94)" }}>
             {primary}
@@ -661,6 +659,19 @@ useEffect(() => {
     window.removeEventListener("slimcal:consumed:update", bump);
     window.removeEventListener("slimcal:burned:update", bump);
     window.removeEventListener("slimcal:workoutHistory:update", bump);
+  };
+}, []);
+
+
+// Viewport height for mobile sizing (prevents rings from clipping on short screens)
+const [viewportH, setViewportH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
+useEffect(() => {
+  const onResize = () => setViewportH(typeof window !== "undefined" ? window.innerHeight : 800);
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+  return () => {
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("orientationchange", onResize);
   };
 }, []);
 
@@ -1094,6 +1105,22 @@ useEffect(() => {
 
   const calErr = calorieTarget ? Math.abs(consumed - calorieTarget) : Math.abs(bundle.totals.netKcal);
   const calScale = calorieTarget ? Math.max(500, calorieTarget) : 700;
+
+// Responsive ring sizing for mobile "page" layout
+const heroRingSize = useMemo(() => {
+  const h = Number(viewportH || 800);
+  if (h < 670) return 124;
+  if (h < 740) return 132;
+  return 148;
+}, [viewportH]);
+
+const macroRingSize = useMemo(() => {
+  const h = Number(viewportH || 800);
+  if (h < 670) return 78;
+  if (h < 740) return 86;
+  return 96;
+}, [viewportH]);
+
   const calQuality = calorieTarget ? clamp(100 - (calErr / calScale) * 100, 0, 100) : 0;
 
   const proteinPct = clamp((bundle.totals.macros.protein_g / Math.max(1, bundle.targets.proteinTarget)) * 100, 0, 100);
@@ -1353,21 +1380,23 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
-          // Full-screen pager on mobile (accounts for app header + bottom nav + iOS safe area).
+          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
           height: {
             xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
             sm: "auto",
           },
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 1.5,
+          gap: { xs: 0, sm: 1.5 },
           overflowX: { xs: "hidden", sm: "auto" },
-          overflowY: { xs: "auto", sm: "visible" },
-          pb: { xs: 0, sm: 1 },
+          overflowY: { xs: "auto", sm: "hidden" },
+          pb: { xs: "calc(12px + env(safe-area-inset-bottom))", sm: 1 },
+          pt: { xs: 1, sm: 0 },
           scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
-          WebkitOverflowScrolling: "touch",
+          scrollSnapStop: "always",
           scrollBehavior: "smooth",
-          overscrollBehaviorY: { xs: "contain", sm: "auto" },
+          overscrollBehaviorY: "contain",
+          touchAction: "pan-y",
+          WebkitOverflowScrolling: "touch",
           scrollbarWidth: "none",
           "&::-webkit-scrollbar": { display: "none" },
         }}
@@ -1389,7 +1418,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Ring
                 pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={148}
+                size={heroRingSize}
                 title="Calories"
                 primary={`${Math.round(calQuality)}%`}
                 secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
@@ -1398,7 +1427,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
               <Ring
                 pct={exercisePct}
-                size={148}
+                size={heroRingSize}
                 title="Exercise"
                 primary={`${Math.round(bundle.totals.burned)} kcal`}
                 secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
@@ -1408,14 +1437,14 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Macros row */}
             <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
+              <Ring pct={proteinPct} size={macroRingSize} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              <Ring pct={carbsPct} size={macroRingSize} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              <Ring pct={fatsPct} size={macroRingSize} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
             </Stack>
 
-            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
+            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} size="small" label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
             {fixTags.length ? (
-              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap" }}>
+              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap", rowGap: 0.8, columnGap: 0.8, maxWidth: 420 }}>
                 {fixTags.map((t) => (
                   <Chip
                     key={t.label}
