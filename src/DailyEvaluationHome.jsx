@@ -250,12 +250,14 @@ function CardShell({ title, subtitle, children, right }) {
     <Card
       elevation={0}
       sx={{
-        // Mobile: full-width, full-height “pages” you scroll vertically.
-        width: { xs: "100%", sm: 520 },
-        maxWidth: { xs: "100%", sm: 560 },
-        alignSelf: "center",
+        // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
+        // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
+        minWidth: { xs: "100%", sm: 360 },
+        maxWidth: { xs: "100%", sm: 440 },
         height: { xs: "100%", sm: "auto" },
-        scrollSnapAlign: "unset",
+        flex: { xs: "0 0 100%", sm: "0 0 auto" },
+        scrollSnapAlign: "start",
+        scrollSnapStop: "always",
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
@@ -266,6 +268,7 @@ function CardShell({ title, subtitle, children, right }) {
         sx={{
           p: 2,
           height: { xs: "100%", sm: "auto" },
+        flex: { xs: "0 0 100%", sm: "0 0 auto" },
           display: { xs: "flex", sm: "block" },
           flexDirection: { xs: "column", sm: "initial" },
           minHeight: 0,
@@ -285,12 +288,12 @@ function CardShell({ title, subtitle, children, right }) {
           {right}
         </Stack>
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-        {/* Let the page scroll naturally (avoid nested scroll traps on mobile). */}
+        {/* Mobile: allow the inside of the card to scroll without breaking the full-screen layout. */}
         <Box
           sx={{
-            flex: "unset",
+            flex: { xs: 1, sm: "unset" },
             minHeight: 0,
-            overflowY: "visible",
+            overflowY: { xs: "auto", sm: "visible" },
             WebkitOverflowScrolling: "touch",
           }}
         >
@@ -1350,22 +1353,23 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
-          // Mobile: vertical scroll of full-screen cards (no horizontal swipe).
+          // Full-screen pager on mobile (accounts for app header + bottom nav + iOS safe area).
           height: {
             xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
             sm: "auto",
           },
           display: "flex",
           flexDirection: { xs: "column", sm: "row" },
-          flexWrap: { xs: "nowrap", sm: "wrap" },
-          justifyContent: { xs: "flex-start", sm: "center" },
-          alignItems: { xs: "stretch", sm: "flex-start" },
           gap: 1.5,
-          overflowX: { xs: "hidden", sm: "hidden" },
-          overflowY: "visible",
+          overflowX: { xs: "hidden", sm: "auto" },
+          overflowY: { xs: "auto", sm: "visible" },
           pb: { xs: 0, sm: 1 },
-          scrollSnapType: "none",
+          scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
           WebkitOverflowScrolling: "touch",
+          scrollBehavior: "smooth",
+          overscrollBehaviorY: { xs: "contain", sm: "auto" },
+          scrollbarWidth: "none",
+          "&::-webkit-scrollbar": { display: "none" },
         }}
       >
         {/* Card 1 */}
