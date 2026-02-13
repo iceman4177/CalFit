@@ -250,12 +250,12 @@ function CardShell({ title, subtitle, children, right }) {
     <Card
       elevation={0}
       sx={{
-        // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
-        // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
-        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
+        // Mobile: full-width, full-height “pages” you scroll vertically.
+        width: { xs: "100%", sm: 520 },
+        maxWidth: { xs: "100%", sm: 560 },
+        alignSelf: "center",
         height: { xs: "100%", sm: "auto" },
-        scrollSnapAlign: "start",
+        scrollSnapAlign: "unset",
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
@@ -285,12 +285,12 @@ function CardShell({ title, subtitle, children, right }) {
           {right}
         </Stack>
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-        {/* Mobile: allow the inside of the card to scroll without breaking the full-screen layout. */}
+        {/* Let the page scroll naturally (avoid nested scroll traps on mobile). */}
         <Box
           sx={{
-            flex: { xs: 1, sm: "unset" },
+            flex: "unset",
             minHeight: 0,
-            overflowY: { xs: "auto", sm: "visible" },
+            overflowY: "visible",
             WebkitOverflowScrolling: "touch",
           }}
         >
@@ -1350,17 +1350,21 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
-          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
+          // Mobile: vertical scroll of full-screen cards (no horizontal swipe).
           height: {
             xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
             sm: "auto",
           },
           display: "flex",
+          flexDirection: { xs: "column", sm: "row" },
+          flexWrap: { xs: "nowrap", sm: "wrap" },
+          justifyContent: { xs: "flex-start", sm: "center" },
+          alignItems: { xs: "stretch", sm: "flex-start" },
           gap: 1.5,
-          overflowX: "auto",
-          overflowY: { xs: "hidden", sm: "visible" },
+          overflowX: { xs: "hidden", sm: "hidden" },
+          overflowY: "visible",
           pb: { xs: 0, sm: 1 },
-          scrollSnapType: "x mandatory",
+          scrollSnapType: "none",
           WebkitOverflowScrolling: "touch",
         }}
       >
