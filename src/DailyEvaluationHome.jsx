@@ -245,22 +245,22 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 }
 
 // ----------------------------- UI primitives ---------------------------------
-function CardShell({ title, subtitle, children, right }) {
+function CardShell({ title, subtitle, children, right, bodyProps }) {
   return (
     <Card
       elevation={0}
       sx={{
-        // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
-        // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
-        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
+        // Mobile: full-width, full-height “pages” you scroll vertically.
+        width: { xs: "100%", sm: 520 },
+        maxWidth: { xs: "100%", sm: 560 },
+        alignSelf: "center",
         height: { xs: "100%", sm: "auto" },
-        scrollSnapAlign: "start",
-        scrollSnapStop: "always",
+        scrollSnapAlign: "unset",
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
         color: "rgba(255,255,255,0.92)",
+        overflow: "hidden",
       }}
     >
       <CardContent
@@ -285,13 +285,20 @@ function CardShell({ title, subtitle, children, right }) {
           </Box>
           {right}
         </Stack>
+
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-        {/* Mobile: keep paging scroll authoritative; size content to fit (avoids gesture conflicts). */}
+
+        {/* On mobile pager pages, the BODY is scrollable so users can read everything.
+            We also attach touch handlers here to resolve swipe-vs-scroll conflicts. */}
         <Box
+          {...(bodyProps || {})}
           sx={{
-            flex: { xs: 1, sm: "unset" },
+            flex: 1,
             minHeight: 0,
+            overflowY: { xs: "auto", sm: "visible" },
             WebkitOverflowScrolling: "touch",
+            pr: { xs: 0.5, sm: 0 },
+            ...((bodyProps && bodyProps.sx) || {}),
           }}
         >
           {children}
@@ -300,6 +307,7 @@ function CardShell({ title, subtitle, children, right }) {
     </Card>
   );
 }
+
 
 function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
   const v = clamp(Number(pct || 0), 0, 100);
@@ -313,8 +321,7 @@ function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
         thickness={5}
         sx={{ color: tone, position: "absolute", left: 0, top: 0 }}
       />
-      <Box sx={{ position: "absolute", inset: 0, display: "flex",
-          flexDirection: { xs: "column", sm: "row" }, alignItems: "center", justifyContent: "center", textAlign: "center", px: 0.8 }}>
+      <Box sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 0.8 }}>
         <Box>
           <Typography sx={{ fontWeight: 950, fontSize: size >= 140 ? 18 : 14, lineHeight: 1.05, color: "rgba(255,255,255,0.94)" }}>
             {primary}
@@ -662,20 +669,85 @@ useEffect(() => {
   };
 }, []);
 
-
-// Viewport height for mobile sizing (prevents rings from clipping on short screens)
-const [viewportH, setViewportH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
-useEffect(() => {
-  const onResize = () => setViewportH(typeof window !== "undefined" ? window.innerHeight : 800);
-  window.addEventListener("resize", onResize);
-  window.addEventListener("orientationchange", onResize);
-  return () => {
-    window.removeEventListener("resize", onResize);
-    window.removeEventListener("orientationchange", onResize);
-  };
-}, []);
-
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // --- Mobile vertical pager (Today / Progress / Coach) ---
+  const pagerRef = useRef(null);
+  const pageRefs = useRef([]);
+
+  const swipeRef = useRef({
+    startY: 0,
+    startX: 0,
+    locked: false,
+    started: false,
+  });
+
+  function scrollToPage(idx) {
+    const el = pageRefs.current[idx];
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch {
+      // ignore
+    }
+  }
+
+  function makeBodyProps(pageIndex) {
+    return {
+      onTouchStart: (e) => {
+        if (!e?.touches?.length) return;
+        const t = e.touches[0];
+        swipeRef.current.startY = t.clientY;
+        swipeRef.current.startX = t.clientX;
+        swipeRef.current.locked = false;
+        swipeRef.current.started = true;
+      },
+      onTouchMove: (e) => {
+        if (!swipeRef.current.started || swipeRef.current.locked) return;
+        if (!e?.touches?.length) return;
+
+        const t = e.touches[0];
+        const dy = t.clientY - swipeRef.current.startY;
+        const dx = t.clientX - swipeRef.current.startX;
+
+        // Ignore mostly-horizontal gestures
+        if (Math.abs(dx) > Math.abs(dy)) return;
+
+        // Only trigger paging once the gesture is intentional
+        const threshold = 42;
+        if (Math.abs(dy) < threshold) return;
+
+        const target = e.currentTarget; // the scrollable body
+        if (!target) return;
+
+        const atTop = target.scrollTop <= 0;
+        const atBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 2;
+
+        // Swipe up (dy negative) -> next page when at bottom
+        if (dy < 0 && atBottom && pageIndex < 2) {
+          swipeRef.current.locked = true;
+          e.preventDefault?.();
+          scrollToPage(pageIndex + 1);
+          return;
+        }
+
+        // Swipe down (dy positive) -> previous page when at top
+        if (dy > 0 && atTop && pageIndex > 0) {
+          swipeRef.current.locked = true;
+          e.preventDefault?.();
+          scrollToPage(pageIndex - 1);
+        }
+      },
+      onTouchEnd: () => {
+        swipeRef.current.started = false;
+        swipeRef.current.locked = false;
+      },
+      onTouchCancel: () => {
+        swipeRef.current.started = false;
+        swipeRef.current.locked = false;
+      },
+    };
+  }
 
   // AI verdict state (gating unchanged)
   const [aiLoading, setAiLoading] = useState(false);
@@ -1105,22 +1177,6 @@ useEffect(() => {
 
   const calErr = calorieTarget ? Math.abs(consumed - calorieTarget) : Math.abs(bundle.totals.netKcal);
   const calScale = calorieTarget ? Math.max(500, calorieTarget) : 700;
-
-// Responsive ring sizing for mobile "page" layout
-const heroRingSize = useMemo(() => {
-  const h = Number(viewportH || 800);
-  if (h < 670) return 124;
-  if (h < 740) return 132;
-  return 148;
-}, [viewportH]);
-
-const macroRingSize = useMemo(() => {
-  const h = Number(viewportH || 800);
-  if (h < 670) return 78;
-  if (h < 740) return 86;
-  return 96;
-}, [viewportH]);
-
   const calQuality = calorieTarget ? clamp(100 - (calErr / calScale) * 100, 0, 100) : 0;
 
   const proteinPct = clamp((bundle.totals.macros.protein_g / Math.max(1, bundle.targets.proteinTarget)) * 100, 0, 100);
@@ -1377,32 +1433,42 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
       </Stack>
 {/* Cards */}
         <Box
-        sx={{
-          mt: { xs: 0, sm: 2 },
-          px: { xs: 2, sm: 0 },
-          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
-          height: {
-            xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
-            sm: "auto",
-          },
-          display: "flex",
-          gap: { xs: 0, sm: 1.5 },
-          overflowX: { xs: "hidden", sm: "auto" },
-          overflowY: { xs: "auto", sm: "hidden" },
-          pb: { xs: "calc(12px + env(safe-area-inset-bottom))", sm: 1 },
-          pt: { xs: 1, sm: 0 },
-          scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
-          scrollSnapStop: "always",
-          scrollBehavior: "smooth",
-          overscrollBehaviorY: "contain",
-          touchAction: "pan-y",
-          WebkitOverflowScrolling: "touch",
-          scrollbarWidth: "none",
-          "&::-webkit-scrollbar": { display: "none" },
-        }}
-      >
+          ref={pagerRef}
+          sx={{
+            mt: { xs: 0, sm: 2 },
+            px: { xs: 2, sm: 0 },
+            // Mobile: vertical swipe between full-screen cards (snap paging).
+            height: {
+              xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
+              sm: "auto",
+            },
+            display: "flex",
+            flexDirection: { xs: "column", sm: "row" },
+            flexWrap: { xs: "nowrap", sm: "wrap" },
+            justifyContent: { xs: "flex-start", sm: "center" },
+            alignItems: { xs: "stretch", sm: "flex-start" },
+            gap: { xs: 0, sm: 1.5 },
+            overflowY: { xs: "auto", sm: "visible" },
+            overflowX: { xs: "hidden", sm: "hidden" },
+            pb: { xs: 0, sm: 1 },
+            scrollSnapType: { xs: "y mandatory", sm: "none" },
+            scrollPaddingTop: 0,
+            WebkitOverflowScrolling: "touch",
+            overscrollBehaviorY: { xs: "contain", sm: "auto" },
+          }}
+        >
+          <Box
+            ref={(el) => (pageRefs.current[0] = el)}
+            sx={{
+              height: { xs: "100%", sm: "auto" },
+              flex: { xs: "0 0 100%", sm: "0 0 auto" },
+              scrollSnapAlign: "start",
+              scrollSnapStop: "always",
+              display: "flex",
+            }}
+          >
         {/* Card 1 */}
-        <CardShell
+        <CardShell bodyProps={makeBodyProps(0)}
           title="Today"
           subtitle="Your scoreboard"
           right={
@@ -1418,7 +1484,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Ring
                 pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={heroRingSize}
+                size={148}
                 title="Calories"
                 primary={`${Math.round(calQuality)}%`}
                 secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
@@ -1427,7 +1493,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
               <Ring
                 pct={exercisePct}
-                size={heroRingSize}
+                size={148}
                 title="Exercise"
                 primary={`${Math.round(bundle.totals.burned)} kcal`}
                 secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
@@ -1437,14 +1503,14 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Macros row */}
             <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring pct={proteinPct} size={macroRingSize} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              <Ring pct={carbsPct} size={macroRingSize} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              <Ring pct={fatsPct} size={macroRingSize} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
+              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
             </Stack>
 
-            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} size="small" label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
+            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
             {fixTags.length ? (
-              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap", rowGap: 0.8, columnGap: 0.8, maxWidth: 420 }}>
+              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap" }}>
                 {fixTags.map((t) => (
                   <Chip
                     key={t.label}
@@ -1458,9 +1524,20 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             ) : null}
           </Stack>
         </CardShell>
+          </Box>
 
+          <Box
+            ref={(el) => (pageRefs.current[1] = el)}
+            sx={{
+              height: { xs: "100%", sm: "auto" },
+              flex: { xs: "0 0 100%", sm: "0 0 auto" },
+              scrollSnapAlign: "start",
+              scrollSnapStop: "always",
+              display: "flex",
+            }}
+          >
         {/* Card 2 */}
-        <CardShell title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell bodyProps={makeBodyProps(1)} title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1599,9 +1676,20 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
           </Stack>
         </CardShell>
+          </Box>
 
+          <Box
+            ref={(el) => (pageRefs.current[2] = el)}
+            sx={{
+              height: { xs: "100%", sm: "auto" },
+              flex: { xs: "0 0 100%", sm: "0 0 auto" },
+              scrollSnapAlign: "start",
+              scrollSnapStop: "always",
+              display: "flex",
+            }}
+          >
 {/* Card 3 */}
-        <CardShell title="Coach" subtitle="Your daily recap">
+        <CardShell bodyProps={makeBodyProps(2)} title="Coach" subtitle="Your daily recap">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
@@ -1645,7 +1733,8 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             </Stack>
           </Stack>
         </CardShell>
-      </Box>
+          </Box>
+        </Box>
 
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Box>
