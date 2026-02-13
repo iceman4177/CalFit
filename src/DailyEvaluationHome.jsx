@@ -245,7 +245,7 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 }
 
 // ----------------------------- UI primitives ---------------------------------
-function CardShell({ title, subtitle, children, right, bodyProps }) {
+function CardShell({ title, subtitle, children, right, bodyProps, footer }) {
   return (
     <Card
       elevation={0}
@@ -295,14 +295,19 @@ function CardShell({ title, subtitle, children, right, bodyProps }) {
           sx={{
             flex: 1,
             minHeight: 0,
-            overflowY: { xs: "auto", sm: "visible" },
-            WebkitOverflowScrolling: "touch",
+            overflowY: { xs: "hidden", sm: "visible" },
             pr: { xs: 0.5, sm: 0 },
             ...((bodyProps && bodyProps.sx) || {}),
           }}
         >
           {children}
         </Box>
+
+        {footer ? (
+          <Box sx={{ pt: 1.2, display: "flex", justifyContent: "flex-end" }}>
+            {footer}
+          </Box>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -693,60 +698,7 @@ useEffect(() => {
   }
 
   function makeBodyProps(pageIndex) {
-    return {
-      onTouchStart: (e) => {
-        if (!e?.touches?.length) return;
-        const t = e.touches[0];
-        swipeRef.current.startY = t.clientY;
-        swipeRef.current.startX = t.clientX;
-        swipeRef.current.locked = false;
-        swipeRef.current.started = true;
-      },
-      onTouchMove: (e) => {
-        if (!swipeRef.current.started || swipeRef.current.locked) return;
-        if (!e?.touches?.length) return;
-
-        const t = e.touches[0];
-        const dy = t.clientY - swipeRef.current.startY;
-        const dx = t.clientX - swipeRef.current.startX;
-
-        // Ignore mostly-horizontal gestures
-        if (Math.abs(dx) > Math.abs(dy)) return;
-
-        // Only trigger paging once the gesture is intentional
-        const threshold = 42;
-        if (Math.abs(dy) < threshold) return;
-
-        const target = e.currentTarget; // the scrollable body
-        if (!target) return;
-
-        const atTop = target.scrollTop <= 0;
-        const atBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 2;
-
-        // Swipe up (dy negative) -> next page when at bottom
-        if (dy < 0 && atBottom && pageIndex < 2) {
-          swipeRef.current.locked = true;
-          e.preventDefault?.();
-          scrollToPage(pageIndex + 1);
-          return;
-        }
-
-        // Swipe down (dy positive) -> previous page when at top
-        if (dy > 0 && atTop && pageIndex > 0) {
-          swipeRef.current.locked = true;
-          e.preventDefault?.();
-          scrollToPage(pageIndex - 1);
-        }
-      },
-      onTouchEnd: () => {
-        swipeRef.current.started = false;
-        swipeRef.current.locked = false;
-      },
-      onTouchCancel: () => {
-        swipeRef.current.started = false;
-        swipeRef.current.locked = false;
-      },
-    };
+    return {};
   }
 
   // AI verdict state (gating unchanged)
@@ -1435,11 +1387,11 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         <Box
           ref={pagerRef}
           sx={{
-            mt: { xs: 0, sm: 2 },
+            mt: { xs: "calc(env(safe-area-inset-top) + 64px)", sm: 2 },
             px: { xs: 2, sm: 0 },
             // Mobile: vertical swipe between full-screen cards (snap paging).
             height: {
-              xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
+              xs: "calc(100dvh - (env(safe-area-inset-top) + 64px) - 72px - env(safe-area-inset-bottom))",
               sm: "auto",
             },
             display: "flex",
@@ -1469,6 +1421,15 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           >
         {/* Card 1 */}
         <CardShell bodyProps={makeBodyProps(0)}
+          footer={
+            <Button
+              variant="contained"
+              onClick={() => scrollToPage(1)}
+              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2 }}
+            >
+              Next ↓
+            </Button>
+          }
           title="Today"
           subtitle="Your scoreboard"
           right={
@@ -1537,7 +1498,16 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             }}
           >
         {/* Card 2 */}
-        <CardShell bodyProps={makeBodyProps(1)} title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell bodyProps={makeBodyProps(1)}
+          footer={
+            <Button
+              variant="contained"
+              onClick={() => scrollToPage(2)}
+              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2 }}
+            >
+              Next ↓
+            </Button>
+          } title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1689,7 +1659,16 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             }}
           >
 {/* Card 3 */}
-        <CardShell bodyProps={makeBodyProps(2)} title="Coach" subtitle="Your daily recap">
+        <CardShell bodyProps={makeBodyProps(2)}
+          footer={
+            <Button
+              variant="outlined"
+              onClick={() => scrollToPage(0)}
+              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2, color: "rgba(255,255,255,0.88)", borderColor: "rgba(148,163,184,0.35)" }}
+            >
+              Back ↑
+            </Button>
+          } title="Coach" subtitle="Your daily recap">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
