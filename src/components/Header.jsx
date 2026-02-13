@@ -10,6 +10,9 @@ import { AppBar,
   Typography,
   Stack,
   Chip,
+  Divider,
+  Tooltip,
+  Avatar,
   Menu,
   MenuItem,
   useMediaQuery } from '@mui/material';
@@ -249,35 +252,95 @@ const [authUser, setAuthUser] = useState(null);
           </Stack>
         </Box>
 
-        {/* Plan action + quick sign-in */}
+        {/* Plan action + account */}
         <Stack direction="row" spacing={1} alignItems="center">
-          <Button
-            variant={isMobile ? 'outlined' : (pro ? 'outlined' : 'contained')}
-            color={isMobile ? 'primary' : ctaColor}
-            onClick={handlePrimaryCta}
-            disabled={!pro && trialEligLoading}
-            size={isMobile ? 'small' : 'medium'}
-            sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 900, px: isMobile ? 1.25 : 2, py: isMobile ? 0.6 : 0.9 }}
-          >
-            {isMobile ? (pro ? 'Pro' : (trialEligible ? 'Try Pro' : 'Upgrade')) : ctaLabel}
-          </Button>
+          {/* Upgrade CTA (hide when already Pro) */}
+          {!pro && (
+            <Button
+              variant={isMobile ? 'outlined' : 'contained'}
+              color={isMobile ? 'primary' : ctaColor}
+              onClick={handlePrimaryCta}
+              disabled={trialEligLoading}
+              size={isMobile ? 'small' : 'medium'}
+              sx={{
+                borderRadius: 999,
+                textTransform: 'none',
+                fontWeight: 900,
+                px: isMobile ? 1.25 : 2,
+                py: isMobile ? 0.6 : 0.9,
+              }}
+            >
+              {isMobile ? (trialEligible ? 'Try Pro' : 'Upgrade') : ctaLabel}
+            </Button>
+          )}
 
+          {/* Logged-in indicator + Login CTA */}
           {authUser ? (
             <>
-              <IconButton
-                onClick={(e) => setAccountAnchor(e.currentTarget)}
-                size="small"
-                sx={{ ml: 0.5 }}
-                aria-label="Account"
-              >
-                <img
-                  src="https://www.svgrepo.com/show/475656/google-color.svg"
-                  alt="Account"
-                  width={20}
-                  height={20}
-                  style={{ display: 'block' }}
+              {pro && (
+                <Chip
+                  label="PRO"
+                  color="success"
+                  variant="outlined"
+                  size="small"
+                  sx={{
+                    borderRadius: 999,
+                    fontWeight: 900,
+                    letterSpacing: 0.5,
+                  }}
                 />
-              </IconButton>
+              )}
+
+              {isMobile ? (
+                <Tooltip title={authUser?.email || 'Account'}>
+                  <IconButton
+                    onClick={(e) => setAccountAnchor(e.currentTarget)}
+                    size="small"
+                    sx={{ ml: 0.25 }}
+                    aria-label="Account"
+                  >
+                    <Avatar
+                      src={
+                        authUser?.user_metadata?.avatar_url ||
+                        authUser?.user_metadata?.picture ||
+                        undefined
+                      }
+                      alt={authUser?.email || 'Account'}
+                      sx={{ width: 28, height: 28, fontSize: 12 }}
+                    >
+                      {(authUser?.email || 'A').slice(0, 1).toUpperCase()}
+                    </Avatar>
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Button
+                  onClick={(e) => setAccountAnchor(e.currentTarget)}
+                  variant="text"
+                  startIcon={
+                    <Avatar
+                      src={
+                        authUser?.user_metadata?.avatar_url ||
+                        authUser?.user_metadata?.picture ||
+                        undefined
+                      }
+                      alt={authUser?.email || 'Account'}
+                      sx={{ width: 26, height: 26, fontSize: 12 }}
+                    >
+                      {(authUser?.email || 'A').slice(0, 1).toUpperCase()}
+                    </Avatar>
+                  }
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 800,
+                    borderRadius: 999,
+                    color: '#0f172a',
+                    px: 1.25,
+                  }}
+                >
+                  {(authUser?.user_metadata?.full_name ||
+                    (authUser?.email ? authUser.email.split('@')[0] : 'Account'))?.slice(0, 18)}
+                </Button>
+              )}
 
               <Menu
                 anchorEl={accountAnchor}
@@ -286,6 +349,10 @@ const [authUser, setAuthUser] = useState(null);
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               >
+                <MenuItem disabled sx={{ opacity: 0.9, fontWeight: 700 }}>
+                  {authUser?.email || 'Signed in'}
+                </MenuItem>
+                <Divider />
                 <MenuItem
                   onClick={() => {
                     setAccountAnchor(null);
@@ -294,6 +361,22 @@ const [authUser, setAuthUser] = useState(null);
                 >
                   Edit targets
                 </MenuItem>
+                {pro && (
+                  <MenuItem
+                    onClick={async () => {
+                      setAccountAnchor(null);
+                      try {
+                        await openBillingPortal({
+                          return_url: `${window.location.origin}${location.pathname || '/'}`,
+                          user_id: authUser.id,
+                          email: authUser.email,
+                        });
+                      } catch {}
+                    }}
+                  >
+                    Manage billing
+                  </MenuItem>
+                )}
                 <MenuItem
                   onClick={async () => {
                     setAccountAnchor(null);
@@ -306,18 +389,41 @@ const [authUser, setAuthUser] = useState(null);
               </Menu>
             </>
           ) : (
-            <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }} aria-label="Sign in">
-              <img
-                src="https://www.svgrepo.com/show/475656/google-color.svg"
-                alt="Sign in"
-                width={20}
-                height={20}
-                style={{ display: 'block' }}
-              />
-            </IconButton>
+            <>
+              {/* Desktop login button */}
+              {!isMobile && (
+                <Button
+                  variant="outlined"
+                  onClick={openSignIn}
+                  size="medium"
+                  sx={{
+                    borderRadius: 999,
+                    textTransform: 'none',
+                    fontWeight: 900,
+                    px: 2,
+                    py: 0.9,
+                  }}
+                >
+                  Login
+                </Button>
+              )}
+
+              {/* Mobile login icon */}
+              {isMobile && (
+                <IconButton onClick={openSignIn} size="small" sx={{ ml: 0.5 }} aria-label="Sign in">
+                  <img
+                    src="https://www.svgrepo.com/show/475656/google-color.svg"
+                    alt="Sign in"
+                    width={20}
+                    height={20}
+                    style={{ display: 'block' }}
+                  />
+                </IconButton>
+              )}
+            </>
           )}
         </Stack>
-      </Toolbar>
+</Toolbar>
     </AppBar>
   );
 }
