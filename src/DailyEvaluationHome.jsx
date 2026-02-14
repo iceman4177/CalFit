@@ -252,11 +252,10 @@ function CardShell({ title, subtitle, children, right }) {
       sx={{
         // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
         // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        width: { xs: "100%", sm: 360 },
-        maxWidth: { xs: "100%", sm: 440 },
+        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
+        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
         height: { xs: "100%", sm: "auto" },
         scrollSnapAlign: "start",
-        scrollSnapStop: { xs: "always", sm: "normal" },
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
@@ -643,55 +642,49 @@ export default function DailyEvaluationHome() {
   const userId = user?.id || null;
 
 
+const [dataTick, setDataTick] = useState(0);
 
-  // --- chrome measurement (header + bottom nav) so cards never sit under translucent UI ---
-  const [chrome, setChrome] = useState({ headerH: 0, navH: 0, vh: 0 });
+  // --- Mobile viewport fitting (avoid header/nav overlays + Safari dynamic bars) ---
+  const [chrome, setChrome] = useState({ bottom: 72, vv: null });
 
   useEffect(() => {
     const measure = () => {
-      const headerEl = document.querySelector("header.MuiAppBar-root");
-      const navRoot = document.querySelector(".MuiBottomNavigation-root");
-      const headerH = headerEl ? headerEl.getBoundingClientRect().height : 0;
-      const navH = navRoot ? navRoot.getBoundingClientRect().height : 0;
+      const vv = window.visualViewport;
+      const vvH = vv ? vv.height : window.innerHeight;
 
-      // visualViewport is best on iOS Safari (accounts for URL bar collapse/expand)
-      const vh = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+      const bottomEl = document.getElementById('slimcal-bottom-nav');
+      const bottomH = bottomEl ? bottomEl.getBoundingClientRect().height : 72;
 
-      setChrome((prev) => {
-        // Avoid re-renders if nothing changed
-        if (prev.headerH === headerH && prev.navH === navH && Math.abs(prev.vh - vh) < 0.5) return prev;
-        return { headerH, navH, vh };
-      });
+      // Expose to CSS (used in sx calc())
+      document.documentElement.style.setProperty('--slimcal-bottomnav-h', `${Math.round(bottomH)}px`);
+      document.documentElement.style.setProperty('--slimcal-vvh', `${Math.round(vvH)}px`);
+
+      setChrome({ bottom: bottomH, vv: vvH });
     };
 
-    // Measure after layout
-    const raf = requestAnimationFrame(measure);
-
-    window.addEventListener("resize", measure);
-    if (window.visualViewport) window.visualViewport.addEventListener("resize", measure);
-
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    const headerEl = document.querySelector("header.MuiAppBar-root");
-    const navRoot = document.querySelector(".MuiBottomNavigation-root");
-    if (ro && headerEl) ro.observe(headerEl);
-    if (ro && navRoot) ro.observe(navRoot);
-
+    measure();
+    window.addEventListener('resize', measure);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', measure);
+      window.visualViewport.addEventListener('scroll', measure);
+    }
     return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", measure);
-      if (window.visualViewport) window.visualViewport.removeEventListener("resize", measure);
-      if (ro) ro.disconnect();
+      window.removeEventListener('resize', measure);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', measure);
+        window.visualViewport.removeEventListener('scroll', measure);
+      }
     };
   }, []);
 
-  const availableH = useMemo(() => {
-    const vh = chrome.vh || window.innerHeight || 0;
-    const h = Math.max(420, Math.floor(vh - (chrome.headerH || 0) - (chrome.navH || 0)));
-    return h;
-  }, [chrome]);
+  const pagerAvailH =
+    (chrome.vv || (typeof window !== 'undefined' ? window.innerHeight : 800)) -
+    (chrome.bottom || 72);
 
-
-const [dataTick, setDataTick] = useState(0);
+  // Responsive ring sizing so Card 1 always fits without scrolling on iPhone
+  const ringBig = Math.round(Math.max(128, Math.min(156, pagerAvailH * 0.22)));
+  const ringMed = Math.round(Math.max(92, Math.min(112, pagerAvailH * 0.155)));
+  const ringSm = Math.round(Math.max(84, Math.min(102, pagerAvailH * 0.14)));
 
 // Recompute derived Daily Eval data when meals/workouts update (local-first + cross-device hydrations)
 useEffect(() => {
@@ -1230,7 +1223,7 @@ useEffect(() => {
   const [questPage, setQuestPage] = useState(0);
 
   const questPages = useMemo(() => {
-    const pageSize = 5;
+    const pageSize = pagerAvailH < 720 ? 4 : 5;
     const pages = [];
     const src = Array.isArray(checklist) ? checklist : [];
     for (let i = 0; i < src.length; i += pageSize) {
@@ -1394,28 +1387,25 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
-	      {/* Cards */}
-	      <Box
-	        sx={{
-	          mt: { xs: 0, sm: 2 },
-	          px: { xs: 2, sm: 0 },
-	          // Mobile: vertical, full-screen "pager" between cards (no header/nav overlap).
-	          height: { xs: `${availableH}px`, sm: "auto" },
-	          maxWidth: { xs: "100%", sm: 1100 },
-	          mx: "auto",
-	          display: { xs: "block", sm: "flex" },
-	          gap: { xs: 0, sm: 1.5 },
-	          overflowY: { xs: "auto", sm: "visible" },
-	          overflowX: { xs: "hidden", sm: "auto" },
-	          pb: { xs: 0, sm: 1 },
-	          scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
-	          scrollSnapStop: { xs: "always", sm: "normal" },
-	          scrollBehavior: { xs: "smooth", sm: "auto" },
-	          WebkitOverflowScrolling: "touch",
-	          overscrollBehaviorY: { xs: "contain", sm: "auto" },
-	          touchAction: { xs: "pan-y", sm: "auto" },
-	        }}
-	      >
+{/* Cards */}
+        <Box
+        sx={{
+          mt: { xs: 0, sm: 2 },
+          px: { xs: 2, sm: 0 },
+          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
+          height: {
+            xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
+            sm: "auto",
+          },
+          display: "flex",
+          gap: 1.5,
+          overflowX: "auto",
+          overflowY: { xs: "hidden", sm: "visible" },
+          pb: { xs: 0, sm: 1 },
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         {/* Card 1 */}
         <CardShell
           title="Today"
@@ -1433,7 +1423,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Ring
                 pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={148}
+                size={ringBig}
                 title="Calories"
                 primary={`${Math.round(calQuality)}%`}
                 secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
@@ -1442,7 +1432,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
               <Ring
                 pct={exercisePct}
-                size={148}
+                size={ringBig}
                 title="Exercise"
                 primary={`${Math.round(bundle.totals.burned)} kcal`}
                 secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
@@ -1452,9 +1442,9 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Macros row */}
             <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
+              <Ring pct={proteinPct} size={ringSm} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              <Ring pct={carbsPct} size={ringSm} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              <Ring pct={fatsPct} size={ringSm} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
             </Stack>
 
             <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
@@ -1525,7 +1515,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                             }}
                             sx={{
                               px: 1.2,
-                              py: 0.85,
+                              py: 1.0,
                               borderTop: "1px solid rgba(148,163,184,0.12)",
                               cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
                               opacity: it.done ? 0.92 : 1,
@@ -1586,18 +1576,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Paging */}
             {questPages.length > 1 ? (
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{
-                  position: { xs: "sticky", sm: "static" },
-                  bottom: { xs: 0, sm: "auto" },
-                  zIndex: 3,
-                  mt: 1.2,
-                  pt: 1.2,
-                  pb: 1.1,
-                  mx: -2,
-                  px: 2,
-                  borderTop: "1px solid rgba(148,163,184,0.16)",
-                  background: "linear-gradient(180deg, rgba(2,6,23,0) 0%, rgba(2,6,23,0.92) 35%, rgba(2,6,23,0.98) 100%)",
-                }}>
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
                 <Button
                   variant="outlined"
                   disabled={!canPrevQuest}

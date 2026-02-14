@@ -172,10 +172,8 @@ const [authUser, setAuthUser] = useState(null);
       elevation={0}
       color="transparent"
       sx={{
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(2,6,23,0.88)' : 'rgba(255,255,255,0.88)',
-        borderBottom: (theme) => theme.palette.mode === 'dark' ? '1px solid rgba(148,163,184,0.14)' : '1px solid rgba(0,0,0,0.06)',
+        backdropFilter: 'blur(8px)',
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}
     >
       <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto' }}>
