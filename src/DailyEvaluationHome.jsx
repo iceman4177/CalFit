@@ -252,8 +252,8 @@ function CardShell({ title, subtitle, children, right }) {
       sx={{
         // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
         // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
-        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
+        width: { xs: "100%", sm: 360 },
+        maxWidth: { xs: "100%", sm: 440 },
         height: { xs: "100%", sm: "auto" },
         scrollSnapAlign: "start",
         scrollSnapStop: { xs: "always", sm: "normal" },
@@ -1394,28 +1394,28 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
-        {/* Cards */}
-        <Box
-          sx={{
-            mt: { xs: 0, sm: 2 },
-            px: { xs: 2, sm: 0 },
-            // Mobile: vertical, full-screen "pager" between cards (no header/nav overlap).
-            height: { xs: `${availableH}px`, sm: "auto" },
-            maxWidth: { xs: "100%", sm: 1100 },
-            mx: "auto",
-            display: { xs: "block", sm: "flex" },
-            gap: { xs: 0, sm: 1.5 },
-            overflowY: { xs: "auto", sm: "visible" },
-            overflowX: { xs: "hidden", sm: "auto" },
-            pb: { xs: 0, sm: 1 },
-            scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
-            scrollSnapStop: { xs: "always", sm: "normal" },
-            scrollBehavior: { xs: "smooth", sm: "auto" },
-            WebkitOverflowScrolling: "touch",
-            overscrollBehaviorY: { xs: "contain", sm: "auto" },
-            touchAction: { xs: "pan-y", sm: "auto" },
-          }}
-        >
+	      {/* Cards */}
+	      <Box
+	        sx={{
+	          mt: { xs: 0, sm: 2 },
+	          px: { xs: 2, sm: 0 },
+	          // Mobile: vertical, full-screen "pager" between cards (no header/nav overlap).
+	          height: { xs: `${availableH}px`, sm: "auto" },
+	          maxWidth: { xs: "100%", sm: 1100 },
+	          mx: "auto",
+	          display: { xs: "block", sm: "flex" },
+	          gap: { xs: 0, sm: 1.5 },
+	          overflowY: { xs: "auto", sm: "visible" },
+	          overflowX: { xs: "hidden", sm: "auto" },
+	          pb: { xs: 0, sm: 1 },
+	          scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
+	          scrollSnapStop: { xs: "always", sm: "normal" },
+	          scrollBehavior: { xs: "smooth", sm: "auto" },
+	          WebkitOverflowScrolling: "touch",
+	          overscrollBehaviorY: { xs: "contain", sm: "auto" },
+	          touchAction: { xs: "pan-y", sm: "auto" },
+	        }}
+	      >
         {/* Card 1 */}
         <CardShell
           title="Today"
@@ -1525,7 +1525,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                             }}
                             sx={{
                               px: 1.2,
-                              py: 1.0,
+                              py: 0.85,
                               borderTop: "1px solid rgba(148,163,184,0.12)",
                               cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
                               opacity: it.done ? 0.92 : 1,
@@ -1586,7 +1586,18 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Paging */}
             {questPages.length > 1 ? (
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{
+                  position: { xs: "sticky", sm: "static" },
+                  bottom: { xs: 0, sm: "auto" },
+                  zIndex: 3,
+                  mt: 1.2,
+                  pt: 1.2,
+                  pb: 1.1,
+                  mx: -2,
+                  px: 2,
+                  borderTop: "1px solid rgba(148,163,184,0.16)",
+                  background: "linear-gradient(180deg, rgba(2,6,23,0) 0%, rgba(2,6,23,0.92) 35%, rgba(2,6,23,0.98) 100%)",
+                }}>
                 <Button
                   variant="outlined"
                   disabled={!canPrevQuest}
