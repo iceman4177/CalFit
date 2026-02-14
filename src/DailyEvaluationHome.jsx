@@ -1213,6 +1213,29 @@ useEffect(() => {
   // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
   const [questPage, setQuestPage] = useState(0);
 
+
+// Swipe cue (shows once, then disappears forever after first swipe)
+const [showSwipeCue, setShowSwipeCue] = useState(() => {
+  try {
+    return localStorage.getItem('slimcal_daily_eval_swipe_cue') !== '1';
+  } catch {
+    return true;
+  }
+});
+
+const hideSwipeCue = useCallback(() => {
+  setShowSwipeCue(false);
+  try {
+    localStorage.setItem('slimcal_daily_eval_swipe_cue', '1');
+  } catch {}
+}, []);
+
+useEffect(() => {
+  if (!showSwipeCue) return;
+  const t = setTimeout(() => hideSwipeCue(), 6000);
+  return () => clearTimeout(t);
+}, [showSwipeCue, hideSwipeCue]); // slimcalSwipeCueAutoHide
+
   const questPages = useMemo(() => {
     const pageSize = typeof window !== 'undefined' && window.innerHeight < 760 ? 3 : 5;
     const pages = [];
@@ -1380,7 +1403,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
       </Stack>
 {/* Cards */}
         <Box
-        sx={{
+        sx={{ position: 'relative',
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
           // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
@@ -1396,7 +1419,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",
         }}
-      >
+       onScroll={(e) => { if (showSwipeCue && e.currentTarget && e.currentTarget.scrollLeft > 24) hideSwipeCue(); }}>
         {/* Card 1 */}
         <CardShell
           title="Today"
@@ -1559,7 +1582,48 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                           </ListItemButton>
                         );
                       })}
-                    </Box>
+                    
+{showSwipeCue && (
+  <Box
+    sx={{
+      position: 'absolute',
+      left: '50%',
+      bottom: 20,
+      transform: 'translateX(-50%)',
+      pointerEvents: 'none',
+      zIndex: 80,
+      '@keyframes slimcalSwipeNudge': {
+        '0%': { transform: 'translateX(-50%) translateY(0px)' },
+        '50%': { transform: 'translateX(-50%) translateY(-2px)' },
+        '100%': { transform: 'translateX(-50%) translateY(0px)' },
+      },
+      animation: 'slimcalSwipeNudge 1.15s ease-in-out infinite',
+    }}
+  >
+    <Box
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 1,
+        px: 1.5,
+        py: 0.9,
+        borderRadius: 999,
+        bgcolor: 'rgba(0,0,0,0.35)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        backdropFilter: 'blur(10px)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+      }}
+    >
+      <Box sx={{ fontSize: 13, fontWeight: 800, color: 'rgba(255,255,255,0.92)', letterSpacing: 0.2 }}>
+        Swipe
+      </Box>
+      <Box sx={{ fontSize: 16, fontWeight: 900, color: 'rgba(255,255,255,0.92)', lineHeight: 1 }}>
+        ››
+      </Box>
+    </Box>
+  </Box>
+)}
+</Box>
                   );
                 })}
               </List>
