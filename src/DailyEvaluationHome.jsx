@@ -252,12 +252,10 @@ function CardShell({ title, subtitle, children, right }) {
       sx={{
         // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
         // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
-        minWidth: { xs: "100%", sm: 360 },
-        maxWidth: { xs: "100%", sm: 520 },
+        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
+        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
         height: { xs: "100%", sm: "auto" },
         scrollSnapAlign: "start",
-        scrollSnapStop: { xs: 'always', sm: 'normal' },
-        flex: { xs: '0 0 100%', sm: '0 0 auto' },
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
@@ -266,12 +264,11 @@ function CardShell({ title, subtitle, children, right }) {
     >
       <CardContent
         sx={{
-          p: { xs: 1.5, sm: 2 },
+          p: 2,
           height: { xs: "100%", sm: "auto" },
           display: { xs: "flex", sm: "block" },
           flexDirection: { xs: "column", sm: "initial" },
           minHeight: 0,
-          overflow: "hidden",
         }}
       >
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
@@ -647,51 +644,39 @@ export default function DailyEvaluationHome() {
 
 const [dataTick, setDataTick] = useState(0);
 
-  // --- Mobile viewport fitting (avoid header/nav overlays + iOS dynamic bars) ---
-  const [chrome, setChrome] = useState({ header: 56, bottom: 72, vv: null });
 
+  const setSlimcalNavHidden = (hidden) => {
+    try {
+      document.documentElement.style.setProperty('--slimcal-nav-hide', hidden ? '1' : '0');
+    } catch {}
+  };
+
+  // Hide bottom nav while swiping between cards so it never covers CTAs.
   useEffect(() => {
-    const measure = () => {
-      const vv = window.visualViewport;
-      const vvH = vv ? vv.height : window.innerHeight;
-
-      const headerEl = document.getElementById('slimcal-header');
-      const headerH = headerEl ? headerEl.getBoundingClientRect().height : 56;
-
-      const bottomEl = document.getElementById('slimcal-bottom-nav');
-      const bottomH = bottomEl ? bottomEl.getBoundingClientRect().height : 72;
-
-      document.documentElement.style.setProperty('--slimcal-header-h', `${Math.round(headerH)}px`);
-      document.documentElement.style.setProperty('--slimcal-bottomnav-h', `${Math.round(bottomH)}px`);
-      document.documentElement.style.setProperty('--slimcal-vvh', `${Math.round(vvH)}px`);
-
-      setChrome({ header: headerH, bottom: bottomH, vv: vvH });
+    let t = null;
+    const showSoon = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => setSlimcalNavHidden(false), 420);
     };
 
-    measure();
-    window.addEventListener('resize', measure);
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', measure);
-      window.visualViewport.addEventListener('scroll', measure);
-    }
+    const onTouchStart = () => {
+      setSlimcalNavHidden(true);
+      showSoon();
+    };
+    const onWheel = () => {
+      setSlimcalNavHidden(true);
+      showSoon();
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('wheel', onWheel, { passive: true });
     return () => {
-      window.removeEventListener('resize', measure);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', measure);
-        window.visualViewport.removeEventListener('scroll', measure);
-      }
+      if (t) clearTimeout(t);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('wheel', onWheel);
+      setSlimcalNavHidden(false);
     };
   }, []);
-
-  const pagerAvailH =
-    (chrome.vv || (typeof window !== 'undefined' ? window.innerHeight : 800)) -
-    (chrome.header || 56) -
-    (chrome.bottom || 72);
-
-  // Responsive ring sizing so Card 1 always fits without scrolling
-  const ringBig = Math.round(Math.max(124, Math.min(152, pagerAvailH * 0.22)));
-  const ringSm = Math.round(Math.max(82, Math.min(100, pagerAvailH * 0.14)));
-
 // Recompute derived Daily Eval data when meals/workouts update (local-first + cross-device hydrations)
 useEffect(() => {
   const bump = () => setDataTick((t) => t + 1);
@@ -1229,7 +1214,7 @@ useEffect(() => {
   const [questPage, setQuestPage] = useState(0);
 
   const questPages = useMemo(() => {
-    const pageSize = pagerAvailH < 720 ? 3 : pagerAvailH < 820 ? 4 : 5;
+    const pageSize = 5;
     const pages = [];
     const src = Array.isArray(checklist) ? checklist : [];
     for (let i = 0; i < src.length; i += pageSize) {
@@ -1398,23 +1383,18 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
-          // Full-screen vertical pager on mobile (real header/nav heights + iOS dynamic bars).
+          // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
           height: {
-            xs: "calc(var(--slimcal-vvh, 100dvh) - var(--slimcal-header-h, 56px) - var(--slimcal-bottomnav-h, 72px) - env(safe-area-inset-bottom))",
+            xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
             sm: "auto",
           },
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
           gap: 1.5,
-          overflowY: { xs: "auto", sm: "visible" },
-          overflowX: { xs: "hidden", sm: "visible" },
+          overflowX: "auto",
+          overflowY: { xs: "hidden", sm: "visible" },
           pb: { xs: 0, sm: 1 },
-          scrollSnapType: { xs: "y mandatory", sm: "none" },
-          scrollPaddingTop: 0,
+          scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",
-          overscrollBehaviorY: "contain",
-          scrollbarWidth: "none",
-          "&::-webkit-scrollbar": { display: "none" },
         }}
       >
         {/* Card 1 */}
@@ -1434,7 +1414,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
               <Ring
                 pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={ringBig}
+                size={148}
                 title="Calories"
                 primary={`${Math.round(calQuality)}%`}
                 secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
@@ -1443,7 +1423,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
               <Ring
                 pct={exercisePct}
-                size={ringBig}
+                size={148}
                 title="Exercise"
                 primary={`${Math.round(bundle.totals.burned)} kcal`}
                 secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
@@ -1453,9 +1433,9 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Macros row */}
             <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring pct={proteinPct} size={ringSm} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              <Ring pct={carbsPct} size={ringSm} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              <Ring pct={fatsPct} size={ringSm} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
+              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
+              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
+              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
             </Stack>
 
             <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
@@ -1587,7 +1567,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
             {/* Paging */}
             {questPages.length > 1 ? (
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 0.6, mt: 'auto' }}>
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
                 <Button
                   variant="outlined"
                   disabled={!canPrevQuest}
