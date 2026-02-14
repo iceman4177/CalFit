@@ -290,7 +290,7 @@ function CardShell({ title, subtitle, children, right }) {
           sx={{
             flex: { xs: 1, sm: "unset" },
             minHeight: 0,
-            overflowY: { xs: "auto", sm: "visible" },
+            overflowY: { xs: "hidden", sm: "visible" },
             WebkitOverflowScrolling: "touch",
           }}
         >
@@ -1214,7 +1214,7 @@ useEffect(() => {
   const [questPage, setQuestPage] = useState(0);
 
   const questPages = useMemo(() => {
-    const pageSize = 5;
+    const pageSize = typeof window !== 'undefined' && window.innerHeight < 760 ? 3 : 5;
     const pages = [];
     const src = Array.isArray(checklist) ? checklist : [];
     for (let i = 0; i < src.length; i += pageSize) {
