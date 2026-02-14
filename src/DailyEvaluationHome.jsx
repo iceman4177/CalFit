@@ -245,22 +245,22 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 }
 
 // ----------------------------- UI primitives ---------------------------------
-function CardShell({ title, subtitle, children, right, bodyProps, footer }) {
+function CardShell({ title, subtitle, children, right }) {
   return (
     <Card
       elevation={0}
       sx={{
-        // Mobile: full-width, full-height “pages” you scroll vertically.
-        width: { xs: "100%", sm: 520 },
-        maxWidth: { xs: "100%", sm: 560 },
-        alignSelf: "center",
+        // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
+        // We subtract horizontal padding (16px * 2) so the card is perfectly centered and never overflows.
+        minWidth: { xs: "calc(100vw - 32px)", sm: 360 },
+        maxWidth: { xs: "calc(100vw - 32px)", sm: 440 },
         height: { xs: "100%", sm: "auto" },
-        scrollSnapAlign: "unset",
+        scrollSnapAlign: "start",
+        scrollSnapStop: { xs: "always", sm: "normal" },
         borderRadius: 3,
         border: "1px solid rgba(148,163,184,0.18)",
         background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)",
         color: "rgba(255,255,255,0.92)",
-        overflow: "hidden",
       }}
     >
       <CardContent
@@ -285,34 +285,22 @@ function CardShell({ title, subtitle, children, right, bodyProps, footer }) {
           </Box>
           {right}
         </Stack>
-
         <Divider sx={{ my: 1.4, borderColor: "rgba(148,163,184,0.18)" }} />
-
-        {/* On mobile pager pages, the BODY is scrollable so users can read everything.
-            We also attach touch handlers here to resolve swipe-vs-scroll conflicts. */}
+        {/* Mobile: allow the inside of the card to scroll without breaking the full-screen layout. */}
         <Box
-          {...(bodyProps || {})}
           sx={{
-            flex: 1,
+            flex: { xs: 1, sm: "unset" },
             minHeight: 0,
-            overflowY: { xs: "hidden", sm: "visible" },
-            pr: { xs: 0.5, sm: 0 },
-            ...((bodyProps && bodyProps.sx) || {}),
+            overflowY: { xs: "auto", sm: "visible" },
+            WebkitOverflowScrolling: "touch",
           }}
         >
           {children}
         </Box>
-
-        {footer ? (
-          <Box sx={{ pt: 1.2, display: "flex", justifyContent: "flex-end" }}>
-            {footer}
-          </Box>
-        ) : null}
       </CardContent>
     </Card>
   );
 }
-
 
 function Ring({ pct, size, title, primary, secondary, tone = "primary.main" }) {
   const v = clamp(Number(pct || 0), 0, 100);
@@ -655,6 +643,54 @@ export default function DailyEvaluationHome() {
   const userId = user?.id || null;
 
 
+
+  // --- chrome measurement (header + bottom nav) so cards never sit under translucent UI ---
+  const [chrome, setChrome] = useState({ headerH: 0, navH: 0, vh: 0 });
+
+  useEffect(() => {
+    const measure = () => {
+      const headerEl = document.querySelector("header.MuiAppBar-root");
+      const navRoot = document.querySelector(".MuiBottomNavigation-root");
+      const headerH = headerEl ? headerEl.getBoundingClientRect().height : 0;
+      const navH = navRoot ? navRoot.getBoundingClientRect().height : 0;
+
+      // visualViewport is best on iOS Safari (accounts for URL bar collapse/expand)
+      const vh = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+
+      setChrome((prev) => {
+        // Avoid re-renders if nothing changed
+        if (prev.headerH === headerH && prev.navH === navH && Math.abs(prev.vh - vh) < 0.5) return prev;
+        return { headerH, navH, vh };
+      });
+    };
+
+    // Measure after layout
+    const raf = requestAnimationFrame(measure);
+
+    window.addEventListener("resize", measure);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", measure);
+
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    const headerEl = document.querySelector("header.MuiAppBar-root");
+    const navRoot = document.querySelector(".MuiBottomNavigation-root");
+    if (ro && headerEl) ro.observe(headerEl);
+    if (ro && navRoot) ro.observe(navRoot);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+      if (window.visualViewport) window.visualViewport.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
+  }, []);
+
+  const availableH = useMemo(() => {
+    const vh = chrome.vh || window.innerHeight || 0;
+    const h = Math.max(420, Math.floor(vh - (chrome.headerH || 0) - (chrome.navH || 0)));
+    return h;
+  }, [chrome]);
+
+
 const [dataTick, setDataTick] = useState(0);
 
 // Recompute derived Daily Eval data when meals/workouts update (local-first + cross-device hydrations)
@@ -675,31 +711,6 @@ useEffect(() => {
 }, []);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-
-  // --- Mobile vertical pager (Today / Progress / Coach) ---
-  const pagerRef = useRef(null);
-  const pageRefs = useRef([]);
-
-  const swipeRef = useRef({
-    startY: 0,
-    startX: 0,
-    locked: false,
-    started: false,
-  });
-
-  function scrollToPage(idx) {
-    const el = pageRefs.current[idx];
-    if (!el) return;
-    try {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    } catch {
-      // ignore
-    }
-  }
-
-  function makeBodyProps(pageIndex) {
-    return {};
-  }
 
   // AI verdict state (gating unchanged)
   const [aiLoading, setAiLoading] = useState(false);
@@ -1383,53 +1394,30 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
-{/* Cards */}
+        {/* Cards */}
         <Box
-          ref={pagerRef}
           sx={{
-            mt: { xs: "calc(env(safe-area-inset-top) + 64px)", sm: 2 },
+            mt: { xs: 0, sm: 2 },
             px: { xs: 2, sm: 0 },
-            // Mobile: vertical swipe between full-screen cards (snap paging).
-            height: {
-              xs: "calc(100dvh - (env(safe-area-inset-top) + 64px) - 72px - env(safe-area-inset-bottom))",
-              sm: "auto",
-            },
-            display: "flex",
-            flexDirection: { xs: "column", sm: "row" },
-            flexWrap: { xs: "nowrap", sm: "wrap" },
-            justifyContent: { xs: "flex-start", sm: "center" },
-            alignItems: { xs: "stretch", sm: "flex-start" },
+            // Mobile: vertical, full-screen "pager" between cards (no header/nav overlap).
+            height: { xs: `${availableH}px`, sm: "auto" },
+            maxWidth: { xs: "100%", sm: 1100 },
+            mx: "auto",
+            display: { xs: "block", sm: "flex" },
             gap: { xs: 0, sm: 1.5 },
             overflowY: { xs: "auto", sm: "visible" },
-            overflowX: { xs: "hidden", sm: "hidden" },
+            overflowX: { xs: "hidden", sm: "auto" },
             pb: { xs: 0, sm: 1 },
-            scrollSnapType: { xs: "y mandatory", sm: "none" },
-            scrollPaddingTop: 0,
+            scrollSnapType: { xs: "y mandatory", sm: "x mandatory" },
+            scrollSnapStop: { xs: "always", sm: "normal" },
+            scrollBehavior: { xs: "smooth", sm: "auto" },
             WebkitOverflowScrolling: "touch",
             overscrollBehaviorY: { xs: "contain", sm: "auto" },
+            touchAction: { xs: "pan-y", sm: "auto" },
           }}
         >
-          <Box
-            ref={(el) => (pageRefs.current[0] = el)}
-            sx={{
-              height: { xs: "100%", sm: "auto" },
-              flex: { xs: "0 0 100%", sm: "0 0 auto" },
-              scrollSnapAlign: "start",
-              scrollSnapStop: "always",
-              display: "flex",
-            }}
-          >
         {/* Card 1 */}
-        <CardShell bodyProps={makeBodyProps(0)}
-          footer={
-            <Button
-              variant="contained"
-              onClick={() => scrollToPage(1)}
-              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2 }}
-            >
-              Next ↓
-            </Button>
-          }
+        <CardShell
           title="Today"
           subtitle="Your scoreboard"
           right={
@@ -1485,29 +1473,9 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             ) : null}
           </Stack>
         </CardShell>
-          </Box>
 
-          <Box
-            ref={(el) => (pageRefs.current[1] = el)}
-            sx={{
-              height: { xs: "100%", sm: "auto" },
-              flex: { xs: "0 0 100%", sm: "0 0 auto" },
-              scrollSnapAlign: "start",
-              scrollSnapStop: "always",
-              display: "flex",
-            }}
-          >
         {/* Card 2 */}
-        <CardShell bodyProps={makeBodyProps(1)}
-          footer={
-            <Button
-              variant="contained"
-              onClick={() => scrollToPage(2)}
-              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2 }}
-            >
-              Next ↓
-            </Button>
-          } title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1646,29 +1614,9 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 
           </Stack>
         </CardShell>
-          </Box>
 
-          <Box
-            ref={(el) => (pageRefs.current[2] = el)}
-            sx={{
-              height: { xs: "100%", sm: "auto" },
-              flex: { xs: "0 0 100%", sm: "0 0 auto" },
-              scrollSnapAlign: "start",
-              scrollSnapStop: "always",
-              display: "flex",
-            }}
-          >
 {/* Card 3 */}
-        <CardShell bodyProps={makeBodyProps(2)}
-          footer={
-            <Button
-              variant="outlined"
-              onClick={() => scrollToPage(0)}
-              sx={{ borderRadius: 999, fontWeight: 950, textTransform: "none", px: 2.2, color: "rgba(255,255,255,0.88)", borderColor: "rgba(148,163,184,0.35)" }}
-            >
-              Back ↑
-            </Button>
-          } title="Coach" subtitle="Your daily recap">
+        <CardShell title="Coach" subtitle="Your daily recap">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
@@ -1712,8 +1660,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             </Stack>
           </Stack>
         </CardShell>
-          </Box>
-        </Box>
+      </Box>
 
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Box>
