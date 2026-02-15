@@ -1,5 +1,5 @@
 // src/DailyEvaluationHome.jsx
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHistory } from "react-router-dom";
 import {
   Box,
@@ -290,7 +290,7 @@ function CardShell({ title, subtitle, children, right }) {
           sx={{
             flex: { xs: 1, sm: "unset" },
             minHeight: 0,
-            overflowY: { xs: "hidden", sm: "visible" },
+            overflowY: { xs: "auto", sm: "visible" },
             WebkitOverflowScrolling: "touch",
           }}
         >
@@ -633,6 +633,73 @@ function buildChecklist({
 
 
 // ----------------------------- main ------------------------------------------
+
+function SparkBurst({ tick = 0 }) {
+  const parts = [
+    { dx: 0, dy: -18 },
+    { dx: 13, dy: -13 },
+    { dx: 18, dy: 0 },
+    { dx: 13, dy: 13 },
+    { dx: 0, dy: 18 },
+    { dx: -13, dy: 13 },
+    { dx: -18, dy: 0 },
+    { dx: -13, dy: -13 },
+  ];
+  return (
+    <Box
+      key={tick}
+      sx={{
+        position: "absolute",
+        inset: 0,
+        display: "grid",
+        placeItems: "center",
+        pointerEvents: "none",
+        zIndex: 6,
+        "@keyframes slimcalParticle": {
+          "0%": { transform: "translate(0px,0px) scale(1)", opacity: 0.0 },
+          "10%": { opacity: 1.0 },
+          "85%": { opacity: 0.0 },
+          "100%": { transform: "translate(var(--dx), var(--dy)) scale(0.15)", opacity: 0.0 },
+        },
+        "@keyframes slimcalRing": {
+          "0%": { transform: "scale(0.7)", opacity: 0.0 },
+          "30%": { opacity: 0.9 },
+          "100%": { transform: "scale(1.25)", opacity: 0.0 },
+        },
+      }}
+    >
+      {parts.map((p, i) => (
+        <Box
+          key={i}
+          component="span"
+          sx={{
+            position: "absolute",
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            bgcolor: "rgba(120,180,255,0.95)",
+            boxShadow: "0 0 14px rgba(120,180,255,0.55)",
+            "--dx": `${p.dx}px`,
+            "--dy": `${p.dy}px`,
+            animation: "slimcalParticle 520ms ease-out forwards",
+          }}
+        />
+      ))}
+      <Box
+        component="span"
+        sx={{
+          position: "absolute",
+          width: 18,
+          height: 18,
+          borderRadius: 999,
+          border: "2px solid rgba(120,180,255,0.55)",
+          animation: "slimcalRing 520ms ease-out forwards",
+        }}
+      />
+    </Box>
+  );
+}
+
 export default function DailyEvaluationHome() {
   const history = useHistory();
   const { isProActive } = useEntitlements();
@@ -644,39 +711,6 @@ export default function DailyEvaluationHome() {
 
 const [dataTick, setDataTick] = useState(0);
 
-
-  const setSlimcalNavHidden = (hidden) => {
-    try {
-      document.documentElement.style.setProperty('--slimcal-nav-hide', hidden ? '1' : '0');
-    } catch {}
-  };
-
-  // Hide bottom nav while swiping between cards so it never covers CTAs.
-  useEffect(() => {
-    let t = null;
-    const showSoon = () => {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => setSlimcalNavHidden(false), 420);
-    };
-
-    const onTouchStart = () => {
-      setSlimcalNavHidden(true);
-      showSoon();
-    };
-    const onWheel = () => {
-      setSlimcalNavHidden(true);
-      showSoon();
-    };
-
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('wheel', onWheel, { passive: true });
-    return () => {
-      if (t) clearTimeout(t);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('wheel', onWheel);
-      setSlimcalNavHidden(false);
-    };
-  }, []);
 // Recompute derived Daily Eval data when meals/workouts update (local-first + cross-device hydrations)
 useEffect(() => {
   const bump = () => setDataTick((t) => t + 1);
@@ -1213,31 +1247,44 @@ useEffect(() => {
   // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
   const [questPage, setQuestPage] = useState(0);
 
+// --- Celebration (Duolingo-style pop) when items become DONE ---
+const [burstTicks, setBurstTicks] = useState({});
+const [toast, setToast] = useState(null);
+const toastTimerRef = useRef(null);
+const prevDoneRef = useRef({}); // key -> boolean
 
-// Swipe cue (shows once, then disappears forever after first swipe)
-const [showSwipeCue, setShowSwipeCue] = useState(() => {
-  try {
-    return localStorage.getItem('slimcal_daily_eval_swipe_cue') !== '1';
-  } catch {
-    return true;
+const triggerCelebrate = useCallback((key, msg) => {
+  setBurstTicks((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
+  if (msg) {
+    setToast({ msg, id: Date.now() });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 900);
   }
-});
-
-const hideSwipeCue = useCallback(() => {
-  setShowSwipeCue(false);
-  try {
-    localStorage.setItem('slimcal_daily_eval_swipe_cue', '1');
-  } catch {}
 }, []);
 
 useEffect(() => {
-  if (!showSwipeCue) return;
-  const t = setTimeout(() => hideSwipeCue(), 6000);
-  return () => clearTimeout(t);
-}, [showSwipeCue, hideSwipeCue]); // slimcalSwipeCueAutoHide
+  return () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  };
+}, []);
+
+useEffect(() => {
+  // When checklist updates, celebrate newly completed items
+  const prev = prevDoneRef.current || {};
+  const now = {};
+  (Array.isArray(checklist) ? checklist : []).forEach((it) => {
+    now[it.key] = !!it.done;
+    if (!!it.done && !prev[it.key]) {
+      const msg = it.key === "rehydrate" ? "💧 Hydration!" : "✅ Nice!";
+      triggerCelebrate(it.key, msg);
+    }
+  });
+  prevDoneRef.current = now;
+}, [checklist, triggerCelebrate]); // slimcalChecklistCelebrate
+
 
   const questPages = useMemo(() => {
-    const pageSize = typeof window !== 'undefined' && window.innerHeight < 760 ? 3 : 5;
+    const pageSize = 5;
     const pages = [];
     const src = Array.isArray(checklist) ? checklist : [];
     for (let i = 0; i < src.length; i += pageSize) {
@@ -1403,7 +1450,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
       </Stack>
 {/* Cards */}
         <Box
-        sx={{ position: 'relative',
+        sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
           // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
@@ -1419,7 +1466,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
           scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",
         }}
-       onScroll={(e) => { if (showSwipeCue && e.currentTarget && e.currentTarget.scrollLeft > 24) hideSwipeCue(); }}>
+      >
         {/* Card 1 */}
         <CardShell
           title="Today"
@@ -1528,15 +1575,26 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                               }
                             }}
                             sx={{
-                              px: 1.2,
+                              
+position: "relative",
+"@keyframes slimcalRowPop": {
+  "0%": { transform: "translateY(0px) scale(1)" },
+  "50%": { transform: "translateY(-1px) scale(1.01)" },
+  "100%": { transform: "translateY(0px) scale(1)" },
+},
+animation: burstTicks[it.key] ? "slimcalRowPop 420ms ease-out" : "none",
+px: 1.2,
                               py: 1.0,
                               borderTop: "1px solid rgba(148,163,184,0.12)",
                               cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
                               opacity: it.done ? 0.92 : 1,
                             }}
                           >
-                            <ListItemIcon sx={{ minWidth: 34 }}>
-                              <Icon sx={{ fontSize: 20, color: iconColor }} />
+                            <ListItemIcon sx={{ minWidth: 34, position: "relative" }}>
+                              <Box sx={{ position: "relative", width: 22, height: 22, display: "grid", placeItems: "center" }}>
+                                <Icon sx={{ fontSize: 20, color: iconColor }} />
+                                {burstTicks[it.key] ? <SparkBurst tick={burstTicks[it.key]} /> : null}
+                              </Box>
                             </ListItemIcon>
 
                             <ListItemText
@@ -1582,48 +1640,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                           </ListItemButton>
                         );
                       })}
-                    
-{showSwipeCue && (
-  <Box
-    sx={{
-      position: 'absolute',
-      left: '50%',
-      bottom: 20,
-      transform: 'translateX(-50%)',
-      pointerEvents: 'none',
-      zIndex: 80,
-      '@keyframes slimcalSwipeNudge': {
-        '0%': { transform: 'translateX(-50%) translateY(0px)' },
-        '50%': { transform: 'translateX(-50%) translateY(-2px)' },
-        '100%': { transform: 'translateX(-50%) translateY(0px)' },
-      },
-      animation: 'slimcalSwipeNudge 1.15s ease-in-out infinite',
-    }}
-  >
-    <Box
-      sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 1,
-        px: 1.5,
-        py: 0.9,
-        borderRadius: 999,
-        bgcolor: 'rgba(0,0,0,0.35)',
-        border: '1px solid rgba(255,255,255,0.14)',
-        backdropFilter: 'blur(10px)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-      }}
-    >
-      <Box sx={{ fontSize: 13, fontWeight: 800, color: 'rgba(255,255,255,0.92)', letterSpacing: 0.2 }}>
-        Swipe
-      </Box>
-      <Box sx={{ fontSize: 16, fontWeight: 900, color: 'rgba(255,255,255,0.92)', lineHeight: 1 }}>
-        ››
-      </Box>
-    </Box>
-  </Box>
-)}
-</Box>
+                    </Box>
                   );
                 })}
               </List>

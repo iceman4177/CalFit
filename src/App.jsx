@@ -19,10 +19,12 @@ import { Container,
   DialogTitle,
   DialogContent,
   DialogActions,
-Snackbar,
+  Fab,
+  Snackbar,
   Alert,
   Badge,
   Chip } from '@mui/material';
+import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
@@ -58,6 +60,7 @@ import WaitlistSignup    from './components/WaitlistSignup';
 
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
+import ReferralDashboard from './components/ReferralDashboard';
 import { logPageView }   from './analytics';
 
 import { useEntitlements } from './context/EntitlementsContext.jsx';
@@ -723,6 +726,10 @@ export default function App() {
 
   // === Quick Actions (Acquisition-forward) ===
   // navBar (legacy hero buttons) removed for production launch.
+
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+
   const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
   useEffect(() => {
     const onStorage = (e) => {
@@ -932,6 +939,17 @@ export default function App() {
             )}
           />
         </Switch>
+
+        <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Invite Friends</DialogTitle>
+          <DialogContent><ReferralDashboard /></DialogContent>
+          <DialogActions><Button onClick={() => setInviteOpen(false)}>Close</Button></DialogActions>
+        </Dialog>
+
+        <Fab color="primary" onClick={() => setInviteOpen(true)} sx={{ position:'fixed', bottom:16, right:16 }}>
+          <CampaignIcon />
+        </Fab>
+
         <UpgradeModal
           open={upgradeOpen}
           onClose={() => setUpgradeOpen(false)}

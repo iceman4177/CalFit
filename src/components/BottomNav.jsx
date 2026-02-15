@@ -1,5 +1,5 @@
 // src/components/BottomNav.jsx
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import Paper from '@mui/material/Paper';
 import BottomNavigation from '@mui/material/BottomNavigation';
@@ -40,18 +40,7 @@ function pickActiveTab(pathname) {
 }
 
 export default function BottomNav() {
-  const [navHidden, setNavHidden] = useState(false);
-
-  useEffect(() => {
-    const onSet = (e) => {
-      const hidden = !!(e && e.detail && e.detail.hidden);
-      setNavHidden(hidden);
-    };
-    window.addEventListener('slimcal:setNavHidden', onSet);
-    return () => window.removeEventListener('slimcal:setNavHidden', onSet);
-  }, []);
-
-const history = useHistory();
+  const history = useHistory();
   const location = useLocation();
 
   const current = pickActiveTab(location.pathname);
