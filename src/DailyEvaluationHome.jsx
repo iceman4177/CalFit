@@ -1283,32 +1283,49 @@ useEffect(() => {
 }, [checklist, triggerCelebrate]); // slimcalChecklistCelebrate
 
 
-  const questPages = useMemo(() => {
-    const pageSize = 5;
-    const pages = [];
+  const questWindows = useMemo(() => {
     const src = Array.isArray(checklist) ? checklist : [];
-    for (let i = 0; i < src.length; i += pageSize) {
-      pages.push(src.slice(i, i + pageSize));
+    const buckets = { morning: [], afternoon: [], night: [] };
+    for (const it of src) {
+      const w = it?.window;
+      if (w === 'morning' || w === 'afternoon' || w === 'night') buckets[w].push(it);
+      else buckets.afternoon.push(it);
     }
-    return pages.length ? pages : [[]];
+    return buckets;
   }, [checklist]);
+
+  const questWindowPageSizes = useMemo(() => ({ morning: 2, afternoon: 2, night: 1 }), []);
+
+  const questMaxPages = useMemo(() => {
+    const sizes = questWindowPageSizes;
+    const perWindow = ['morning', 'afternoon', 'night'].map((w) => {
+      const n = questWindows[w]?.length || 0;
+      const sz = sizes[w] || 2;
+      return Math.max(1, Math.ceil(n / sz));
+    });
+    return Math.max(...perWindow, 1);
+  }, [questWindows, questWindowPageSizes]);
 
   useEffect(() => {
     // Clamp page when checklist changes
-    setQuestPage((p) => {
-      const max = Math.max(0, (questPages?.length || 1) - 1);
-      return Math.min(Math.max(0, p), max);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [questPages.length]);
+    setQuestPage((p) => Math.min(Math.max(0, p), questMaxPages - 1));
+  }, [questMaxPages]);
 
-  const questItems = useMemo(() => {
-    const p = Math.max(0, Math.min(questPage, (questPages?.length || 1) - 1));
-    return questPages[p] || [];
-  }, [questPages, questPage]);
+  const questWindowSlices = useMemo(() => {
+    const sizes = questWindowPageSizes;
+    const p = Math.max(0, Math.min(questPage, questMaxPages - 1));
+    const out = {};
+    for (const w of ['morning', 'afternoon', 'night']) {
+      const arr = questWindows[w] || [];
+      const sz = sizes[w] || 2;
+      const start = p * sz;
+      out[w] = arr.slice(start, start + sz);
+    }
+    return out;
+  }, [questWindows, questWindowPageSizes, questPage, questMaxPages]);
 
   const canPrevQuest = questPage > 0;
-  const canNextQuest = questPage < (questPages.length - 1);
+  const canNextQuest = questPage < (questMaxPages - 1);
 
   const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
 
@@ -1550,8 +1567,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
               <List disablePadding>
                 {["morning", "afternoon", "night"].map((winKey) => {
-                  const group = questItems.filter((q) => (q.window || "morning") === winKey);
-                  if (!group.length) return null;
+                  const group = (questWindowSlices?.[winKey] || []).filter(Boolean);
 
                   const winLabel = winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night";
                   return (
@@ -1560,7 +1576,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
                         {winLabel}
                       </Typography>
 
-                      {group.map((it, gIdx) => {
+                      {group.length ? group.map((it, gIdx) => {
                         const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
                         const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
 
@@ -1639,7 +1655,15 @@ px: 1.2,
                             )}
                           </ListItemButton>
                         );
-                      })}
+                      }) : (
+                        <ListItem sx={{ px: 0, py: 1 }}>
+                          <ListItemText
+                            primary="All set"
+                            secondary="Nothing left in this section."
+                            primaryTypographyProps={{ sx: { fontWeight: 900 } }}
+                          />
+                        </ListItem>
+                      )}
                     </Box>
                   );
                 })}
@@ -1647,7 +1671,7 @@ px: 1.2,
             </Box>
 
             {/* Paging */}
-            {questPages.length > 1 ? (
+            {questMaxPages > 1 ? (
               <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
                 <Button
                   variant="outlined"
@@ -1659,13 +1683,13 @@ px: 1.2,
                 </Button>
                 <Chip
                   size="small"
-                  label={`${questPage + 1}/${questPages.length}`}
+                  label={`${questPage + 1}/${questMaxPages}`}
                   sx={{ borderRadius: 999, fontWeight: 950 }}
                 />
                 <Button
                   variant="outlined"
                   disabled={!canNextQuest}
-                  onClick={() => setQuestPage((p) => Math.min(questPages.length - 1, p + 1))}
+                  onClick={() => setQuestPage((p) => Math.min(questMaxPages - 1, p + 1))}
                   sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
                 >
                   Next
