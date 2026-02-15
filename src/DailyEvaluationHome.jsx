@@ -1,5 +1,5 @@
 // src/DailyEvaluationHome.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useHistory } from "react-router-dom";
 import {
   Box,
