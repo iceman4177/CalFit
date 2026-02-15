@@ -237,7 +237,7 @@ function computeScore({
 }
 
 function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
-  if (!profileComplete) return { state: "notyet", reason: "Finish setup to personalize your win." };
+  if (!profileComplete) return { state: "notyet", reason: "Set targets (30 sec) to personalize your win." };
   if (!hasLogs) return { state: "notyet", reason: "Log at least 1 meal or a workout." };
   if (confidenceLabel === "Low") return { state: "notyet", reason: "Log a bit more so it’s accurate." };
   if (score >= 74) return { state: "win", reason: "Solid day. Repeat this." };
@@ -474,8 +474,8 @@ function buildChecklist({
   push({
     key: "setup",
     window: "morning",
-    title: "Finish setup",
-    subtitle: "So workout + targets are accurate",
+    title: "Set targets (30 sec)",
+    subtitle: "Rings + coach stay accurate",
     done: !!profileComplete,
     action: "/workout",
     priority: 0,
@@ -504,8 +504,8 @@ function buildChecklist({
   push({
     key: "meal_morning",
     window: "morning",
-    title: "Log breakfast",
-    subtitle: "Quick meal + 30g protein",
+    title: "Log breakfast (2 min)",
+    subtitle: goalType === "bulk" ? "Protein + carbs (yogurt + oats)" : "Protein-first (25–35g)",
     done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
     action: "/meals",
     priority: 2,
@@ -516,8 +516,8 @@ function buildChecklist({
   push({
     key: "meal_afternoon",
     window: "afternoon",
-    title: "Log lunch",
-    subtitle: "Keep momentum (protein + carbs)",
+    title: "Log lunch (2 min)",
+    subtitle: goalType === "bulk" ? "Protein + carbs (chicken + rice)" : "Protein + fiber (chicken + salad)",
     done: hasL || ((Number(mealsCount) || 0) >= 2 && hour >= 11 && hour <= 15),
     action: "/meals",
     priority: 3,
@@ -616,8 +616,8 @@ function buildChecklist({
   push({
     key: "workout",
     window: hour < 15 ? "afternoon" : "night",
-    title: hasWorkout ? "Workout logged" : "Log workout",
-    subtitle: hasWorkout ? "Counts toward your day" : "So exercise counts",
+    title: hasWorkout ? "Workout logged" : "Log workout (2 min)",
+    subtitle: hasWorkout ? "Exercise counted ✅" : "Even 1 exercise — log it",
     done: !!hasWorkout,
     action: "/workout",
     priority: 8,
