@@ -1243,89 +1243,104 @@ useEffect(() => {
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
 
-  // Card 2: quests (time-windowed, paged)
-  // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
-  const [questPage, setQuestPage] = useState(0);
+  
+  // Card 2: quests (time-windowed)
+  // Neatly separated into Morning / Afternoon / Night pages, with a Next button to toggle.
+  const QUEST_WINDOW_ORDER = useMemo(() => ["morning", "afternoon", "night"], []);
+  const getDefaultQuestWindowIndex = useCallback(() => {
+    const h = Number.isFinite(bundle?.derived?.nowHourPST) ? bundle.derived.nowHourPST : getHourInTimeZone(new Date(), "America/Los_Angeles");
+    if (h < 12) return 0; // morning
+    if (h < 17) return 1; // afternoon
+    return 2; // night
+  }, [bundle]);
 
-// --- Celebration (Duolingo-style pop) when items become DONE ---
-const [burstTicks, setBurstTicks] = useState({});
-const [toast, setToast] = useState(null);
-const toastTimerRef = useRef(null);
-const prevDoneRef = useRef({}); // key -> boolean
+  const [questWindowIndex, setQuestWindowIndex] = useState(() => getDefaultQuestWindowIndex());
 
-const triggerCelebrate = useCallback((key, msg) => {
-  setBurstTicks((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
-  if (msg) {
-    setToast({ msg, id: Date.now() });
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 900);
-  }
-}, []);
+  // --- Celebration (Duolingo-style pop) when items become DONE ---
+  const [burstTicks, setBurstTicks] = useState({});
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
+  const prevDoneRef = useRef({}); // key -> boolean
 
-useEffect(() => {
-  return () => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-  };
-}, []);
-
-useEffect(() => {
-  // When checklist updates, celebrate newly completed items
-  const prev = prevDoneRef.current || {};
-  const now = {};
-  (Array.isArray(checklist) ? checklist : []).forEach((it) => {
-    now[it.key] = !!it.done;
-    if (!!it.done && !prev[it.key]) {
-      const msg = it.key === "rehydrate" ? "💧 Hydration!" : "✅ Nice!";
-      triggerCelebrate(it.key, msg);
+  const triggerCelebrate = useCallback((key, msg) => {
+    setBurstTicks((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
+    if (msg) {
+      setToast({ msg, id: Date.now() });
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToast(null), 900);
     }
-  });
-  prevDoneRef.current = now;
-}, [checklist, triggerCelebrate]); // slimcalChecklistCelebrate
+  }, []);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    // When checklist updates, celebrate newly completed items
+    const prev = prevDoneRef.current || {};
+    const now = {};
+    (Array.isArray(checklist) ? checklist : []).forEach((it) => {
+      now[it.key] = !!it.done;
+      if (!!it.done && !prev[it.key]) {
+        const msg = it.key === "rehydrate" ? "💧 Hydration!" : "✅ Nice!";
+        triggerCelebrate(it.key, msg);
+      }
+    });
+    prevDoneRef.current = now;
+  }, [checklist, triggerCelebrate]); // slimcalChecklistCelebrate
 
   const questWindows = useMemo(() => {
     const src = Array.isArray(checklist) ? checklist : [];
     const buckets = { morning: [], afternoon: [], night: [] };
     for (const it of src) {
       const w = it?.window;
-      if (w === 'morning' || w === 'afternoon' || w === 'night') buckets[w].push(it);
+      if (w === "morning" || w === "afternoon" || w === "night") buckets[w].push(it);
       else buckets.afternoon.push(it);
+    }
+    // Keep each window sorted by priority (and stable by title as tie-break)
+    for (const w of ["morning", "afternoon", "night"]) {
+      buckets[w] = (buckets[w] || []).slice().sort((a, b) => {
+        const pa = Number.isFinite(a?.priority) ? a.priority : 999;
+        const pb = Number.isFinite(b?.priority) ? b.priority : 999;
+        if (pa !== pb) return pa - pb;
+        return String(a?.title || "").localeCompare(String(b?.title || ""));
+      });
     }
     return buckets;
   }, [checklist]);
 
-  const questWindowPageSizes = useMemo(() => ({ morning: 2, afternoon: 2, night: 1 }), []);
-
-  const questMaxPages = useMemo(() => {
-    const sizes = questWindowPageSizes;
-    const perWindow = ['morning', 'afternoon', 'night'].map((w) => {
-      const n = questWindows[w]?.length || 0;
-      const sz = sizes[w] || 2;
-      return Math.max(1, Math.ceil(n / sz));
-    });
-    return Math.max(...perWindow, 1);
-  }, [questWindows, questWindowPageSizes]);
+  const questWindowKey = QUEST_WINDOW_ORDER[Math.max(0, Math.min(questWindowIndex, QUEST_WINDOW_ORDER.length - 1))] || "morning";
 
   useEffect(() => {
-    // Clamp page when checklist changes
-    setQuestPage((p) => Math.min(Math.max(0, p), questMaxPages - 1));
-  }, [questMaxPages]);
-
-  const questWindowSlices = useMemo(() => {
-    const sizes = questWindowPageSizes;
-    const p = Math.max(0, Math.min(questPage, questMaxPages - 1));
-    const out = {};
-    for (const w of ['morning', 'afternoon', 'night']) {
-      const arr = questWindows[w] || [];
-      const sz = sizes[w] || 2;
-      const start = p * sz;
-      out[w] = arr.slice(start, start + sz);
+    // If the day window shifts and the current page is empty, snap to a sensible window.
+    const cur = questWindows?.[questWindowKey] || [];
+    if (cur.length === 0) {
+      const idx = getDefaultQuestWindowIndex();
+      const fallbackKey = QUEST_WINDOW_ORDER[idx] || "morning";
+      const fb = questWindows?.[fallbackKey] || [];
+      if (fb.length) setQuestWindowIndex(idx);
     }
-    return out;
-  }, [questWindows, questWindowPageSizes, questPage, questMaxPages]);
+  }, [questWindows, questWindowKey, getDefaultQuestWindowIndex, QUEST_WINDOW_ORDER]);
 
-  const canPrevQuest = questPage > 0;
-  const canNextQuest = questPage < (questMaxPages - 1);
+  const questWindowLabel = questWindowKey === "morning" ? "Morning" : questWindowKey === "afternoon" ? "Afternoon" : "Night";
+  const questWindowHint =
+    questWindowKey === "morning"
+      ? "Set up your targets + lock in breakfast."
+      : questWindowKey === "afternoon"
+      ? "Midday check-in: lunch + movement + protein checkpoint."
+      : "Close strong: dinner + finish targets.";
+
+  const questWindowItems = useMemo(() => questWindows?.[questWindowKey] || [], [questWindows, questWindowKey]);
+  const questWindowDone = useMemo(() => questWindowItems.filter((i) => !!i?.done).length, [questWindowItems]);
+  const questWindowTotal = questWindowItems.length;
+
+  const canPrevQuestWindow = questWindowIndex > 0;
+  const canNextQuestWindow = questWindowIndex < (QUEST_WINDOW_ORDER.length - 1);
+
+  const goNextQuestWindow = () => setQuestWindowIndex((i) => Math.min(QUEST_WINDOW_ORDER.length - 1, i + 1));
+  const goPrevQuestWindow = () => setQuestWindowIndex((i) => Math.max(0, i - 1));
 
   const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
 
@@ -1565,138 +1580,158 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             </Stack>
 
             <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
-              <List disablePadding>
-                {["morning", "afternoon", "night"].map((winKey) => {
-                  const group = (questWindowSlices?.[winKey] || []).filter(Boolean);
+              {/* Window header */}
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 1.2, pt: 1.1, pb: 0.7 }}>
+                <Stack spacing={0.25}>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                    {questWindowLabel} • {questWindowDone}/{questWindowTotal}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", fontWeight: 850 }}>
+                    {questWindowHint}
+                  </Typography>
+                </Stack>
 
-                  const winLabel = winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night";
-                  return (
-                    <Box key={winKey} sx={{ width: "100%" }}>
-                      <Typography variant="caption" sx={{ display: "block", px: 1.2, pt: 1.0, pb: 0.6, color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
-                        {winLabel}
-                      </Typography>
-
-                      {group.length ? group.map((it, gIdx) => {
-                        const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
-                        const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
-
-                        const isHydrate = it.manual && it.key === "rehydrate";
-                        return (
-                          <ListItemButton
-                            key={it.key}
-                            disableRipple
-                            onClick={() => {
-                              if (!it.done && !isHydrate && it.action) {
-                                history.push(it.action);
-                              }
-                            }}
-                            sx={{
-                              
-position: "relative",
-"@keyframes slimcalRowPop": {
-  "0%": { transform: "translateY(0px) scale(1)" },
-  "50%": { transform: "translateY(-1px) scale(1.01)" },
-  "100%": { transform: "translateY(0px) scale(1)" },
-},
-animation: burstTicks[it.key] ? "slimcalRowPop 420ms ease-out" : "none",
-px: 1.2,
-                              py: 1.0,
-                              borderTop: "1px solid rgba(148,163,184,0.12)",
-                              cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
-                              opacity: it.done ? 0.92 : 1,
-                            }}
-                          >
-                            <ListItemIcon sx={{ minWidth: 34, position: "relative" }}>
-                              <Box sx={{ position: "relative", width: 22, height: 22, display: "grid", placeItems: "center" }}>
-                                <Icon sx={{ fontSize: 20, color: iconColor }} />
-                                {burstTicks[it.key] ? <SparkBurst tick={burstTicks[it.key]} /> : null}
-                              </Box>
-                            </ListItemIcon>
-
-                            <ListItemText
-                              primary={
-                                <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
-                                  {it.title}
-                                </Typography>
-                              }
-                              secondary={
-                                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
-                                  {it.subtitle}
-                                </Typography>
-                              }
-                            />
-
-                            {it.done && !isHydrate ? (
-                              <Chip
-                                size="small"
-                                label="DONE"
-                                sx={{
-                                  fontWeight: 950,
-                                  borderRadius: 999,
-                                  bgcolor: "rgba(34,197,94,0.14)",
-                                  color: "rgba(255,255,255,0.86)",
-                                  border: "1px solid rgba(34,197,94,0.35)",
-                                }}
-                              />
-                            ) : (
-                              isHydrate ? (
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleHydration();
-                                  }}
-                                  sx={{ borderRadius: 999, fontWeight: 950, px: 1.8, textTransform: "none" }}
-                                >
-                                  {it.done ? "Undo" : "Check"}
-                                </Button>
-                              ) : null
-                            )}
-                          </ListItemButton>
-                        );
-                      }) : (
-                        <ListItem sx={{ px: 0, py: 1 }}>
-                          <ListItemText
-                            primary="All set"
-                            secondary="Nothing left in this section."
-                            primaryTypographyProps={{ sx: { fontWeight: 900 } }}
-                          />
-                        </ListItem>
-                      )}
-                    </Box>
-                  );
-                })}
-              </List>
-            </Box>
-
-            {/* Paging */}
-            {questMaxPages > 1 ? (
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
-                <Button
-                  variant="outlined"
-                  disabled={!canPrevQuest}
-                  onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
-                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
-                >
-                  Prev
-                </Button>
                 <Chip
                   size="small"
-                  label={`${questPage + 1}/${questMaxPages}`}
+                  label={`${questWindowIndex + 1}/${QUEST_WINDOW_ORDER.length}`}
                   sx={{ borderRadius: 999, fontWeight: 950 }}
                 />
+              </Stack>
+
+              <Divider sx={{ borderColor: "rgba(148,163,184,0.14)" }} />
+
+              <List disablePadding>
+                {questWindowItems.length ? (
+                  questWindowItems.map((it) => {
+                    const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
+                    const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
+                    const isHydrate = it.manual && it.key === "rehydrate";
+                    const canTap = !it.done && !isHydrate && !!it.action;
+
+                    const secondaryLine = it.subtitle || (canTap ? "Tap to log it" : "");
+                    const tertiary = canTap ? "Tap to log" : (isHydrate ? (it.done ? "Checked" : "Check it off") : (it.done ? "Done ✅" : ""));
+
+                    return (
+                      <ListItemButton
+                        key={it.key}
+                        disableRipple
+                        onClick={() => {
+                          if (canTap) history.push(it.action);
+                        }}
+                        sx={{
+                          position: "relative",
+                          "@keyframes slimcalRowPop": {
+                            "0%": { transform: "translateY(0px) scale(1)" },
+                            "50%": { transform: "translateY(-1px) scale(1.01)" },
+                            "100%": { transform: "translateY(0px) scale(1)" },
+                          },
+                          animation: burstTicks[it.key] ? "slimcalRowPop 420ms ease-out" : "none",
+                          px: 1.2,
+                          py: 1.05,
+                          borderTop: "1px solid rgba(148,163,184,0.12)",
+                          cursor: canTap ? "pointer" : "default",
+                          opacity: it.done ? 0.92 : 1,
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 34, position: "relative" }}>
+                          <Box sx={{ position: "relative", width: 22, height: 22, display: "grid", placeItems: "center" }}>
+                            <Icon sx={{ fontSize: 20, color: iconColor }} />
+                            {burstTicks[it.key] ? <SparkBurst tick={burstTicks[it.key]} /> : null}
+                          </Box>
+                        </ListItemIcon>
+
+                        <ListItemText
+                          primary={
+                            <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
+                              {it.title}
+                            </Typography>
+                          }
+                          secondary={
+                            <Stack spacing={0.15}>
+                              {!!secondaryLine && (
+                                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
+                                  {secondaryLine}
+                                </Typography>
+                              )}
+                              {!!tertiary && (
+                                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.50)" }}>
+                                  {tertiary}
+                                </Typography>
+                              )}
+                            </Stack>
+                          }
+                        />
+
+                        {isHydrate ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleHydration();
+                            }}
+                            sx={{ borderRadius: 999, fontWeight: 950, px: 1.8, textTransform: "none" }}
+                          >
+                            {it.done ? "Undo" : "Check"}
+                          </Button>
+                        ) : it.done ? (
+                          <Chip
+                            size="small"
+                            label="DONE"
+                            sx={{
+                              fontWeight: 950,
+                              borderRadius: 999,
+                              bgcolor: "rgba(34,197,94,0.14)",
+                              color: "rgba(255,255,255,0.86)",
+                              border: "1px solid rgba(34,197,94,0.35)",
+                            }}
+                          />
+                        ) : canTap ? (
+                          <Chip
+                            size="small"
+                            label={it.action === "/meals" ? "LOG MEAL" : it.action === "/workout" ? "LOG WORKOUT" : "OPEN"}
+                            sx={{
+                              fontWeight: 950,
+                              borderRadius: 999,
+                              bgcolor: "rgba(59,130,246,0.12)",
+                              color: "rgba(255,255,255,0.86)",
+                              border: "1px solid rgba(59,130,246,0.28)",
+                            }}
+                          />
+                        ) : null}
+                      </ListItemButton>
+                    );
+                  })
+                ) : (
+                  <Box sx={{ px: 1.2, py: 1.2 }}>
+                    <Typography sx={{ fontWeight: 900 }}>All set ✅</Typography>
+                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)" }}>
+                      Nothing left in this section.
+                    </Typography>
+                  </Box>
+                )}
+              </List>
+
+              {/* Paging between Morning / Afternoon / Night */}
+              <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ px: 1.2, py: 1.1, borderTop: "1px solid rgba(148,163,184,0.12)" }}>
                 <Button
                   variant="outlined"
-                  disabled={!canNextQuest}
-                  onClick={() => setQuestPage((p) => Math.min(questMaxPages - 1, p + 1))}
-                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
+                  disabled={!canPrevQuestWindow}
+                  onClick={goPrevQuestWindow}
+                  sx={{ borderRadius: 999, px: 2.4, fontWeight: 950, textTransform: "none" }}
+                >
+                  Back
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={!canNextQuestWindow}
+                  onClick={goNextQuestWindow}
+                  sx={{ borderRadius: 999, px: 2.4, fontWeight: 950, textTransform: "none" }}
                 >
                   Next
                 </Button>
               </Stack>
-            ) : null}
-
+            </Box>
 
           </Stack>
         </CardShell>
