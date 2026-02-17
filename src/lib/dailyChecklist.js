@@ -422,3 +422,17 @@ export function formatChecklistForPrompt(summary) {
     : "None (already complete).";
   return `Micro-quest checklist: ${s.done}/${s.total} complete (${pct}%). Active window: ${s.active_window}. Next step: ${next}`;
 }
+
+// Back-compat + convenience wrapper for Recap Coach.
+// Some files import this name directly; keep it stable.
+export function buildMicroQuestSummary({ items = [], nowHourPST = null } = {}) {
+  const summary = buildChecklistSummary(items, nowHourPST);
+  return {
+    summary,
+    prompt_line: formatChecklistForPrompt(summary),
+    next_step: summary?.next_step || null,
+    completion_pct: summary?.completion_pct ?? 0,
+    remaining: summary?.remaining ?? 0,
+    active_window: summary?.active_window || "morning",
+  };
+}
