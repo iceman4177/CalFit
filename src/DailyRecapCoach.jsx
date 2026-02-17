@@ -29,6 +29,7 @@ import {
   getMeals,
   getMealItemsForMealIds,
 } from "./lib/db";
+import { buildMicroQuestSummary } from "./lib/dailyChecklist.js";
 
 // ---- Coach-first: XP (localStorage, no backend) -------------------------------
 const XP_KEY = "slimcal:xp:v1";
@@ -925,6 +926,18 @@ for (const v of byEx.values()) {
 
       const timing = computeTimingNotes(ctx.meals || []);
 
+      const microQuestSummary = buildMicroQuestSummary({
+        now: new Date(),
+        timeZone: "America/Los_Angeles",
+        meals: ctx.meals || [],
+        workouts: ctx.workouts || [],
+        proteinSoFar: round(ctx.macroTotals?.protein_g || 0),
+        proteinTarget: targets.proteinDaily || 170,
+        consumed: ctx.consumed || 0,
+        burned: ctx.burned || 0,
+        calorieGoal: targets.dailyGoal || 0,
+      });
+
       const coachFacts = {
         day: todayISO,
         goals: {
@@ -979,6 +992,7 @@ for (const v of byEx.values()) {
           gaps_minutes: (timing.gaps || []).slice(0, 8),
         },
         client_context: { app: "slimcal.ai", source: ctx.source },
+        micro_quest_summary: microQuestSummary,
       };
 
       const autoSuggestions = suggestionSnippets({
@@ -1002,7 +1016,7 @@ Output format (use these headings):
 3) "Training Check-In" (what was trained + quick note)
 4) "Goal Progress" (daily kcal goal + how far off + protein target progress)
 5) "Timing & Consistency" (comments on meal timing & gaps; practical fix)
-6) "Next Move" (2–4 actionable steps + 2–3 foods to hit targets)
+6) "Next Move" (2–4 actionable steps. Prioritize micro_quest_summary.next_best_move when present + 2–3 foods to hit targets)
 7) "Coach Challenge" (a fun micro-challenge for tomorrow)
 `;
 
