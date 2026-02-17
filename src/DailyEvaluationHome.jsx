@@ -36,6 +36,7 @@ import FeatureUseBadge, {
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { supabase } from "./lib/supabaseClient.js";
+import { buildDailyChecklistItems, buildChecklistWindows, buildChecklistSummary, pickDefaultWindowIndex } from "./lib/dailyChecklist.js";
 
 /**
  * DailyEvaluationHome — Win-first + Action Steps v3
@@ -1088,7 +1089,7 @@ useEffect(() => {
       dayISO,
       profile: userData,
       targets: { calorieTarget, proteinTarget: pTarget, carbsTarget, fatTarget, goalType },
-      totals: { consumed: consumedFinal, burned: burnedFinal, netKcal, macros, mealsCount },
+      totals: { consumed: consumedFinal, burned: burnedFinal, netKcal, macros, mealsCount, mealsArr },
       est: { bmr_est: bmrEst || 0, tdee_est: tdeeEst || 0 },
       derived: {
         profileComplete,
@@ -1244,65 +1245,118 @@ useEffect(() => {
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
 
-  // Card 2: micro-quests (user-first, time-windowed)
-// We keep the checklist items exactly as-is, but present them as clean pages: Morning → Afternoon → Night.
-const windowKeys = useMemo(() => (["morning", "afternoon", "night"]), []);
-const [questWinPage, setQuestWinPage] = useState(0);
+  // Card 2: quests (time-windowed, paged)
+  // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
+  const [questPage, setQuestPage] = useState(0);
 
-// Swipe support (mobile): horizontal swipe anywhere on the quest list to move between windows.
-const swipeRef = useRef({ startX: 0, startY: 0, active: false });
+// --- Celebration (Duolingo-style pop) when items become DONE ---
+const [burstTicks, setBurstTicks] = useState({});
+const [toast, setToast] = useState(null);
+const toastTimerRef = useRef(null);
+const prevDoneRef = useRef({}); // key -> boolean
 
-const clampWinPage = useCallback((p) => Math.max(0, Math.min(windowKeys.length - 1, p)), [windowKeys.length]);
-
-useEffect(() => {
-  // Clamp page if something changes
-  setQuestWinPage((p) => clampWinPage(p));
-}, [clampWinPage]);
-
-const questWindows = useMemo(() => {
-  const src = Array.isArray(checklist) ? checklist : [];
-  const buckets = { morning: [], afternoon: [], night: [] };
-  for (const it of src) {
-    const w = it?.window;
-    if (w === "morning" || w === "afternoon" || w === "night") buckets[w].push(it);
-    else buckets.afternoon.push(it);
+const triggerCelebrate = useCallback((key, msg) => {
+  setBurstTicks((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
+  if (msg) {
+    setToast({ msg, id: Date.now() });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 900);
   }
-  return buckets;
-}, [checklist]);
-
-const activeWinKey = windowKeys[questWinPage] || "morning";
-const activeQuests = questWindows?.[activeWinKey] || [];
-const activeDoneCount = useMemo(() => activeQuests.filter((q) => q?.done).length, [activeQuests]);
-const activeTotalCount = activeQuests.length;
-
-const canPrevWindow = questWinPage > 0;
-const canNextWindow = questWinPage < (windowKeys.length - 1);
-
-const windowLabel = (k) => (k === "morning" ? "Morning" : k === "afternoon" ? "Afternoon" : "Night");
-
-const handleTouchStart = useCallback((e) => {
-  const t = e?.touches?.[0];
-  if (!t) return;
-  swipeRef.current = { startX: t.clientX, startY: t.clientY, active: true };
 }, []);
 
-const handleTouchEnd = useCallback((e) => {
-  const s = swipeRef.current;
-  swipeRef.current.active = false;
-  const t = e?.changedTouches?.[0];
-  if (!s?.active || !t) return;
+useEffect(() => {
+  return () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  };
+}, []);
 
-  const dx = t.clientX - s.startX;
-  const dy = t.clientY - s.startY;
+useEffect(() => {
+  // When checklist updates, celebrate newly completed items
+  const prev = prevDoneRef.current || {};
+  const now = {};
+  (Array.isArray(checklist) ? checklist : []).forEach((it) => {
+    now[it.key] = !!it.done;
+    if (!!it.done && !prev[it.key]) {
+      const msg = it.key === "rehydrate" ? "💧 Hydration!" : "✅ Nice!";
+      triggerCelebrate(it.key, msg);
+    }
+  });
+  prevDoneRef.current = now;
+}, [checklist, triggerCelebrate]); // slimcalChecklistCelebrate
 
-  // Avoid stealing vertical scroll.
-  if (Math.abs(dy) > Math.abs(dx)) return;
 
-  const threshold = 40;
-  if (dx <= -threshold && canNextWindow) setQuestWinPage((p) => clampWinPage(p + 1));
-  if (dx >= threshold && canPrevWindow) setQuestWinPage((p) => clampWinPage(p - 1));
-}, [canNextWindow, canPrevWindow, clampWinPage]);
 
+  const touchStartXRef = useRef(null);
+  const touchDeltaXRef = useRef(0);
+
+  const onQuestTouchStart = (e) => {
+    const x = e?.touches?.[0]?.clientX;
+    touchStartXRef.current = typeof x === "number" ? x : null;
+    touchDeltaXRef.current = 0;
+  };
+
+  const onQuestTouchMove = (e) => {
+    const startX = touchStartXRef.current;
+    const x = e?.touches?.[0]?.clientX;
+    if (typeof startX === "number" && typeof x === "number") {
+      touchDeltaXRef.current = x - startX;
+    }
+  };
+
+  const onQuestTouchEnd = () => {
+    const dx = touchDeltaXRef.current || 0;
+    const THRESH = 55;
+    if (dx > THRESH && canPrevQuest) setQuestPage((p) => Math.max(0, p - 1));
+    else if (dx < -THRESH && canNextQuest) setQuestPage((p) => Math.min(2, p + 1));
+    touchStartXRef.current = null;
+    touchDeltaXRef.current = 0;
+  };
+
+
+  const questWindows = useMemo(() => {
+    const src = Array.isArray(checklist) ? checklist : [];
+    const buckets = { morning: [], afternoon: [], night: [] };
+    for (const it of src) {
+      const w = it?.window;
+      if (w === 'morning' || w === 'afternoon' || w === 'night') buckets[w].push(it);
+      else buckets.afternoon.push(it);
+    }
+    return buckets;
+  }, [checklist]);
+
+    // Window-based paging: Morning / Afternoon / Night (separate pages)
+  const QUEST_WINDOWS = useMemo(() => ["morning", "afternoon", "night"], []);
+
+  const questMaxPages = QUEST_WINDOWS.length;
+
+  // Default to the most relevant window for the current time (PST)
+  useEffect(() => {
+    const idx = pickDefaultWindowIndex(bundle?.derived?.nowHourPST);
+    setQuestPage((p) => {
+      // only auto-set on first mount / if still at 0 and it's not morning
+      if (p === 0 && idx !== 0) return idx;
+      return p;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Clamp page
+  useEffect(() => {
+    setQuestPage((p) => Math.min(Math.max(0, p), questMaxPages - 1));
+  }, [questMaxPages]);
+
+  const questWindowKey = QUEST_WINDOWS[Math.max(0, Math.min(questPage, questMaxPages - 1))] || "morning";
+
+  const questWindowSlices = useMemo(() => {
+    // For the active page, show ALL items for that window (keeps it simple + user-friendly).
+    // Still uses the same underlying checklist (no data changes).
+    const out = { morning: [], afternoon: [], night: [] };
+    for (const w of QUEST_WINDOWS) out[w] = questWindows[w] || [];
+    return out;
+  }, [questWindows, QUEST_WINDOWS]);
+
+  const canPrevQuest = questPage > 0;
+  const canNextQuest = questPage < (questMaxPages - 1);
 const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
 
 // AI gating
@@ -1540,200 +1594,177 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
               </Stack>
             </Stack>
 
-            {/* Quest windows pager */}
-<Box
-  sx={{
-    width: "100%",
-    borderRadius: 2,
-    border: "1px solid rgba(148,163,184,0.18)",
-    background: "rgba(15,23,42,0.55)",
-    overflow: "hidden",
-  }}
-  onTouchStart={handleTouchStart}
-  onTouchEnd={handleTouchEnd}
->
-  {/* Header row */}
-  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 1.2, pt: 1.1, pb: 0.9 }}>
-    <Stack spacing={0.25}>
-      <Typography
-        variant="caption"
-        sx={{
-          color: "rgba(255,255,255,0.70)",
-          fontWeight: 950,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-        }}
-      >
-        {windowLabel(activeWinKey)}
-      </Typography>
-      <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
-        Swipe left/right, or tap Next — keep stacking wins.
-      </Typography>
-    </Stack>
+            <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
+              <List disablePadding>
+                {/* Window pager (Morning / Afternoon / Night) */}
+                <Box sx={{ width: "100%", px: 1.2, py: 1.1 }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.8 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={!canPrevQuest}
+                      onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
+                      sx={{ borderRadius: 999, textTransform: "none", fontWeight: 900, px: 1.8 }}
+                    >
+                      Back
+                    </Button>
 
-    <Chip
-      size="small"
-      label={`${activeDoneCount}/${activeTotalCount}`}
-      sx={{
-        borderRadius: 999,
-        fontWeight: 950,
-        bgcolor: activeDoneCount === activeTotalCount && activeTotalCount > 0 ? "rgba(34,197,94,0.14)" : "rgba(148,163,184,0.10)",
-        color: "rgba(255,255,255,0.86)",
-        border: activeDoneCount === activeTotalCount && activeTotalCount > 0 ? "1px solid rgba(34,197,94,0.35)" : "1px solid rgba(148,163,184,0.22)",
-      }}
-    />
-  </Stack>
+                    <Stack alignItems="center" spacing={0.2}>
+                      <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                        {questWindowKey === "morning" ? "Morning" : questWindowKey === "afternoon" ? "Afternoon" : "Night"}
+                      </Typography>
 
-  {/* Animated pages */}
-  <Box
-    sx={{
-      display: "flex",
-      width: "300%",
-      transform: `translateX(-${questWinPage * (100 / 3)}%)`,
-      transition: "transform 280ms cubic-bezier(0.2, 0.9, 0.2, 1)",
-      willChange: "transform",
-    }}
-  >
-    {windowKeys.map((winKey) => {
-      const group = (questWindows?.[winKey] || []).filter(Boolean);
+                      <Stack direction="row" spacing={0.6} alignItems="center">
+                        {["morning", "afternoon", "night"].map((w, i) => (
+                          <Box
+                            key={w}
+                            sx={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: 999,
+                              background: i === questPage ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.25)",
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    </Stack>
 
-      return (
-        <Box key={winKey} sx={{ width: "33.3333%", px: 0 }}>
-          <List disablePadding>
-            {group.length ? (
-              group.map((it) => {
-                const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
-                const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={!canNextQuest}
+                      onClick={() => setQuestPage((p) => Math.min(2, p + 1))}
+                      sx={{ borderRadius: 999, textTransform: "none", fontWeight: 950, px: 2.1 }}
+                    >
+                      Next
+                    </Button>
+                  </Stack>
 
-                const isHydrate = it.manual && it.key === "rehydrate";
-                return (
-                  <ListItemButton
-                    key={it.key}
-                    disableRipple
-                    onClick={() => {
-                      if (!it.done && !isHydrate && it.action) {
-                        history.push(it.action);
-                      }
-                    }}
+                  <Box
+                    onTouchStart={onQuestTouchStart}
+                    onTouchMove={onQuestTouchMove}
+                    onTouchEnd={onQuestTouchEnd}
                     sx={{
-                      position: "relative",
-                      "@keyframes slimcalRowPop": {
-                        "0%": { transform: "translateY(0px) scale(1)" },
-                        "50%": { transform: "translateY(-1px) scale(1.01)" },
-                        "100%": { transform: "translateY(0px) scale(1)" },
-                      },
-                      animation: burstTicks[it.key] ? "slimcalRowPop 420ms ease-out" : "none",
-                      px: 1.2,
-                      py: 1.0,
-                      borderTop: "1px solid rgba(148,163,184,0.12)",
-                      cursor: (!it.done && !isHydrate && !!it.action) ? "pointer" : "default",
-                      opacity: it.done ? 0.92 : 1,
+                      width: "100%",
+                      overflow: "hidden",
+                      borderRadius: 2,
+                      border: "1px solid rgba(148,163,184,0.14)",
+                      background: "rgba(2,6,23,0.35)",
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 34, position: "relative" }}>
-                      <Box sx={{ position: "relative", width: 22, height: 22, display: "grid", placeItems: "center" }}>
-                        <Icon sx={{ fontSize: 20, color: iconColor }} />
-                        {burstTicks[it.key] ? <SparkBurst tick={burstTicks[it.key]} /> : null}
-                      </Box>
-                    </ListItemIcon>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        width: "300%",
+                        transform: `translateX(-${questPage * 100}%)`,
+                        transition: "transform 260ms ease",
+                      }}
+                    >
+                      {["morning", "afternoon", "night"].map((winKey) => {
+                        const group = (questWindowSlices?.[winKey] || []).filter(Boolean);
+                        const doneCount = group.filter((g) => g?.done).length;
+                        const totalCount = group.length;
+                        return (
+                          <Box key={winKey} sx={{ width: "100%", flex: "0 0 100%", p: 1.0 }}>
+                            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 0.4, pb: 0.6 }}>
+                              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                                {winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night"}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                label={`${doneCount}/${totalCount}`}
+                                sx={{ height: 22, fontWeight: 900, borderRadius: 999, background: "rgba(148,163,184,0.18)", color: "rgba(255,255,255,0.85)" }}
+                              />
+                            </Stack>
 
-                    <ListItemText
-                      primary={
-                        <Typography sx={{ fontWeight: 900, color: "rgba(255,255,255,0.92)" }}>
-                          {it.title}
-                        </Typography>
-                      }
-                      secondary={
-                        <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.68)" }}>
-                          {it.subtitle}
-                        </Typography>
-                      }
-                    />
+                            {group.length ? (
+                              group.map((it, gIdx) => {
+                                const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
+                                const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
+                                return (
+                                  <ListItemButton
+                                    key={`${winKey}-${it.key}-${gIdx}`}
+                                    onClick={() => {
+                                      if (it.manual) {
+                                        if (it.key === "rehydrate") toggleHydration();
+                                      } else if (it.action) {
+                                        history.push(it.action);
+                                      }
+                                    }}
+                                    sx={{
+                                      mx: 0.2,
+                                      my: 0.35,
+                                      borderRadius: 2,
+                                      alignItems: "flex-start",
+                                      background: it.done ? "rgba(34,197,94,0.07)" : "rgba(148,163,184,0.06)",
+                                      border: "1px solid rgba(148,163,184,0.12)",
+                                    }}
+                                  >
+                                    <ListItemIcon sx={{ minWidth: 34, mt: 0.3 }}>
+                                      <Icon style={{ color: iconColor, fontSize: 20 }} />
+                                    </ListItemIcon>
+                                    <ListItemText
+                                      primary={
+                                        <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)", lineHeight: 1.15 }}>
+                                          {it.title}
+                                        </Typography>
+                                      }
+                                      secondary={
+                                        <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)", mt: 0.35, lineHeight: 1.25 }}>
+                                          {it.subtitle}
+                                        </Typography>
+                                      }
+                                    />
+                                  </ListItemButton>
+                                );
+                              })
+                            ) : (
+                              <ListItem sx={{ px: 0, py: 1 }}>
+                                <ListItemText
+                                  primary="All set"
+                                  secondary="Nothing else needed in this window right now."
+                                  primaryTypographyProps={{ sx: { fontWeight: 950, color: "rgba(255,255,255,0.86)" } }}
+                                  secondaryTypographyProps={{ sx: { color: "rgba(255,255,255,0.65)" } }}
+                                />
+                              </ListItem>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Box>
+                </Box>              </List>
+            </Box>
 
-                    {it.done && !isHydrate ? (
-                      <Chip
-                        size="small"
-                        label="DONE"
-                        sx={{
-                          fontWeight: 950,
-                          borderRadius: 999,
-                          bgcolor: "rgba(34,197,94,0.14)",
-                          color: "rgba(255,255,255,0.86)",
-                          border: "1px solid rgba(34,197,94,0.35)",
-                        }}
-                      />
-                    ) : (
-                      isHydrate ? (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleHydration();
-                          }}
-                          sx={{ borderRadius: 999, fontWeight: 950, px: 1.8, textTransform: "none" }}
-                        >
-                          {it.done ? "Undo" : "Check"}
-                        </Button>
-                      ) : null
-                    )}
-                  </ListItemButton>
-                );
-              })
-            ) : (
-              <ListItem sx={{ px: 1.2, py: 1.1 }}>
-                <ListItemText
-                  primary="All set"
-                  secondary="Nothing left in this window."
-                  primaryTypographyProps={{ sx: { fontWeight: 900 } }}
+            {/* Paging */}
+            {questMaxPages > 1 ? (
+              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
+                <Button
+                  variant="outlined"
+                  disabled={!canPrevQuest}
+                  onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
+                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
+                >
+                  Prev
+                </Button>
+                <Chip
+                  size="small"
+                  label={`${questPage + 1}/${questMaxPages}`}
+                  sx={{ borderRadius: 999, fontWeight: 950 }}
                 />
-              </ListItem>
-            )}
-          </List>
-        </Box>
-      );
-    })}
-  </Box>
-</Box>
+                <Button
+                  variant="outlined"
+                  disabled={!canNextQuest}
+                  onClick={() => setQuestPage((p) => Math.min(questMaxPages - 1, p + 1))}
+                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
+                >
+                  Next
+                </Button>
+              </Stack>
+            ) : null}
 
-{/* Window navigation */}
-<Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
-  <Button
-    variant="outlined"
-    disabled={!canPrevWindow}
-    onClick={() => setQuestWinPage((p) => clampWinPage(p - 1))}
-    sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
-  >
-    Prev
-  </Button>
 
-  <Stack direction="row" spacing={0.7} alignItems="center">
-    {windowKeys.map((_, idx) => (
-      <Box
-        key={idx}
-        onClick={() => setQuestWinPage(idx)}
-        sx={{
-          width: 8,
-          height: 8,
-          borderRadius: 999,
-          cursor: "pointer",
-          bgcolor: idx === questWinPage ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.28)",
-        }}
-      />
-    ))}
-  </Stack>
-
-  <Button
-    variant="outlined"
-    disabled={!canNextWindow}
-    onClick={() => setQuestWinPage((p) => clampWinPage(p + 1))}
-    sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
-  >
-    Next
-  </Button>
-</Stack>
-
-</Stack>
+          </Stack>
         </CardShell>
 
 {/* Card 3 */}
