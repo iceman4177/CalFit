@@ -1,185 +1,424 @@
 // src/lib/dailyChecklist.js
-// Lightweight, shared helper for "micro-quest" inference.
-// NOTE: This is intentionally heuristic + additive; it should never block core app flows.
+// Shared, canonical micro-quest spine used by DailyEvaluationHome (Card 2) and DailyRecapCoach.
+// Goal: keep checklist logic consistent across UI + coaching tone without touching persistence/sync.
 
-function safeNum(n, fallback = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : fallback;
-}
-
-function getHourInTimeZone(dateLike, timeZone = "America/Los_Angeles") {
+export function getHourInTimeZone(date, timeZone) {
   try {
-    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
-    const hourStr = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone }).format(d);
-    const h = parseInt(hourStr, 10);
-    return Number.isFinite(h) ? h : d.getHours();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const h = parts.find((p) => p.type === "hour")?.value;
+    const n = Number(h);
+    return Number.isFinite(n) ? n : null;
   } catch {
-    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
-    return d.getHours();
+    return date?.getHours?.() ?? null;
   }
 }
 
-function windowForHour(h) {
-  const hour = safeNum(h, 12);
-  // Morning: 4–10, Afternoon: 11–16, Night: 17–3 (wrap)
-  if (hour >= 4 && hour <= 10) return "morning";
-  if (hour >= 11 && hour <= 16) return "afternoon";
-  return "night";
+// ---- Meal event grouping + time-window inference (PST) ----
+function isBreakfastLikeText(t) {
+  if (!t) return false;
+  const s = String(t).toLowerCase();
+  // lightweight keywords; time-of-day still dominates
+  return /(egg|eggs|oat|oats|oatmeal|cereal|yogurt|toast|bagel|pancake|waffle|bacon|sausage|coffee|banana|berries|granola|protein shake|shake)/.test(s);
 }
 
-function mealTs(meal) {
-  return (
-    meal?.eaten_at ||
-    meal?.eatenAt ||
-    meal?.logged_at ||
-    meal?.loggedAt ||
-    meal?.created_at ||
-    meal?.createdAt ||
-    meal?.ts ||
-    meal?.time ||
-    null
-  );
-}
+function groupMealsIntoEventsPST(mealsArr) {
+  const MIN_GAP_MS = 45 * 60 * 1000; // 45 minutes = one "meal event"
+  const rows = (Array.isArray(mealsArr) ? mealsArr : [])
+    .map((m) => ({ ms: getMealTsMs(m), text: getMealText(m) }))
+    .filter((r) => Number.isFinite(r.ms))
+    .sort((a, b) => a.ms - b.ms);
 
-// Group meals into "events" so a snack + drink doesn't count as multiple meal slots.
-// Default: new event if ≥ 75 minutes since last meal.
-function groupMealEvents(meals = [], timeZone = "America/Los_Angeles", gapMinutes = 75) {
-  const sorted = [...(meals || [])]
-    .filter(Boolean)
-    .map((m) => {
-      const ts = mealTs(m);
-      const t = ts ? new Date(ts).getTime() : NaN;
-      return { ...m, _ts: ts, _t: t };
-    })
-    .filter((m) => Number.isFinite(m._t))
-    .sort((a, b) => a._t - b._t);
-
-  const out = [];
-  let cur = null;
-
-  for (const m of sorted) {
-    if (!cur) {
-      cur = { start_t: m._t, end_t: m._t, meals: [m] };
-      continue;
-    }
-    const mins = (m._t - cur.end_t) / 60000;
-    if (mins >= gapMinutes) {
-      out.push(cur);
-      cur = { start_t: m._t, end_t: m._t, meals: [m] };
+  const events = [];
+  for (const r of rows) {
+    const last = events[events.length - 1];
+    if (last && r.ms - last.ms <= MIN_GAP_MS) {
+      last.texts.push(r.text);
+      last.msEnd = r.ms;
     } else {
-      cur.end_t = m._t;
-      cur.meals.push(m);
+      events.push({ msStart: r.ms, msEnd: r.ms, texts: [r.text] });
     }
   }
-  if (cur) out.push(cur);
 
-  // Annotate each event with window + hour
-  return out.map((ev) => {
-    const mid = new Date((ev.start_t + ev.end_t) / 2);
-    const hour = getHourInTimeZone(mid, timeZone);
-    return { ...ev, hour, window: windowForHour(hour) };
+  return events.map((e) => {
+    const hourPST = getHourInTimeZone(new Date(e.msStart), "America/Los_Angeles");
+    return {
+      hourPST: Number.isFinite(hourPST) ? hourPST : null,
+      text: e.texts.filter(Boolean).join(" "),
+      msStart: e.msStart,
+      msEnd: e.msEnd,
+    };
   });
 }
 
-function summarizeMealSlots(events = []) {
-  const has = { morning: false, afternoon: false, night: false };
-  for (const ev of events) {
-    if (ev?.window) has[ev.window] = true;
-  }
-
-  // Brunch heuristic: a first event between 11–13 can count as "breakfast done" but still recommend lunch later.
-  const first = events?.[0];
-  if (!has.morning && first && first.window === "afternoon" && safeNum(first.hour, 12) <= 13) {
-    has.morning = true;
-  }
-  return has;
+function bucketMealWindowPST(hour) {
+  if (hour == null) return null;
+  // breakfast: 4-10, lunch: 11-15, dinner: 16-21, late: 22-3
+  if (hour >= 4 && hour <= 10) return "breakfast";
+  if (hour >= 11 && hour <= 15) return "lunch";
+  if (hour >= 16 && hour <= 21) return "dinner";
+  return "late";
 }
 
-export function buildMicroQuestSummary({
-  now = new Date(),
-  timeZone = "America/Los_Angeles",
-  meals = [],
-  workouts = [],
-  proteinSoFar = 0,
-  proteinTarget = 170,
-  consumed = null,
-  burned = null,
-  calorieGoal = null,
-} = {}) {
-  const h = getHourInTimeZone(now, timeZone);
-  const currentWindow = windowForHour(h);
+function getMealStep({ nowHourPST, mealBuckets }) {
+  const hasBreakfast = !!mealBuckets?.breakfast;
+  const hasLunch = !!mealBuckets?.lunch;
+  const hasDinner = !!mealBuckets?.dinner;
 
-  const mealEvents = groupMealEvents(meals, timeZone, 75);
-  const slots = summarizeMealSlots(mealEvents);
+  // If we can infer meal timing, prefer accuracy over simple counts.
+  if (!hasBreakfast && nowHourPST < 11) return { step: "breakfast", title: "Log breakfast" };
+  if (!hasBreakfast) return { step: "first", title: "Log your first meal" };
 
-  const workoutsCount = Array.isArray(workouts) ? workouts.length : 0;
+  if (!hasLunch && nowHourPST < 16) return { step: "lunch", title: "Log lunch" };
+  if (!hasLunch) return { step: "next", title: "Log your next meal" };
 
-  const pending = [];
+  if (!hasDinner && nowHourPST >= 16) return { step: "dinner", title: "Log dinner" };
+  if (!hasDinner) return { step: "next", title: "Log your next meal" };
 
-  // Window-first pending suggestions
-  if (!slots.morning) pending.push({ id: "log_breakfast", window: "morning", label: "Log your first meal (breakfast)" });
-  if (!slots.afternoon) pending.push({ id: "log_lunch", window: "afternoon", label: "Log lunch (even a quick meal)" });
-  if (!slots.night) pending.push({ id: "log_dinner", window: "night", label: "Log dinner / last meal" });
+  return { step: "snack", title: "Log a snack (optional)" };
+}
 
-  if (workoutsCount <= 0) pending.push({ id: "log_workout", window: "afternoon", label: "Log a workout (even a short one)" });
 
-  const pTarget = safeNum(proteinTarget, 0);
-  const pSoFar = safeNum(proteinSoFar, 0);
-  if (pTarget > 0 && pSoFar < pTarget) {
-    const remaining = Math.max(0, Math.round(pTarget - pSoFar));
-    pending.push({ id: "protein_target", window: "night", label: `Hit protein target (+${remaining}g left)` });
+
+export function inferMealBucketsPST(mealsArr, now = new Date()) {
+  const arr = Array.isArray(mealsArr) ? mealsArr : [];
+  const mealEvents = groupMealsIntoEventsPST(arr);
+  const mealHoursPST = mealEvents.map((e) => e.hourPST).filter((h) => typeof h === "number");
+
+  const bucketCounts = mealHoursPST.reduce(
+    (acc, h) => {
+      const b = bucketMealWindowPST(h);
+      if (b) acc[b] = (acc[b] || 0) + 1;
+      return acc;
+    },
+    { breakfast: 0, lunch: 0, dinner: 0, late: 0 }
+  );
+
+  const nowHourPST = getHourInTimeZone(now, "America/Los_Angeles");
+
+  // UX rule: If it's past breakfast time (>= 12pm) and the user logged *a* meal but none were in the breakfast window,
+  // treat their first logged meal as "breakfast" so the checklist stays intuitive.
+  if (nowHourPST != null && nowHourPST >= 12 && nowHourPST < 16 && bucketCounts.breakfast === 0 && mealEvents.length > 0) {
+    const firstEvt = mealEvents[0];
+    const firstHour = Number(firstEvt?.hourPST);
+    const firstLooksBreakfast = isBreakfastLikeText(firstEvt?.text);
+    // Only apply when it's plausibly breakfast/early-day.
+    if (firstLooksBreakfast || (Number.isFinite(firstHour) && firstHour <= 15)) {
+      if (bucketCounts.lunch > 0) bucketCounts.lunch -= 1;
+      else if (bucketCounts.dinner > 0) bucketCounts.dinner -= 1;
+      else if (bucketCounts.late > 0) bucketCounts.late -= 1;
+      bucketCounts.breakfast = 1;
+    }
   }
 
-  // Determine completion: we treat the above 5 as the canonical "micro quest spine"
-  const spine = [
-    { id: "log_breakfast", done: !!slots.morning },
-    { id: "log_lunch", done: !!slots.afternoon },
-    { id: "log_dinner", done: !!slots.night },
-    { id: "log_workout", done: workoutsCount > 0 },
-    { id: "protein_target", done: !(pTarget > 0 && pSoFar < pTarget) },
-  ];
-
-  const total = spine.length;
-  const done = spine.filter((q) => q.done).length;
-
-  const windowCounts = {
-    morning: { done: slots.morning ? 1 : 0, total: 1 },
-    afternoon: { done: slots.afternoon ? 1 : 0, total: 1 },
-    night: { done: slots.night ? 1 : 0, total: 1 },
+  const mealBuckets = {
+    breakfast: bucketCounts.breakfast > 0,
+    lunch: bucketCounts.lunch > 0,
+    dinner: bucketCounts.dinner > 0,
+    late: bucketCounts.late > 0,
   };
-
-  const momentum = total ? Math.round((done / total) * 100) : 0;
-
-  // Pick "next best move": pending item in current window, else first pending.
-  const nextBest =
-    pending.find((p) => p.window === currentWindow) ||
-    pending[0] ||
-    null;
-
-  // Small, human-friendly "tone tag"
-  let toneTag = "steady";
-  if (momentum >= 80) toneTag = "crushing";
-  else if (momentum >= 55) toneTag = "solid";
-  else if (momentum >= 30) toneTag = "warming_up";
-  else toneTag = "reset";
 
   return {
-    current_window: currentWindow,
-    momentum_percent: momentum,
-    tone_tag: toneTag,
-    spine_done: done,
-    spine_total: total,
-    meal_events: mealEvents.length,
-    slots,
-    window_counts: windowCounts,
-    pending_top: pending.slice(0, 5),
-    next_best_move: nextBest,
-    context: {
-      consumed: consumed == null ? null : Math.round(safeNum(consumed, 0)),
-      burned: burned == null ? null : Math.round(safeNum(burned, 0)),
-      calorie_goal: calorieGoal == null ? null : Math.round(safeNum(calorieGoal, 0)),
-      protein_so_far: Math.round(pSoFar),
-      protein_target: Math.round(pTarget),
-    },
+    nowHourPST,
+    mealEvents,
+    mealHoursPST,
+    bucketCounts,
+    mealBuckets,
   };
+}
+
+// ---- Canonical checklist items (micro-quests) ----
+function buildChecklist({
+  goalType,
+  profileComplete,
+  mealsCount,
+  mealBuckets,
+  nowHourPST,
+  hasWorkout,
+  proteinG,
+  carbsG,
+  fatG,
+  proteinTarget,
+  carbsTarget,
+  fatTarget,
+  dayHydrationDone,
+}) {
+  const g = normalizeGoalType(goalType);
+  const hour = Number.isFinite(nowHourPST) ? nowHourPST : getHourInTimeZone(new Date(), "America/Los_Angeles");
+
+
+  const items = [];
+  const push = (it) => items.push(it);
+
+  // Morning
+  push({
+    key: "setup",
+    window: "morning",
+    title: "Set targets (30 sec)",
+    subtitle: "Rings + coach stay accurate",
+    done: !!profileComplete,
+    action: "/workout",
+    priority: 0,
+    hiddenWhenDone: true,
+    manual: false,
+  });
+
+  // Manual hydration checkbox (morning routine)
+  push({
+    key: "rehydrate",
+    window: "morning",
+    title: "Hydrate",
+    subtitle: hour < 12 ? "Water + electrolytes" : "Water (quick reset)",
+    done: !!dayHydrationDone,
+    action: null,
+    priority: 1,
+    hiddenWhenDone: false,
+    manual: true,
+  });
+
+  // Meals as chronological checkpoints (time-aware in Pacific time)
+  const hasB = mealBuckets?.breakfast === true;
+  const hasL = mealBuckets?.lunch === true;
+  const hasD = mealBuckets?.dinner === true;
+
+  push({
+    key: "meal_morning",
+    window: "morning",
+    title: "Log breakfast (2 min)",
+    subtitle: goalType === "bulk" ? "Protein + carbs (yogurt + oats)" : "Protein-first (25–35g)",
+    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
+    action: "/meals",
+    priority: 2,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+
+  push({
+    key: "meal_afternoon",
+    window: "afternoon",
+    title: "Log lunch (2 min)",
+    subtitle: goalType === "bulk" ? "Protein + carbs (chicken + rice)" : "Protein + fiber (chicken + salad)",
+    done: hasL || ((Number(mealsCount) || 0) >= 2 && hour >= 11 && hour <= 15),
+    action: "/meals",
+    priority: 3,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+
+  push({
+    key: "meal_night",
+    window: "night",
+    title: "Log dinner",
+    subtitle: "Close the day (protein-focused)",
+    done: hasD || ((Number(mealsCount) || 0) >= 3 && hour >= 16),
+    action: "/meals",
+    priority: 4,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+// Protein checkpoint (afternoon) + finish target (night)
+  const pT = Number(proteinTarget) || 0;
+  const pNow = Number(proteinG) || 0;
+  if (pT > 0) {
+    const half = Math.round(pT * 0.5);
+    const needHalf = Math.max(0, half - pNow);
+    push({
+      key: "protein_half",
+      window: "afternoon",
+      title: pNow >= half ? "Protein checkpoint" : "Hit protein checkpoint",
+      subtitle: pNow >= half ? "Nice — keep going" : `Get to ~${half}g (add ~${Math.round(Math.min(45, needHalf))}g)`,
+      done: pNow >= half,
+      action: "/meals",
+      priority: 5,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+
+    const pGap = Math.max(0, pT - pNow);
+    push({
+      key: "protein_full",
+      window: "night",
+      title: pGap > 0 ? "Hit protein target" : "Protein target hit",
+      subtitle: pGap > 0 ? `Add ~${Math.round(Math.min(60, pGap))}g protein` : "Done ✅",
+      done: pGap <= 0,
+      action: "/meals",
+      priority: 6,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  }
+
+  // Goal-aware fuel / movement steps
+  if (g === "bulk") {
+    const cT = Number(carbsTarget) || 0;
+    const cNow = Number(carbsG) || 0;
+    if (cT > 0) {
+      const cGap = Math.max(0, cT - cNow);
+      push({
+        key: "fuel",
+        window: "night",
+        title: cGap > 0 ? "Fuel training (carbs)" : "Carbs on track",
+        subtitle: cGap > 0 ? `Add ~${Math.round(Math.min(110, cGap))}g carbs` : "Nice",
+        done: cGap <= 0,
+        action: "/meals",
+        priority: 7,
+        hiddenWhenDone: false,
+        manual: false,
+      });
+    }
+  } else if (g === "cut") {
+    push({
+      key: "walk",
+      window: "afternoon",
+      title: "10‑min walk",
+      subtitle: "Easy deficit win",
+      done: !!hasWorkout,
+      action: "/workout",
+      priority: 7,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  } else {
+    push({
+      key: "move",
+      window: "afternoon",
+      title: "Move 10 minutes",
+      subtitle: "Keeps your day clean",
+      done: !!hasWorkout,
+      action: "/workout",
+      priority: 7,
+      hiddenWhenDone: false,
+      manual: false,
+    });
+  }
+
+  // Workout (best in afternoon/evening)
+  push({
+    key: "workout",
+    window: hour < 15 ? "afternoon" : "night",
+    title: hasWorkout ? "Workout logged" : "Log workout (2 min)",
+    subtitle: hasWorkout ? "Exercise counted ✅" : "Even 1 exercise — log it",
+    done: !!hasWorkout,
+    action: "/workout",
+    priority: 8,
+    hiddenWhenDone: false,
+    manual: false,
+  });
+
+  return items
+    .filter((it) => !(it.hiddenWhenDone && it.done))
+    .sort((a, b) => a.priority - b.priority)
+    .slice(0, 18);
+}
+
+
+// ----------------------------- main ------------------------------------------
+
+
+export function buildDailyChecklistItems({
+  goalType,
+  profileComplete,
+  meals = [],
+  mealsCount,
+  now = new Date(),
+  hasWorkout,
+  proteinG,
+  carbsG,
+  fatG,
+  proteinTarget,
+  carbsTarget,
+  fatTarget,
+  dayHydrationDone,
+}) {
+  const inferred = inferMealBucketsPST(meals, now);
+  const nowHourPST = inferred.nowHourPST;
+  const mealBuckets = inferred.mealBuckets;
+
+  return buildChecklist({
+    goalType,
+    profileComplete,
+    mealsCount: Number(mealsCount) || (Array.isArray(meals) ? meals.length : 0),
+    mealBuckets,
+    nowHourPST,
+    hasWorkout: !!hasWorkout,
+    proteinG: Number(proteinG) || 0,
+    carbsG: Number(carbsG) || 0,
+    fatG: Number(fatG) || 0,
+    proteinTarget: Number(proteinTarget) || 0,
+    carbsTarget: Number(carbsTarget) || 0,
+    fatTarget: Number(fatTarget) || 0,
+    dayHydrationDone: !!dayHydrationDone,
+  });
+}
+
+export function buildChecklistWindows(items = []) {
+  const src = Array.isArray(items) ? items : [];
+  const buckets = { morning: [], afternoon: [], night: [] };
+  for (const it of src) {
+    const w = it?.window;
+    if (w === "morning" || w === "afternoon" || w === "night") buckets[w].push(it);
+    else buckets.afternoon.push(it);
+  }
+  return buckets;
+}
+
+export function pickDefaultWindowIndex(nowHourPST) {
+  const h = Number.isFinite(nowHourPST) ? nowHourPST : getHourInTimeZone(new Date(), "America/Los_Angeles");
+  if (h == null) return 0;
+  if (h < 12) return 0;
+  if (h < 17) return 1;
+  return 2;
+}
+
+export function buildChecklistSummary(items = [], nowHourPST = null) {
+  const src = Array.isArray(items) ? items : [];
+  const total = src.length;
+  const done = src.filter((i) => i?.done).length;
+  const windows = buildChecklistWindows(src);
+
+  const byWindow = {};
+  for (const w of ["morning", "afternoon", "night"]) {
+    const arr = windows[w] || [];
+    byWindow[w] = {
+      total: arr.length,
+      done: arr.filter((i) => i?.done).length,
+    };
+  }
+
+  const remaining = src.filter((i) => !i?.done);
+  const nextStep = remaining[0] || null;
+
+  const idx = pickDefaultWindowIndex(nowHourPST);
+  const activeWindow = ["morning", "afternoon", "night"][idx] || "morning";
+
+  return {
+    total,
+    done,
+    remaining: total - done,
+    completion_pct: total ? Math.round((done / total) * 100) : 0,
+    active_window: activeWindow,
+    by_window: byWindow,
+    next_step: nextStep
+      ? {
+          key: nextStep.key,
+          title: nextStep.title,
+          subtitle: nextStep.subtitle,
+          action: nextStep.action || null,
+          window: nextStep.window || null,
+        }
+      : null,
+  };
+}
+
+export function formatChecklistForPrompt(summary) {
+  if (!summary) return "";
+  const s = summary;
+  const pct = s.completion_pct ?? 0;
+  const next = s.next_step
+    ? `${s.next_step.title} — ${s.next_step.subtitle}`
+    : "None (already complete).";
+  return `Micro-quest checklist: ${s.done}/${s.total} complete (${pct}%). Active window: ${s.active_window}. Next step: ${next}`;
 }
