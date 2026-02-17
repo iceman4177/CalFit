@@ -1382,29 +1382,130 @@ const nextStep = useMemo(() => remainingSteps[0] || null, [remainingSteps]);
       const goalType = normalizeGoalType(bundle.profile?.goalType);
       const hasEst = !!bundle.est.tdee_est && !!bundle.est.bmr_est;
 
+            const dietPreference = (bundle.profile?.dietPreference || localStorage.getItem("diet_preference") || "omnivore");
+      const trainingIntent = (bundle.profile?.trainingIntent || localStorage.getItem("training_intent") || "general");
+      const trainingSplit = (bundle.profile?.trainingSplit || localStorage.getItem("training_split") || "");
+      const lastFocus = (bundle.profile?.lastFocus || localStorage.getItem("last_focus") || "");
+      const equipmentList = bundle.profile?.equipment || safeJsonParse(localStorage.getItem("equipment_list"), []);
+      const calorieBias = Number(bundle.profile?.calorieBias || localStorage.getItem("calorie_bias") || 0) || 0;
+
+      const calorieTargetSafe = Number(bundle.targets.calorieTarget) || 0;
+      const calDelta = calorieTargetSafe ? (bundle.totals.consumed - calorieTargetSafe) : 0;
+      const calorieRemaining = calorieTargetSafe ? Math.max(0, calorieTargetSafe - bundle.totals.consumed) : 0;
+
+      const proteinRemaining = Math.max(0, (Number(bundle.targets.proteinTarget) || 0) - (Number(bundle.totals.macros.protein_g) || 0));
+      const carbsRemaining = Math.max(0, (Number(bundle.targets.carbsTarget) || 0) - (Number(bundle.totals.macros.carbs_g) || 0));
+      const fatRemaining = Math.max(0, (Number(bundle.targets.fatTarget) || 0) - (Number(bundle.totals.macros.fat_g) || 0));
+
+      const checklistSummary = buildChecklistSummary(checklist, bundle?.derived?.nowHourPST);
+
+      const formatPST = (ts) => {
+        try {
+          const d = ts ? new Date(ts) : null;
+          if (!d || !Number.isFinite(d.getTime())) return "";
+          return new Intl.DateTimeFormat("en-US", {
+            timeZone: "America/Los_Angeles",
+            hour: "numeric",
+            minute: "2-digit",
+          }).format(d);
+        } catch {
+          return "";
+        }
+      };
+
+      const mealsCompact = (Array.isArray(bundle?.totals?.mealsArr) ? bundle.totals.mealsArr : [])
+        .slice()
+        .sort((a, b) => {
+          const ta = new Date(a?.eaten_at || a?.eatenAt || a?.created_at || a?.createdAt || 0).getTime();
+          const tb = new Date(b?.eaten_at || b?.eatenAt || b?.created_at || b?.createdAt || 0).getTime();
+          return (ta || 0) - (tb || 0);
+        })
+        .slice(0, 8)
+        .map((m) => ({
+          time: formatPST(m?.eaten_at || m?.eatenAt || m?.created_at || m?.createdAt || null),
+          title: String(m?.title || m?.name || "Meal").slice(0, 80),
+          calories: Math.round(Number(m?.total_calories || m?.totalCalories || m?.calories || 0) || 0),
+          p: Math.round(Number(m?.protein_g || m?.proteinG || m?.protein || 0) || 0),
+          c: Math.round(Number(m?.carbs_g || m?.carbsG || m?.carbs || 0) || 0),
+          f: Math.round(Number(m?.fat_g || m?.fatG || m?.fat || 0) || 0),
+        }));
+
+      // Today's workouts (scoped local history)
+      const uid = userId || bundle?.profile?.id || bundle?.profile?.user_id || null;
+      const workoutKey = uid ? `workoutHistory:${uid}` : "workoutHistory";
+      const workoutHistoryRaw = safeJsonParse(localStorage.getItem(workoutKey), []);
+      const dayUS = bundle.dayUS;
+
+      const workoutsToday = (Array.isArray(workoutHistoryRaw) ? workoutHistoryRaw : [])
+        .filter((w) => (w?.date || w?.day || "") === dayUS)
+        .slice(0, 4)
+        .map((w) => {
+          const ex = Array.isArray(w?.exercises) ? w.exercises : Array.isArray(w?.items) ? w.items : [];
+          const exNames = ex.map((e) => e?.name).filter(Boolean).slice(0, 6);
+          return {
+            time: formatPST(w?.started_at || w?.createdAt || w?.created_at || null),
+            name: String(w?.name || "Workout").slice(0, 70),
+            calories: Math.round(Number(w?.totalCalories || w?.total_calories || 0) || 0),
+            exercises: exNames,
+          };
+        });
+
       const payload = {
         feature: "daily_eval_verdict",
         prompt: `
-You are SlimCal Coach. Write a short, personal message for the user.
+You are SlimCal Coach — the daily BRAIN of the app.
+Generate a highly detailed, personalized "Daily Verdict" that makes the user feel understood.
+
+OUTPUT FORMAT (plain text, easy to skim):
+1) Status line (WIN / CLOSE / NEEDS LOGS) + 1 sentence why.
+2) Numbers snapshot (bullets): Consumed, Burned, Net, Calories vs Target (delta), Protein/Carbs/Fat vs targets.
+3) Checklist status: completion %, active window, and the next 3 missing micro-quests.
+4) Insights (2–5 bullets): the biggest levers today based on goal type + what they logged.
+5) Next actions (very specific):
+   - Next meal: tailored to dietPreference + macro gaps + calories remaining (give 2 options).
+   - Next training/movement: tailored to trainingIntent/split + what they already did today (if none, propose 1 short session).
+6) Tomorrow setup (3 bullets): simple plan to win earlier.
+END WITH: "Win move: ___" (one single action for the next 2 hours).
+
 Rules:
-- 2–4 sentences max.
-- punchy + motivating (not robotic).
-- Use numbers: calories eaten, exercise, net, protein, carbs, fats; include targets when available.
-- Mention goal type (${goalType}).
-- End with 1 line: "Win move: ___" (one specific action).
+- Use the provided data aggressively; if something is missing, say what to log/fill to improve accuracy.
+- Use real numbers everywhere (no vague advice).
+- Be supportive + confident, but not corny.
+- Keep it detailed but not endless (aim ~350–650 words).
+
 Data:
 Day: ${bundle.dayUS}
 Goal: ${goalType}
-Calories: ${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"}
-Exercise: ${Math.round(bundle.totals.burned)} kcal
-Net: ${Math.round(bundle.totals.netKcal)} kcal
-Protein: ${Math.round(bundle.totals.macros.protein_g)} / ${Math.round(bundle.targets.proteinTarget)} g
-Carbs: ${Math.round(bundle.totals.macros.carbs_g)} / ${Math.round(bundle.targets.carbsTarget)} g
-Fats: ${Math.round(bundle.totals.macros.fat_g)} / ${Math.round(bundle.targets.fatTarget)} g
+Diet preference: ${dietPreference}
+Training intent: ${trainingIntent}
+Training split: ${trainingSplit || "n/a"}
+Last focus: ${lastFocus || "n/a"}
+Equipment: ${Array.isArray(equipmentList) && equipmentList.length ? equipmentList.slice(0, 12).join(", ") : "n/a"}
+Profile complete: ${bundle.derived.profileComplete ? "yes" : "no"}
 Metabolism: ${hasEst ? `BMR ${Math.round(bundle.est.bmr_est)}, TDEE ${Math.round(bundle.est.tdee_est)}` : "n/a"}
+Calorie bias: ${calorieBias}
+
+Consumed: ${Math.round(bundle.totals.consumed)}
+Burned: ${Math.round(bundle.totals.burned)}
+Net: ${Math.round(bundle.totals.netKcal)}
+Calorie target: ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"}
+Calorie delta (consumed - target): ${bundle.targets.calorieTarget ? Math.round(calDelta) : "—"}
+Calories remaining: ${bundle.targets.calorieTarget ? Math.round(calorieRemaining) : "—"}
+
+Protein: ${Math.round(bundle.totals.macros.protein_g)} / ${Math.round(bundle.targets.proteinTarget)} g (remaining ~${Math.round(proteinRemaining)}g)
+Carbs: ${Math.round(bundle.totals.macros.carbs_g)} / ${Math.round(bundle.targets.carbsTarget)} g (remaining ~${Math.round(carbsRemaining)}g)
+Fats: ${Math.round(bundle.totals.macros.fat_g)} / ${Math.round(bundle.targets.fatTarget)} g (remaining ~${Math.round(fatRemaining)}g)
+
+Meals logged today: ${bundle.totals.mealsCount}
+Meal windows: breakfast=${bundle.derived.mealBuckets?.breakfast ? "yes" : "no"}, lunch=${bundle.derived.mealBuckets?.lunch ? "yes" : "no"}, dinner=${bundle.derived.mealBuckets?.dinner ? "yes" : "no"}, late=${bundle.derived.mealBuckets?.late ? "yes" : "no"}
+Meals detail (time PST, calories, macros): ${JSON.stringify(mealsCompact)}
+
+Workouts logged today: ${workoutsToday.length}
+Workouts detail (time PST, calories, exercises): ${JSON.stringify(workoutsToday)}
+
+Checklist summary: ${JSON.stringify(checklistSummary)}
 Confidence: ${bundle.derived.confidenceLabel}
 Score: ${bundle.derived.score}/100
-Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
 `.trim(),
       };
 
@@ -1463,8 +1564,8 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
   const topSubtitle = `${bundle.dayUS} • swipe → do steps → win`;
 
   const coachHelper = pro
-    ? "Generate your daily recap verdict for today."
-    : `Generate your daily recap verdict (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
+    ? "Generate your daily verdict (ultra-detailed) for today."
+    : `Generate your daily verdict (ultra-detailed) (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
 
   return (
     <Box
@@ -1768,7 +1869,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
         </CardShell>
 
 {/* Card 3 */}
-        <CardShell title="Coach" subtitle="Your daily recap">
+        <CardShell title="Coach" subtitle="Your daily verdict">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
@@ -1781,7 +1882,7 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
               disabled={aiLoading}
               sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.4 }}
             >
-              {aiLoading ? "Generating…" : "Get daily recap"}
+              {aiLoading ? "Generating…" : "Get daily verdict"}
             </Button>
 
             {!!aiError && (
@@ -1797,8 +1898,8 @@ Remaining steps: ${remainingSteps.map(s => s.title).slice(0,5).join(", ")}
             )}
 
             {!!aiVerdict && (
-              <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)" }}>
-                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your recap</Typography>
+              <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)", maxHeight: { xs: "52dvh", sm: "none" }, overflowY: { xs: "auto", sm: "visible" }, WebkitOverflowScrolling: "touch", pr: { xs: 0.5, sm: 0 } }}>
+                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your verdict</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
                   {aiVerdict}
                 </Typography>

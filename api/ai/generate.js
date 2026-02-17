@@ -980,11 +980,11 @@ ${planLines.slice(0, 2).join("\n")}`.trim();
       const call = openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are SlimCal Coach. Be concise, punchy, and actionable." },
+          { role: "system", content: "You are SlimCal Coach, an expert coach + nutritionist. Be detailed but skimmable: use short headings and bullets, cite the user\u2019s numbers, and end with one clear \"Win move\"." },
           { role: "user", content: String(body?.prompt || body?.text || body?.message || "").slice(0, 12000) },
         ],
-        temperature: 0.5,
-        max_tokens: 280,
+        temperature: 0.55,
+        max_tokens: 700,
       });
 
       const completion = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
