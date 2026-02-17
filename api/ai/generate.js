@@ -18,7 +18,7 @@ const openai = process.env.OPENAI_API_KEY
   : null;
 
 export const config = { api: { bodyParser: false } };
-export const maxDuration = 10;
+export const maxDuration = 30;
 
 // -------------------- BASIC UTILS --------------------
 async function readJson(req) {
@@ -225,8 +225,66 @@ async function allowFreeFeature({ req, feature, userId }) {
   return dbAllow(clientId, feature, userId);
 }
 
+
+
+// -------------------- VERDICT FALLBACK --------------------
+
+function fallbackDailyVerdictFromPrompt(p) {
+  const text = String(p || "");
+  const grabNum = (label) => {
+    const m = text.match(new RegExp(`${label}:\\s*([0-9]+(?:\\.[0-9]+)?)`, "i"));
+    return m ? Number(m[1]) : null;
+  };
+
+  const consumed = grabNum("Consumed") ?? 0;
+  const burned = grabNum("Burned") ?? 0;
+  const net = grabNum("Net") ?? (consumed - burned);
+  const protein = grabNum("Protein") ?? null;
+  const carbs = grabNum("Carbs") ?? null;
+  const fat = grabNum("Fat") ?? null;
+
+  const goalMatch = text.match(/Goal:\s*([a-z_]+)/i);
+  const goalType = (goalMatch?.[1] || "maintain").replace(/_/g, " ");
+
+  // Checklist summary (best-effort parse)
+  const doneMatch = text.match(/Checklist Done:\s*(\d+)\/(\d+)/i);
+  const done = doneMatch ? Number(doneMatch[1]) : null;
+  const total = doneMatch ? Number(doneMatch[2]) : null;
+
+  const lines = [];
+  lines.push(`Today’s Verdict (${goalType}):`);
+  lines.push(`• Calories: ${Math.round(consumed)} in, ${Math.round(burned)} out → net ${Math.round(net)}.`);
+  if (protein != null || carbs != null || fat != null) {
+    const parts = [];
+    if (protein != null) parts.push(`${Math.round(protein)}g protein`);
+    if (carbs != null) parts.push(`${Math.round(carbs)}g carbs`);
+    if (fat != null) parts.push(`${Math.round(fat)}g fat`);
+    lines.push(`• Macros: ${parts.join(" · ")}.`);
+  }
+  if (done != null && total != null) {
+    lines.push(`• Checklist: ${done}/${total} completed — keep stacking wins.`);
+  }
+
+  lines.push("");
+  lines.push("Win move (do this next):");
+  if (protein != null && protein < 120) {
+    lines.push("1) Add a high-protein meal/snack (30–50g) in the next 2–3 hours.");
+  } else {
+    lines.push("1) Log your next meal immediately when you start eating (2 taps, keep streak alive).");
+  }
+  if (burned < 150) {
+    lines.push("2) Do a quick 10–20 min walk or short lift session to push output up.");
+  } else {
+    lines.push("2) Hydrate + get a clean carb window around training if you lift again.");
+  }
+
+  lines.push("");
+  lines.push("If the AI ever fails to load, this fallback will still keep you moving — refresh and try again.");
+  return lines.join("\n").trim();
+}
+
 // -------------------- TIMEOUT --------------------
-const OPENAI_TIMEOUT_MS = 6000;
+const OPENAI_TIMEOUT_MS = 20000;
 function withTimeout(promise, ms, onTimeoutValue) {
   return new Promise((resolve) => {
     let settled = false;
@@ -991,7 +1049,7 @@ ${planLines.slice(0, 2).join("\n")}`.trim();
       const text = completion?.choices?.[0]?.message?.content?.trim();
 
       if (!text) {
-        res.status(502).json({ error: "AI timed out", reason: "timeout" });
+        res.status(200).json({ text: fallbackDailyVerdictFromPrompt(String(body?.prompt || body?.text || body?.message || "")), warning: "ai_timeout_fallback" });
         return;
       }
 
@@ -999,7 +1057,7 @@ ${planLines.slice(0, 2).join("\n")}`.trim();
       return;
     } catch (e) {
       console.error("[ai/generate] daily_eval_verdict error:", e);
-      res.status(500).json({ error: "AI verdict failed" });
+      res.status(200).json({ text: fallbackDailyVerdictFromPrompt(String(body?.prompt || body?.text || body?.message || "")), warning: "ai_error_fallback" });
       return;
     }
   }
