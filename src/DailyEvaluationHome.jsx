@@ -247,23 +247,9 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 }
 
 // ----------------------------- UI primitives ---------------------------------
-function CardShell({ title, subtitle, children, right, cardId }) {
-
-  const scrollToCard = (id) => {
-    try {
-      if (typeof document === "undefined") return;
-      const el = document.getElementById(id);
-      if (el && el.scrollIntoView) {
-        el.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
-      }
-    } catch {
-      // ignore
-    }
-  };
-
+function CardShell({ title, subtitle, children, right }) {
   return (
     <Card
-      id={cardId}
       elevation={0}
       sx={{
         // Mobile-first: make each card feel like a full-screen page inside a swipeable carousel.
@@ -1610,22 +1596,7 @@ Score: ${bundle.derived.score}/100
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
-
-      {/* Card navigation (desktop + trackpad hint) */}
-      <Stack
-        direction="row"
-        spacing={1}
-        alignItems="center"
-        justifyContent="center"
-        sx={{ mt: 1.5, mb: 0.5, px: { xs: 2, sm: 0 }, display: { xs: "none", sm: "flex" }, flexWrap: "wrap" }}
-      >
-        <Chip label="Today" onClick={() => scrollToCard("de-card-1")} clickable sx={{ fontWeight: 950, borderRadius: 999 }} />
-        <Chip label="Progress" onClick={() => scrollToCard("de-card-2")} clickable sx={{ fontWeight: 950, borderRadius: 999 }} />
-        <Chip label="Daily Verdict" onClick={() => scrollToCard("de-card-3")} clickable sx={{ fontWeight: 950, borderRadius: 999 }} />
-        <Chip label="Body Scan" onClick={() => scrollToCard("de-card-4")} clickable sx={{ fontWeight: 950, borderRadius: 999 }} />
-      </Stack>
-
-      {/* Cards */}
+{/* Cards */}
         <Box
         sx={{
           mt: { xs: 0, sm: 2 },
@@ -1645,16 +1616,9 @@ Score: ${bundle.derived.score}/100
         }}
       >
         {/* Card 1 */}
-        <CardShell cardId="de-card-1"
+        <CardShell
           title="Today"
           subtitle="Your scoreboard"
-          right={
-            <Chip
-              label={`${scoreAnim}/100`}
-              sx={{ fontWeight: 950, borderRadius: 999 }}
-              color={scoreAnim >= 88 ? "success" : scoreAnim >= 74 ? "primary" : "error"}
-            />
-          }
         >
           <Stack spacing={1.2} alignItems="center">
             {/* Top row: Calories + Exercise */}
@@ -1703,7 +1667,7 @@ Score: ${bundle.derived.score}/100
         </CardShell>
 
         {/* Card 2 */}
-        <CardShell cardId="de-card-2" title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1897,7 +1861,7 @@ Score: ${bundle.derived.score}/100
         </CardShell>
 
 {/* Card 3 */}
-        <CardShell cardId="de-card-3" title="Coach" subtitle="Your daily verdict">
+        <CardShell title="Coach" subtitle="Your daily verdict">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
@@ -1943,7 +1907,7 @@ Score: ${bundle.derived.score}/100
         </CardShell>
 
         {/* Card 4 */}
-<CardShell cardId="de-card-4" title="Body Scan" subtitle="Beta">
+<CardShell title="Body Scan" subtitle="Beta">
   <Stack spacing={1.1}>
     <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
       Upload a full-body photo to generate your <b>Build Arc</b> score and your fastest upgrade levers.

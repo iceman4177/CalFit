@@ -15,16 +15,10 @@ import { Container,
   Stack,
   Menu,
   MenuItem,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Fab,
   Snackbar,
   Alert,
   Badge,
   Chip } from '@mui/material';
-import CampaignIcon      from '@mui/icons-material/Campaign';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
@@ -61,7 +55,7 @@ import WaitlistSignup    from './components/WaitlistSignup';
 
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
-import ReferralDashboard from './components/ReferralDashboard';
+  // (Invite/Referral modal removed)
 import { logPageView }   from './analytics';
 
 import { useEntitlements } from './context/EntitlementsContext.jsx';
@@ -729,7 +723,6 @@ export default function App() {
   // navBar (legacy hero buttons) removed for production launch.
 
 
-  const [inviteOpen, setInviteOpen] = useState(false);
 
   const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
   useEffect(() => {
@@ -823,6 +816,7 @@ export default function App() {
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
+          <Route path="/body-scan" component={BodyScanBeta} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
@@ -916,7 +910,6 @@ export default function App() {
 }}
 />
           }/>
-          <Route path="/body-scan" component={BodyScanBeta} />
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
           <Route path="/achievements" component={Achievements} />
@@ -941,16 +934,6 @@ export default function App() {
             )}
           />
         </Switch>
-
-        <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Invite Friends</DialogTitle>
-          <DialogContent><ReferralDashboard /></DialogContent>
-          <DialogActions><Button onClick={() => setInviteOpen(false)}>Close</Button></DialogActions>
-        </Dialog>
-
-        <Fab color="primary" onClick={() => setInviteOpen(true)} sx={{ position:'fixed', bottom:16, right:16 }}>
-          <CampaignIcon />
-        </Fab>
 
         <UpgradeModal
           open={upgradeOpen}
