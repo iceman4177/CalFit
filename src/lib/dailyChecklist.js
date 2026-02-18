@@ -17,6 +17,37 @@ export function getHourInTimeZone(date, timeZone) {
   }
 }
 
+// ---- Robust meal helpers (local + cloud shapes) ----
+function getMealText(m) {
+  try {
+    if (!m) return "";
+    return String(m?.name ?? m?.title ?? m?.food_name ?? m?.label ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function getMealTsMs(m) {
+  try {
+    if (!m) return NaN;
+    const raw =
+      m?.eaten_at ?? m?.eatenAt ?? m?.createdAt ?? m?.created_at ?? m?.timestamp ?? m?.time ?? null;
+    if (raw == null) return NaN;
+    // number => assume ms if large, else seconds
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) return NaN;
+      return raw > 2_000_000_000 ? raw : raw * 1000;
+    }
+    // string/date
+    const d = raw instanceof Date ? raw : new Date(String(raw));
+    const ms = d.getTime();
+    return Number.isFinite(ms) ? ms : NaN;
+  } catch {
+    return NaN;
+  }
+}
+
+
 // ---- Meal event grouping + time-window inference (PST) ----
 function isBreakfastLikeText(t) {
   if (!t) return false;

@@ -51,7 +51,7 @@ import FeatureUseBadge, {
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
-import { saveMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
+import { saveMealLocalFirst, deleteMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
 import { callAIGenerate } from './lib/ai';
 
 // ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
@@ -63,6 +63,34 @@ const isProUser = () => {
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
   return !!ud.isPremium;
 };
+
+
+// ---- local tombstones for deletions (prevents cloud re-hydrate re-adding deleted meals) ----
+function deletedMealsKey(userId, dayISO) {
+  const uid = userId || 'guest';
+  const d = dayISO || 'today';
+  return `deletedMealIds:${uid}:${d}`;
+}
+
+function readDeletedMealIds(userId, dayISO) {
+  try {
+    const raw = localStorage.getItem(deletedMealsKey(userId, dayISO));
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addDeletedMealId(userId, dayISO, clientId) {
+  if (!clientId) return;
+  try {
+    const prev = readDeletedMealIds(userId, dayISO);
+    if (prev.includes(clientId)) return;
+    const next = prev.concat([clientId]).slice(-500);
+    localStorage.setItem(deletedMealsKey(userId, dayISO), JSON.stringify(next));
+  } catch {}
+}
 
 // ---------- helpers ----------
 function kcalFromMacros(p = 0, c = 0, f = 0) {
@@ -566,13 +594,21 @@ export default function MealTracker({ onMealUpdate }) {
           };
         });
 
+        // Respect local deletions (tombstones) so hydration never resurrects removed meals
+        const deletedIds = readDeletedMealIds(user.id, todayISO);
+        const deletedSet = new Set(deletedIds);
+        const cloudMealsFiltered = deletedIds.length ? cloudMeals.filter((m) => !deletedSet.has(String(m?.client_id || ''))) : cloudMeals;
+
+
         // 2) Merge into local without duplicates (client_id is the idempotent key)
         const mergedMap = new Map();
         for (const lm of meals || []) {
           const cid = lm?.client_id || `local_${lm?.name || ''}_${lm?.createdAt || ''}_${lm?.calories || 0}`;
+          if (deletedSet?.has?.(String(cid))) continue;
           mergedMap.set(cid, { ...lm, client_id: cid });
         }
-        for (const cm of cloudMeals) {
+        for (const cm of cloudMealsFiltered) {
+          if (deletedSet?.has?.(String(cm?.client_id || ''))) continue;
           if (!mergedMap.has(cm.client_id)) mergedMap.set(cm.client_id, cm);
         }
 
@@ -816,12 +852,30 @@ export default function MealTracker({ onMealUpdate }) {
     setCaloriesManualOverride(false);
   };
 
-  const handleDeleteMeal = index => {
-    setMealLog(prev => {
-      const updated = prev.filter((_, i) => i !== index);
+  const handleDeleteMeal = (index) => {
+    const row = mealLog?.[index];
+    const cid = row?.client_id || null;
+
+    // 1) Optimistic local remove (UI updates instantly)
+    setMealLog((prev) => {
+      const updated = (Array.isArray(prev) ? prev : []).filter((_, i) => i !== index);
       saveDay(updated);
       return updated;
     });
+
+    // 2) Tombstone so cloud hydration can't re-add it for today
+    if (cid) addDeletedMealId(user?.id || null, todayISO, cid);
+
+    // 3) If signed in, delete from cloud (or queue delete op offline)
+    (async () => {
+      try {
+        if (user?.id && cid) {
+          await deleteMealLocalFirst({ user_id: user.id, client_id: cid });
+        }
+      } catch (e) {
+        console.warn('[MealTracker] deleteMealLocalFirst failed', e);
+      }
+    })();
   };
 
   const handleClear = () => {
