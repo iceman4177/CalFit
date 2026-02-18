@@ -27,6 +27,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
 
 import UpgradeModal from "./components/UpgradeModal";
+import FrameCheckModal from "./components/FrameCheckModal.jsx";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
@@ -36,7 +37,8 @@ import FeatureUseBadge, {
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { supabase } from "./lib/supabaseClient.js";
-import { buildDailyChecklistItems, buildChecklistWindows, buildChecklistSummary, pickDefaultWindowIndex } from "./lib/dailyChecklist.js";
+import { buildDailyChecklistItems, buildChecklistWindows, buildChecklistSummary, pickDefaultWindowIndex, buildMicroQuestSummary } from "./lib/dailyChecklist.js";
+import { computeFrameCheckScores } from "./lib/frameCheck.js";
 
 /**
  * DailyEvaluationHome — Win-first + Action Steps v3
@@ -736,6 +738,7 @@ useEffect(() => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiError, setAiError] = useState("");
+  const [frameOpen, setFrameOpen] = useState(false);
 
   // per-device per-day cache for AI verdict text
   const dayISOForRecap = isoDay();
@@ -1913,7 +1916,79 @@ Score: ${bundle.derived.score}/100
             </Stack>
           </Stack>
         </CardShell>
+
+        {/* Card 4 */}
+        <CardShell title="Frame Check" subtitle="Viral scan">
+          <Stack spacing={1.1}>
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+              <Chip
+                label={`${frameScores.overall}/100 • ${frameScores.tier}`}
+                sx={{ fontWeight: 950, borderRadius: 999 }}
+                color={
+                  frameScores.overall >= 88
+                    ? "success"
+                    : frameScores.overall >= 74
+                    ? "primary"
+                    : frameScores.overall >= 58
+                    ? "warning"
+                    : "error"
+                }
+              />
+              <Chip
+                label={`90d ~ ${frameScores.projected90}`}
+                variant="outlined"
+                sx={{
+                  borderRadius: 999,
+                  color: "rgba(255,255,255,0.82)",
+                  borderColor: "rgba(148,163,184,0.32)",
+                }}
+              />
+            </Stack>
+
+            <Stack direction="row" spacing={2} sx={{ mt: 0.3 }}>
+              <Stack spacing={0.2}>
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
+                  Strength
+                </Typography>
+                <Typography sx={{ fontWeight: 900 }}>{frameScores.strength}</Typography>
+              </Stack>
+              <Stack spacing={0.2}>
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
+                  Weak spot
+                </Typography>
+                <Typography sx={{ fontWeight: 900 }}>{frameScores.weakness}</Typography>
+              </Stack>
+            </Stack>
+
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.76)", mt: 0.2 }}>
+              This blends your meals, workouts, checklist, and profile targets into a daily identity report you can share.
+            </Typography>
+
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={() => setFrameOpen(true)}
+              sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.6 }}
+            >
+              Run Frame Check
+            </Button>
+
+            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", textAlign: "center" }}>
+              Free: 1/day • Pro: unlimited
+            </Typography>
+          </Stack>
+        </CardShell>
+
       </Box>
+
+      <FrameCheckModal
+        open={frameOpen}
+        onClose={() => setFrameOpen(false)}
+        entitlements={{ isPro: !!isProActive }}
+        bundle={bundle}
+        checklistSummary={{ ...checklistSummary, microQuestSummary }}
+        toast={(m, tone) => setToast({ open: true, msg: m, tone: tone || "info" })}
+      />
 
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Box>

@@ -7,7 +7,7 @@
 //   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
 //   Supabase when possible; fallback to in-memory counter if table/policy missing.
 //
-// Features supported: 'workout', 'meal', 'coach', 'daily_eval_verdict'.
+// Features supported: 'workout', 'meal', 'coach', 'daily_eval_verdict', 'frame_check'.
 //
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
@@ -156,20 +156,28 @@ async function resolveUserId(req, { user_id, email }) {
 }
 
 // -------------------- FREE PASS --------------------
-const FREE_LIMIT = 3;
+const FREE_LIMITS = {
+  default: 3,
+  frame_check: 1,
+};
+
+function getFreeLimitForFeature(feature) {
+  return FREE_LIMITS[feature] ?? FREE_LIMITS.default;
+}
 const freeMem = new Map();
 
 function memAllow(clientId, feature) {
   const key = `m:${clientId}:${feature}`;
   const today = dayKeyUTC();
+  const limit = getFreeLimitForFeature(feature);
   const rec = freeMem.get(key);
   if (!rec || rec.day !== today) {
     freeMem.set(key, { used: 1, day: today });
-    return { allowed: true, remaining: FREE_LIMIT - 1 };
+    return { allowed: true, remaining: limit - 1 };
   }
-  if (rec.used < FREE_LIMIT) {
+  if (rec.used < limit) {
     rec.used += 1;
-    return { allowed: true, remaining: FREE_LIMIT - rec.used };
+    return { allowed: true, remaining: limit - rec.used };
   }
   return { allowed: false, remaining: 0 };
 }
@@ -178,6 +186,7 @@ async function dbAllow(clientId, feature, userId) {
   if (!supabaseAdmin) return memAllow(clientId, feature);
   try {
     const today = dayKeyUTC();
+    const limit = getFreeLimitForFeature(feature);
 
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
@@ -197,11 +206,11 @@ async function dbAllow(clientId, feature, userId) {
         .single();
 
       if (ins.error) return memAllow(clientId, feature);
-      return { allowed: true, remaining: FREE_LIMIT - 1 };
+      return { allowed: true, remaining: limit - 1 };
     }
 
     const currentUses = data.uses || 0;
-    if (currentUses >= FREE_LIMIT) return { allowed: false, remaining: 0 };
+    if (currentUses >= limit) return { allowed: false, remaining: 0 };
 
     const upd = await supabaseAdmin
       .from("ai_free_passes")
@@ -214,7 +223,7 @@ async function dbAllow(clientId, feature, userId) {
 
     if (upd.error) return memAllow(clientId, feature);
     const newUses = upd.data?.uses ?? currentUses + 1;
-    return { allowed: true, remaining: Math.max(0, FREE_LIMIT - newUses) };
+    return { allowed: true, remaining: Math.max(0, limit - newUses) };
   } catch {
     return memAllow(clientId, feature);
   }
@@ -998,6 +1007,83 @@ export default async function handler(req, res) {
     }
   }
 
+
+  if (feature === "frame_check") {
+    try {
+      // OpenAI unavailable: return a grounded deterministic JSON report (never hard-fail).
+      if (!openai) {
+        const p = String(body?.prompt || body?.text || body?.message || "");
+        const grab = (label) => {
+          const m = p.match(new RegExp(`${label}:\\s*([^\\n]+)`, "i"));
+          return m ? String(m[1]).trim() : "";
+        };
+
+        const tier = grab("Tier") || "BUILD MODE";
+        const overall = parseInt(grab("Overall") || "0", 10) || 0;
+        const strength = grab("Top strength") || "Consistency";
+        const weakness = grab("Weak spot") || "Logging";
+        const projected90 = parseInt(grab("Projected 90d") || "0", 10) || 0;
+
+        const consumed = parseInt(grab("Calories consumed") || "0", 10) || 0;
+        const burned = parseInt(grab("Calories burned") || "0", 10) || 0;
+        const protein = parseInt((grab("Protein") || "0").replace(/[^0-9]/g, ""), 10) || 0;
+        const checklist = grab("Checklist completion") || "";
+
+        const payload = {
+          headline: `${tier} • ${overall}/100`,
+          summary: `Consumed ${consumed} • Burned ${burned} • Protein ${protein}g\nChecklist: ${checklist}\nStrength: ${strength} • Weak spot: ${weakness}`,
+          breakdown: [
+            "Physique signals: protein + training + calorie control are the big three.",
+            "Discipline overlay: checklist completion + logging consistency drive your score up fastest.",
+            "Keep it simple: hit protein, move your body, and close the next 2 steps."
+          ],
+          next_moves: [
+            "Log your next meal (even rough).",
+            "Add a 20–35 min training stimulus (lift or incline walk).",
+            "Hit a clean protein dose (25–45g) in the next meal.",
+          ],
+          share_card: `FRAME CHECK\n${tier} • ${overall}/100\nStrength: ${strength}\nWeak: ${weakness}\n90d: ~${projected90}/100\npowered by SlimCal`,
+          projection_90d: `If you keep today's discipline trend, you're trending toward ~${projected90}/100 in ~90 days.`,
+        };
+
+        res.status(200).json({ text: JSON.stringify(payload) });
+        return;
+      }
+
+      const usr = String(body?.prompt || body?.text || body?.message || "");
+      const sys =
+        "You are SlimCal Frame Check — a cinematic but grounded daily scan. " +
+        "Return VALID JSON ONLY, no markdown. Keys: headline, summary, breakdown (array), next_moves (array), share_card, projection_90d. " +
+        "Use the user's numbers and be specific. Be supportive, never cruel. 80% serious, 20% meme spice.";
+
+      const call = openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: usr }
+        ],
+        temperature: 0.55,
+        max_tokens: 900
+      });
+
+      const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+      if (!ai) {
+        // Timeout: return deterministic fallback with HTTP 200 so UI never breaks.
+        const payload = { headline: "Frame Check", summary: "Timed out — using fallback.", breakdown: [], next_moves: [], share_card: "FRAME CHECK\npowered by SlimCal", projection_90d: "" };
+        res.status(200).json({ text: JSON.stringify(payload) });
+        return;
+      }
+
+      const text = ai?.choices?.[0]?.message?.content || "";
+      res.status(200).json({ text });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] frame_check error:", e);
+      const payload = { headline: "Frame Check", summary: "Error — using fallback.", breakdown: [], next_moves: [], share_card: "FRAME CHECK\npowered by SlimCal", projection_90d: "" };
+      res.status(200).json({ text: JSON.stringify(payload) });
+      return;
+    }
+  }
 
   if (feature === "daily_eval_verdict" || feature === "daily_eval") {
     try {
