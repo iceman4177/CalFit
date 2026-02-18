@@ -27,7 +27,6 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
 
 import UpgradeModal from "./components/UpgradeModal";
-import FrameCheckModal from "./components/FrameCheckModal.jsx";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
@@ -38,7 +37,6 @@ import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { supabase } from "./lib/supabaseClient.js";
 import { buildDailyChecklistItems, buildChecklistWindows, buildChecklistSummary, pickDefaultWindowIndex, buildMicroQuestSummary } from "./lib/dailyChecklist.js";
-import { computeFrameCheckScores } from "./lib/frameCheck.js";
 
 /**
  * DailyEvaluationHome — Win-first + Action Steps v3
@@ -738,7 +736,6 @@ useEffect(() => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiError, setAiError] = useState("");
-  const [frameOpen, setFrameOpen] = useState(false);
 
   // per-device per-day cache for AI verdict text
   const dayISOForRecap = isoDay();
@@ -1257,14 +1254,6 @@ useEffect(() => {
     return buildMicroQuestSummary({ items: checklist, nowHourPST: bundle?.derived?.nowHourPST });
   }, [checklist, bundle?.derived?.nowHourPST]);
 
-  // Card 4 preview scores (kept lightweight + deterministic)
-  const frameScores = useMemo(() => {
-    return computeFrameCheckScores({
-      ...bundle,
-      checklist: { pct: checklistSummaryTop?.completion_pct ?? 0 },
-    });
-  }, [bundle, checklistSummaryTop?.completion_pct]);
-
   // Card 2: quests (time-windowed, paged)
   // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
   const [questPage, setQuestPage] = useState(0);
@@ -1636,376 +1625,91 @@ Score: ${bundle.derived.score}/100
         }}
       >
         {/* Card 1 */}
+
         <CardShell
-          title="Today"
-          subtitle="Your scoreboard"
+          title="Body Scan"
+          subtitle="Beta • See where you stand and unlock the fastest upgrade levers"
           right={
             <Chip
-              label={`${scoreAnim}/100`}
-              sx={{ fontWeight: 950, borderRadius: 999 }}
-              color={scoreAnim >= 88 ? "success" : scoreAnim >= 74 ? "primary" : "error"}
+              label="Beta"
+              size="small"
+              sx={{
+                fontWeight: 950,
+                borderRadius: 999,
+                bgcolor: "rgba(34,197,94,0.14)",
+                color: "rgba(187,247,208,0.92)",
+                border: "1px solid rgba(34,197,94,0.28)",
+              }}
             />
           }
         >
-          <Stack spacing={1.2} alignItems="center">
-            {/* Top row: Calories + Exercise */}
-            <Stack direction="row" spacing={2.0} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring
-                pct={bundle.targets.calorieTarget ? calQuality : 0}
-                size={148}
-                title="Calories"
-                primary={`${Math.round(calQuality)}%`}
-                secondary={`${Math.round(bundle.totals.consumed)} / ${bundle.targets.calorieTarget ? Math.round(bundle.targets.calorieTarget) : "—"} kcal`}
-                tone="primary.main"
-              />
-
-              <Ring
-                pct={exercisePct}
-                size={148}
-                title="Exercise"
-                primary={`${Math.round(bundle.totals.burned)} kcal`}
-                secondary={bundle.derived.hasWorkout ? "logged" : "not logged"}
-                tone="warning.main"
-              />
-            </Stack>
-
-            {/* Macros row */}
-            <Stack direction="row" spacing={1.2} justifyContent="center" alignItems="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-              <Ring pct={proteinPct} size={96} title="Protein" primary={`${Math.round(bundle.totals.macros.protein_g)}g`} secondary={`of ${Math.round(bundle.targets.proteinTarget)}g`} tone="success.main" />
-              <Ring pct={carbsPct} size={96} title="Carbs" primary={`${Math.round(bundle.totals.macros.carbs_g)}g`} secondary={`of ${Math.round(bundle.targets.carbsTarget)}g`} tone="info.main" />
-              <Ring pct={fatsPct} size={96} title="Fats" primary={`${Math.round(bundle.totals.macros.fat_g)}g`} secondary={`of ${Math.round(bundle.targets.fatTarget)}g`} tone="secondary.main" />
-            </Stack>
-
-            <Chip icon={<WarningAmberIcon sx={{ color: "inherit" }} />} label={flag.label} color={flag.tone} sx={{ mt: 0.2, fontWeight: 950, borderRadius: 999 }} />
-            {fixTags.length ? (
-              <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="center" sx={{ mt: 0.8, flexWrap: "wrap" }}>
-                {fixTags.map((t) => (
-                  <Chip
-                    key={t.label}
-                    size="small"
-                    label={t.label}
-                    color={t.tone}
-                    sx={{ borderRadius: 999, fontWeight: 950 }}
-                  />
-                ))}
-              </Stack>
-            ) : null}
-          </Stack>
-        </CardShell>
-
-        {/* Card 2 */}
-        <CardShell title="Progress" subtitle="Your quests (5 at a time)">
-          <Stack spacing={1.1} alignItems="center">
-            <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
-              <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ width: "100%", flexWrap: "wrap" }}>
-                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
-                  {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You’re done for now ✅"}
-                </Typography>
-                {nextStep?.action ? (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    onClick={() => history.push(nextStep.action)}
-                    sx={{ borderRadius: 999, fontWeight: 950, px: 2.2, textTransform: "none" }}
-                  >
-                    {nextStep.action === "/meals" ? "Meals" : nextStep.action === "/workout" ? "Workout" : "Go"}
-                  </Button>
-                ) : null}
-              </Stack>
-            </Stack>
-
-            <Box sx={{ width: "100%", borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.55)" }}>
-              <List disablePadding>
-                {/* Window pager (Morning / Afternoon / Night) */}
-                <Box sx={{ width: "100%", px: 1.2, py: 1.1 }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.8 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={!canPrevQuest}
-                      onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
-                      sx={{ borderRadius: 999, textTransform: "none", fontWeight: 900, px: 1.8 }}
-                    >
-                      Back
-                    </Button>
-
-                    <Stack alignItems="center" spacing={0.2}>
-                      <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.72)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
-                        {questWindowKey === "morning" ? "Morning" : questWindowKey === "afternoon" ? "Afternoon" : "Night"}
-                      </Typography>
-
-                      <Stack direction="row" spacing={0.6} alignItems="center">
-                        {["morning", "afternoon", "night"].map((w, i) => (
-                          <Box
-                            key={w}
-                            sx={{
-                              width: 7,
-                              height: 7,
-                              borderRadius: 999,
-                              background: i === questPage ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.25)",
-                            }}
-                          />
-                        ))}
-                      </Stack>
-                    </Stack>
-
-                    <Button
-                      size="small"
-                      variant="contained"
-                      disabled={!canNextQuest}
-                      onClick={() => setQuestPage((p) => Math.min(2, p + 1))}
-                      sx={{ borderRadius: 999, textTransform: "none", fontWeight: 950, px: 2.1 }}
-                    >
-                      Next
-                    </Button>
-                  </Stack>
-
-                  <Box
-                    onTouchStart={onQuestTouchStart}
-                    onTouchMove={onQuestTouchMove}
-                    onTouchEnd={onQuestTouchEnd}
-                    sx={{
-                      width: "100%",
-                      overflow: "hidden",
-                      borderRadius: 2,
-                      border: "1px solid rgba(148,163,184,0.14)",
-                      background: "rgba(2,6,23,0.35)",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        display: "flex",
-                        width: "300%",
-                        transform: `translateX(-${questPage * 100}%)`,
-                        transition: "transform 260ms ease",
-                      }}
-                    >
-                      {["morning", "afternoon", "night"].map((winKey) => {
-                        const group = (questWindowSlices?.[winKey] || []).filter(Boolean);
-                        const doneCount = group.filter((g) => g?.done).length;
-                        const totalCount = group.length;
-                        return (
-                          <Box key={winKey} sx={{ width: "100%", flex: "0 0 100%", p: 1.0 }}>
-                            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 0.4, pb: 0.6 }}>
-                              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.70)", fontWeight: 950, letterSpacing: 0.4, textTransform: "uppercase" }}>
-                                {winKey === "morning" ? "Morning" : winKey === "afternoon" ? "Afternoon" : "Night"}
-                              </Typography>
-                              <Chip
-                                size="small"
-                                label={`${doneCount}/${totalCount}`}
-                                sx={{ height: 22, fontWeight: 900, borderRadius: 999, background: "rgba(148,163,184,0.18)", color: "rgba(255,255,255,0.85)" }}
-                              />
-                            </Stack>
-
-                            {group.length ? (
-                              group.map((it, gIdx) => {
-                                const Icon = it.done ? CheckCircleIcon : RadioButtonUncheckedIcon;
-                                const iconColor = it.done ? "rgba(34,197,94,0.92)" : "rgba(255,255,255,0.55)";
-                                return (
-                                  <ListItemButton
-                                    key={`${winKey}-${it.key}-${gIdx}`}
-                                    onClick={() => {
-                                      if (it.manual) {
-                                        if (it.key === "rehydrate") toggleHydration();
-                                      } else if (it.action) {
-                                        history.push(it.action);
-                                      }
-                                    }}
-                                    sx={{
-                                      mx: 0.2,
-                                      my: 0.35,
-                                      borderRadius: 2,
-                                      alignItems: "flex-start",
-                                      background: it.done ? "rgba(34,197,94,0.07)" : "rgba(148,163,184,0.06)",
-                                      border: "1px solid rgba(148,163,184,0.12)",
-                                    }}
-                                  >
-                                    <ListItemIcon sx={{ minWidth: 34, mt: 0.3 }}>
-                                      <Icon style={{ color: iconColor, fontSize: 20 }} />
-                                    </ListItemIcon>
-                                    <ListItemText
-                                      primary={
-                                        <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.92)", lineHeight: 1.15 }}>
-                                          {it.title}
-                                        </Typography>
-                                      }
-                                      secondary={
-                                        <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)", mt: 0.35, lineHeight: 1.25 }}>
-                                          {it.subtitle}
-                                        </Typography>
-                                      }
-                                    />
-                                  </ListItemButton>
-                                );
-                              })
-                            ) : (
-                              <ListItem sx={{ px: 0, py: 1 }}>
-                                <ListItemText
-                                  primary="All set"
-                                  secondary="Nothing else needed in this window right now."
-                                  primaryTypographyProps={{ sx: { fontWeight: 950, color: "rgba(255,255,255,0.86)" } }}
-                                  secondaryTypographyProps={{ sx: { color: "rgba(255,255,255,0.65)" } }}
-                                />
-                              </ListItem>
-                            )}
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Box>
-                </Box>              </List>
+          <Stack spacing={1.2}>
+            <Box
+              sx={{
+                borderRadius: 3,
+                border: "1px dashed rgba(148,163,184,0.32)",
+                background: "rgba(2,6,23,0.55)",
+                p: 2,
+                textAlign: "center",
+              }}
+            >
+              <Typography sx={{ fontWeight: 900, mb: 0.6 }}>
+                Upload a full-body photo
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>
+                You’ll get physique signals + your Build Arc share card. Always neutral or positive.
+              </Typography>
             </Box>
 
-            {/* Paging */}
-            {questMaxPages > 1 ? (
-              <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ pt: 1.2 }}>
-                <Button
-                  variant="outlined"
-                  disabled={!canPrevQuest}
-                  onClick={() => setQuestPage((p) => Math.max(0, p - 1))}
-                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
-                >
-                  Prev
-                </Button>
-                <Chip
-                  size="small"
-                  label={`${questPage + 1}/${questMaxPages}`}
-                  sx={{ borderRadius: 999, fontWeight: 950 }}
-                />
-                <Button
-                  variant="outlined"
-                  disabled={!canNextQuest}
-                  onClick={() => setQuestPage((p) => Math.min(questMaxPages - 1, p + 1))}
-                  sx={{ borderRadius: 999, px: 2.6, fontWeight: 950, textTransform: "none" }}
-                >
-                  Next
-                </Button>
+            <Box sx={{ px: 0.5 }}>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
+                What you’ll unlock
+              </Typography>
+              <Stack spacing={0.6} sx={{ mt: 0.6 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CheckCircleIcon sx={{ fontSize: 18, color: "rgba(34,197,94,0.9)" }} />
+                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.82)" }}>
+                    Body Fat • Lean Mass • BMI estimates
+                  </Typography>
+                </Stack>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CheckCircleIcon sx={{ fontSize: 18, color: "rgba(34,197,94,0.9)" }} />
+                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.82)" }}>
+                    Fastest “upgrade levers” for the next 7–90 days
+                  </Typography>
+                </Stack>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CheckCircleIcon sx={{ fontSize: 18, color: "rgba(34,197,94,0.9)" }} />
+                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.82)" }}>
+                    Build Arc score card you can share in one tap
+                  </Typography>
+                </Stack>
               </Stack>
-            ) : null}
-
-
-          </Stack>
-        </CardShell>
-
-{/* Card 3 */}
-        <CardShell title="Coach" subtitle="Your daily verdict">
-          <Stack spacing={1.1} alignItems="center">
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
-              {coachHelper}
-            </Typography>
+            </Box>
 
             <Button
               variant="contained"
               fullWidth
-              onClick={handleGenerateAiVerdict}
-              disabled={aiLoading}
-              sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.4 }}
+              onClick={() => history.push("/body-scan")}
+              sx={{
+                borderRadius: 999,
+                fontWeight: 950,
+                py: 1.15,
+                mt: 0.4,
+                background: "linear-gradient(180deg, rgba(59,130,246,1) 0%, rgba(37,99,235,1) 100%)",
+              }}
             >
-              {aiLoading ? "Generating…" : "Get daily verdict"}
+              Open Body Scan
             </Button>
 
-            {!!aiError && (
-              <Typography variant="body2" sx={{ color: "rgba(248,113,113,0.95)", textAlign: "center" }}>
-                {aiError}
-              </Typography>
-            )}
-
-            {!aiVerdict && !aiLoading && !aiError && (
-              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.60)", textAlign: "center" }}>
-                Uses what you logged today and gives you the fastest path to a win.
-              </Typography>
-            )}
-
-            {!!aiVerdict && (
-              <Box sx={{ width: "100%", p: 1.2, borderRadius: 2, border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.6)", maxHeight: { xs: "52dvh", sm: "none" }, overflowY: { xs: "auto", sm: "visible" }, WebkitOverflowScrolling: "touch", pr: { xs: 0.5, sm: 0 } }}>
-                <Typography sx={{ fontWeight: 950, mb: 0.6 }}>Your verdict</Typography>
-                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.80)", whiteSpace: "pre-wrap" }}>
-                  {aiVerdict}
-                </Typography>
-              </Box>
-            )}
-
-            <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" alignItems="center" sx={{ width: "100%" }}>
-              <Button variant="outlined" startIcon={<IosShareIcon />} disabled={!aiVerdict && !bundle.derived.hasLogs} onClick={handleShare} sx={{ borderRadius: 999, fontWeight: 950 }}>
-                Share
-              </Button>
-            </Stack>
-          </Stack>
-        </CardShell>
-
-        {/* Card 4 */}
-        <CardShell title="Frame Check" subtitle="Viral scan">
-          <Stack spacing={1.1}>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-              <Chip
-                label={`${frameScores.overall}/100 • ${frameScores.tier}`}
-                sx={{ fontWeight: 950, borderRadius: 999 }}
-                color={
-                  frameScores.overall >= 88
-                    ? "success"
-                    : frameScores.overall >= 74
-                    ? "primary"
-                    : frameScores.overall >= 58
-                    ? "warning"
-                    : "error"
-                }
-              />
-              <Chip
-                label={`90d ~ ${frameScores.projected90}`}
-                variant="outlined"
-                sx={{
-                  borderRadius: 999,
-                  color: "rgba(255,255,255,0.82)",
-                  borderColor: "rgba(148,163,184,0.32)",
-                }}
-              />
-            </Stack>
-
-            <Stack direction="row" spacing={2} sx={{ mt: 0.3 }}>
-              <Stack spacing={0.2}>
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
-                  Strength
-                </Typography>
-                <Typography sx={{ fontWeight: 900 }}>{frameScores.strength}</Typography>
-              </Stack>
-              <Stack spacing={0.2}>
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
-                  Weak spot
-                </Typography>
-                <Typography sx={{ fontWeight: 900 }}>{frameScores.weakness}</Typography>
-              </Stack>
-            </Stack>
-
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.76)", mt: 0.2 }}>
-              This blends your meals, workouts, checklist, and profile targets into a daily identity report you can share.
-            </Typography>
-
-            <Button
-              variant="contained"
-              fullWidth
-              onClick={() => setFrameOpen(true)}
-              sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.6 }}
-            >
-              Run Frame Check
-            </Button>
-
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", textAlign: "center" }}>
-              Free: 1/day • Pro: unlimited
+            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.58)", textAlign: "center" }}>
+              Private by default • Your photo is used only to generate your scan
             </Typography>
           </Stack>
         </CardShell>
+
 
       </Box>
-
-      <FrameCheckModal
-        open={frameOpen}
-        onClose={() => setFrameOpen(false)}
-        entitlements={{ isPro: !!isProActive }}
-        bundle={bundle}
-        checklistSummary={{ ...checklistSummaryTop, microQuestSummary }}
-        toast={(m, tone) => setToast({ open: true, msg: m, tone: tone || "info" })}
-      />
 
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Box>

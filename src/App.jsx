@@ -54,6 +54,7 @@ import CalorieSummary    from './CalorieSummary';
 import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
 import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
+import BodyScanBeta from './BodyScanBeta';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
 import WaitlistSignup    from './components/WaitlistSignup';
@@ -915,6 +916,7 @@ export default function App() {
 }}
 />
           }/>
+          <Route path="/body-scan" component={BodyScanBeta} />
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
           <Route path="/achievements" component={Achievements} />
