@@ -36,14 +36,36 @@ export function computeFrameCheckScores(ctx) {
   const checklist = ctx?.checklist || {};
   const checklistPct = clamp(safeNum(checklist?.pct), 0, 100);
 
-  const calErr = calorieTarget > 0 ? Math.abs(net - calorieTarget) : Math.abs(net);
-  const calTight = calorieTarget > 0 ? clamp(100 - (calErr / Math.max(150, calorieTarget * 0.3)) * 100, 0, 100) : 50;
+  // Confidence: how much signal we actually have today (so we don't "punish" missing data).
+  const signals = [
+    hasMeals ? 1 : 0,
+    hasWorkout ? 1 : 0,
+    checklistPct >= 10 ? 1 : 0,
+    protein >= 10 ? 1 : 0,
+    calorieTarget > 0 ? 1 : 0,
+    proteinTarget > 0 ? 1 : 0,
+    safeNum(ctx?.profile?.height_in) > 0 || safeNum(ctx?.profile?.height_cm) > 0 ? 1 : 0,
+    safeNum(ctx?.profile?.weight_lb) > 0 || safeNum(ctx?.profile?.weight_kg) > 0 ? 1 : 0,
+  ];
+  const confidence = clamp(signals.reduce((a, b) => a + b, 0) / signals.length, 0, 1);
 
-  const proteinPct = proteinTarget > 0 ? clamp((protein / proteinTarget) * 100, 0, 130) : (protein >= 100 ? 100 : clamp((protein / 100) * 100, 0, 100));
+  const calErr = calorieTarget > 0 ? Math.abs(net - calorieTarget) : Math.abs(net);
+  const calTight =
+    calorieTarget > 0
+      ? clamp(100 - (calErr / Math.max(150, calorieTarget * 0.3)) * 100, 0, 100)
+      : 55; // neutral if no target
+
+  const proteinPct =
+    proteinTarget > 0
+      ? clamp((protein / proteinTarget) * 100, 0, 130)
+      : protein >= 120
+        ? 100
+        : clamp((protein / 120) * 100, 0, 100);
+
   const trainingScore = hasWorkout ? clamp((burned / 450) * 100, 0, 100) : 0;
 
   // Aesthetic = proxy for "body composition + muscle-building behavior signals"
-  const aesthetic = clamp(
+  const aestheticRaw = clamp(
     0.35 * proteinPct +
       0.25 * trainingScore +
       0.20 * calTight +
@@ -53,7 +75,7 @@ export function computeFrameCheckScores(ctx) {
   );
 
   // Discipline = consistency + logging + adherence
-  const discipline = clamp(
+  const disciplineRaw = clamp(
     (hasMeals ? 18 : 0) +
       (hasWorkout ? 18 : 0) +
       0.32 * calTight +
@@ -62,34 +84,56 @@ export function computeFrameCheckScores(ctx) {
     100
   );
 
-  const overall = clamp(0.55 * discipline + 0.45 * aesthetic, 0, 100);
+  const overallRaw = clamp(0.55 * disciplineRaw + 0.45 * aestheticRaw, 0, 100);
 
-  let tier = "BUILD MODE";
+  // Calibration: keep it motivating & shareable.
+  // - Never humiliate users for missing data (mark as "estimate" instead).
+  // - Still allow high scores when signals are strong.
+  const floor = confidence < 0.35 ? 45 : 35;
+  const ceil = 97;
+
+  const aesthetic = clamp(aestheticRaw + (1 - confidence) * 6, 0, 100);
+  const discipline = clamp(disciplineRaw + (1 - confidence) * 6, 0, 100);
+
+  const overall = clamp(overallRaw + (1 - confidence) * 8, floor, ceil);
+
+  let tier = "REBUILD ARC";
   if (overall >= 88) tier = "ELITE ARC";
-  else if (overall >= 76) tier = "LOCKED IN";
-  else if (overall >= 62) tier = "SOLID";
-  else if (overall >= 48) tier = "WARMUP";
-  else tier = "RESET DAY";
+  else if (overall >= 78) tier = "VILLAIN ARC";
+  else if (overall >= 64) tier = "LOCKED IN";
+  else if (overall >= 52) tier = "BUILD ARC";
 
-  // Strength / Weak spot: keep it grounded (behavioral + actionable)
+  const isEstimate = confidence < 0.55;
+
+  // Strength / Weak spot: behavioral + actionable
   let strength = "Consistency";
   if (trainingScore >= 70) strength = "Training output";
   else if (proteinPct >= 95) strength = "Protein discipline";
   else if (calTight >= 80) strength = "Calorie control";
   else if (checklistPct >= 75) strength = "Daily structure";
 
-  let weakness = "Logging";
+  let weakness = "Training stimulus";
   if (!hasMeals) weakness = "Meal logging";
   else if (!hasWorkout) weakness = "Training stimulus";
   else if (proteinPct < 70) weakness = "Protein";
   else if (calTight < 65) weakness = "Calorie tightness";
-  else if (checklistPct < 60) weakness = "Checklist follow-through";
+  else if (checklistPct < 60) weakness = "Follow-through";
 
-  // Simple 90-day projection: based on current discipline, not fantasy.
-  const projectionDelta = clamp((discipline - 50) / 10, -2.5, 3.5); // -2.5..+3.5 points/month
-  const projected90 = clamp(overall + projectionDelta * 3, 0, 100);
+  // 90-day projection: never shame; small trend based on discipline momentum.
+  const deltaPerMonth = clamp((discipline - 58) / 12, -1.2, 3.0); // -1.2..+3.0 / month
+  const projected90 = clamp(overall + deltaPerMonth * 3, floor, 99);
 
-  return { overall: Math.round(overall), discipline: Math.round(discipline), aesthetic: Math.round(aesthetic), tier, strength, weakness, projected90: Math.round(projected90) };
+  return {
+    overall: Math.round(overall),
+    discipline: Math.round(discipline),
+    aesthetic: Math.round(aesthetic),
+    tier,
+    strength,
+    weakness,
+    projected90: Math.round(projected90),
+    confidence: Math.round(confidence * 100),
+    isEstimate,
+  };
 }
 
 export function buildFrameCheckPrompt(ctx) {
