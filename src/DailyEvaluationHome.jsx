@@ -1248,6 +1248,23 @@ useEffect(() => {
 
   const remainingSteps = useMemo(() => checklist.filter((i) => !i.done), [checklist]);
 
+  // Shared summaries used across Card 2 + Recap + Frame Check preview
+  const checklistSummaryTop = useMemo(() => {
+    return buildChecklistSummary(checklist, bundle?.derived?.nowHourPST);
+  }, [checklist, bundle?.derived?.nowHourPST]);
+
+  const microQuestSummary = useMemo(() => {
+    return buildMicroQuestSummary({ items: checklist, nowHourPST: bundle?.derived?.nowHourPST });
+  }, [checklist, bundle?.derived?.nowHourPST]);
+
+  // Card 4 preview scores (kept lightweight + deterministic)
+  const frameScores = useMemo(() => {
+    return computeFrameCheckScores({
+      ...bundle,
+      checklist: { pct: checklistSummaryTop?.completion_pct ?? 0 },
+    });
+  }, [bundle, checklistSummaryTop?.completion_pct]);
+
   // Card 2: quests (time-windowed, paged)
   // We show 5 items per page to keep it uncluttered, but allow a fuller day plan.
   const [questPage, setQuestPage] = useState(0);
@@ -1986,7 +2003,7 @@ Score: ${bundle.derived.score}/100
         onClose={() => setFrameOpen(false)}
         entitlements={{ isPro: !!isProActive }}
         bundle={bundle}
-        checklistSummary={{ ...checklistSummary, microQuestSummary }}
+        checklistSummary={{ ...checklistSummaryTop, microQuestSummary }}
         toast={(m, tone) => setToast({ open: true, msg: m, tone: tone || "info" })}
       />
 
