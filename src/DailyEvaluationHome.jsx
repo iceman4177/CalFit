@@ -1907,28 +1907,58 @@ Score: ${bundle.derived.score}/100
         </CardShell>
 
         {/* Card 4 */}
-<CardShell title="Body Scan" subtitle="Beta">
+<CardShell title="Pose Session" subtitle="Beta">
   <Stack spacing={1.1}>
     <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
-      Upload a full-body photo to generate your <b>Build Arc</b> score and your fastest upgrade levers.
+      Do a 3‑pose <b>Pose Session</b> (front relaxed, double‑bi, back double‑bi). The scanner auto‑captures each pose and
+      generates a positive‑only progress report + a share card built for creators.
     </Typography>
 
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-      <Chip label="Neutral/positive only" variant="outlined" sx={{ borderRadius: 999, borderColor: "rgba(148,163,184,0.32)", color: "rgba(255,255,255,0.78)" }} />
-      <Chip label="Shareable results" variant="outlined" sx={{ borderRadius: 999, borderColor: "rgba(148,163,184,0.32)", color: "rgba(255,255,255,0.78)" }} />
-    </Stack>
+    <Box
+      sx={{
+        mt: 0.4,
+        p: 1.2,
+        borderRadius: 3,
+        border: "1px dashed rgba(140,255,180,0.22)",
+        background: "radial-gradient(1200px 400px at 50% 0%, rgba(120,255,170,0.10), rgba(0,0,0,0))",
+      }}
+    >
+      <Typography variant="subtitle1" sx={{ fontWeight: 900, letterSpacing: 0.2 }}>
+        What you’ll unlock
+      </Typography>
+      <Stack spacing={0.6} sx={{ mt: 0.8 }}>
+        {[
+          "3 pose captures → cleaner signals",
+          "Muscle‑by‑muscle positive feedback + “next levers”",
+          "Shareable creator card (#SlimcalAI) in one tap",
+        ].map((t) => (
+          <Stack key={t} direction="row" spacing={1} alignItems="center">
+            <CheckCircleIcon sx={{ fontSize: 18, color: "#5CFF9A" }} />
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.82)" }}>
+              {t}
+            </Typography>
+          </Stack>
+        ))}
+      </Stack>
+    </Box>
 
     <Button
+      onClick={() => history.push("/body-scan/session")}
       variant="contained"
-      fullWidth
-      onClick={() => history.push("/body-scan")}
-      sx={{ borderRadius: 999, fontWeight: 950, py: 1.15, mt: 0.6 }}
+      sx={{
+        borderRadius: 999,
+        fontWeight: 950,
+        py: 1.15,
+        mt: 0.6,
+        background: "linear-gradient(180deg, rgba(70,140,255,1), rgba(50,95,240,1))",
+        boxShadow: "0 10px 30px rgba(35,85,220,0.35)",
+      }}
     >
-      Open Body Scan
+      Start Pose Session
     </Button>
 
     <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", textAlign: "center" }}>
-      Private by default • We don’t share your photo, only the scan summary you choose to share
+      Private by default • Your photo is used only to generate your pose session
     </Typography>
   </Stack>
 </CardShell>

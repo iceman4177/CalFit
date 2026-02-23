@@ -49,6 +49,7 @@ import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
 import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
 import BodyScanBeta from './BodyScanBeta';
+import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
 import WaitlistSignup    from './components/WaitlistSignup';
@@ -816,6 +817,8 @@ export default function App() {
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
+                    <Route path="/body-scan/session" component={PoseSession} />
+
           <Route path="/body-scan" component={BodyScanBeta} />
 
           <Route path="/edit-info" render={() =>
