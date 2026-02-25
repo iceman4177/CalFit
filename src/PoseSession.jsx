@@ -102,6 +102,8 @@ function PoseGhost({ pose, size = 260 }) {
   const glow = "rgba(120,255,180,0.18)";
   const isFront = pose !== "back_double_bi";
 
+  const isDoubleBi = pose === "front_double_bi" || pose === "back_double_bi";
+
   const arms =
     pose === "front_relaxed"
       ? { l1: [95, 120], l2: [80, 170], r1: [165, 120], r2: [180, 170] }
@@ -110,7 +112,19 @@ function PoseGhost({ pose, size = 260 }) {
   const backFlare = pose === "back_double_bi" ? 26 : 16;
 
   return (
-    <Box sx={{ width: size, height: size, position: "relative" }}>
+    <Box
+      sx={{
+        width: size,
+        height: size,
+        position: "relative",
+        animation: "ps_float 3.8s ease-in-out infinite",
+        "@keyframes ps_float": {
+          "0%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-3px)" },
+          "100%": { transform: "translateY(0px)" },
+        },
+      }}
+    >
       <svg width={size} height={size} viewBox="0 0 260 260">
         <defs>
           <filter id="g">
@@ -120,18 +134,59 @@ function PoseGhost({ pose, size = 260 }) {
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+          <style>{`
+            @keyframes ps_pulse {
+              0% { opacity: 0.55; }
+              50% { opacity: 0.95; }
+              100% { opacity: 0.55; }
+            }
+            @keyframes ps_arm {
+              0% { transform: rotate(-6deg); }
+              50% { transform: rotate(6deg); }
+              100% { transform: rotate(-6deg); }
+            }
+          `}</style>
         </defs>
 
         {/* glow */}
-        <g filter="url(#g)" stroke={glow} strokeWidth="10" fill="none" strokeLinecap="round">
+        <g
+          filter="url(#g)"
+          stroke={glow}
+          strokeWidth="10"
+          fill="none"
+          strokeLinecap="round"
+          style={{ animation: "ps_pulse 2.6s ease-in-out infinite" }}
+        >
           <path d={`M130 48 C 122 48 118 54 118 62 C 118 72 124 80 130 80 C 136 80 142 72 142 62 C 142 54 138 48 130 48 Z`} />
           <path
             d={`M130 86 C ${112 - backFlare} 92, ${105 - backFlare} 115, 106 132 C 108 152, 118 176, 130 188 C 142 176, 152 152, 154 132 C ${155 + backFlare} 115, ${148 + backFlare} 92, 130 86 Z`}
           />
           <path d={`M130 188 C 118 198, 114 214, 112 236`} />
           <path d={`M130 188 C 142 198, 146 214, 148 236`} />
-          <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
-          <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
+          <g
+            style={
+              isDoubleBi
+                ? {
+                    transformOrigin: "130px 102px",
+                    animation: "ps_arm 1.8s ease-in-out infinite",
+                  }
+                : undefined
+            }
+          >
+            <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
+          </g>
+          <g
+            style={
+              isDoubleBi
+                ? {
+                    transformOrigin: "130px 102px",
+                    animation: "ps_arm 1.8s ease-in-out infinite",
+                  }
+                : undefined
+            }
+          >
+            <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
+          </g>
         </g>
 
         {/* outline */}
@@ -142,8 +197,30 @@ function PoseGhost({ pose, size = 260 }) {
           />
           <path d={`M130 188 C 118 198, 114 214, 112 236`} />
           <path d={`M130 188 C 142 198, 146 214, 148 236`} />
-          <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
-          <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
+          <g
+            style={
+              isDoubleBi
+                ? {
+                    transformOrigin: "130px 102px",
+                    animation: "ps_arm 1.8s ease-in-out infinite",
+                  }
+                : undefined
+            }
+          >
+            <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
+          </g>
+          <g
+            style={
+              isDoubleBi
+                ? {
+                    transformOrigin: "130px 102px",
+                    animation: "ps_arm 1.8s ease-in-out infinite",
+                  }
+                : undefined
+            }
+          >
+            <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
+          </g>
         </g>
 
         {/* center crosshair */}
@@ -328,6 +405,7 @@ export default function PoseSession() {
     motion: 999,
     center: 0,
     height: 0,
+    arms: 0,
     hint: "Align to the outline",
   });
 
@@ -450,6 +528,12 @@ export default function PoseSession() {
     let mid = 0;
     let bot = 0;
 
+    // Rough “arm presence” signals for double-bi poses.
+    // We look for extra silhouette energy in upper left/right side bands.
+    let upperLeft = 0;
+    let upperRight = 0;
+    let upperCenter = 0;
+
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const p = y * size + x;
@@ -464,6 +548,13 @@ export default function PoseSession() {
         if (y < size * 0.22) top += m;
         else if (y > size * 0.78) bot += m;
         else mid += m;
+
+        // Upper torso band (roughly shoulders/arms)
+        if (y >= size * 0.14 && y <= size * 0.48) {
+          if (x < size * 0.34) upperLeft += m;
+          else if (x > size * 0.66) upperRight += m;
+          else upperCenter += m;
+        }
       }
     }
 
@@ -484,7 +575,17 @@ export default function PoseSession() {
 
     const height = energy > 0 ? clamp((top / energy) * 1.7 + (bot / energy) * 1.7 + (mid / energy) * 0.6, 0, 1) : 0;
 
-    return { motion, center, height, energy, size };
+    // Normalize 0..1, higher = more “arms raised / present” relative to torso.
+    const armsPresence = energy > 0
+      ? clamp(((upperLeft + upperRight) / (upperCenter + 1)) / 2.2, 0, 1)
+      : 0;
+
+    // Symmetry score for arms (1 is balanced)
+    const armsSym = (upperLeft + upperRight) > 0
+      ? clamp(1 - (Math.abs(upperLeft - upperRight) / (upperLeft + upperRight + 1)), 0, 1)
+      : 0;
+
+    return { motion, center, height, energy, size, armsPresence, armsSym };
   } catch {
     return null;
   }
@@ -515,7 +616,7 @@ export default function PoseSession() {
 useEffect(() => {
   if (phase !== "capture") return;
   if (!ready || !autoEnabled) {
-    setAutoStatus((st) => ({ ...st, match: false, stable: false, hint: "Align to the outline" }));
+    setAutoStatus((st) => ({ ...st, match: false, stable: false, arms: 0, hint: "Align to the outline" }));
     autoStableCountRef.current = 0;
     return;
   }
@@ -548,7 +649,11 @@ useEffect(() => {
     const heightOk = metrics.height > 0.55;
     const energyOk = metrics.energy > 1200;
 
-    const match = centerOk && heightOk && energyOk;
+    // Pose-aware gating: for Double Bi poses, require some “arms up” presence.
+    const isDoubleBi = pose?.key === "front_double_bi" || pose?.key === "back_double_bi";
+    const armsOk = isDoubleBi ? (metrics.armsPresence > 0.40 && metrics.armsSym > 0.55) : true;
+
+    const match = centerOk && heightOk && energyOk && armsOk;
 
     if (match && motionOk) autoStableCountRef.current += 1;
     else autoStableCountRef.current = 0;
@@ -559,6 +664,7 @@ useEffect(() => {
     if (!energyOk) hint = "Step into better lighting / fill the frame";
     else if (!centerOk) hint = "Center your body on the outline";
     else if (!heightOk) hint = "Show full body (head + feet)";
+    else if (isDoubleBi && !armsOk) hint = "Match the Double Bi outline (arms up + elbows out)";
     else if (!motionOk) hint = "Hold still…";
     else if (stable) hint = "Locked — auto capture";
 
@@ -568,6 +674,7 @@ useEffect(() => {
       motion: metrics.motion,
       center: metrics.center,
       height: metrics.height,
+      arms: metrics.armsPresence,
       hint,
     });
 
@@ -581,7 +688,7 @@ useEffect(() => {
     try { cancelAnimationFrame(raf); } catch {}
     autoStableCountRef.current = 0;
   };
-}, [phase, ready, autoEnabled, countdown, poseIndex]);
+}, [phase, ready, autoEnabled, countdown, poseIndex, pose?.key]);
 
 // Countdown once we have a stable match
 useEffect(() => {
@@ -915,6 +1022,23 @@ useEffect(() => {
                   >
                     <PoseGhost pose={pose.ghost} />
                   </Box>
+
+                  {/* lock glow */}
+                  {autoEnabled && ready && (autoStatus.match || autoStatus.stable) && (
+                    <Box
+                      sx={{
+                        position: "absolute",
+                        inset: 0,
+                        pointerEvents: "none",
+                        border: "1px solid rgba(120,255,180,0.18)",
+                        boxShadow: autoStatus.stable
+                          ? "inset 0 0 0 1px rgba(120,255,180,0.25), 0 0 80px rgba(120,255,180,0.18)"
+                          : "0 0 60px rgba(120,255,180,0.10)",
+                        background:
+                          "radial-gradient(800px 500px at 50% 40%, rgba(120,255,180,0.10), rgba(0,0,0,0))",
+                      }}
+                    />
+                  )}
 
                   {/* top helpers */}
                   <Box
