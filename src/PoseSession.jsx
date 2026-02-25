@@ -318,11 +318,27 @@ export default function PoseSession() {
     async function start() {
       setError("");
       try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          // Prefer wide sensor; we'll letterbox (contain) instead of zooming.
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
+        // iOS Safari often feels "zoomed" on the selfie camera.
+        // For a full‑body pose flow, we prefer the rear (environment) camera + letterbox (contain).
+        const tryGet = async (constraints) => navigator.mediaDevices.getUserMedia(constraints);
+
+        let s;
+        try {
+          s = await tryGet({
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          });
+        } catch {
+          // Fallback (some laptops / desktops / permissions): any camera.
+          s = await tryGet({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          });
+        }
         if (!isMounted) return;
         streamRef.current = s;
         if (videoRef.current) {
@@ -363,17 +379,21 @@ export default function PoseSession() {
         const res = landmarker.detectForVideo(v, performance.now());
         const landmarks = res?.landmarks?.[0] || null;
 
-        const { match, bbox } = scorePoseMatch(pose?.key, landmarks);
+        const { match, bbox, anchors } = scorePoseMatch(pose?.key, landmarks);
 
         // Smooth match a bit to avoid flicker
         setPoseMatch((prev) => lerp(prev, match, 0.35));
 
         if (bbox) {
-          const cx = (bbox.minX + bbox.maxX) / 2;
-          const cy = (bbox.minY + bbox.maxY) / 2;
+          // Anchor the ghost to shoulders/hips so it "wraps" the user (instead of floating).
+          const cx = anchors?.midShoulder?.x ?? (bbox.minX + bbox.maxX) / 2;
+          const cy = anchors?.midHip?.y
+            ? lerp(anchors.midShoulder.y, anchors.midHip.y, 0.25)
+            : (bbox.minY + bbox.maxY) / 2;
+
           const h = Math.max(0.001, bbox.maxY - bbox.minY);
-          // target ghost height ~72% of container height
-          const s = clamp(h / 0.72, 0.65, 1.35);
+          // target ghost height ~78% of container height (a bit larger for mobile)
+          const s = clamp(h / 0.78, 0.55, 1.55);
           setGhostFit((prev) => {
             if (!prev) return { cx, cy, s };
             return {
@@ -1028,12 +1048,12 @@ export default function PoseSession() {
                         }}
                       >
                         <CardContent>
-                          <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>MUSCLE MOMENTUM</Typography>
+                          <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>BUILD ARC</Typography>
                           <Typography sx={{ fontSize: 44, fontWeight: 980, lineHeight: 1.0, color: "rgba(240,255,252,0.98)", textShadow: "0 0 18px rgba(140,255,200,0.22)" }}>
                             {results.build_arc}/100
                           </Typography>
                           <Typography sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
-                            {results.strength} • built from pose match + weekly consistency
+                            {results.strength} • your physique momentum (pose match + consistency)
                           </Typography>
                           <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)" }}>
                             Re‑scan weekly • Streak {streakCount}
@@ -1055,12 +1075,16 @@ export default function PoseSession() {
                             {deltaLabel || "Baseline locked"}
                           </Typography>
                           <Stack spacing={0.6} sx={{ mt: 1.0 }}>
-                            {(deltaWins?.length ? deltaWins : results.wins || []).slice(0, 4).map((w) => (
+                            {(deltaWins?.length ? deltaWins : results.wins || []).slice(0, 4).map((w) => {
+                              const displayV =
+                                typeof w.v === "string" ? w.v.replace(/%/g, " level") : w.v;
+                              return (
                               <Stack key={w.k} direction="row" justifyContent="space-between">
                                 <Typography sx={{ color: "rgba(255,255,255,0.78)" }}>{w.k}</Typography>
-                                <Typography sx={{ color: "rgba(170,255,210,0.95)", fontWeight: 900 }}>{w.v}</Typography>
+                                <Typography sx={{ color: "rgba(170,255,210,0.95)", fontWeight: 900 }}>{displayV}</Typography>
                               </Stack>
-                            ))}
+                              );
+                            })}
                           </Stack>
                         </CardContent>
                       </Card>

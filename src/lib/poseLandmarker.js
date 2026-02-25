@@ -5,18 +5,11 @@
 let _landmarkerPromise = null;
 
 async function loadTasksVision() {
-  // Prefer installed dependency if present, else fall back to CDN.
-  try {
-    // eslint-disable-next-line import/no-unresolved
-    return await import("@mediapipe/tasks-vision");
-  } catch (e) {
-    // Vite needs @vite-ignore for external dynamic imports.
-    // Skypack is used by MediaPipe's own web demos.
-    // NOTE: this is browser-only; do not call during SSR.
-    // eslint-disable-next-line no-unused-vars
-    const mod = await import(/* @vite-ignore */ "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0");
-    return mod;
-  }
+  // IMPORTANT:
+  // Use CDN import to avoid requiring @mediapipe/tasks-vision to be installed.
+  // This prevents Vite/Rollup build failures when the dependency isn't present.
+  // Browser-only; do not call during SSR.
+  return await import(/* @vite-ignore */ "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.32");
 }
 
 export async function getPoseLandmarker() {
@@ -28,7 +21,7 @@ export async function getPoseLandmarker() {
     // Use hosted wasm + model assets.
     // Model URL pattern is documented across MediaPipe demos and examples.
     const wasm = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
     );
 
     const landmarker = await PoseLandmarker.createFromOptions(wasm, {
@@ -76,9 +69,9 @@ function scoreRule(ok) {
 
 export function scorePoseMatch(poseKey, landmarks) {
   // landmarks: array of 33 normalized landmarks (x,y in [0,1])
-  // Return { match: 0..1, bbox: {minX,maxX,minY,maxY} }
+  // Return { match: 0..1, bbox: {minX,maxX,minY,maxY}, anchors: {...} }
   if (!Array.isArray(landmarks) || landmarks.length < 33) {
-    return { match: 0, bbox: null };
+    return { match: 0, bbox: null, anchors: null };
   }
 
   // Key indices per MediaPipe pose: https://developers.google.com/mediapipe/solutions/vision/pose_landmarker
@@ -157,5 +150,15 @@ export function scorePoseMatch(poseKey, landmarks) {
   }
 
   const match = clamp(n ? s / n : 0, 0, 1);
-  return { match, bbox };
+  return {
+    match,
+    bbox,
+    anchors: {
+      midShoulder,
+      midHip,
+      shoulderWidth,
+      ls,
+      rs,
+    },
+  };
 }
