@@ -14,11 +14,11 @@ import {
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
+import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -26,25 +26,23 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
     key: "front_relaxed",
     title: "Front Relaxed",
-    subtitle: "Stand tall • arms relaxed • feet shoulder-width",
-    ghost: "front_relaxed",
+    subtitle: "Stand tall • arms relaxed • full body in frame",
   },
   {
     key: "front_double_bi",
     title: "Double Bi",
-    subtitle: "Hands up • squeeze arms • flare lats slightly",
-    ghost: "front_double_bi",
+    subtitle: "Hands up • elbows out • squeeze arms",
   },
   {
     key: "back_double_bi",
     title: "Back Double Bi",
-    subtitle: "Turn around • elbows up • spread your back",
-    ghost: "back_double_bi",
+    subtitle: "Turn around • elbows up • spread back",
   },
 ];
 
@@ -58,1109 +56,887 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
-function PoseGhost({ pose }) {
-  // Pose-specific neon silhouette (full body) that reads instantly on mobile.
-  // We keep it SVG-only (no heavy CV libs) and scale it via the parent container.
-  const neon = "rgba(140, 255, 200, 0.92)";
-  const neonSoft = "rgba(140, 255, 200, 0.22)";
-  const isBack = pose === "back_double_bi";
-  const isDouble = pose === "front_double_bi" || pose === "back_double_bi";
-
-  // Different arm paths per pose (thicker + more readable than the prior stick icon)
-  const arms =
-    pose === "front_relaxed"
-      ? {
-          left: "M132 168 C106 184, 96 210, 92 246 C88 278, 90 314, 104 344",
-          right: "M168 168 C194 184, 204 210, 208 246 C212 278, 210 314, 196 344",
-        }
-      : {
-          // double-bi: elbows high, hands near head
-          left: "M138 156 C110 130, 88 132, 78 154 C70 172, 74 196, 92 212 C110 228, 122 206, 134 190",
-          right: "M162 156 C190 130, 212 132, 222 154 C230 172, 226 196, 208 212 C190 228, 178 206, 166 190",
-        };
-
-  // Back pose: slightly wider lat flare
-  const latFlare = isBack ? 18 : 10;
-
-  return (
-    <Box
-      sx={{
-        width: "100%",
-        height: "100%",
-        position: "relative",
-        filter: "drop-shadow(0 0 18px rgba(140,255,200,0.22))",
-      }}
-    >
-      <svg
-        width="100%"
-        height="100%"
-        viewBox="0 0 300 520"
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <defs>
-          <filter id="neonGlow">
-            <feGaussianBlur stdDeviation="6" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        {/* soft aura */}
-        <g filter="url(#neonGlow)" stroke={neonSoft} strokeWidth="14" fill="none" strokeLinecap="round">
-          <path d="M150 84 C136 84 126 96 126 112 C126 132 138 148 150 148 C162 148 174 132 174 112 C174 96 164 84 150 84 Z" />
-          <path
-            d={`M150 152 C ${118 - latFlare} 168, ${106 - latFlare} 212, 112 252 C 118 294, 134 338, 150 360 C 166 338, 182 294, 188 252 C ${194 + latFlare} 212, ${182 + latFlare} 168, 150 152 Z`}
-          />
-          <path d="M150 360 C 134 382, 126 412, 122 452" />
-          <path d="M150 360 C 166 382, 174 412, 178 452" />
-          <path d={arms.left} />
-          <path d={arms.right} />
-        </g>
-
-        {/* primary outline */}
-        <g
-          stroke={neon}
-          strokeWidth="3.2"
-          fill="none"
-          strokeLinecap="round"
-          style={{
-            animation: isDouble ? "posePulse 1.25s ease-in-out infinite" : "none",
-          }}
-        >
-          <path d="M150 84 C136 84 126 96 126 112 C126 132 138 148 150 148 C162 148 174 132 174 112 C174 96 164 84 150 84 Z" />
-          <path
-            d={`M150 152 C ${118 - latFlare} 168, ${106 - latFlare} 212, 112 252 C 118 294, 134 338, 150 360 C 166 338, 182 294, 188 252 C ${194 + latFlare} 212, ${182 + latFlare} 168, 150 152 Z`}
-          />
-          <path d="M150 360 C 134 382, 126 412, 122 452" />
-          <path d="M150 360 C 166 382, 174 412, 178 452" />
-          <path d={arms.left} />
-          <path d={arms.right} />
-        </g>
-
-        {/* crosshair at midsection */}
-        <g stroke="rgba(140,255,200,0.95)" strokeWidth="2.4">
-          <circle cx="150" cy="268" r="10" fill="rgba(140,255,200,0.10)" />
-          <line x1="150" y1="248" x2="150" y2="288" />
-          <line x1="130" y1="268" x2="170" y2="268" />
-        </g>
-
-        {/* label */}
-        <text
-          x="150"
-          y="502"
-          textAnchor="middle"
-          fill="rgba(235,255,248,0.92)"
-          fontSize="14"
-          fontFamily="system-ui, -apple-system, Segoe UI, Roboto"
-        >
-          {pose === "front_relaxed"
-            ? "FRONT RELAXED"
-            : pose === "front_double_bi"
-            ? "FRONT DOUBLE BI"
-            : "BACK DOUBLE BI"}
-        </text>
-
-        <style>{`
-          @keyframes posePulse {
-            0% { opacity: 0.9; }
-            50% { opacity: 1; }
-            100% { opacity: 0.9; }
-          }
-        `}</style>
-      </svg>
-    </Box>
-  );
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
+// ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
+function buildPoseTemplate(poseKey, anchors) {
+  if (!anchors) return null;
+  const { midShoulder, midHip, shoulderWidth } = anchors;
 
+  // Create an abstract "ghost" using a few key points.
+  // Everything is in normalized video coords [0..1].
+  const sw = shoulderWidth || 0.22;
 
-function computeSignalsForPose(poseKey, metrics) {
-  // Map generic image metrics into "physique signals" buckets per pose.
-  // Signals are consistent for deltas and always framed positively.
-  const q = clamp(metrics.edge * 0.55 + metrics.variance * 0.35 + (1 - Math.abs(metrics.mean - 0.55)) * 0.10, 0, 1);
+  const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
+  const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
+  const ls = { x: midShoulder.x - sw * 0.5, y: midShoulder.y };
+  const rs = { x: midShoulder.x + sw * 0.5, y: midShoulder.y };
+  const lh = { x: midHip.x - sw * 0.42, y: midHip.y };
+  const rh = { x: midHip.x + sw * 0.42, y: midHip.y };
 
-  if (poseKey === "front_relaxed") {
-    return {
-      taper: clamp(0.45 + q * 0.45, 0, 1),
-      chest: clamp(0.40 + q * 0.40, 0, 1),
-      legs: clamp(0.38 + q * 0.38, 0, 1),
-    };
+  let le, re, lw, rw;
+
+  if (poseKey === "front_double_bi" || poseKey === "back_double_bi") {
+    // elbows high + out, wrists near head
+    le = { x: midShoulder.x - sw * 1.05, y: midShoulder.y - sw * 0.45 };
+    re = { x: midShoulder.x + sw * 1.05, y: midShoulder.y - sw * 0.45 };
+    lw = { x: midShoulder.x - sw * 0.55, y: midShoulder.y - sw * 0.95 };
+    rw = { x: midShoulder.x + sw * 0.55, y: midShoulder.y - sw * 0.95 };
+  } else {
+    // relaxed: elbows down, wrists near hips
+    le = { x: midShoulder.x - sw * 0.65, y: midShoulder.y + sw * 0.62 };
+    re = { x: midShoulder.x + sw * 0.65, y: midShoulder.y + sw * 0.62 };
+    lw = { x: midHip.x - sw * 0.55, y: midHip.y + sw * 0.75 };
+    rw = { x: midHip.x + sw * 0.55, y: midHip.y + sw * 0.75 };
   }
-  if (poseKey === "front_double_bi") {
-    return {
-      delts: clamp(0.42 + q * 0.45, 0, 1),
-      arms: clamp(0.44 + q * 0.46, 0, 1),
-      lats: clamp(0.40 + q * 0.42, 0, 1),
-    };
-  }
-  // back_double_bi
+
+  const kneeY = midHip.y + sw * 1.75;
+  const ankleY = midHip.y + sw * 2.65;
+
+  const lk = { x: midHip.x - sw * 0.28, y: kneeY };
+  const rk = { x: midHip.x + sw * 0.28, y: kneeY };
+  const la = { x: midHip.x - sw * 0.22, y: ankleY };
+  const ra = { x: midHip.x + sw * 0.22, y: ankleY };
+
   return {
-    back: clamp(0.44 + q * 0.46, 0, 1),
-    rear_delts: clamp(0.40 + q * 0.44, 0, 1),
-    arms: clamp(0.40 + q * 0.38, 0, 1),
+    head,
+    neck,
+    ls,
+    rs,
+    le,
+    re,
+    lw,
+    rw,
+    lh,
+    rh,
+    lk,
+    rk,
+    la,
+    ra,
+    midShoulder,
+    midHip,
+    shoulderWidth: sw,
   };
 }
 
-function mergeSignals(signalList) {
-  const acc = {};
-  const counts = {};
-  signalList.forEach((sig) => {
-    Object.entries(sig || {}).forEach(([k, v]) => {
-      acc[k] = (acc[k] || 0) + Number(v || 0);
-      counts[k] = (counts[k] || 0) + 1;
+function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
+  if (!ctx || !tpl) return;
+
+  const P = (p) => ({ x: p.x * w, y: p.y * h });
+
+  const segs = [
+    ["head", "neck"],
+    ["neck", "ls"],
+    ["neck", "rs"],
+    ["ls", "le"],
+    ["le", "lw"],
+    ["rs", "re"],
+    ["re", "rw"],
+    ["ls", "rs"],
+    ["ls", "lh"],
+    ["rs", "rh"],
+    ["lh", "rh"],
+    ["lh", "lk"],
+    ["lk", "la"],
+    ["rh", "rk"],
+    ["rk", "ra"],
+  ];
+
+  ctx.save();
+  ctx.clearRect(0, 0, w, h);
+
+  // soft vignette to make ghost readable
+  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
+  grd.addColorStop(0, "rgba(0,0,0,0)");
+  grd.addColorStop(1, "rgba(0,0,0,0.35)");
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, w, h);
+
+  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // glow layer
+  if (glow) {
+    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
+    ctx.lineWidth = baseWidth * 3.0;
+    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
+    ctx.shadowBlur = 18;
+    for (const [a, b] of segs) {
+      const A = P(tpl[a]);
+      const B = P(tpl[b]);
+      ctx.beginPath();
+      ctx.moveTo(A.x, A.y);
+      ctx.lineTo(B.x, B.y);
+      ctx.stroke();
+    }
+  }
+
+  // core line
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
+  ctx.lineWidth = baseWidth * 1.15;
+  for (const [a, b] of segs) {
+    const A = P(tpl[a]);
+    const B = P(tpl[b]);
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
+  }
+
+  // hint zones for arms (makes matching obvious)
+  const zoneAlpha = 0.14;
+  ctx.fillStyle = `rgba(0,255,190,${zoneAlpha})`;
+  const drawZone = (p, r) => {
+    const c = P(p);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  drawZone(tpl.lw, baseWidth * 2.8);
+  drawZone(tpl.rw, baseWidth * 2.8);
+  drawZone(tpl.le, baseWidth * 2.8);
+  drawZone(tpl.re, baseWidth * 2.8);
+
+  ctx.restore();
+}
+
+// ----- AI scoring call (kept from prior patch) -----
+async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
+  try {
+    const clientKey = "slimcal_client_id";
+    let clientId = "";
+    if (typeof window !== "undefined") {
+      clientId =
+        window.localStorage.getItem(clientKey) ||
+        window.localStorage.getItem("client_id") ||
+        "";
+      if (!clientId) {
+        clientId = uid();
+        window.localStorage.setItem(clientKey, clientId);
+      }
+    }
+
+    const res = await fetch("/api/ai/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(clientId ? { "x-client-id": clientId } : {}),
+      },
+      body: JSON.stringify({
+        feature: "pose_session",
+        poses: poses.map((p) => ({
+          pose_key: p.pose_key,
+          image_data_url: p.image_data_url,
+        })),
+        prev: prevSession || null,
+        today_local_day: todayISO,
+      }),
     });
-  });
-  const out = {};
-  Object.keys(acc).forEach((k) => {
-    out[k] = acc[k] / (counts[k] || 1);
-  });
-  return out;
-}
 
-function buildStrengthTag(streakCount, signals) {
-  if (streakCount >= 3) return "Consistency";
-  const entries = Object.entries(signals || {});
-  if (!entries.length) return "Momentum";
-  entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
-  const top = entries[0][0];
-  if (top === "taper") return "Aesthetics";
-  if (top === "back") return "Power";
-  if (top === "arms") return "Drive";
-  if (top === "delts" || top === "rear_delts") return "Presence";
-  return "Momentum";
-}
-
-function computeBuildArc(signals, streakCount) {
-  const vals = Object.values(signals || {}).map((v) => clamp(v, 0, 1));
-  const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0.55;
-
-  // Stable, friendly range: 62..95
-  const base = 62 + avg * 30;
-  const streakBoost = Math.min(5, Math.max(0, streakCount - 1));
-  return clamp(Math.round(base + streakBoost), 55, 96);
-}
-
-function buildPercentile(buildArc) {
-  // Convert score to Top X% (lower is better). Keep it friendly.
-  const top = 40 - (buildArc - 60) * 0.65;
-  return clamp(Math.round(top), 5, 45);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((j && j.error) || "AI failed");
+    if (!j || !j.session) throw new Error("Bad AI response");
+    return { ok: true, session: j.session };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
 }
 
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
+
   const userId = user?.id || "guest";
+  const todayISO = useMemo(() => localDayISO(), []);
+  const prevHistory = useMemo(() => readPoseSessionHistory(userId), [userId]);
+  const prevSession = prevHistory?.[0] || null;
+
+  const [cameraFacing, setCameraFacing] = useState("user"); // default front
+  const [step, setStep] = useState(0); // 0..POSES-1 then results
+  const [started, setStarted] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+  const [locked, setLocked] = useState(false);
+  const [lockHint, setLockHint] = useState("Move back to fit your full body");
+  const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
+  const [scanBusy, setScanBusy] = useState(false);
+  const [aiSession, setAiSession] = useState(null);
+  const [aiError, setAiError] = useState("");
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const canvasRef = useRef(null);
+  const overlayRef = useRef(null);
+  const rafRef = useRef(0);
+  const lastLmRef = useRef(null);
+  const stableRef = useRef({ t0: 0, okFrames: 0 });
 
-  const [phase, setPhase] = useState("capture"); // capture | results
-  const [poseIndex, setPoseIndex] = useState(0);
-  const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
-  const [autoEnabled, setAutoEnabled] = useState(true);
-  const [countdown, setCountdown] = useState(0);
-  const [scanning, setScanning] = useState(false);
-
-  // Keypoint pose matching + ghost fit
-  const [poseMatch, setPoseMatch] = useState(0);
-  const [ghostFit, setGhostFit] = useState(null); // {cx, cy, s} in 0..1
-  const holdRef = useRef({ t0: 0, ready: false, lastPoseKey: "" });
-
-  const [captures, setCaptures] = useState([]); // [{ poseKey, dataUrl, id }]
-
-  // session history
-  const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [prevSession, setPrevSession] = useState(null);
-  const [streakCount, setStreakCount] = useState(1);
-
-  // computed results
-  const [finalizing, setFinalizing] = useState(false);
-  const [sessionResult, setSessionResult] = useState(null);
-  const [deltaWins, setDeltaWins] = useState([]); // [{k,v}]
-  const [deltaLabel, setDeltaLabel] = useState("");
-
-  const pose = POSES[poseIndex];
-
-  // Load history once for this user
-  useEffect(() => {
-    try {
-      const hist = readPoseSessionHistory(userId);
-      const last = hist?.[0] || null;
-      setPrevSession(last);
-      const streak = computeSessionStreak(hist);
-      setStreakCount(streak.streak || 1);
-    } catch {
-      setPrevSession(null);
-      setStreakCount(1);
-    }
-    setHistoryLoaded(true);
-  }, [userId]);
+  const pose = POSES[Math.min(step, POSES.length - 1)];
+  const isResults = step >= POSES.length;
 
   const stopStream = useCallback(() => {
     try {
-      if (streamRef.current) {
-        streamRef.current.getTracks?.().forEach((t) => t.stop());
-      }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     } catch {}
+    rafRef.current = 0;
+
+    const s = streamRef.current;
     streamRef.current = null;
+    if (s) {
+      try {
+        s.getTracks().forEach((t) => t.stop());
+      } catch {}
+    }
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function start() {
-      setError("");
-      try {
-        // iOS Safari often feels "zoomed" on the selfie camera.
-        // For a full‑body pose flow, we prefer the rear (environment) camera + letterbox (contain).
-        const tryGet = async (constraints) => navigator.mediaDevices.getUserMedia(constraints);
-
-        let s;
-        try {
-          s = await tryGet({
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-            },
-            audio: false,
-          });
-        } catch {
-          // Fallback (some laptops / desktops / permissions): any camera.
-          s = await tryGet({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false,
-          });
-        }
-        if (!isMounted) return;
-        streamRef.current = s;
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          await videoRef.current.play?.();
-        }
-      } catch (e) {
-        setError("Camera access is blocked. Allow camera permissions to run the pose session.");
-      }
-    }
-
-    if (phase === "capture") start();
-
-    return () => {
-      isMounted = false;
-      stopStream();
+  const startStream = useCallback(async () => {
+    stopStream();
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: cameraFacing, // "user" or "environment"
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
     };
-  }, [phase, stopStream]);
 
-  // Keypoint loop (match outline → hold still → auto snap)
+    const s = await navigator.mediaDevices.getUserMedia(constraints);
+    streamRef.current = s;
+
+    const v = videoRef.current;
+    if (v) {
+      v.srcObject = s;
+      await v.play().catch(() => {});
+    }
+  }, [cameraFacing, stopStream]);
+
   useEffect(() => {
-    if (phase !== "capture") return;
+    if (!started) return;
+    startStream();
+    return () => stopStream();
+  }, [started, startStream, stopStream]);
 
-    let raf = 0;
-    let cancelled = false;
+  // Keypoint loop: detect pose and update lock state + draw ghost
+  useEffect(() => {
+    if (!started) return;
+    if (isResults) return;
+
+    let alive = true;
     let landmarker = null;
 
-    const tick = async () => {
-      if (cancelled) return;
+    const run = async () => {
+      landmarker = await getPoseLandmarker();
       const v = videoRef.current;
-      if (!v || v.readyState < 2) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
+      const canvas = overlayRef.current;
+      if (!v || !canvas) return;
 
-      try {
-        landmarker = landmarker || (await getPoseLandmarker());
-        const res = landmarker.detectForVideo(v, performance.now());
-        const landmarks = res?.landmarks?.[0] || null;
+      const ctx = canvas.getContext("2d");
+      const tick = async () => {
+        if (!alive) return;
 
-        const { match, bbox, anchors } = scorePoseMatch(pose?.key, landmarks);
+        const w = canvas.clientWidth || v.clientWidth || 360;
+        const h = canvas.clientHeight || v.clientHeight || 640;
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
 
-        // Smooth match a bit to avoid flicker
-        setPoseMatch((prev) => lerp(prev, match, 0.35));
-
-        if (bbox) {
-          // Anchor the ghost to shoulders/hips so it "wraps" the user (instead of floating).
-          const cx = anchors?.midShoulder?.x ?? (bbox.minX + bbox.maxX) / 2;
-          const cy = anchors?.midHip?.y
-            ? lerp(anchors.midShoulder.y, anchors.midHip.y, 0.25)
-            : (bbox.minY + bbox.maxY) / 2;
-
-          const h = Math.max(0.001, bbox.maxY - bbox.minY);
-          // target ghost height ~78% of container height (a bit larger for mobile)
-          const s = clamp(h / 0.78, 0.55, 1.55);
-          setGhostFit((prev) => {
-            if (!prev) return { cx, cy, s };
-            return {
-              cx: lerp(prev.cx, cx, 0.25),
-              cy: lerp(prev.cy, cy, 0.25),
-              s: lerp(prev.s, s, 0.18),
-            };
-          });
+        // Run pose detection at ~10fps
+        const t = nowMs();
+        let landmarks = null;
+        try {
+          const r = landmarker.detectForVideo(v, t);
+          landmarks = r?.landmarks?.[0] || null;
+        } catch {
+          landmarks = null;
         }
 
-        // Hold-still readiness gate
-        const now = performance.now();
-        const st = holdRef.current;
-        if (st.lastPoseKey !== pose?.key) {
-          st.lastPoseKey = pose?.key;
-          st.t0 = 0;
-          st.ready = false;
-          setReady(false);
-        }
+        let match = 0;
+        let anchors = null;
+        let bbox = null;
 
-        const threshold = pose?.key === "front_relaxed" ? 0.78 : 0.82;
-        if (match >= threshold) {
-          if (!st.t0) st.t0 = now;
-          const held = now - st.t0;
-          if (held >= 750) {
-            if (!st.ready) {
-              st.ready = true;
-              setReady(true);
-            }
-          }
+        if (landmarks && landmarks.length >= 33) {
+          const scored = scorePoseMatch(pose.key, landmarks);
+          match = clamp(scored?.match || 0, 0, 1);
+          anchors = scored?.anchors || null;
+          bbox = scored?.bbox || null;
+          lastLmRef.current = { landmarks, anchors, bbox, match };
         } else {
-          st.t0 = 0;
-          if (st.ready) {
-            st.ready = false;
-            setReady(false);
-          }
+          lastLmRef.current = null;
         }
-      } catch {
-        // If landmarker fails (rare / offline), we fall back to manual capture.
-      }
 
-      raf = requestAnimationFrame(tick);
+        const tpl = buildPoseTemplate(pose.key, anchors);
+        drawNeonGhost(ctx, tpl, { w, h, glow: true });
+
+        // Match + stability gating (MrBeast simple: MOVE BACK -> MATCH -> HOLD)
+        let inFrame = false;
+        if (bbox) {
+          const height = bbox.maxY - bbox.minY;
+          inFrame = height > 0.55 && bbox.minY < 0.22 && bbox.maxY > 0.88;
+        }
+
+        const ok = inFrame && match >= 0.72;
+
+        // stability from landmark movement (much more reliable than pixel diff)
+        let stable = false;
+        if (landmarks && lastLmRef.current?.landmarks) {
+          const prevLm = stableRef.current.prevLm;
+          if (prevLm && prevLm.length === landmarks.length) {
+            let sum = 0;
+            for (let i = 0; i < landmarks.length; i++) {
+              const dx = landmarks[i].x - prevLm[i].x;
+              const dy = landmarks[i].y - prevLm[i].y;
+              sum += Math.sqrt(dx * dx + dy * dy);
+            }
+            const avg = sum / landmarks.length;
+            stable = avg < 0.0045; // small movement
+          }
+          stableRef.current.prevLm = landmarks;
+        }
+
+        if (!inFrame) {
+          setLocked(false);
+          setLockHint("Move back • get full body inside the frame");
+          stableRef.current.okFrames = 0;
+        } else if (match < 0.72) {
+          setLocked(false);
+          setLockHint("Match the outline • then hold still");
+          stableRef.current.okFrames = 0;
+        } else if (!stable) {
+          setLocked(false);
+          setLockHint("Hold still… almost locked");
+          stableRef.current.okFrames = 0;
+        } else {
+          // locked candidate
+          stableRef.current.okFrames += 1;
+          setLockHint("LOCKED ✅");
+          setLocked(true);
+        }
+
+        // Auto-capture after a short stable period
+        if (ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
+          // Start countdown
+          setCountdown(3);
+        }
+
+        rafRef.current = requestAnimationFrame(tick);
+      };
+
+      rafRef.current = requestAnimationFrame(tick);
     };
 
-    raf = requestAnimationFrame(tick);
+    run();
+
     return () => {
-      cancelled = true;
-      if (raf) cancelAnimationFrame(raf);
+      alive = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
     };
-  }, [phase, pose?.key]);
+  }, [started, isResults, pose.key, countdown]);
 
-  const captureFrame = useCallback(() => {
+  // countdown -> snap
+  useEffect(() => {
+    if (!countdown) return;
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown((c) => (c ? c - 1 : null)), 750);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (countdown === 0) {
+      setCountdown(null);
+      onCapture();
+    }
+  }, [countdown]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onCapture = useCallback(async () => {
     const v = videoRef.current;
-    if (!v) return null;
+    if (!v) return;
+
+    // draw current frame to a temp canvas (respect mirroring for selfie cam)
+    const tmp = document.createElement("canvas");
     const w = v.videoWidth || 720;
     const h = v.videoHeight || 1280;
+    tmp.width = w;
+    tmp.height = h;
+    const ctx = tmp.getContext("2d");
 
-    if (!canvasRef.current) {
-      canvasRef.current = document.createElement("canvas");
+    if (cameraFacing === "user") {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
     }
-    const c = canvasRef.current;
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d");
     ctx.drawImage(v, 0, 0, w, h);
-    return c.toDataURL("image/jpeg", 0.88);
-  }, []);
 
-  const doCapture = useCallback(() => {
-    const dataUrl = captureFrame();
-    if (!dataUrl) return;
+    const dataUrl = tmp.toDataURL("image/png", 0.92);
+    setCaptures((cur) => [
+      ...cur,
+      { pose_key: pose.key, image_data_url: dataUrl },
+    ]);
+    setLocked(false);
+    setCountdown(null);
+    stableRef.current.okFrames = 0;
 
-    const item = { id: uid(), poseKey: pose.key, dataUrl, createdAt: Date.now() };
-    setCaptures((prev) => [...prev, item]);
-
-    // advance
-    setReady(false);
-    setCountdown(0);
-
-    if (poseIndex >= POSES.length - 1) {
-      setPhase("results");
-      stopStream();
+    if (step + 1 >= POSES.length) {
+      // go to results & score
+      setStep(POSES.length);
     } else {
-      setPoseIndex((i) => i + 1);
+      setStep((s) => s + 1);
     }
-  }, [captureFrame, pose?.key, poseIndex, stopStream]);
+  }, [pose.key, step, cameraFacing]);
 
-  // Auto-capture countdown when ready + auto enabled
+  // Score session when finished capturing
   useEffect(() => {
-    if (phase !== "capture") return;
-    if (!ready || !autoEnabled) return;
-    if (scanning) return;
+    if (!started) return;
+    if (!isResults) return;
+    if (captures.length < POSES.length) return;
+    if (scanBusy || aiSession) return;
 
-    let t1;
-    let t2;
-    setScanning(true);
-    setCountdown(3);
+    let canceled = false;
 
-    t1 = setInterval(() => {
-      setCountdown((c) => c - 1);
-    }, 900);
+    const run = async () => {
+      setScanBusy(true);
+      setAiError("");
 
-    t2 = setTimeout(() => {
-      doCapture();
-      setScanning(false);
-    }, 2700);
-
-    return () => {
-      clearInterval(t1);
-      clearTimeout(t2);
-      setScanning(false);
-      setCountdown(0);
-    };
-  }, [phase, ready, autoEnabled, doCapture, scanning]);
-
-  // Finalize session results when entering results phase
-  useEffect(() => {
-    if (phase !== "results") return;
-    if (!historyLoaded) return;
-    if (finalizing) return;
-    if (sessionResult) return;
-
-    let cancelled = false;
-
-    (async () => {
-      setFinalizing(true);
-      try {
-        const today = localDayISO(new Date());
-
-        // Analyze each capture
-        const analyzed = [];
-        for (const cap of captures) {
-          const metrics = await analyzeImageDataUrl(cap.dataUrl);
-          const signals = computeSignalsForPose(cap.poseKey, metrics);
-          analyzed.push({ poseKey: cap.poseKey, metrics, signals });
-        }
-
-        const mergedSignals = mergeSignals(analyzed.map((a) => a.signals));
-
-        const hist = readPoseSessionHistory(userId);
-        const streak = computeSessionStreak(hist);
-        const effectiveStreak = clamp(streak.streak || 1, 1, 999);
-
-        const buildArc = computeBuildArc(mergedSignals, effectiveStreak);
-        const percentile = buildPercentile(buildArc);
-        const strength = buildStrengthTag(effectiveStreak, mergedSignals);
-
-        const currentSession = {
-          id: uid(),
-          user_id: userId,
-          localDay: today,
-          createdAt: Date.now(),
-          poses: analyzed.map((a) => ({ poseKey: a.poseKey, metrics: a.metrics })),
-          muscleSignals: mergedSignals,
-          build_arc: buildArc,
-          percentile,
-          strength,
-          horizon_days: 90,
-        };
-
-        // Compute positive-only deltas vs prev session
-        const prev = hist?.[0] || prevSession;
-        const deltas = computeDeltasPositiveOnly(prev || null, currentSession);
-
-        // Wins list (top 4)
-        const wins = deltas.wins.slice(0, 4);
-
-        // Save session (append writes newest-first)
-        appendPoseSession(userId, currentSession);
-
-        // Label
-        let label = "Baseline locked";
-        if (prev?.localDay) {
-          const improved = (deltas?.overallPct || 0) > 0;
-          label = improved
-            ? `Since your last session (${prev.localDay})`
-            : `Steady since your last session (${prev.localDay})`;
-        }
-
-        const levers = [
-          "Add +25g protein today",
-          "Strength train 2–3×/week",
-          "Re-scan weekly in similar lighting",
-        ];
-
-        if (!cancelled) {
-          setDeltaWins(wins);
-          setDeltaLabel(label);
-          setStreakCount(effectiveStreak);
-          setSessionResult({
-            ...currentSession,
-            wins,
-            levers,
-            since_points: deltas?.hasPrev ? deltas.overallPct : 0,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          // Safe fallback — still show something friendly
-          setSessionResult({
-            build_arc: 80,
-            percentile: 20,
-            strength: "Momentum",
-            horizon_days: 90,
-            since_points: 0,
-            wins: [
-              { k: "Consistency", v: "+1%" },
-              { k: "Arms", v: "+1%" },
-              { k: "Delts", v: "+1%" },
-              { k: "V‑taper", v: "+1%" },
-            ],
-            levers: [
-              "Add +25g protein today",
-              "Strength train 2–3×/week",
-              "Re-scan weekly in similar lighting",
-            ],
-          });
-          setDeltaWins([]);
-          setDeltaLabel("Baseline locked");
-        }
-      } finally {
-        if (!cancelled) setFinalizing(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, historyLoaded, finalizing, sessionResult, captures, userId, prevSession]);
-
-  const results = useMemo(() => {
-    // Render-safe results object
-    return (
-      sessionResult || {
-        build_arc: 80,
-        percentile: 20,
-        strength: "Momentum",
-        horizon_days: 90,
-        wins: [],
-        levers: [],
-      }
-    );
-  }, [sessionResult]);
-
-  const resultsContext = useMemo(() => {
-    const isBaseline = (deltaLabel || "").toLowerCase().includes("baseline") || !prevSession;
-    if (isBaseline) {
-      return {
-        title: "Baseline locked ✅",
-        body: "You’ve got a solid starting look. Re‑scan weekly in similar lighting and you’ll see your physique signals climb fast.",
-      };
-    }
-    // Turn top win into a hype line
-    const top = (results.wins || [])[0];
-    const vibe = top?.k ? `WHOA — ${top.k} is trending up.` : "WHOA — I’m seeing real progress.";
-    return {
-      title: vibe,
-      body: "Keep doing what you’re doing. Hold this pose session weekly to make your gains obvious (and shareable).",
-    };
-  }, [deltaLabel, prevSession, results.wins]);
-
-  const handleShare = useCallback(async () => {
-    try {
-      const isBaseline = (deltaLabel || "").toLowerCase().includes("baseline") || !prevSession;
-      const headline = isBaseline
-        ? "Baseline locked ✅ You’re starting strong."
-        : "WHOA — I’m seeing real progress."
-      const subhead = isBaseline
-        ? "Re‑scan weekly in similar lighting to watch your muscles pop."
-        : "Keep the streak alive — week‑over‑week wins compound.";
-
-      const blob = await buildPoseSessionSharePng({
-        build_arc: results.build_arc,
-        percentile: results.percentile,
-        strength: results.strength,
-        horizon_days: results.horizon_days,
-        wins: results.wins,
-        pose_count: captures.length,
-        streak_count: streakCount,
-        since_points: results.since_points || 0,
-        pose_images: captures.map((c) => c.dataUrl),
-        headline,
-        subhead,
+      const r = await scorePoseSessionWithAI({
+        poses: captures,
+        prevSession,
+        todayISO,
       });
 
-      const caption = `Pose Session ✅ ${isBaseline ? "Baseline locked" : "Progress unlocked"} • Streak ${streakCount} • #SlimcalAI`;
-      await shareOrDownloadPng(blob, "slimcal-pose-session.png", caption);
+      if (canceled) return;
+
+      if (r.ok) {
+        setAiSession(r.session);
+        // Save minimal session (no images) for deltas/streak
+        try {
+          const hist = readPoseSessionHistory(userId);
+          const streak = computeSessionStreak(hist, todayISO);
+
+          const record = {
+            local_day: todayISO,
+            created_at: Date.now(),
+            build_arc: clamp(r.session?.build_arc ?? r.session?.buildArcScore ?? 75, 0, 100),
+            muscleSignals: r.session?.muscleSignals || {},
+            poseQuality: r.session?.poseQuality || {},
+          };
+
+          appendPoseSession(userId, record);
+        } catch {}
+      } else {
+        setAiError(r.error || "Scan failed");
+        // Still save baseline record (positive-only) so next session has context
+        try {
+          const hist = readPoseSessionHistory(userId);
+          const record = {
+            local_day: todayISO,
+            created_at: Date.now(),
+            build_arc: 78,
+            muscleSignals: {},
+            poseQuality: {},
+          };
+          appendPoseSession(userId, record);
+        } catch {}
+      }
+
+      setScanBusy(false);
+    };
+
+    run();
+    return () => {
+      canceled = true;
+    };
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
+
+  const latestRecord = useMemo(() => {
+    try {
+      const hist = readPoseSessionHistory(userId);
+      return hist?.[0] || null;
     } catch {
-      // ignore
+      return null;
     }
-  }, [captures, results, streakCount, deltaLabel, prevSession]);
+  }, [userId, aiSession, aiError]); // recompute after scoring
+
+  const deltas = useMemo(() => {
+    if (!latestRecord) return null;
+    const hist = readPoseSessionHistory(userId);
+    const prev = hist?.[1] || null;
+    return computeDeltasPositiveOnly(prev, latestRecord);
+  }, [latestRecord, userId]);
+
+  const streakCount = useMemo(() => {
+    try {
+      const hist = readPoseSessionHistory(userId);
+      return computeSessionStreak(hist, todayISO);
+    } catch {
+      return 1;
+    }
+  }, [userId, todayISO, aiSession, aiError]);
+
+  const share = useCallback(async () => {
+    const session = aiSession || {};
+    const buildArc =
+      clamp(session?.build_arc ?? session?.buildArcScore ?? latestRecord?.build_arc ?? 78, 0, 100);
+
+    const percentile = clamp(session?.percentile ?? 22, 1, 99);
+    const strength = session?.strength || "Momentum";
+
+    const hype =
+      session?.hype ||
+      (prevSession
+        ? "WHOA — your consistency is showing. Keep the streak alive."
+        : "Baseline locked ✅ You’re already off to a strong start.");
+
+    const wins =
+      session?.highlights ||
+      (prevSession ? ["Chest signal up", "Arms looking fuller"] : ["Strong starting frame", "Great pose control"]);
+
+    const levers =
+      session?.levers ||
+      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2–3× this week"]);
+
+    const png = await buildPoseSessionSharePng({
+      buildArc,
+      percentile,
+      strength,
+      streakCount,
+      sincePoints: deltas?.since_points || 0,
+      headline: "POSE SESSION",
+      subhead: hype,
+      wins,
+      levers,
+      // embed the 3 pose images (viral payload)
+      poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
+    });
+
+    await shareOrDownloadPng(png, {
+      filename: `slimcal-pose-session-${todayISO}.png`,
+      shareTitle: "SlimCal Pose Session",
+      shareText: "Pose Session ✅ #SlimcalAI",
+    });
+  }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
+
+  const start = () => {
+    setStarted(true);
+    setStep(0);
+    setCaptures([]);
+    setAiSession(null);
+    setAiError("");
+    setCountdown(null);
+    setLocked(false);
+  };
+
+  const back = () => history.push("/");
 
   return (
-    <Box sx={{ minHeight: "100vh", background: "#070A0F", color: "white" }}>
-      <Box
-        sx={{
-          px: { xs: 2, sm: 3 },
-          py: 2,
-          maxWidth: 980,
-          mx: "auto",
-        }}
-      >
-        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-          <Stack direction="row" alignItems="center" spacing={1.2}>
-            <Button
-              onClick={() => history.push("/")}
-              startIcon={<ArrowBackIcon />}
-              sx={{ color: "rgba(255,255,255,0.85)", textTransform: "none" }}
-            >
-              Back
-            </Button>
-            <Typography variant="h6" sx={{ fontWeight: 950, letterSpacing: 0.3 }}>
+    <Box sx={{ p: 2, maxWidth: 720, mx: "auto" }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<ArrowBackIcon />}
+          onClick={back}
+        >
+          Back
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        {started && !isResults && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FlipCameraAndroidIcon />}
+            onClick={() => setCameraFacing((f) => (f === "user" ? "environment" : "user"))}
+          >
+            Flip
+          </Button>
+        )}
+        {!started ? (
+          <Chip label="BETA" color="success" size="small" />
+        ) : (
+          <Chip label={`${Math.min(step + 1, 3)}/3`} color="info" size="small" />
+        )}
+      </Stack>
+
+      {!started ? (
+        <Card sx={{ borderRadius: 3, background: "#0b0f14", color: "#eafffb" }}>
+          <CardContent>
+            <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: 0.5 }}>
               Pose Session
             </Typography>
-            <Chip
-              size="small"
-              label="Beta"
-              sx={{
-                ml: 0.5,
-                bgcolor: "rgba(120,255,180,0.14)",
-                color: "rgba(170,255,210,0.95)",
-                border: "1px solid rgba(120,255,180,0.25)",
-                fontWeight: 900,
-              }}
-            />
-          </Stack>
-
-          <Chip
-            size="small"
-            label={phase === "capture" ? `Pose ${poseIndex + 1}/${POSES.length}` : `Results • Streak ${streakCount}`}
-            sx={{
-              bgcolor: "rgba(255,255,255,0.07)",
-              color: "rgba(255,255,255,0.88)",
-              border: "1px solid rgba(255,255,255,0.10)",
-              fontWeight: 800,
-            }}
-          />
-        </Stack>
-
-        <Box sx={{ mt: 2 }}>
-          {error ? (
-            <Card
-              sx={{
-                bgcolor: "rgba(255,255,255,0.06)",
-                borderRadius: 4,
-                border: "1px solid rgba(255,255,255,0.10)",
-              }}
-            >
-              <CardContent>
-                <Typography sx={{ fontWeight: 900 }}>Camera needed</Typography>
-                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)", mt: 0.5 }}>
-                  {error}
-                </Typography>
-                <Button
-                  variant="contained"
-                  sx={{ mt: 2, borderRadius: 999, fontWeight: 900 }}
-                  onClick={() => window.location.reload()}
-                >
-                  Retry
-                </Button>
-              </CardContent>
-            </Card>
-          ) : phase === "capture" ? (
-            <Stack spacing={2}>
-              <Card
-                sx={{
-                  borderRadius: 5,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  bgcolor: "rgba(255,255,255,0.04)",
-                  boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
-                }}
-              >
+            <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.9)" }}>
+              3 poses • auto-lock • share your progress
+            </Typography>
+            <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
+            <Stack spacing={1.25}>
+              {POSES.map((p) => (
                 <Box
+                  key={p.key}
                   sx={{
-                    position: "relative",
-                    aspectRatio: { xs: "9/16", sm: "16/9" },
-                    background:
-                      "radial-gradient(1200px 600px at 50% 0%, rgba(120,255,180,0.10), rgba(0,0,0,0))",
+                    p: 1.25,
+                    borderRadius: 2,
+                    border: "1px solid rgba(0,255,190,0.15)",
+                    background: "rgba(0,255,190,0.04)",
                   }}
                 >
-                  <video
-                    ref={videoRef}
-                    playsInline
-                    muted
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      // 'contain' prevents the iOS Safari "zoomed" look.
-                      objectFit: "contain",
-                      backgroundColor: "#000",
-                      filter: "contrast(1.05) saturate(1.05)",
-                    }}
-                  />
+                  <Typography sx={{ fontWeight: 800 }}>{p.title}</Typography>
+                  <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
+                    {p.subtitle}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+            <Button
+              sx={{ mt: 2 }}
+              fullWidth
+              size="large"
+              variant="contained"
+              startIcon={<CameraAltIcon />}
+              onClick={start}
+            >
+              Start Pose Session
+            </Button>
+          </CardContent>
+        </Card>
+      ) : !isResults ? (
+        <Card sx={{ borderRadius: 3, background: "#05070a", color: "#eafffb", overflow: "hidden" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>
+              {pose.title}
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.88)" }}>
+              {pose.subtitle}
+            </Typography>
 
-                  {/* overlay */}
+            <Box
+              sx={{
+                mt: 1.5,
+                position: "relative",
+                width: "100%",
+                aspectRatio: "9 / 16",
+                borderRadius: 3,
+                overflow: "hidden",
+                border: "1px solid rgba(0,255,190,0.18)",
+                background: "#000",
+              }}
+            >
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                autoPlay
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain", // FIX: no crop zoom
+                  transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
+                  background: "#000",
+                }}
+              />
+              <canvas
+                ref={overlayRef}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  mixBlendMode: "screen",
+                  transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
+                }}
+              />
+
+              {/* Countdown overlay */}
+              {countdown ? (
+                <Box
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "grid",
+                    placeItems: "center",
+                    pointerEvents: "none",
+                  }}
+                >
                   <Box
                     sx={{
-                      position: "absolute",
-                      inset: 0,
+                      width: 120,
+                      height: 120,
+                      borderRadius: "999px",
+                      border: "2px solid rgba(0,255,190,0.55)",
+                      boxShadow: "0 0 22px rgba(0,255,190,0.25)",
                       display: "grid",
                       placeItems: "center",
-                      pointerEvents: "none",
+                      background: "rgba(0,0,0,0.45)",
                     }}
                   >
-                    <Box
-                      sx={{
-                        width: "86%",
-                        height: "86%",
-                        maxWidth: 420,
-                        maxHeight: 640,
-                        transform:
-                          ghostFit
-                            ? `translate(${(ghostFit.cx - 0.5) * 18}%, ${(ghostFit.cy - 0.5) * 18}%) scale(${ghostFit.s})`
-                            : "none",
-                        transition: "transform 120ms linear",
-                      }}
-                    >
-                      <PoseGhost pose={pose.ghost} />
-                    </Box>
+                    <Typography sx={{ fontSize: 54, fontWeight: 900, color: "#eafffb" }}>
+                      {countdown}
+                    </Typography>
                   </Box>
-
-                  {/* top helpers */}
-                  <Box
-                    sx={{
-                      position: "absolute",
-                      top: 12,
-                      left: 12,
-                      right: 12,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 1,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    <Chip
-                      size="small"
-                      label={
-                        ready
-                          ? "Locked → hold still"
-                          : poseMatch > 0.2
-                          ? `Match ${Math.round(poseMatch * 100)}%`
-                          : "Move back + match outline"
-                      }
-                      sx={{
-                        bgcolor: "rgba(0,0,0,0.35)",
-                        color: ready ? "rgba(170,255,210,0.95)" : "rgba(255,255,255,0.90)",
-                        border: "1px solid rgba(255,255,255,0.16)",
-                        fontWeight: 800,
-                      }}
-                    />
-                    <Chip
-                      size="small"
-                      icon={<CameraAltIcon sx={{ color: "rgba(170,255,210,0.95)" }} />}
-                      label={autoEnabled ? "Auto" : "Manual"}
-                      sx={{
-                        bgcolor: "rgba(0,0,0,0.35)",
-                        color: "rgba(170,255,210,0.95)",
-                        border: "1px solid rgba(120,255,180,0.22)",
-                        fontWeight: 900,
-                      }}
-                    />
-                  </Box>
-
-                  {/* countdown */}
-                  {countdown > 0 && (
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "grid",
-                        placeItems: "center",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 96,
-                          height: 96,
-                          borderRadius: 999,
-                          background: "rgba(0,0,0,0.45)",
-                          border: "1px solid rgba(120,255,180,0.28)",
-                          display: "grid",
-                          placeItems: "center",
-                          boxShadow: "0 18px 50px rgba(0,0,0,0.55)",
-                        }}
-                      >
-                        <Typography sx={{ fontSize: 42, fontWeight: 950, color: "rgba(170,255,210,0.95)" }}>
-                          {countdown}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  )}
                 </Box>
+              ) : null}
 
-                <CardContent>
-                  <Stack spacing={1.1}>
-                    <Stack direction="row" alignItems="baseline" justifyContent="space-between" spacing={2}>
-                      <Typography variant="h6" sx={{ fontWeight: 950 }}>
-                        {pose.title}
-                      </Typography>
-                      <Chip
-                        size="small"
-                        label={poseIndex === 0 ? "Baseline" : poseIndex === 1 ? "Arms/Delts" : "Back/V‑taper"}
-                        sx={{
-                          bgcolor: "rgba(120,255,180,0.12)",
-                          color: "rgba(170,255,210,0.95)",
-                          border: "1px solid rgba(120,255,180,0.20)",
-                          fontWeight: 900,
-                        }}
-                      />
-                    </Stack>
-
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)" }}>
-                      {pose.subtitle}
-                    </Typography>
-
-                    <Divider sx={{ borderColor: "rgba(255,255,255,0.10)", my: 0.6 }} />
-
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ sm: "center" }}>
-                      <Button
-                        variant={ready ? "contained" : "outlined"}
-                        onClick={() => setReady((v) => !v)}
-                        sx={{
-                          borderRadius: 999,
-                          fontWeight: 950,
-                          px: 2,
-                          borderColor: "rgba(120,255,180,0.30)",
-                          color: ready ? "white" : "rgba(170,255,210,0.95)",
-                          bgcolor: ready ? "rgba(60,120,255,1)" : "transparent",
-                        }}
-                      >
-                        {ready ? "Ready ✓" : "I’m in frame"}
-                      </Button>
-
-                      <Button
-                        variant="outlined"
-                        onClick={() => setAutoEnabled((v) => !v)}
-                        sx={{
-                          borderRadius: 999,
-                          fontWeight: 900,
-                          borderColor: "rgba(255,255,255,0.20)",
-                          color: "rgba(255,255,255,0.82)",
-                        }}
-                      >
-                        {autoEnabled ? "Auto‑capture ON" : "Auto‑capture OFF"}
-                      </Button>
-
-                      <Box sx={{ flex: 1 }} />
-
-                      <Button
-                        variant="contained"
-                        onClick={doCapture}
-                        disabled={autoEnabled && ready}
-                        sx={{
-                          borderRadius: 999,
-                          fontWeight: 950,
-                          px: 2.2,
-                          background: "linear-gradient(180deg, rgba(70,140,255,1), rgba(50,95,240,1))",
-                          boxShadow: "0 12px 34px rgba(35,85,220,0.35)",
-                        }}
-                      >
-                        Capture now
-                      </Button>
-                    </Stack>
-
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", mt: 0.2 }}>
-                      Tip: use similar lighting each week for cleaner progress tracking. Always neutral or positive.
-                    </Typography>
-                  </Stack>
-                </CardContent>
-              </Card>
-
-              <Card
+              {/* Lock hint */}
+              <Box
                 sx={{
-                  borderRadius: 4,
-                  bgcolor: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.10)",
+                  position: "absolute",
+                  left: 10,
+                  bottom: 10,
+                  right: 10,
+                  p: 1,
+                  borderRadius: 2,
+                  background: "rgba(0,0,0,0.55)",
+                  border: locked ? "1px solid rgba(0,255,190,0.55)" : "1px solid rgba(0,255,190,0.18)",
+                  boxShadow: locked ? "0 0 18px rgba(0,255,190,0.18)" : "none",
                 }}
               >
-                <CardContent>
-                  <Typography sx={{ fontWeight: 900 }}>Captured</Typography>
-                  <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
-                    {captures.length === 0
-                      ? "No poses captured yet."
-                      : `Nice — ${captures.length} pose${captures.length === 1 ? "" : "s"} locked.`}
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#eafffb" }}>
+                  {lockHint}
+                </Typography>
+              </Box>
+            </Box>
+
+            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={() => setCountdown(3)}
+                disabled={!!countdown}
+              >
+                Capture now
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={() => setCountdown(3)}
+                disabled={!!countdown}
+              >
+                Auto snap
+              </Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card sx={{ borderRadius: 3, background: "#070a0f", color: "#eafffb" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>
+              Pose Session Results
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.9)" }}>
+              {prevSession ? "Progress update" : "Baseline locked for future scans ✅"}
+            </Typography>
+
+            <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
+
+            {scanBusy ? (
+              <Typography sx={{ fontWeight: 800, color: "rgba(220,255,245,0.9)" }}>
+                Scanning your poses…
+              </Typography>
+            ) : (
+              <>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip
+                    label={`BUILD ARC ${Math.round(
+                      clamp(aiSession?.build_arc ?? aiSession?.buildArcScore ?? latestRecord?.build_arc ?? 78, 0, 100)
+                    )}/100`}
+                    color="success"
+                    sx={{ fontWeight: 900 }}
+                  />
+                  <Chip
+                    label={`Top ${clamp(aiSession?.percentile ?? 22, 1, 99)}%`}
+                    color="info"
+                    sx={{ fontWeight: 800 }}
+                  />
+                  <Chip
+                    label={`Streak ${streakCount}`}
+                    sx={{
+                      fontWeight: 800,
+                      border: "1px solid rgba(0,255,190,0.25)",
+                      color: "#eafffb",
+                    }}
+                    variant="outlined"
+                  />
+                </Stack>
+
+                <Typography sx={{ mt: 1, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
+                  {aiSession?.hype ||
+                    (prevSession
+                      ? "WHOA — your momentum is building. Keep showing up."
+                      : "Great starting frame. You’re going to level up fast.")}
+                </Typography>
+
+                {deltas ? (
+                  <Box sx={{ mt: 1.25 }}>
+                    <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
+                      Since last: <b>+{deltas.since_points || 0} levels</b>
+                    </Typography>
+                  </Box>
+                ) : null}
+
+                <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
+
+                <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>
+                  Wins
+                </Typography>
+                <Stack spacing={0.75} sx={{ mt: 1 }}>
+                  {(aiSession?.highlights || ["Chest pop", "Arms look fuller"]).slice(0, 3).map((t, idx) => (
+                    <Box
+                      key={idx}
+                      sx={{
+                        p: 1,
+                        borderRadius: 2,
+                        background: "rgba(0,255,190,0.05)",
+                        border: "1px solid rgba(0,255,190,0.14)",
+                      }}
+                    >
+                      <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
+
+                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>
+                  Next unlocks (pick 1)
+                </Typography>
+                <Stack spacing={0.75} sx={{ mt: 1 }}>
+                  {(aiSession?.levers || ["Protein +25g today", "Train 2–3× this week"])
+                    .slice(0, 2)
+                    .map((t, idx) => (
+                      <Box
+                        key={idx}
+                        sx={{
+                          p: 1,
+                          borderRadius: 2,
+                          background: "rgba(0,255,255,0.04)",
+                          border: "1px solid rgba(0,255,255,0.14)",
+                        }}
+                      >
+                        <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
+                      </Box>
+                    ))}
+                </Stack>
+
+                {aiError ? (
+                  <Typography sx={{ mt: 1.5, color: "rgba(255,180,180,0.9)", fontWeight: 700 }}>
+                    {aiError}
                   </Typography>
-                </CardContent>
-              </Card>
-            </Stack>
-          ) : (
-            <Stack spacing={2}>
-              <Card
-                sx={{
-                  borderRadius: 5,
-                  border: "1px solid rgba(120,255,180,0.18)",
-                  bgcolor: "rgba(255,255,255,0.04)",
-                  boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
-                }}
-              >
-                <CardContent>
-                  <Stack spacing={1.2}>
-                    <Typography variant="h5" sx={{ fontWeight: 950, letterSpacing: 0.3, color: "rgba(140,255,200,0.98)", textShadow: "0 0 14px rgba(140,255,200,0.22)" }}>
-                      Scan Results
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)" }}>
-                      Your Pose Session signals (always neutral or positive).
-                    </Typography>
+                ) : null}
 
-                    <Card
-                      sx={{
-                        borderRadius: 4,
-                        bgcolor: "rgba(0,0,0,0.32)",
-                        border: "1px solid rgba(120,255,180,0.18)",
-                      }}
-                    >
-                      <CardContent>
-                        <Typography sx={{ fontWeight: 950, color: "rgba(170,255,210,0.98)", textShadow: "0 0 14px rgba(140,255,200,0.18)" }}>
-                          {resultsContext.title}
-                        </Typography>
-                        <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.6 }}>
-                          {resultsContext.body}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-
-                    {finalizing && (
-                      <Card
-                        sx={{
-                          borderRadius: 4,
-                          bgcolor: "rgba(0,0,0,0.32)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                        }}
-                      >
-                        <CardContent>
-                          <Typography sx={{ fontWeight: 950, color: "rgba(240,255,252,0.98)" }}>Scanning…</Typography>
-                          <Typography variant="body2" sx={{ color: "rgba(140,255,200,0.92)", mt: 0.4, textShadow: "0 0 10px rgba(140,255,200,0.18)" }}>
-                            Locking your wins.
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ mt: 1 }}>
-                      <Card
-                        sx={{
-                          flex: 1,
-                          borderRadius: 4,
-                          bgcolor: "rgba(0,0,0,0.32)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                        }}
-                      >
-                        <CardContent>
-                          <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>BUILD ARC</Typography>
-                          <Typography sx={{ fontSize: 44, fontWeight: 980, lineHeight: 1.0, color: "rgba(240,255,252,0.98)", textShadow: "0 0 18px rgba(140,255,200,0.22)" }}>
-                            {results.build_arc}/100
-                          </Typography>
-                          <Typography sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
-                            {results.strength} • your physique momentum (pose match + consistency)
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)" }}>
-                            Re‑scan weekly • Streak {streakCount}
-                          </Typography>
-                        </CardContent>
-                      </Card>
-
-                      <Card
-                        sx={{
-                          flex: 1,
-                          borderRadius: 4,
-                          bgcolor: "rgba(0,0,0,0.32)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                        }}
-                      >
-                        <CardContent>
-                          <Typography sx={{ fontWeight: 950, color: "rgba(140,255,200,0.95)", textShadow: "0 0 12px rgba(140,255,200,0.16)" }}>Since last</Typography>
-                          <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
-                            {deltaLabel || "Baseline locked"}
-                          </Typography>
-                          <Stack spacing={0.6} sx={{ mt: 1.0 }}>
-                            {(deltaWins?.length ? deltaWins : results.wins || []).slice(0, 4).map((w) => {
-                              const displayV =
-                                typeof w.v === "string" ? w.v.replace(/%/g, " level") : w.v;
-                              return (
-                              <Stack key={w.k} direction="row" justifyContent="space-between">
-                                <Typography sx={{ color: "rgba(255,255,255,0.78)" }}>{w.k}</Typography>
-                                <Typography sx={{ color: "rgba(170,255,210,0.95)", fontWeight: 900 }}>{displayV}</Typography>
-                              </Stack>
-                              );
-                            })}
-                          </Stack>
-                        </CardContent>
-                      </Card>
-                    </Stack>
-
-                    <Card
-                      sx={{
-                        borderRadius: 4,
-                        bgcolor: "rgba(0,0,0,0.32)",
-                        border: "1px solid rgba(255,255,255,0.10)",
-                      }}
-                    >
-                      <CardContent>
-                        <Typography sx={{ fontWeight: 950, color: "rgba(140,255,200,0.95)", textShadow: "0 0 12px rgba(140,255,200,0.16)" }}>Next unlocks</Typography>
-                        <Stack spacing={0.6} sx={{ mt: 0.8 }}>
-                          {(results.levers || []).map((t) => (
-                            <Typography key={t} variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
-                              • {t}
-                            </Typography>
-                          ))}
-                        </Stack>
-                      </CardContent>
-                    </Card>
-
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ mt: 0.5 }}>
-                      <Button
-                        variant="contained"
-                        startIcon={<IosShareIcon />}
-                        onClick={handleShare}
-                        sx={{
-                          borderRadius: 999,
-                          fontWeight: 950,
-                          px: 2.2,
-                          background: "linear-gradient(180deg, rgba(70,140,255,1), rgba(50,95,240,1))",
-                          boxShadow: "0 12px 34px rgba(35,85,220,0.35)",
-                        }}
-                      >
-                        Share
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        onClick={() => {
-                          setCaptures([]);
-                          setPoseIndex(0);
-                          setPhase("capture");
-                          window.location.reload();
-                        }}
-                        sx={{
-                          borderRadius: 999,
-                          fontWeight: 900,
-                          borderColor: "rgba(255,255,255,0.20)",
-                          color: "rgba(255,255,255,0.82)",
-                        }}
-                      >
-                        Re‑scan
-                      </Button>
-                      <Box sx={{ flex: 1 }} />
-                      <Button
-                        variant="text"
-                        onClick={() => history.push("/")}
-                        sx={{ color: "rgba(255,255,255,0.72)", textTransform: "none" }}
-                      >
-                        Back to Daily Eval
-                      </Button>
-                    </Stack>
-
-                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)" }}>
-                      Creator tip: share weekly to show your arc — “Week over week” wins compound.
-                    </Typography>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Stack>
-          )}
-        </Box>
-      </Box>
+                <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                  <Button fullWidth variant="outlined" onClick={() => start()}>
+                    New Session
+                  </Button>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    startIcon={<IosShareIcon />}
+                    onClick={share}
+                  >
+                    Share
+                  </Button>
+                </Stack>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </Box>
   );
 }
