@@ -308,6 +308,10 @@ export default function PoseSession() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
+  const autoCanvasRef = useRef(null);
+  const autoPrevRef = useRef(null); // Float32Array luminance
+  const autoStableCountRef = useRef(0);
+  const autoLastTickRef = useRef(0);
 
   const [phase, setPhase] = useState("capture"); // capture | results
   const [poseIndex, setPoseIndex] = useState(0);
@@ -316,6 +320,16 @@ export default function PoseSession() {
   const [autoEnabled, setAutoEnabled] = useState(true);
   const [countdown, setCountdown] = useState(0);
   const [scanning, setScanning] = useState(false);
+
+  // Auto-capture signals (best-effort; never blocks manual capture)
+  const [autoStatus, setAutoStatus] = useState({
+    match: false,
+    stable: false,
+    motion: 999,
+    center: 0,
+    height: 0,
+    hint: "Align to the outline",
+  });
 
   const [captures, setCaptures] = useState([]); // [{ poseKey, dataUrl, id }]
 
@@ -402,6 +416,80 @@ export default function PoseSession() {
     return c.toDataURL("image/jpeg", 0.88);
   }, []);
 
+  function _sampleVideoLuma(videoEl, size = 72) {
+  try {
+    const v = videoEl;
+    if (!v || !v.videoWidth || !v.videoHeight) return null;
+
+    if (!autoCanvasRef.current) autoCanvasRef.current = document.createElement("canvas");
+    const c = autoCanvasRef.current;
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, size, size);
+    const { data } = ctx.getImageData(0, 0, size, size);
+
+    const lum = new Float32Array(size * size);
+    let sum = 0;
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      lum[p] = y;
+      sum += y;
+    }
+    const mean = sum / (size * size);
+
+    const thr = mean + 18;
+
+    let energy = 0;
+    let cx = 0;
+    let cy = 0;
+    let top = 0;
+    let mid = 0;
+    let bot = 0;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const p = y * size + x;
+        const val = lum[p];
+        const m = val > thr ? (val - thr) : 0;
+        if (m <= 0) continue;
+
+        energy += m;
+        cx += x * m;
+        cy += y * m;
+
+        if (y < size * 0.22) top += m;
+        else if (y > size * 0.78) bot += m;
+        else mid += m;
+      }
+    }
+
+    const centroid = energy > 0 ? { x: cx / energy, y: cy / energy } : { x: size / 2, y: size / 2 };
+
+    const prev = autoPrevRef.current;
+    let motion = 999;
+    if (prev && prev.length === lum.length) {
+      let diff = 0;
+      for (let i = 0; i < lum.length; i++) diff += Math.abs(lum[i] - prev[i]);
+      motion = diff / lum.length;
+    }
+    autoPrevRef.current = lum;
+
+    const dx = Math.abs(centroid.x - size / 2) / (size / 2);
+    const dy = Math.abs(centroid.y - size / 2) / (size / 2);
+    const center = clamp(1 - (dx * 0.9 + dy * 0.9), 0, 1);
+
+    const height = energy > 0 ? clamp((top / energy) * 1.7 + (bot / energy) * 1.7 + (mid / energy) * 0.6, 0, 1) : 0;
+
+    return { motion, center, height, energy, size };
+  } catch {
+    return null;
+  }
+}
+
   const doCapture = useCallback(() => {
     const dataUrl = captureFrame();
     if (!dataUrl) return;
@@ -421,33 +509,108 @@ export default function PoseSession() {
     }
   }, [captureFrame, pose?.key, poseIndex, stopStream]);
 
-  // Auto-capture countdown when ready + auto enabled
-  useEffect(() => {
-    if (phase !== "capture") return;
-    if (!ready || !autoEnabled) return;
-    if (scanning) return;
+// Auto-capture: best-effort "match outline → hold still → auto snap"
+// - Uses lightweight frame sampling (no heavy CV).
+// - Never blocks manual capture.
+useEffect(() => {
+  if (phase !== "capture") return;
+  if (!ready || !autoEnabled) {
+    setAutoStatus((st) => ({ ...st, match: false, stable: false, hint: "Align to the outline" }));
+    autoStableCountRef.current = 0;
+    return;
+  }
+  if (countdown > 0) return;
 
-    let t1;
-    let t2;
-    setScanning(true);
-    setCountdown(3);
+  const v = videoRef.current;
+  if (!v) return;
 
-    t1 = setInterval(() => {
-      setCountdown((c) => c - 1);
-    }, 900);
+  let alive = true;
 
-    t2 = setTimeout(() => {
-      doCapture();
-      setScanning(false);
-    }, 2700);
+  const tick = () => {
+    if (!alive) return;
 
-    return () => {
-      clearInterval(t1);
-      clearTimeout(t2);
-      setScanning(false);
-      setCountdown(0);
-    };
-  }, [phase, ready, autoEnabled, doCapture, scanning]);
+    // throttle ~6fps
+    const now = Date.now();
+    if (now - (autoLastTickRef.current || 0) < 160) {
+      requestAnimationFrame(tick);
+      return;
+    }
+    autoLastTickRef.current = now;
+
+    const metrics = _sampleVideoLuma(v, 72);
+    if (!metrics) {
+      requestAnimationFrame(tick);
+      return;
+    }
+
+    const motionOk = metrics.motion < 7.5; // lower = steadier
+    const centerOk = metrics.center > 0.55;
+    const heightOk = metrics.height > 0.55;
+    const energyOk = metrics.energy > 1200;
+
+    const match = centerOk && heightOk && energyOk;
+
+    if (match && motionOk) autoStableCountRef.current += 1;
+    else autoStableCountRef.current = 0;
+
+    const stable = autoStableCountRef.current >= 5;
+
+    let hint = "Align to the outline";
+    if (!energyOk) hint = "Step into better lighting / fill the frame";
+    else if (!centerOk) hint = "Center your body on the outline";
+    else if (!heightOk) hint = "Show full body (head + feet)";
+    else if (!motionOk) hint = "Hold still…";
+    else if (stable) hint = "Locked — auto capture";
+
+    setAutoStatus({
+      match,
+      stable,
+      motion: metrics.motion,
+      center: metrics.center,
+      height: metrics.height,
+      hint,
+    });
+
+    requestAnimationFrame(tick);
+  };
+
+  const raf = requestAnimationFrame(tick);
+
+  return () => {
+    alive = false;
+    try { cancelAnimationFrame(raf); } catch {}
+    autoStableCountRef.current = 0;
+  };
+}, [phase, ready, autoEnabled, countdown, poseIndex]);
+
+// Countdown once we have a stable match
+useEffect(() => {
+  if (phase !== "capture") return;
+  if (!autoEnabled || !ready) return;
+  if (!autoStatus.match || !autoStatus.stable) return;
+  if (countdown > 0) return;
+
+  let t1;
+  let t2;
+  setScanning(true);
+  setCountdown(3);
+
+  t1 = setInterval(() => {
+    setCountdown((c) => c - 1);
+  }, 900);
+
+  t2 = setTimeout(() => {
+    doCapture();
+    setScanning(false);
+  }, 2700);
+
+  return () => {
+    clearInterval(t1);
+    clearTimeout(t2);
+    setScanning(false);
+    setCountdown(0);
+  };
+}, [phase, autoEnabled, ready, autoStatus.match, autoStatus.stable, countdown, doCapture]);
 
   // Finalize session results when entering results phase
   useEffect(() => {
@@ -769,7 +932,7 @@ export default function PoseSession() {
                   >
                     <Chip
                       size="small"
-                      label="Hold phone steady"
+                      label={autoStatus.hint}
                       sx={{
                         bgcolor: "rgba(0,0,0,0.35)",
                         color: "rgba(255,255,255,0.88)",
@@ -879,7 +1042,7 @@ export default function PoseSession() {
                       <Button
                         variant="contained"
                         onClick={doCapture}
-                        disabled={autoEnabled && ready}
+                        disabled={countdown > 0}
                         sx={{
                           borderRadius: 999,
                           fontWeight: 950,
