@@ -58,6 +58,8 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const strength = String(data?.strength ?? "Consistency").slice(0, 28);
   const horizon = clamp(data?.horizon_days ?? 90, 7, 365);
   const poseCount = clamp(data?.pose_count ?? 3, 1, 10);
+  const streak = clamp(data?.streak_count ?? 1, 1, 999);
+  const since = clamp(data?.since_points ?? 0, 0, 99);
   const wins = Array.isArray(data?.wins) ? data.wins.slice(0, 4) : [];
 
   const canvas = document.createElement("canvas");
@@ -96,6 +98,17 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   text(ctx, "POSE SESSION", 90, 90, 44, "rgba(170,255,210,0.95)", 950);
   text(ctx, `3 poses • auto‑capture • progress tracking`, 90, 148, 26, "rgba(255,255,255,0.72)", 700);
 
+  // Streak chip
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, W - 350, 92, 260, 58, 999);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  text(ctx, `STREAK ${streak}×`, W - 220, 106, 26, "rgba(255,255,255,0.88)", 950, "center");
+
   // Main card
   const cardX = 90;
   const cardY = 240;
@@ -130,6 +143,19 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   ctx.stroke();
   ctx.restore();
   text(ctx, `${poseCount} poses`, cardX + cardW - 195, cardY + 83, 26, "rgba(255,255,255,0.88)", 900, "center");
+
+  // Since last (positive-only)
+  if (since > 0) {
+    ctx.save();
+    ctx.fillStyle = "rgba(120,255,180,0.10)";
+    ctx.strokeStyle = "rgba(120,255,180,0.22)";
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cardX + cardW - 300, cardY + 140, 210, 56, 999);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    text(ctx, `+${since} pts`, cardX + cardW - 195, cardY + 153, 26, "rgba(170,255,210,0.95)", 950, "center");
+  }
 
   // Divider line
   ctx.save();
