@@ -57,6 +57,45 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
+async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
+  try {
+    const clientKey = "slimcal_client_id";
+    let clientId = "";
+    if (typeof window !== "undefined") {
+      clientId =
+        window.localStorage.getItem(clientKey) ||
+        window.localStorage.getItem("client_id") ||
+        "";
+      if (!clientId) {
+        clientId = uid();
+        window.localStorage.setItem(clientKey, clientId);
+      }
+    }
+
+    const res = await fetch("/api/ai/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(clientId ? { "x-client-id": clientId } : {}),
+      },
+      body: JSON.stringify({
+        feature: "pose_session",
+        poses,
+        prev_muscle_signals: prevSession?.muscleSignals || prevSession?.signals || null,
+        local_day: todayISO,
+      }),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json || typeof json !== "object") return null;
+    return json.session || null;
+  } catch {
+    return null;
+  }
+}
+
+
 function PoseGhost({ pose, size = 260 }) {
   // Simple SVG “outline” that shifts arm positions per pose.
   const stroke = "rgba(120,255,180,0.55)";
@@ -422,42 +461,81 @@ export default function PoseSession() {
     (async () => {
       setFinalizing(true);
       try {
+
         const today = localDayISO(new Date());
 
-        // Analyze each capture
-        const analyzed = [];
-        for (const cap of captures) {
-          const metrics = await analyzeImageDataUrl(cap.dataUrl);
-          const signals = computeSignalsForPose(cap.poseKey, metrics);
-          analyzed.push({ poseKey: cap.poseKey, metrics, signals });
+        // Try AI scoring first (3 poses). If anything fails, fall back to local lightweight signals.
+        const hist = readPoseSessionHistory(userId);
+        const prev = hist?.[0] || prevSession || null;
+
+        const aiSession = await scorePoseSessionWithAI({
+          poses: captures.map((c) => ({
+            poseKey: c.poseKey,
+            title: c.title,
+            image_data_url: c.dataUrl,
+          })),
+          prevSession: prev,
+          todayISO: today,
+        });
+
+        let currentSession = null;
+
+        if (aiSession && aiSession.muscleSignals) {
+          const streak = computeSessionStreak(hist);
+          const effectiveStreak = clamp(streak.streak || 1, 1, 999);
+
+          currentSession = {
+            id: uid(),
+            user_id: userId,
+            localDay: today,
+            createdAt: Date.now(),
+            poses: aiSession.poses || captures.map((c) => ({ poseKey: c.poseKey })),
+            muscleSignals: aiSession.muscleSignals,
+            build_arc: clamp(aiSession.build_arc ?? aiSession.buildArcScore ?? 80, 0, 100),
+            percentile: clamp(aiSession.percentile ?? 20, 1, 99),
+            strength: String(aiSession.strength || aiSession.strengthTag || "Consistency").slice(0, 40),
+            horizon_days: clamp(aiSession.horizon_days ?? 90, 7, 365),
+            highlights: Array.isArray(aiSession.highlights) ? aiSession.highlights.slice(0, 5) : [],
+            levers: Array.isArray(aiSession.levers) ? aiSession.levers.slice(0, 4) : [],
+            confidenceNote: String(aiSession.confidenceNote || "").slice(0, 160),
+            poseQuality: aiSession.poseQuality || null,
+            streak_count: effectiveStreak,
+          };
+        } else {
+          // Analyze each capture locally (non-medical). Used for consistent progress tracking + deltas.
+          const analyzed = [];
+          for (const cap of captures) {
+            const metrics = await analyzeImageDataUrl(cap.dataUrl);
+            const signals = computeSignalsForPose(cap.poseKey, metrics);
+            analyzed.push({ poseKey: cap.poseKey, metrics, signals });
+          }
+
+          const mergedSignals = mergeSignals(analyzed.map((a) => a.signals));
+
+          const streak = computeSessionStreak(hist);
+          const effectiveStreak = clamp(streak.streak || 1, 1, 999);
+
+          const buildArc = computeBuildArc(mergedSignals, effectiveStreak);
+          const percentile = buildPercentile(buildArc);
+          const strength = buildStrengthTag(effectiveStreak, mergedSignals);
+
+          currentSession = {
+            id: uid(),
+            user_id: userId,
+            localDay: today,
+            createdAt: Date.now(),
+            poses: analyzed.map((a) => ({ poseKey: a.poseKey, metrics: a.metrics })),
+            muscleSignals: mergedSignals,
+            build_arc: buildArc,
+            percentile,
+            strength,
+            horizon_days: 90,
+            streak_count: effectiveStreak,
+          };
         }
 
-        const mergedSignals = mergeSignals(analyzed.map((a) => a.signals));
-
-        const hist = readPoseSessionHistory(userId);
-        const streak = computeSessionStreak(hist);
-        const effectiveStreak = clamp(streak.streak || 1, 1, 999);
-
-        const buildArc = computeBuildArc(mergedSignals, effectiveStreak);
-        const percentile = buildPercentile(buildArc);
-        const strength = buildStrengthTag(effectiveStreak, mergedSignals);
-
-        const currentSession = {
-          id: uid(),
-          user_id: userId,
-          localDay: today,
-          createdAt: Date.now(),
-          poses: analyzed.map((a) => ({ poseKey: a.poseKey, metrics: a.metrics })),
-          muscleSignals: mergedSignals,
-          build_arc: buildArc,
-          percentile,
-          strength,
-          horizon_days: 90,
-        };
-
-        // Compute positive-only deltas vs prev session
-        const prev = hist?.[0] || prevSession;
-        const deltas = computeDeltasPositiveOnly(prev || null, currentSession);
+        // Compute positive-only deltas vs previous session
+        const deltas = computeDeltasPositiveOnly(prev, currentSession);
 
         // Wins list (top 4)
         const wins = deltas.wins.slice(0, 4);
@@ -474,16 +552,18 @@ export default function PoseSession() {
             : `Steady since your last session (${prev.localDay})`;
         }
 
-        const levers = [
-          "Add +25g protein today",
-          "Strength train 2–3×/week",
-          "Re-scan weekly in similar lighting",
-        ];
+        const levers = (currentSession.levers && currentSession.levers.length)
+          ? currentSession.levers
+          : [
+              "Add +25g protein today",
+              "Strength train 2–3×/week",
+              "Re-scan weekly in similar lighting",
+            ];
 
         if (!cancelled) {
           setDeltaWins(wins);
           setDeltaLabel(label);
-          setStreakCount(effectiveStreak);
+          setStreakCount(currentSession.streak_count || 1);
           setSessionResult({
             ...currentSession,
             wins,

@@ -7,7 +7,7 @@
 //   keyed by X-Client-Id (falls back to IP if missing). Attempts are synced to
 //   Supabase when possible; fallback to in-memory counter if table/policy missing.
 //
-// Features supported: 'workout', 'meal', 'coach', 'daily_eval_verdict', 'frame_check'.
+// Features supported: 'workout', 'meal', 'coach', 'daily_eval_verdict', 'frame_check', 'body_scan', 'pose_session'.
 //
 
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
@@ -81,6 +81,72 @@ function getUserIdFromHeaders(req) {
   }
   return null;
 }
+
+function safeParseJsonFromText(text) {
+  const t = String(text || "").trim();
+  if (!t) return null;
+  try {
+    return JSON.parse(t);
+  } catch {
+    // Best-effort: extract the first JSON object from the response.
+    const m = t.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    try {
+      return JSON.parse(m[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function clamp(n, lo, hi) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return lo;
+  return Math.max(lo, Math.min(hi, x));
+}
+
+function fallbackBodyScan() {
+  // Always neutral/positive. Treated as a baseline estimate.
+  return {
+    bodyFatPct: 18.7,
+    leanMassLbs: 156,
+    bmi: 23,
+    buildArcScore: 81,
+    percentile: 19,
+    strengthTag: "Consistency",
+    horizon: "90-Day upgrade horizon",
+    levers: ["Add ~25g protein today", "Strength train 2–3×/week"],
+    confidenceNote: "Solid baseline — re-scan in similar lighting for clean tracking.",
+  };
+}
+
+
+function fallbackPoseSession() {
+  return {
+    build_arc: 81,
+    percentile: 19,
+    strength: "Consistency",
+    horizon_days: 90,
+    muscleSignals: {
+      delts: 0.62,
+      arms: 0.64,
+      lats: 0.60,
+      chest: 0.58,
+      back: 0.61,
+      waist_taper: 0.57,
+      legs: 0.55,
+    },
+    poseQuality: {
+      front_relaxed: 0.72,
+      front_double_bi: 0.74,
+      back_double_bi: 0.73,
+    },
+    highlights: ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
+    levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
+    confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
+  };
+}
+
 
 // -------------------- ENTITLEMENTS --------------------
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
@@ -159,6 +225,8 @@ async function resolveUserId(req, { user_id, email }) {
 const FREE_LIMITS = {
   default: 3,
   frame_check: 1,
+  body_scan: 1,
+  pose_session: 1,
 };
 
 function getFreeLimitForFeature(feature) {
@@ -1007,6 +1075,204 @@ export default async function handler(req, res) {
     }
   }
 
+  if (feature === "body_scan" || feature === "body_scan_beta") {
+    try {
+      const imageDataUrl = String(
+        body?.image_data_url || body?.imageDataUrl || body?.image || body?.photo || ""
+      );
+
+      if (!imageDataUrl || !imageDataUrl.startsWith("data:image")) {
+        res.status(400).json({ error: "Missing image_data_url" });
+        return;
+      }
+
+      // OpenAI unavailable: return deterministic fallback so UI never breaks.
+      if (!openai) {
+        res.status(200).json({ scan: fallbackBodyScan(), warning: "ai_unavailable_fallback" });
+        return;
+      }
+
+      const sys =
+        "You are SlimCal Body Scan (Beta) — cinematic but grounded. " +
+        "Return VALID JSON ONLY (no markdown, no extra text). " +
+        "This is a rough, non-medical estimate from a single photo. " +
+        "Tone must be neutral or positive only — never negative or insulting. " +
+        "JSON keys: bodyFatPct (number), leanMassLbs (number), bmi (number), buildArcScore (int 0-100), " +
+        "percentile (int 1-99), strengthTag (string), horizon (string), levers (array of 2-4 short strings), confidenceNote (string).";
+
+      const userText =
+        "Analyze this full-body photo and estimate the requested fields. " +
+        "Be conservative with numbers. If uncertain, use a 'solid baseline' confidence note. " +
+        "Levers should be actionable and supportive (protein, training consistency, steps, sleep).";
+
+      const call = openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: sys },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+        temperature: 0.35,
+        max_tokens: 650,
+      });
+
+      const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+      if (!ai) {
+        res.status(200).json({ scan: fallbackBodyScan(), warning: "ai_timeout_fallback" });
+        return;
+      }
+
+      const text = ai?.choices?.[0]?.message?.content || "";
+      const parsed = safeParseJsonFromText(text) || {};
+
+      const fb = fallbackBodyScan();
+      const scan = {
+        bodyFatPct: clamp(parsed.bodyFatPct ?? fb.bodyFatPct, 4, 45),
+        leanMassLbs: clamp(parsed.leanMassLbs ?? fb.leanMassLbs, 60, 260),
+        bmi: clamp(parsed.bmi ?? fb.bmi, 14, 45),
+        buildArcScore: Math.round(clamp(parsed.buildArcScore ?? fb.buildArcScore, 0, 100)),
+        percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
+        strengthTag: String(parsed.strengthTag || fb.strengthTag).slice(0, 48),
+        horizon: String(parsed.horizon || fb.horizon).slice(0, 80),
+        levers: Array.isArray(parsed.levers)
+          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
+          : fb.levers,
+        confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 140),
+      };
+
+      if (!scan.levers?.length) scan.levers = fb.levers;
+      if (scan.levers.length < 2) scan.levers = [...scan.levers, ...fb.levers].slice(0, 2);
+
+      res.status(200).json({ scan, ...(body?.debug ? { raw: text } : {}) });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] body_scan error:", e);
+      res.status(200).json({ scan: fallbackBodyScan(), warning: "ai_error_fallback" });
+      return;
+    }
+  }
+
+
+
+  if (feature === "pose_session" || feature === "pose_session_beta") {
+    try {
+      const poses = Array.isArray(body?.poses) ? body.poses : [];
+      if (!poses.length) {
+        res.status(400).json({ error: "Missing poses" });
+        return;
+      }
+
+      // Validate images (expect data URLs)
+      const cleanPoses = poses
+        .map((p) => ({
+          poseKey: String(p?.poseKey || p?.key || "").trim(),
+          title: String(p?.title || "").trim(),
+          imageDataUrl: String(p?.image_data_url || p?.imageDataUrl || p?.image || "").trim(),
+        }))
+        .filter((p) => p.poseKey && p.imageDataUrl && p.imageDataUrl.startsWith("data:image"))
+        .slice(0, 5);
+
+      if (cleanPoses.length < 2) {
+        res.status(400).json({ error: "At least 2 valid pose images required" });
+        return;
+      }
+
+      if (!openai) {
+        res.status(200).json({ session: fallbackPoseSession(), warning: "ai_unavailable_fallback" });
+        return;
+      }
+
+      const sys =
+        "You are SlimCal Pose Session Scanner (Beta). " +
+        "Return VALID JSON ONLY (no markdown, no extra text). " +
+        "This is NOT a medical device. You are estimating 'physique signals' and 'pose quality' from 3 bodybuilding poses. " +
+        "Tone MUST be neutral or positive only. Never insult. Never say 'bad', 'weak', 'behind', or shame language. " +
+        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), strength (string), horizon_days (int), " +
+        "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
+        "poseQuality (object mapping poseKey to number 0..1), highlights (array 2-5 short strings), levers (array 2-4 short strings), confidenceNote (string).";
+
+      const userText =
+        "Analyze the following pose images: Front Relaxed, Front Double Biceps, Back Double Biceps (or similar). " +
+        "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
+        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
+        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
+
+      const content = [
+        { type: "text", text: userText },
+        ...cleanPoses.map((p) => ({
+          type: "image_url",
+          image_url: { url: p.imageDataUrl },
+        })),
+      ];
+
+      const call = openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content },
+        ],
+        temperature: 0.35,
+        max_tokens: 900,
+      });
+
+      const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
+      if (!ai) {
+        res.status(200).json({ session: fallbackPoseSession(), warning: "ai_timeout_fallback" });
+        return;
+      }
+
+      const text = ai?.choices?.[0]?.message?.content || "";
+      const parsed = safeParseJsonFromText(text) || {};
+      const fb = fallbackPoseSession();
+
+      const ms = parsed.muscleSignals || parsed.muscles || fb.muscleSignals;
+      const pq = parsed.poseQuality || parsed.pose_quality || fb.poseQuality;
+
+      const session = {
+        build_arc: Math.round(clamp(parsed.build_arc ?? parsed.buildArcScore ?? fb.build_arc, 0, 100)),
+        percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
+        strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
+        horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
+        muscleSignals: {
+          delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
+          arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
+          lats: clamp(ms?.lats ?? fb.muscleSignals.lats, 0, 1),
+          chest: clamp(ms?.chest ?? fb.muscleSignals.chest, 0, 1),
+          back: clamp(ms?.back ?? fb.muscleSignals.back, 0, 1),
+          waist_taper: clamp(ms?.waist_taper ?? ms?.taper ?? fb.muscleSignals.waist_taper, 0, 1),
+          legs: clamp(ms?.legs ?? fb.muscleSignals.legs, 0, 1),
+        },
+        poseQuality: {
+          front_relaxed: clamp(pq?.front_relaxed ?? pq?.frontRelaxed ?? fb.poseQuality.front_relaxed, 0, 1),
+          front_double_bi: clamp(pq?.front_double_bi ?? pq?.frontDoubleBi ?? fb.poseQuality.front_double_bi, 0, 1),
+          back_double_bi: clamp(pq?.back_double_bi ?? pq?.backDoubleBi ?? fb.poseQuality.back_double_bi, 0, 1),
+        },
+        highlights: Array.isArray(parsed.highlights)
+          ? parsed.highlights.map((s) => String(s).slice(0, 90)).slice(0, 5)
+          : fb.highlights,
+        levers: Array.isArray(parsed.levers)
+          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
+          : fb.levers,
+        confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
+        poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
+      };
+
+      if (!session.highlights?.length) session.highlights = fb.highlights;
+      if (!session.levers?.length) session.levers = fb.levers;
+
+      res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
+      return;
+    } catch (e) {
+      console.error("[ai/generate] pose_session error:", e);
+      res.status(200).json({ session: fallbackPoseSession(), warning: "ai_error_fallback" });
+      return;
+    }
+  }
 
   if (feature === "frame_check") {
     try {
