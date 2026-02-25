@@ -18,6 +18,7 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -173,6 +174,10 @@ function PoseGhost({ pose }) {
   );
 }
 
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
 
 function computeSignalsForPose(poseKey, metrics) {
   // Map generic image metrics into "physique signals" buckets per pose.
@@ -263,6 +268,11 @@ export default function PoseSession() {
   const [countdown, setCountdown] = useState(0);
   const [scanning, setScanning] = useState(false);
 
+  // Keypoint pose matching + ghost fit
+  const [poseMatch, setPoseMatch] = useState(0);
+  const [ghostFit, setGhostFit] = useState(null); // {cx, cy, s} in 0..1
+  const holdRef = useRef({ t0: 0, ready: false, lastPoseKey: "" });
+
   const [captures, setCaptures] = useState([]); // [{ poseKey, dataUrl, id }]
 
   // session history
@@ -309,7 +319,8 @@ export default function PoseSession() {
       setError("");
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 1280 } },
+          // Prefer wide sensor; we'll letterbox (contain) instead of zooming.
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
         if (!isMounted) return;
@@ -330,6 +341,89 @@ export default function PoseSession() {
       stopStream();
     };
   }, [phase, stopStream]);
+
+  // Keypoint loop (match outline → hold still → auto snap)
+  useEffect(() => {
+    if (phase !== "capture") return;
+
+    let raf = 0;
+    let cancelled = false;
+    let landmarker = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      const v = videoRef.current;
+      if (!v || v.readyState < 2) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      try {
+        landmarker = landmarker || (await getPoseLandmarker());
+        const res = landmarker.detectForVideo(v, performance.now());
+        const landmarks = res?.landmarks?.[0] || null;
+
+        const { match, bbox } = scorePoseMatch(pose?.key, landmarks);
+
+        // Smooth match a bit to avoid flicker
+        setPoseMatch((prev) => lerp(prev, match, 0.35));
+
+        if (bbox) {
+          const cx = (bbox.minX + bbox.maxX) / 2;
+          const cy = (bbox.minY + bbox.maxY) / 2;
+          const h = Math.max(0.001, bbox.maxY - bbox.minY);
+          // target ghost height ~72% of container height
+          const s = clamp(h / 0.72, 0.65, 1.35);
+          setGhostFit((prev) => {
+            if (!prev) return { cx, cy, s };
+            return {
+              cx: lerp(prev.cx, cx, 0.25),
+              cy: lerp(prev.cy, cy, 0.25),
+              s: lerp(prev.s, s, 0.18),
+            };
+          });
+        }
+
+        // Hold-still readiness gate
+        const now = performance.now();
+        const st = holdRef.current;
+        if (st.lastPoseKey !== pose?.key) {
+          st.lastPoseKey = pose?.key;
+          st.t0 = 0;
+          st.ready = false;
+          setReady(false);
+        }
+
+        const threshold = pose?.key === "front_relaxed" ? 0.78 : 0.82;
+        if (match >= threshold) {
+          if (!st.t0) st.t0 = now;
+          const held = now - st.t0;
+          if (held >= 750) {
+            if (!st.ready) {
+              st.ready = true;
+              setReady(true);
+            }
+          }
+        } else {
+          st.t0 = 0;
+          if (st.ready) {
+            st.ready = false;
+            setReady(false);
+          }
+        }
+      } catch {
+        // If landmarker fails (rare / offline), we fall back to manual capture.
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [phase, pose?.key]);
 
   const captureFrame = useCallback(() => {
     const v = videoRef.current;
@@ -524,8 +618,33 @@ export default function PoseSession() {
     );
   }, [sessionResult]);
 
+  const resultsContext = useMemo(() => {
+    const isBaseline = (deltaLabel || "").toLowerCase().includes("baseline") || !prevSession;
+    if (isBaseline) {
+      return {
+        title: "Baseline locked ✅",
+        body: "You’ve got a solid starting look. Re‑scan weekly in similar lighting and you’ll see your physique signals climb fast.",
+      };
+    }
+    // Turn top win into a hype line
+    const top = (results.wins || [])[0];
+    const vibe = top?.k ? `WHOA — ${top.k} is trending up.` : "WHOA — I’m seeing real progress.";
+    return {
+      title: vibe,
+      body: "Keep doing what you’re doing. Hold this pose session weekly to make your gains obvious (and shareable).",
+    };
+  }, [deltaLabel, prevSession, results.wins]);
+
   const handleShare = useCallback(async () => {
     try {
+      const isBaseline = (deltaLabel || "").toLowerCase().includes("baseline") || !prevSession;
+      const headline = isBaseline
+        ? "Baseline locked ✅ You’re starting strong."
+        : "WHOA — I’m seeing real progress."
+      const subhead = isBaseline
+        ? "Re‑scan weekly in similar lighting to watch your muscles pop."
+        : "Keep the streak alive — week‑over‑week wins compound.";
+
       const blob = await buildPoseSessionSharePng({
         build_arc: results.build_arc,
         percentile: results.percentile,
@@ -535,14 +654,17 @@ export default function PoseSession() {
         pose_count: captures.length,
         streak_count: streakCount,
         since_points: results.since_points || 0,
+        pose_images: captures.map((c) => c.dataUrl),
+        headline,
+        subhead,
       });
 
-      const caption = `Pose Session ✅ Build Arc ${results.build_arc}/100 • Top ${results.percentile}% • Streak ${streakCount} • #SlimcalAI`;
+      const caption = `Pose Session ✅ ${isBaseline ? "Baseline locked" : "Progress unlocked"} • Streak ${streakCount} • #SlimcalAI`;
       await shareOrDownloadPng(blob, "slimcal-pose-session.png", caption);
     } catch {
       // ignore
     }
-  }, [captures.length, results, streakCount, deltaLabel]);
+  }, [captures, results, streakCount, deltaLabel, prevSession]);
 
   return (
     <Box sx={{ minHeight: "100vh", background: "#070A0F", color: "white" }}>
@@ -640,7 +762,9 @@ export default function PoseSession() {
                     style={{
                       width: "100%",
                       height: "100%",
-                      objectFit: "cover",
+                      // 'contain' prevents the iOS Safari "zoomed" look.
+                      objectFit: "contain",
+                      backgroundColor: "#000",
                       filter: "contrast(1.05) saturate(1.05)",
                     }}
                   />
@@ -655,7 +779,19 @@ export default function PoseSession() {
                       pointerEvents: "none",
                     }}
                   >
-                    <Box sx={{ width: "86%", height: "86%", maxWidth: 420, maxHeight: 640 }}>
+                    <Box
+                      sx={{
+                        width: "86%",
+                        height: "86%",
+                        maxWidth: 420,
+                        maxHeight: 640,
+                        transform:
+                          ghostFit
+                            ? `translate(${(ghostFit.cx - 0.5) * 18}%, ${(ghostFit.cy - 0.5) * 18}%) scale(${ghostFit.s})`
+                            : "none",
+                        transition: "transform 120ms linear",
+                      }}
+                    >
                       <PoseGhost pose={pose.ghost} />
                     </Box>
                   </Box>
@@ -676,10 +812,16 @@ export default function PoseSession() {
                   >
                     <Chip
                       size="small"
-                      label="Hold phone steady"
+                      label={
+                        ready
+                          ? "Locked → hold still"
+                          : poseMatch > 0.2
+                          ? `Match ${Math.round(poseMatch * 100)}%`
+                          : "Move back + match outline"
+                      }
                       sx={{
                         bgcolor: "rgba(0,0,0,0.35)",
-                        color: "rgba(255,255,255,0.88)",
+                        color: ready ? "rgba(170,255,210,0.95)" : "rgba(255,255,255,0.90)",
                         border: "1px solid rgba(255,255,255,0.16)",
                         fontWeight: 800,
                       }}
@@ -842,6 +984,23 @@ export default function PoseSession() {
                       Your Pose Session signals (always neutral or positive).
                     </Typography>
 
+                    <Card
+                      sx={{
+                        borderRadius: 4,
+                        bgcolor: "rgba(0,0,0,0.32)",
+                        border: "1px solid rgba(120,255,180,0.18)",
+                      }}
+                    >
+                      <CardContent>
+                        <Typography sx={{ fontWeight: 950, color: "rgba(170,255,210,0.98)", textShadow: "0 0 14px rgba(140,255,200,0.18)" }}>
+                          {resultsContext.title}
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.6 }}>
+                          {resultsContext.body}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+
                     {finalizing && (
                       <Card
                         sx={{
@@ -869,15 +1028,15 @@ export default function PoseSession() {
                         }}
                       >
                         <CardContent>
-                          <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>BUILD ARC</Typography>
+                          <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>MUSCLE MOMENTUM</Typography>
                           <Typography sx={{ fontSize: 44, fontWeight: 980, lineHeight: 1.0, color: "rgba(240,255,252,0.98)", textShadow: "0 0 18px rgba(140,255,200,0.22)" }}>
                             {results.build_arc}/100
                           </Typography>
                           <Typography sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
-                            Top {results.percentile}% • Strength: {results.strength}
+                            {results.strength} • built from pose match + weekly consistency
                           </Typography>
                           <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)" }}>
-                            {results.horizon_days}-Day upgrade horizon • Streak {streakCount}
+                            Re‑scan weekly • Streak {streakCount}
                           </Typography>
                         </CardContent>
                       </Card>

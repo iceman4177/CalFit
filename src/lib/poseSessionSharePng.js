@@ -65,6 +65,20 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const streak = clamp(data?.streak_count ?? 1, 1, 999);
   const since = clamp(data?.since_points ?? 0, 0, 99);
   const wins = Array.isArray(data?.wins) ? data.wins.slice(0, 4) : [];
+  const poseImages = Array.isArray(data?.pose_images) ? data.pose_images.slice(0, 3) : [];
+  const headline = String(data?.headline ?? "").slice(0, 80);
+  const subhead = String(data?.subhead ?? "").slice(0, 120);
+
+  async function loadImg(src) {
+    if (!src) return null;
+    return await new Promise((resolve) => {
+      const im = new Image();
+      im.crossOrigin = "anonymous";
+      im.onload = () => resolve(im);
+      im.onerror = () => resolve(null);
+      im.src = src;
+    });
+  }
 
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -102,6 +116,13 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   text(ctx, "POSE SESSION", 90, 90, 46, "rgba(140,255,200,0.98)", 950, "left", 18);
   text(ctx, `3 poses • auto‑capture • week‑over‑week wins`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
 
+  if (headline) {
+    text(ctx, headline, 90, 190, 28, "rgba(255,255,255,0.92)", 850, "left", 10);
+  }
+  if (subhead) {
+    text(ctx, subhead, 90, 226, 22, "rgba(255,255,255,0.72)", 750);
+  }
+
   // Streak chip
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.08)";
@@ -115,7 +136,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
 
   // Main card
   const cardX = 90;
-  const cardY = 240;
+  const cardY = 280;
   const cardW = W - 180;
   const cardH = 760;
 
@@ -172,16 +193,69 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   ctx.stroke();
   ctx.restore();
 
-  // Highlights
-  text(ctx, "HIGHLIGHTS", cardX + 70, cardY + 420, 24, "rgba(255,255,255,0.72)", 900);
-  let y = cardY + 468;
-  wins.forEach((w) => {
-    const k = String(w?.k ?? "").slice(0, 18);
-    const v = String(w?.v ?? "").slice(0, 18);
-    text(ctx, k, cardX + 70, y, 28, "rgba(255,255,255,0.82)", 850);
-    text(ctx, v, cardX + cardW - 70, y, 28, "rgba(170,255,210,0.95)", 950, "right");
-    y += 52;
-  });
+  // Pose strip (3 thumbnails)
+  if (poseImages.length) {
+    const thumbs = await Promise.all(poseImages.map(loadImg));
+    const tY = cardY + 430;
+    const tW = (cardW - 70 * 2 - 24 * 2) / 3;
+    const tH = 190;
+    for (let i = 0; i < 3; i++) {
+      const im = thumbs[i];
+      if (!im) continue;
+      const x = cardX + 70 + i * (tW + 24);
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.32)";
+      ctx.strokeStyle = "rgba(120,255,180,0.22)";
+      ctx.lineWidth = 2;
+      roundRect(ctx, x, tY, tW, tH, 24);
+      ctx.fill();
+      ctx.stroke();
+      ctx.clip();
+      // cover crop
+      const ar = im.width / im.height;
+      const tr = tW / tH;
+      let dw = tW,
+        dh = tH,
+        dx = x,
+        dy = tY;
+      if (ar > tr) {
+        dh = tH;
+        dw = dh * ar;
+        dx = x - (dw - tW) / 2;
+      } else {
+        dw = tW;
+        dh = dw / ar;
+        dy = tY - (dh - tH) / 2;
+      }
+      ctx.drawImage(im, dx, dy, dw, dh);
+      ctx.restore();
+    }
+
+    // Move highlights down if we drew thumbnails
+    // (simple: overlay highlight title below thumbs)
+    text(ctx, "HIGHLIGHTS", cardX + 70, cardY + 640, 24, "rgba(255,255,255,0.72)", 900);
+    let y2 = cardY + 688;
+    wins.forEach((w) => {
+      const k = String(w?.k ?? "").slice(0, 18);
+      const v = String(w?.v ?? "").slice(0, 18);
+      text(ctx, k, cardX + 70, y2, 28, "rgba(255,255,255,0.82)", 850);
+      text(ctx, v, cardX + cardW - 70, y2, 28, "rgba(170,255,210,0.95)", 950, "right");
+      y2 += 52;
+    });
+  }
+
+  // Highlights (default position when no thumbs)
+  if (!poseImages.length) {
+    text(ctx, "HIGHLIGHTS", cardX + 70, cardY + 420, 24, "rgba(255,255,255,0.72)", 900);
+    let y = cardY + 468;
+    wins.forEach((w) => {
+      const k = String(w?.k ?? "").slice(0, 18);
+      const v = String(w?.v ?? "").slice(0, 18);
+      text(ctx, k, cardX + 70, y, 28, "rgba(255,255,255,0.82)", 850);
+      text(ctx, v, cardX + cardW - 70, y, 28, "rgba(170,255,210,0.95)", 950, "right");
+      y += 52;
+    });
+  }
 
   // Bottom CTA bar
   const barY = cardY + cardH - 140;
