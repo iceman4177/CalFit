@@ -57,253 +57,122 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
-async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
-  try {
-    const clientKey = "slimcal_client_id";
-    let clientId = "";
-    if (typeof window !== "undefined") {
-      clientId =
-        window.localStorage.getItem(clientKey) ||
-        window.localStorage.getItem("client_id") ||
-        "";
-      if (!clientId) {
-        clientId = uid();
-        window.localStorage.setItem(clientKey, clientId);
-      }
-    }
+function PoseGhost({ pose }) {
+  // Pose-specific neon silhouette (full body) that reads instantly on mobile.
+  // We keep it SVG-only (no heavy CV libs) and scale it via the parent container.
+  const neon = "rgba(140, 255, 200, 0.92)";
+  const neonSoft = "rgba(140, 255, 200, 0.22)";
+  const isBack = pose === "back_double_bi";
+  const isDouble = pose === "front_double_bi" || pose === "back_double_bi";
 
-    const res = await fetch("/api/ai/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(clientId ? { "x-client-id": clientId } : {}),
-      },
-      body: JSON.stringify({
-        feature: "pose_session",
-        poses,
-        prev_muscle_signals: prevSession?.muscleSignals || prevSession?.signals || null,
-        local_day: todayISO,
-      }),
-    });
-
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (!json || typeof json !== "object") return null;
-    return json.session || null;
-  } catch {
-    return null;
-  }
-}
-
-
-function PoseGhost({ pose, size = 260 }) {
-  // Simple SVG “outline” that shifts arm positions per pose.
-  const stroke = "rgba(120,255,180,0.55)";
-  const glow = "rgba(120,255,180,0.18)";
-  const isFront = pose !== "back_double_bi";
-
-  const isDoubleBi = pose === "front_double_bi" || pose === "back_double_bi";
-
+  // Different arm paths per pose (thicker + more readable than the prior stick icon)
   const arms =
     pose === "front_relaxed"
-      ? { l1: [95, 120], l2: [80, 170], r1: [165, 120], r2: [180, 170] }
-      : { l1: [92, 88], l2: [70, 120], r1: [168, 88], r2: [190, 120] };
+      ? {
+          left: "M132 168 C106 184, 96 210, 92 246 C88 278, 90 314, 104 344",
+          right: "M168 168 C194 184, 204 210, 208 246 C212 278, 210 314, 196 344",
+        }
+      : {
+          // double-bi: elbows high, hands near head
+          left: "M138 156 C110 130, 88 132, 78 154 C70 172, 74 196, 92 212 C110 228, 122 206, 134 190",
+          right: "M162 156 C190 130, 212 132, 222 154 C230 172, 226 196, 208 212 C190 228, 178 206, 166 190",
+        };
 
-  const backFlare = pose === "back_double_bi" ? 26 : 16;
+  // Back pose: slightly wider lat flare
+  const latFlare = isBack ? 18 : 10;
 
   return (
     <Box
       sx={{
-        width: size,
-        height: size,
+        width: "100%",
+        height: "100%",
         position: "relative",
-        animation: "ps_float 3.8s ease-in-out infinite",
-        "@keyframes ps_float": {
-          "0%": { transform: "translateY(0px)" },
-          "50%": { transform: "translateY(-3px)" },
-          "100%": { transform: "translateY(0px)" },
-        },
+        filter: "drop-shadow(0 0 18px rgba(140,255,200,0.22))",
       }}
     >
-      <svg width={size} height={size} viewBox="0 0 260 260">
+      <svg
+        width="100%"
+        height="100%"
+        viewBox="0 0 300 520"
+        preserveAspectRatio="xMidYMid meet"
+      >
         <defs>
-          <filter id="g">
-            <feGaussianBlur stdDeviation="6" result="b" />
+          <filter id="neonGlow">
+            <feGaussianBlur stdDeviation="6" result="blur" />
             <feMerge>
-              <feMergeNode in="b" />
+              <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
-          <style>{`
-            @keyframes ps_pulse {
-              0% { opacity: 0.55; }
-              50% { opacity: 0.95; }
-              100% { opacity: 0.55; }
-            }
-            @keyframes ps_arm {
-              0% { transform: rotate(-6deg); }
-              50% { transform: rotate(6deg); }
-              100% { transform: rotate(-6deg); }
-            }
-          `}</style>
         </defs>
 
-        {/* glow */}
+        {/* soft aura */}
+        <g filter="url(#neonGlow)" stroke={neonSoft} strokeWidth="14" fill="none" strokeLinecap="round">
+          <path d="M150 84 C136 84 126 96 126 112 C126 132 138 148 150 148 C162 148 174 132 174 112 C174 96 164 84 150 84 Z" />
+          <path
+            d={`M150 152 C ${118 - latFlare} 168, ${106 - latFlare} 212, 112 252 C 118 294, 134 338, 150 360 C 166 338, 182 294, 188 252 C ${194 + latFlare} 212, ${182 + latFlare} 168, 150 152 Z`}
+          />
+          <path d="M150 360 C 134 382, 126 412, 122 452" />
+          <path d="M150 360 C 166 382, 174 412, 178 452" />
+          <path d={arms.left} />
+          <path d={arms.right} />
+        </g>
+
+        {/* primary outline */}
         <g
-          filter="url(#g)"
-          stroke={glow}
-          strokeWidth="10"
+          stroke={neon}
+          strokeWidth="3.2"
           fill="none"
           strokeLinecap="round"
-          style={{ animation: "ps_pulse 2.6s ease-in-out infinite" }}
+          style={{
+            animation: isDouble ? "posePulse 1.25s ease-in-out infinite" : "none",
+          }}
         >
-          <path d={`M130 48 C 122 48 118 54 118 62 C 118 72 124 80 130 80 C 136 80 142 72 142 62 C 142 54 138 48 130 48 Z`} />
+          <path d="M150 84 C136 84 126 96 126 112 C126 132 138 148 150 148 C162 148 174 132 174 112 C174 96 164 84 150 84 Z" />
           <path
-            d={`M130 86 C ${112 - backFlare} 92, ${105 - backFlare} 115, 106 132 C 108 152, 118 176, 130 188 C 142 176, 152 152, 154 132 C ${155 + backFlare} 115, ${148 + backFlare} 92, 130 86 Z`}
+            d={`M150 152 C ${118 - latFlare} 168, ${106 - latFlare} 212, 112 252 C 118 294, 134 338, 150 360 C 166 338, 182 294, 188 252 C ${194 + latFlare} 212, ${182 + latFlare} 168, 150 152 Z`}
           />
-          <path d={`M130 188 C 118 198, 114 214, 112 236`} />
-          <path d={`M130 188 C 142 198, 146 214, 148 236`} />
-          <g
-            style={
-              isDoubleBi
-                ? {
-                    transformOrigin: "130px 102px",
-                    animation: "ps_arm 1.8s ease-in-out infinite",
-                  }
-                : undefined
-            }
-          >
-            <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
-          </g>
-          <g
-            style={
-              isDoubleBi
-                ? {
-                    transformOrigin: "130px 102px",
-                    animation: "ps_arm 1.8s ease-in-out infinite",
-                  }
-                : undefined
-            }
-          >
-            <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
-          </g>
+          <path d="M150 360 C 134 382, 126 412, 122 452" />
+          <path d="M150 360 C 166 382, 174 412, 178 452" />
+          <path d={arms.left} />
+          <path d={arms.right} />
         </g>
 
-        {/* outline */}
-        <g stroke={stroke} strokeWidth="2.4" fill="none" strokeLinecap="round">
-          <path d={`M130 48 C 122 48 118 54 118 62 C 118 72 124 80 130 80 C 136 80 142 72 142 62 C 142 54 138 48 130 48 Z`} />
-          <path
-            d={`M130 86 C ${112 - backFlare} 92, ${105 - backFlare} 115, 106 132 C 108 152, 118 176, 130 188 C 142 176, 152 152, 154 132 C ${155 + backFlare} 115, ${148 + backFlare} 92, 130 86 Z`}
-          />
-          <path d={`M130 188 C 118 198, 114 214, 112 236`} />
-          <path d={`M130 188 C 142 198, 146 214, 148 236`} />
-          <g
-            style={
-              isDoubleBi
-                ? {
-                    transformOrigin: "130px 102px",
-                    animation: "ps_arm 1.8s ease-in-out infinite",
-                  }
-                : undefined
-            }
-          >
-            <path d={`M130 102 L ${arms.l1[0]} ${arms.l1[1]} L ${arms.l2[0]} ${arms.l2[1]}`} />
-          </g>
-          <g
-            style={
-              isDoubleBi
-                ? {
-                    transformOrigin: "130px 102px",
-                    animation: "ps_arm 1.8s ease-in-out infinite",
-                  }
-                : undefined
-            }
-          >
-            <path d={`M130 102 L ${arms.r1[0]} ${arms.r1[1]} L ${arms.r2[0]} ${arms.r2[1]}`} />
-          </g>
-        </g>
-
-        {/* center crosshair */}
-        <g stroke="rgba(120,255,180,0.85)" strokeWidth="2">
-          <circle cx="130" cy="146" r="8" fill="rgba(120,255,180,0.12)" />
-          <line x1="130" y1="132" x2="130" y2="160" />
-          <line x1="116" y1="146" x2="144" y2="146" />
+        {/* crosshair at midsection */}
+        <g stroke="rgba(140,255,200,0.95)" strokeWidth="2.4">
+          <circle cx="150" cy="268" r="10" fill="rgba(140,255,200,0.10)" />
+          <line x1="150" y1="248" x2="150" y2="288" />
+          <line x1="130" y1="268" x2="170" y2="268" />
         </g>
 
         {/* label */}
         <text
-          x="130"
-          y="252"
+          x="150"
+          y="502"
           textAnchor="middle"
-          fill="rgba(255,255,255,0.55)"
-          fontSize="12"
+          fill="rgba(235,255,248,0.92)"
+          fontSize="14"
           fontFamily="system-ui, -apple-system, Segoe UI, Roboto"
         >
-          {isFront ? "ALIGN OUTLINE" : "ALIGN (BACK VIEW)"}
+          {pose === "front_relaxed"
+            ? "FRONT RELAXED"
+            : pose === "front_double_bi"
+            ? "FRONT DOUBLE BI"
+            : "BACK DOUBLE BI"}
         </text>
+
+        <style>{`
+          @keyframes posePulse {
+            0% { opacity: 0.9; }
+            50% { opacity: 1; }
+            100% { opacity: 0.9; }
+          }
+        `}</style>
       </svg>
     </Box>
   );
 }
 
-async function analyzeImageDataUrl(dataUrl, sampleSize = 96) {
-  // Lightweight, zero-dependency "pose quality" signals from the image itself.
-  // Not medical. Used only for consistent progress tracking + deltas.
-  return await new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = sampleSize;
-        canvas.height = sampleSize;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, sampleSize, sampleSize);
-        const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
-
-        // Luminance mean + variance
-        let sum = 0;
-        let sumSq = 0;
-        const lum = new Float32Array(sampleSize * sampleSize);
-        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          lum[p] = y;
-          sum += y;
-          sumSq += y * y;
-        }
-        const n = sampleSize * sampleSize;
-        const mean = sum / n;
-        const variance = Math.max(0, sumSq / n - mean * mean);
-
-        // Very cheap edge signal (gradient magnitude)
-        let edgeSum = 0;
-        for (let y = 1; y < sampleSize - 1; y++) {
-          for (let x = 1; x < sampleSize - 1; x++) {
-            const idx = y * sampleSize + x;
-            const gx = lum[idx + 1] - lum[idx - 1];
-            const gy = lum[idx + sampleSize] - lum[idx - sampleSize];
-            edgeSum += Math.abs(gx) + Math.abs(gy);
-          }
-        }
-        const edge = edgeSum / ((sampleSize - 2) * (sampleSize - 2));
-
-        // Normalize into 0..1-ish
-        const meanN = clamp(mean / 255, 0, 1);
-        const varN = clamp(variance / (255 * 255), 0, 1);
-        const edgeN = clamp(edge / 40, 0, 1); // tuned for typical phone images
-
-        resolve({ mean: meanN, variance: varN, edge: edgeN });
-      } catch {
-        resolve({ mean: 0.5, variance: 0.2, edge: 0.2 });
-      }
-    };
-    img.onerror = () => resolve({ mean: 0.5, variance: 0.2, edge: 0.2 });
-    img.src = dataUrl;
-  });
-}
 
 function computeSignalsForPose(poseKey, metrics) {
   // Map generic image metrics into "physique signals" buckets per pose.
@@ -385,10 +254,6 @@ export default function PoseSession() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
-  const autoCanvasRef = useRef(null);
-  const autoPrevRef = useRef(null); // Float32Array luminance
-  const autoStableCountRef = useRef(0);
-  const autoLastTickRef = useRef(0);
 
   const [phase, setPhase] = useState("capture"); // capture | results
   const [poseIndex, setPoseIndex] = useState(0);
@@ -397,17 +262,6 @@ export default function PoseSession() {
   const [autoEnabled, setAutoEnabled] = useState(true);
   const [countdown, setCountdown] = useState(0);
   const [scanning, setScanning] = useState(false);
-
-  // Auto-capture signals (best-effort; never blocks manual capture)
-  const [autoStatus, setAutoStatus] = useState({
-    match: false,
-    stable: false,
-    motion: 999,
-    center: 0,
-    height: 0,
-    arms: 0,
-    hint: "Align to the outline",
-  });
 
   const [captures, setCaptures] = useState([]); // [{ poseKey, dataUrl, id }]
 
@@ -494,103 +348,6 @@ export default function PoseSession() {
     return c.toDataURL("image/jpeg", 0.88);
   }, []);
 
-  function _sampleVideoLuma(videoEl, size = 72) {
-  try {
-    const v = videoEl;
-    if (!v || !v.videoWidth || !v.videoHeight) return null;
-
-    if (!autoCanvasRef.current) autoCanvasRef.current = document.createElement("canvas");
-    const c = autoCanvasRef.current;
-    c.width = size;
-    c.height = size;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(v, 0, 0, size, size);
-    const { data } = ctx.getImageData(0, 0, size, size);
-
-    const lum = new Float32Array(size * size);
-    let sum = 0;
-    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      lum[p] = y;
-      sum += y;
-    }
-    const mean = sum / (size * size);
-
-    const thr = mean + 18;
-
-    let energy = 0;
-    let cx = 0;
-    let cy = 0;
-    let top = 0;
-    let mid = 0;
-    let bot = 0;
-
-    // Rough “arm presence” signals for double-bi poses.
-    // We look for extra silhouette energy in upper left/right side bands.
-    let upperLeft = 0;
-    let upperRight = 0;
-    let upperCenter = 0;
-
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const p = y * size + x;
-        const val = lum[p];
-        const m = val > thr ? (val - thr) : 0;
-        if (m <= 0) continue;
-
-        energy += m;
-        cx += x * m;
-        cy += y * m;
-
-        if (y < size * 0.22) top += m;
-        else if (y > size * 0.78) bot += m;
-        else mid += m;
-
-        // Upper torso band (roughly shoulders/arms)
-        if (y >= size * 0.14 && y <= size * 0.48) {
-          if (x < size * 0.34) upperLeft += m;
-          else if (x > size * 0.66) upperRight += m;
-          else upperCenter += m;
-        }
-      }
-    }
-
-    const centroid = energy > 0 ? { x: cx / energy, y: cy / energy } : { x: size / 2, y: size / 2 };
-
-    const prev = autoPrevRef.current;
-    let motion = 999;
-    if (prev && prev.length === lum.length) {
-      let diff = 0;
-      for (let i = 0; i < lum.length; i++) diff += Math.abs(lum[i] - prev[i]);
-      motion = diff / lum.length;
-    }
-    autoPrevRef.current = lum;
-
-    const dx = Math.abs(centroid.x - size / 2) / (size / 2);
-    const dy = Math.abs(centroid.y - size / 2) / (size / 2);
-    const center = clamp(1 - (dx * 0.9 + dy * 0.9), 0, 1);
-
-    const height = energy > 0 ? clamp((top / energy) * 1.7 + (bot / energy) * 1.7 + (mid / energy) * 0.6, 0, 1) : 0;
-
-    // Normalize 0..1, higher = more “arms raised / present” relative to torso.
-    const armsPresence = energy > 0
-      ? clamp(((upperLeft + upperRight) / (upperCenter + 1)) / 2.2, 0, 1)
-      : 0;
-
-    // Symmetry score for arms (1 is balanced)
-    const armsSym = (upperLeft + upperRight) > 0
-      ? clamp(1 - (Math.abs(upperLeft - upperRight) / (upperLeft + upperRight + 1)), 0, 1)
-      : 0;
-
-    return { motion, center, height, energy, size, armsPresence, armsSym };
-  } catch {
-    return null;
-  }
-}
-
   const doCapture = useCallback(() => {
     const dataUrl = captureFrame();
     if (!dataUrl) return;
@@ -610,114 +367,33 @@ export default function PoseSession() {
     }
   }, [captureFrame, pose?.key, poseIndex, stopStream]);
 
-// Auto-capture: best-effort "match outline → hold still → auto snap"
-// - Uses lightweight frame sampling (no heavy CV).
-// - Never blocks manual capture.
-useEffect(() => {
-  if (phase !== "capture") return;
-  if (!ready || !autoEnabled) {
-    setAutoStatus((st) => ({ ...st, match: false, stable: false, arms: 0, hint: "Align to the outline" }));
-    autoStableCountRef.current = 0;
-    return;
-  }
-  if (countdown > 0) return;
+  // Auto-capture countdown when ready + auto enabled
+  useEffect(() => {
+    if (phase !== "capture") return;
+    if (!ready || !autoEnabled) return;
+    if (scanning) return;
 
-  const v = videoRef.current;
-  if (!v) return;
+    let t1;
+    let t2;
+    setScanning(true);
+    setCountdown(3);
 
-  let alive = true;
+    t1 = setInterval(() => {
+      setCountdown((c) => c - 1);
+    }, 900);
 
-  const tick = () => {
-    if (!alive) return;
+    t2 = setTimeout(() => {
+      doCapture();
+      setScanning(false);
+    }, 2700);
 
-    // throttle ~6fps
-    const now = Date.now();
-    if (now - (autoLastTickRef.current || 0) < 160) {
-      requestAnimationFrame(tick);
-      return;
-    }
-    autoLastTickRef.current = now;
-
-    const metrics = _sampleVideoLuma(v, 72);
-    if (!metrics) {
-      requestAnimationFrame(tick);
-      return;
-    }
-
-    const motionOk = metrics.motion < 7.5; // lower = steadier
-    const centerOk = metrics.center > 0.55;
-    const heightOk = metrics.height > 0.55;
-    const energyOk = metrics.energy > 1200;
-
-    // Pose-aware gating: for Double Bi poses, require some “arms up” presence.
-    const isDoubleBi = pose?.key === "front_double_bi" || pose?.key === "back_double_bi";
-    const armsOk = isDoubleBi ? (metrics.armsPresence > 0.40 && metrics.armsSym > 0.55) : true;
-
-    const match = centerOk && heightOk && energyOk && armsOk;
-
-    if (match && motionOk) autoStableCountRef.current += 1;
-    else autoStableCountRef.current = 0;
-
-    const stable = autoStableCountRef.current >= 5;
-
-    let hint = "Align to the outline";
-    if (!energyOk) hint = "Step into better lighting / fill the frame";
-    else if (!centerOk) hint = "Center your body on the outline";
-    else if (!heightOk) hint = "Show full body (head + feet)";
-    else if (isDoubleBi && !armsOk) hint = "Match the Double Bi outline (arms up + elbows out)";
-    else if (!motionOk) hint = "Hold still…";
-    else if (stable) hint = "Locked — auto capture";
-
-    setAutoStatus({
-      match,
-      stable,
-      motion: metrics.motion,
-      center: metrics.center,
-      height: metrics.height,
-      arms: metrics.armsPresence,
-      hint,
-    });
-
-    requestAnimationFrame(tick);
-  };
-
-  const raf = requestAnimationFrame(tick);
-
-  return () => {
-    alive = false;
-    try { cancelAnimationFrame(raf); } catch {}
-    autoStableCountRef.current = 0;
-  };
-}, [phase, ready, autoEnabled, countdown, poseIndex, pose?.key]);
-
-// Countdown once we have a stable match
-useEffect(() => {
-  if (phase !== "capture") return;
-  if (!autoEnabled || !ready) return;
-  if (!autoStatus.match || !autoStatus.stable) return;
-  if (countdown > 0) return;
-
-  let t1;
-  let t2;
-  setScanning(true);
-  setCountdown(3);
-
-  t1 = setInterval(() => {
-    setCountdown((c) => c - 1);
-  }, 900);
-
-  t2 = setTimeout(() => {
-    doCapture();
-    setScanning(false);
-  }, 2700);
-
-  return () => {
-    clearInterval(t1);
-    clearTimeout(t2);
-    setScanning(false);
-    setCountdown(0);
-  };
-}, [phase, autoEnabled, ready, autoStatus.match, autoStatus.stable, countdown, doCapture]);
+    return () => {
+      clearInterval(t1);
+      clearTimeout(t2);
+      setScanning(false);
+      setCountdown(0);
+    };
+  }, [phase, ready, autoEnabled, doCapture, scanning]);
 
   // Finalize session results when entering results phase
   useEffect(() => {
@@ -731,81 +407,42 @@ useEffect(() => {
     (async () => {
       setFinalizing(true);
       try {
-
         const today = localDayISO(new Date());
 
-        // Try AI scoring first (3 poses). If anything fails, fall back to local lightweight signals.
-        const hist = readPoseSessionHistory(userId);
-        const prev = hist?.[0] || prevSession || null;
-
-        const aiSession = await scorePoseSessionWithAI({
-          poses: captures.map((c) => ({
-            poseKey: c.poseKey,
-            title: c.title,
-            image_data_url: c.dataUrl,
-          })),
-          prevSession: prev,
-          todayISO: today,
-        });
-
-        let currentSession = null;
-
-        if (aiSession && aiSession.muscleSignals) {
-          const streak = computeSessionStreak(hist);
-          const effectiveStreak = clamp(streak.streak || 1, 1, 999);
-
-          currentSession = {
-            id: uid(),
-            user_id: userId,
-            localDay: today,
-            createdAt: Date.now(),
-            poses: aiSession.poses || captures.map((c) => ({ poseKey: c.poseKey })),
-            muscleSignals: aiSession.muscleSignals,
-            build_arc: clamp(aiSession.build_arc ?? aiSession.buildArcScore ?? 80, 0, 100),
-            percentile: clamp(aiSession.percentile ?? 20, 1, 99),
-            strength: String(aiSession.strength || aiSession.strengthTag || "Consistency").slice(0, 40),
-            horizon_days: clamp(aiSession.horizon_days ?? 90, 7, 365),
-            highlights: Array.isArray(aiSession.highlights) ? aiSession.highlights.slice(0, 5) : [],
-            levers: Array.isArray(aiSession.levers) ? aiSession.levers.slice(0, 4) : [],
-            confidenceNote: String(aiSession.confidenceNote || "").slice(0, 160),
-            poseQuality: aiSession.poseQuality || null,
-            streak_count: effectiveStreak,
-          };
-        } else {
-          // Analyze each capture locally (non-medical). Used for consistent progress tracking + deltas.
-          const analyzed = [];
-          for (const cap of captures) {
-            const metrics = await analyzeImageDataUrl(cap.dataUrl);
-            const signals = computeSignalsForPose(cap.poseKey, metrics);
-            analyzed.push({ poseKey: cap.poseKey, metrics, signals });
-          }
-
-          const mergedSignals = mergeSignals(analyzed.map((a) => a.signals));
-
-          const streak = computeSessionStreak(hist);
-          const effectiveStreak = clamp(streak.streak || 1, 1, 999);
-
-          const buildArc = computeBuildArc(mergedSignals, effectiveStreak);
-          const percentile = buildPercentile(buildArc);
-          const strength = buildStrengthTag(effectiveStreak, mergedSignals);
-
-          currentSession = {
-            id: uid(),
-            user_id: userId,
-            localDay: today,
-            createdAt: Date.now(),
-            poses: analyzed.map((a) => ({ poseKey: a.poseKey, metrics: a.metrics })),
-            muscleSignals: mergedSignals,
-            build_arc: buildArc,
-            percentile,
-            strength,
-            horizon_days: 90,
-            streak_count: effectiveStreak,
-          };
+        // Analyze each capture
+        const analyzed = [];
+        for (const cap of captures) {
+          const metrics = await analyzeImageDataUrl(cap.dataUrl);
+          const signals = computeSignalsForPose(cap.poseKey, metrics);
+          analyzed.push({ poseKey: cap.poseKey, metrics, signals });
         }
 
-        // Compute positive-only deltas vs previous session
-        const deltas = computeDeltasPositiveOnly(prev, currentSession);
+        const mergedSignals = mergeSignals(analyzed.map((a) => a.signals));
+
+        const hist = readPoseSessionHistory(userId);
+        const streak = computeSessionStreak(hist);
+        const effectiveStreak = clamp(streak.streak || 1, 1, 999);
+
+        const buildArc = computeBuildArc(mergedSignals, effectiveStreak);
+        const percentile = buildPercentile(buildArc);
+        const strength = buildStrengthTag(effectiveStreak, mergedSignals);
+
+        const currentSession = {
+          id: uid(),
+          user_id: userId,
+          localDay: today,
+          createdAt: Date.now(),
+          poses: analyzed.map((a) => ({ poseKey: a.poseKey, metrics: a.metrics })),
+          muscleSignals: mergedSignals,
+          build_arc: buildArc,
+          percentile,
+          strength,
+          horizon_days: 90,
+        };
+
+        // Compute positive-only deltas vs prev session
+        const prev = hist?.[0] || prevSession;
+        const deltas = computeDeltasPositiveOnly(prev || null, currentSession);
 
         // Wins list (top 4)
         const wins = deltas.wins.slice(0, 4);
@@ -822,18 +459,16 @@ useEffect(() => {
             : `Steady since your last session (${prev.localDay})`;
         }
 
-        const levers = (currentSession.levers && currentSession.levers.length)
-          ? currentSession.levers
-          : [
-              "Add +25g protein today",
-              "Strength train 2–3×/week",
-              "Re-scan weekly in similar lighting",
-            ];
+        const levers = [
+          "Add +25g protein today",
+          "Strength train 2–3×/week",
+          "Re-scan weekly in similar lighting",
+        ];
 
         if (!cancelled) {
           setDeltaWins(wins);
           setDeltaLabel(label);
-          setStreakCount(currentSession.streak_count || 1);
+          setStreakCount(effectiveStreak);
           setSessionResult({
             ...currentSession,
             wins,
@@ -1020,25 +655,10 @@ useEffect(() => {
                       pointerEvents: "none",
                     }}
                   >
-                    <PoseGhost pose={pose.ghost} />
+                    <Box sx={{ width: "86%", height: "86%", maxWidth: 420, maxHeight: 640 }}>
+                      <PoseGhost pose={pose.ghost} />
+                    </Box>
                   </Box>
-
-                  {/* lock glow */}
-                  {autoEnabled && ready && (autoStatus.match || autoStatus.stable) && (
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        inset: 0,
-                        pointerEvents: "none",
-                        border: "1px solid rgba(120,255,180,0.18)",
-                        boxShadow: autoStatus.stable
-                          ? "inset 0 0 0 1px rgba(120,255,180,0.25), 0 0 80px rgba(120,255,180,0.18)"
-                          : "0 0 60px rgba(120,255,180,0.10)",
-                        background:
-                          "radial-gradient(800px 500px at 50% 40%, rgba(120,255,180,0.10), rgba(0,0,0,0))",
-                      }}
-                    />
-                  )}
 
                   {/* top helpers */}
                   <Box
@@ -1056,7 +676,7 @@ useEffect(() => {
                   >
                     <Chip
                       size="small"
-                      label={autoStatus.hint}
+                      label="Hold phone steady"
                       sx={{
                         bgcolor: "rgba(0,0,0,0.35)",
                         color: "rgba(255,255,255,0.88)",
@@ -1166,7 +786,7 @@ useEffect(() => {
                       <Button
                         variant="contained"
                         onClick={doCapture}
-                        disabled={countdown > 0}
+                        disabled={autoEnabled && ready}
                         sx={{
                           borderRadius: 999,
                           fontWeight: 950,
@@ -1195,7 +815,7 @@ useEffect(() => {
               >
                 <CardContent>
                   <Typography sx={{ fontWeight: 900 }}>Captured</Typography>
-                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)", mt: 0.4 }}>
+                  <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
                     {captures.length === 0
                       ? "No poses captured yet."
                       : `Nice — ${captures.length} pose${captures.length === 1 ? "" : "s"} locked.`}
@@ -1215,11 +835,11 @@ useEffect(() => {
               >
                 <CardContent>
                   <Stack spacing={1.2}>
-                    <Typography variant="h5" sx={{ fontWeight: 950, letterSpacing: 0.2 }}>
+                    <Typography variant="h5" sx={{ fontWeight: 950, letterSpacing: 0.3, color: "rgba(140,255,200,0.98)", textShadow: "0 0 14px rgba(140,255,200,0.22)" }}>
                       Scan Results
                     </Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.72)" }}>
-                      Here are your physique signals from this pose session. Always neutral or positive.
+                    <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)" }}>
+                      Your Pose Session signals (always neutral or positive).
                     </Typography>
 
                     {finalizing && (
@@ -1231,9 +851,9 @@ useEffect(() => {
                         }}
                       >
                         <CardContent>
-                          <Typography sx={{ fontWeight: 900 }}>Locking your session…</Typography>
-                          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)", mt: 0.4 }}>
-                            Calibrating your baseline and calculating week‑over‑week wins.
+                          <Typography sx={{ fontWeight: 950, color: "rgba(240,255,252,0.98)" }}>Scanning…</Typography>
+                          <Typography variant="body2" sx={{ color: "rgba(140,255,200,0.92)", mt: 0.4, textShadow: "0 0 10px rgba(140,255,200,0.18)" }}>
+                            Locking your wins.
                           </Typography>
                         </CardContent>
                       </Card>
@@ -1250,10 +870,10 @@ useEffect(() => {
                       >
                         <CardContent>
                           <Typography sx={{ fontWeight: 900, color: "rgba(170,255,210,0.95)" }}>BUILD ARC</Typography>
-                          <Typography sx={{ fontSize: 40, fontWeight: 950, lineHeight: 1.0 }}>
+                          <Typography sx={{ fontSize: 44, fontWeight: 980, lineHeight: 1.0, color: "rgba(240,255,252,0.98)", textShadow: "0 0 18px rgba(140,255,200,0.22)" }}>
                             {results.build_arc}/100
                           </Typography>
-                          <Typography sx={{ color: "rgba(255,255,255,0.75)", mt: 0.4 }}>
+                          <Typography sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
                             Top {results.percentile}% • Strength: {results.strength}
                           </Typography>
                           <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)" }}>
@@ -1271,8 +891,8 @@ useEffect(() => {
                         }}
                       >
                         <CardContent>
-                          <Typography sx={{ fontWeight: 900 }}>Since last session</Typography>
-                          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.70)", mt: 0.4 }}>
+                          <Typography sx={{ fontWeight: 950, color: "rgba(140,255,200,0.95)", textShadow: "0 0 12px rgba(140,255,200,0.16)" }}>Since last</Typography>
+                          <Typography variant="body2" sx={{ color: "rgba(240,255,252,0.92)", mt: 0.4 }}>
                             {deltaLabel || "Baseline locked"}
                           </Typography>
                           <Stack spacing={0.6} sx={{ mt: 1.0 }}>
@@ -1295,7 +915,7 @@ useEffect(() => {
                       }}
                     >
                       <CardContent>
-                        <Typography sx={{ fontWeight: 900 }}>Upgrade levers</Typography>
+                        <Typography sx={{ fontWeight: 950, color: "rgba(140,255,200,0.95)", textShadow: "0 0 12px rgba(140,255,200,0.16)" }}>Next unlocks</Typography>
                         <Stack spacing={0.6} sx={{ mt: 0.8 }}>
                           {(results.levers || []).map((t) => (
                             <Typography key={t} variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>

@@ -39,12 +39,16 @@ function drawGlowDot(ctx, x, y, r, color) {
   ctx.restore();
 }
 
-function text(ctx, str, x, y, size, color, weight = 800, align = "left") {
+function text(ctx, str, x, y, size, color, weight = 800, align = "left", glow = 0) {
   ctx.save();
   ctx.font = `${weight} ${size}px system-ui, -apple-system, Segoe UI, Roboto`;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "top";
+  if (glow && glow > 0) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glow;
+  }
   ctx.fillText(str, x, y);
   ctx.restore();
 }
@@ -95,8 +99,8 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   drawGlowDot(ctx, W * 0.55, H * 0.74, 12, "rgba(120,255,180,1)");
 
   // Header
-  text(ctx, "POSE SESSION", 90, 90, 44, "rgba(170,255,210,0.95)", 950);
-  text(ctx, `3 poses • auto‑capture • progress tracking`, 90, 148, 26, "rgba(255,255,255,0.72)", 700);
+  text(ctx, "POSE SESSION", 90, 90, 46, "rgba(140,255,200,0.98)", 950, "left", 18);
+  text(ctx, `3 poses • auto‑capture • week‑over‑week wins`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
 
   // Streak chip
   ctx.save();
@@ -107,7 +111,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   ctx.fill();
   ctx.stroke();
   ctx.restore();
-  text(ctx, `STREAK ${streak}×`, W - 220, 106, 26, "rgba(255,255,255,0.88)", 950, "center");
+  text(ctx, `STREAK ${streak}×`, W - 220, 106, 26, "rgba(240,255,252,0.94)", 950, "center", 10);
 
   // Main card
   const cardX = 90;
@@ -127,11 +131,11 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   ctx.restore();
 
   // Build Arc block
-  text(ctx, "BUILD ARC", cardX + 70, cardY + 70, 30, "rgba(170,255,210,0.95)", 950);
-  text(ctx, `${buildArc}/100`, cardX + 70, cardY + 118, 96, "rgba(255,255,255,0.96)", 950);
-  text(ctx, `Top ${percentile}%`, cardX + 70, cardY + 230, 34, "rgba(170,255,210,0.95)", 900);
-  text(ctx, `Strength: ${strength}`, cardX + 70, cardY + 282, 28, "rgba(255,255,255,0.78)", 800);
-  text(ctx, `${horizon}-Day upgrade horizon`, cardX + 70, cardY + 322, 22, "rgba(255,255,255,0.60)", 700);
+  text(ctx, "BUILD ARC", cardX + 70, cardY + 70, 32, "rgba(140,255,200,0.98)", 950, "left", 14);
+  text(ctx, `${buildArc}/100`, cardX + 70, cardY + 118, 102, "rgba(240,255,252,0.98)", 980, "left", 18);
+  text(ctx, `Top ${percentile}%`, cardX + 70, cardY + 236, 34, "rgba(140,255,200,0.96)", 900, "left", 12);
+  text(ctx, `Strength: ${strength}`, cardX + 70, cardY + 292, 28, "rgba(240,255,252,0.92)", 850);
+  text(ctx, `${horizon}-Day upgrade horizon`, cardX + 70, cardY + 334, 22, "rgba(240,255,252,0.74)", 720);
 
   // Pose count pill
   ctx.save();
@@ -154,7 +158,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    text(ctx, `+${since} pts`, cardX + cardW - 195, cardY + 153, 26, "rgba(170,255,210,0.95)", 950, "center");
+    text(ctx, `+${since} pts`, cardX + cardW - 195, cardY + 153, 26, "rgba(140,255,200,0.98)", 950, "center", 12);
   }
 
   // Divider line
