@@ -205,6 +205,52 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
 }
 
 // ----- AI scoring call (kept from prior patch) -----
+async function compressDataUrl(dataUrl, { maxDim = 640, quality = 0.75 } = {}) {
+  try {
+    if (!dataUrl || typeof dataUrl !== "string") return dataUrl;
+    // Only compress data URLs (avoid breaking remote URLs if ever used)
+    if (!dataUrl.startsWith("data:image/")) return dataUrl;
+
+    const img = new Image();
+    img.decoding = "async";
+    img.src = dataUrl;
+    await (img.decode ? img.decode() : new Promise((res, rej) => {
+      img.onload = () => res();
+      img.onerror = () => rej(new Error("img load failed"));
+    }));
+
+    const w = img.naturalWidth || img.width || 0;
+    const h = img.naturalHeight || img.height || 0;
+    if (!w || !h) return dataUrl;
+
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * scale));
+    const ch = Math.max(1, Math.round(h * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+
+    // White background so JPEG doesn't go black where alpha existed
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(img, 0, 0, cw, ch);
+
+    return canvas.toDataURL("image/jpeg", quality);
+  } catch {
+    return dataUrl;
+  }
+}
+
+function approxBytes(str) {
+  try {
+    return new Blob([str]).size;
+  } catch {
+    return (str || "").length;
+  }
+}
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
     const clientKey = "slimcal_client_id";
@@ -218,24 +264,50 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
         clientId = uid();
         window.localStorage.setItem(clientKey, clientId);
       }
-    }
+    }    const compressPasses = [
+          { maxDim: 640, quality: 0.75 },
+          { maxDim: 512, quality: 0.72 },
+          { maxDim: 420, quality: 0.65 },
+        ];
 
-    const res = await fetch("/api/ai/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(clientId ? { "x-client-id": clientId } : {}),
-      },
-      body: JSON.stringify({
-        feature: "pose_session",
-        poses: poses.map((p) => ({
+        let posesForSend = poses.map((p) => ({
           pose_key: p.pose_key,
           image_data_url: p.image_data_url,
-        })),
-        prev: prevSession || null,
-        today_local_day: todayISO,
-      }),
-    });
+        }));
+
+        // Keep payload under common serverless limits (413 = request too large).
+        for (const pass of compressPasses) {
+          posesForSend = await Promise.all(
+            posesForSend.map(async (p) => ({
+              ...p,
+              image_data_url: await compressDataUrl(p.image_data_url, pass),
+            }))
+          );
+
+          const probe = JSON.stringify({
+            feature: "pose_session",
+            poses: posesForSend,
+            prev: prevSession || null,
+            today_local_day: todayISO,
+          });
+
+          // ~3.2MB headroom for platform limits + headers
+          if (approxBytes(probe) < 3_200_000) break;
+        }
+
+        const res = await fetch("/api/ai/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(clientId ? { "x-client-id": clientId } : {}),
+          },
+          body: JSON.stringify({
+            feature: "pose_session",
+            poses: posesForSend,
+            prev: prevSession || null,
+            today_local_day: todayISO,
+          }),
+        });
 
     const j = await res.json().catch(() => null);
     if (!res.ok) throw new Error((j && j.error) || "AI failed");
@@ -342,15 +414,6 @@ export default function PoseSession() {
         if (canvas.height !== h) canvas.height = h;
 
         // Run pose detection at ~10fps
-        // Guard: MediaPipe will throw / spam if the video has no frame yet (videoWidth/Height = 0).
-        // This happens right after camera permission, on tab-switch, or on some iOS/low-power states.
-        if (!v.videoWidth || !v.videoHeight || v.readyState < 2) {
-          // Keep the overlay sized, but skip detection until we have a real frame.
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          requestAnimationFrame(tick);
-          return;
-        }
-
         const t = nowMs();
         let landmarks = null;
         try {
@@ -359,6 +422,7 @@ export default function PoseSession() {
         } catch {
           landmarks = null;
         }
+
         let match = 0;
         let anchors = null;
         let bbox = null;
@@ -460,9 +524,6 @@ export default function PoseSession() {
   const onCapture = useCallback(async () => {
     const v = videoRef.current;
     if (!v) return;
-
-    // Guard: if the video hasn't produced a frame yet, avoid drawImage() errors.
-    if (!v.videoWidth || !v.videoHeight || v.readyState < 2) return;
 
     // draw current frame to a temp canvas (respect mirroring for selfie cam)
     const tmp = document.createElement("canvas");
