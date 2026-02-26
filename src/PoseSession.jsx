@@ -205,52 +205,6 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
 }
 
 // ----- AI scoring call (kept from prior patch) -----
-async function compressDataUrl(dataUrl, { maxDim = 640, quality = 0.75 } = {}) {
-  try {
-    if (!dataUrl || typeof dataUrl !== "string") return dataUrl;
-    // Only compress data URLs (avoid breaking remote URLs if ever used)
-    if (!dataUrl.startsWith("data:image/")) return dataUrl;
-
-    const img = new Image();
-    img.decoding = "async";
-    img.src = dataUrl;
-    await (img.decode ? img.decode() : new Promise((res, rej) => {
-      img.onload = () => res();
-      img.onerror = () => rej(new Error("img load failed"));
-    }));
-
-    const w = img.naturalWidth || img.width || 0;
-    const h = img.naturalHeight || img.height || 0;
-    if (!w || !h) return dataUrl;
-
-    const scale = Math.min(1, maxDim / Math.max(w, h));
-    const cw = Math.max(1, Math.round(w * scale));
-    const ch = Math.max(1, Math.round(h * scale));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return dataUrl;
-
-    // White background so JPEG doesn't go black where alpha existed
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.drawImage(img, 0, 0, cw, ch);
-
-    return canvas.toDataURL("image/jpeg", quality);
-  } catch {
-    return dataUrl;
-  }
-}
-
-function approxBytes(str) {
-  try {
-    return new Blob([str]).size;
-  } catch {
-    return (str || "").length;
-  }
-}
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
     const clientKey = "slimcal_client_id";
@@ -264,50 +218,24 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
         clientId = uid();
         window.localStorage.setItem(clientKey, clientId);
       }
-    }    const compressPasses = [
-          { maxDim: 640, quality: 0.75 },
-          { maxDim: 512, quality: 0.72 },
-          { maxDim: 420, quality: 0.65 },
-        ];
+    }
 
-        let posesForSend = poses.map((p) => ({
+    const res = await fetch("/api/ai/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(clientId ? { "x-client-id": clientId } : {}),
+      },
+      body: JSON.stringify({
+        feature: "pose_session",
+        poses: poses.map((p) => ({
           pose_key: p.pose_key,
           image_data_url: p.image_data_url,
-        }));
-
-        // Keep payload under common serverless limits (413 = request too large).
-        for (const pass of compressPasses) {
-          posesForSend = await Promise.all(
-            posesForSend.map(async (p) => ({
-              ...p,
-              image_data_url: await compressDataUrl(p.image_data_url, pass),
-            }))
-          );
-
-          const probe = JSON.stringify({
-            feature: "pose_session",
-            poses: posesForSend,
-            prev: prevSession || null,
-            today_local_day: todayISO,
-          });
-
-          // ~3.2MB headroom for platform limits + headers
-          if (approxBytes(probe) < 3_200_000) break;
-        }
-
-        const res = await fetch("/api/ai/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(clientId ? { "x-client-id": clientId } : {}),
-          },
-          body: JSON.stringify({
-            feature: "pose_session",
-            poses: posesForSend,
-            prev: prevSession || null,
-            today_local_day: todayISO,
-          }),
-        });
+        })),
+        prev: prevSession || null,
+        today_local_day: todayISO,
+      }),
+    });
 
     const j = await res.json().catch(() => null);
     if (!res.ok) throw new Error((j && j.error) || "AI failed");
@@ -397,6 +325,54 @@ export default function PoseSession() {
 
     let alive = true;
     let landmarker = null;
+    let recreating = false;
+    let consecutiveErrors = 0;
+    let pausedByVisibility = false;
+
+    const isVideoReady = (v) => {
+      try {
+        return (
+          v &&
+          v.readyState >= 2 &&
+          (v.videoWidth || 0) > 0 &&
+          (v.videoHeight || 0) > 0
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    const softResetLandmarker = async () => {
+      if (!alive) return;
+      if (recreating) return;
+      recreating = true;
+      try {
+        try {
+          landmarker?.close?.();
+        } catch {}
+        landmarker = null;
+
+        // Small backoff lets the camera/video element resume producing frames
+        // after tab-switches / permission transitions.
+        await new Promise((r) => setTimeout(r, 180));
+        if (!alive) return;
+
+        landmarker = await getPoseLandmarker();
+        consecutiveErrors = 0;
+      } finally {
+        recreating = false;
+      }
+    };
+
+    const onVis = () => {
+      pausedByVisibility = !!document.hidden;
+      if (!pausedByVisibility) {
+        consecutiveErrors = 0;
+        stableRef.current.okFrames = 0;
+        stableRef.current.prevLm = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
 
     const run = async () => {
       landmarker = await getPoseLandmarker();
@@ -407,6 +383,31 @@ export default function PoseSession() {
       const ctx = canvas.getContext("2d");
       const tick = async () => {
         if (!alive) return;
+
+        if (pausedByVisibility) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        // If the video doesn't have a real frame yet, do NOT call detectForVideo.
+        // Prevents "texImage2D: no video" + ROI width/height = 0 failures.
+        if (!isVideoReady(v)) {
+          setLocked(false);
+          setLockHint("Initializing camera…");
+          stableRef.current.okFrames = 0;
+          stableRef.current.prevLm = null;
+
+          const w = canvas.clientWidth || v.clientWidth || 360;
+          const h = canvas.clientHeight || v.clientHeight || 640;
+          if (canvas.width !== w) canvas.width = w;
+          if (canvas.height !== h) canvas.height = h;
+
+          const tpl = buildPoseTemplate(pose.key, null);
+          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
 
         const w = canvas.clientWidth || v.clientWidth || 360;
         const h = canvas.clientHeight || v.clientHeight || 640;
@@ -419,8 +420,14 @@ export default function PoseSession() {
         try {
           const r = landmarker.detectForVideo(v, t);
           landmarks = r?.landmarks?.[0] || null;
+          consecutiveErrors = 0;
         } catch {
           landmarks = null;
+          consecutiveErrors += 1;
+          // After a couple consecutive errors, recreate the landmarker so the graph can recover.
+          if (consecutiveErrors >= 2) {
+            softResetLandmarker();
+          }
         }
 
         let match = 0;
@@ -503,6 +510,11 @@ export default function PoseSession() {
       alive = false;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
+      document.removeEventListener("visibilitychange", onVis);
+      try {
+        landmarker?.close?.();
+      } catch {}
+      landmarker = null;
     };
   }, [started, isResults, pose.key, countdown]);
 
@@ -524,6 +536,15 @@ export default function PoseSession() {
   const onCapture = useCallback(async () => {
     const v = videoRef.current;
     if (!v) return;
+
+    // Avoid WebGL/MediaPipe errors when capture is triggered before the video has a real frame.
+    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) {
+      setLocked(false);
+      setLockHint("Camera not ready yet — try again in a second");
+      stableRef.current.okFrames = 0;
+      stableRef.current.prevLm = null;
+      return;
+    }
 
     // draw current frame to a temp canvas (respect mirroring for selfie cam)
     const tmp = document.createElement("canvas");
