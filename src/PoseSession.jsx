@@ -342,6 +342,15 @@ export default function PoseSession() {
         if (canvas.height !== h) canvas.height = h;
 
         // Run pose detection at ~10fps
+        // Guard: MediaPipe will throw / spam if the video has no frame yet (videoWidth/Height = 0).
+        // This happens right after camera permission, on tab-switch, or on some iOS/low-power states.
+        if (!v.videoWidth || !v.videoHeight || v.readyState < 2) {
+          // Keep the overlay sized, but skip detection until we have a real frame.
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          requestAnimationFrame(tick);
+          return;
+        }
+
         const t = nowMs();
         let landmarks = null;
         try {
@@ -350,7 +359,6 @@ export default function PoseSession() {
         } catch {
           landmarks = null;
         }
-
         let match = 0;
         let anchors = null;
         let bbox = null;
@@ -452,6 +460,9 @@ export default function PoseSession() {
   const onCapture = useCallback(async () => {
     const v = videoRef.current;
     if (!v) return;
+
+    // Guard: if the video hasn't produced a frame yet, avoid drawImage() errors.
+    if (!v.videoWidth || !v.videoHeight || v.readyState < 2) return;
 
     // draw current frame to a temp canvas (respect mirroring for selfie cam)
     const tmp = document.createElement("canvas");
@@ -583,8 +594,8 @@ export default function PoseSession() {
     const hype =
       session?.hype ||
       (prevSession
-        ? "WHOA — your momentum is building. Keep showing up."
-        : "Great starting frame. You’re going to level up fast.");
+        ? "WHOA — your consistency is showing. Keep the streak alive."
+        : "Baseline locked ✅ You’re already off to a strong start.");
 
     const wins =
       session?.highlights ||
@@ -605,13 +616,13 @@ export default function PoseSession() {
       wins,
       levers,
       // embed the 3 pose images (viral payload)
-      pose_images: captures.map((c) => c.image_data_url).slice(0, 3),
+      poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
     await shareOrDownloadPng(png, {
       filename: `slimcal-pose-session-${todayISO}.png`,
       shareTitle: "SlimCal Pose Session",
-      shareText: "DROP YOUR BUILD ARC → #SlimcalAI",
+      shareText: "Pose Session ✅ #SlimcalAI",
     });
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
@@ -874,7 +885,7 @@ export default function PoseSession() {
                 <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
 
                 <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>
-                  Momentum wins
+                  Wins
                 </Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
                   {(aiSession?.highlights || ["Chest pop", "Arms look fuller"]).slice(0, 3).map((t, idx) => (
@@ -893,7 +904,7 @@ export default function PoseSession() {
                 </Stack>
 
                 <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>
-                  Next unlock — pick 1
+                  Next unlocks (pick 1)
                 </Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
                   {(aiSession?.levers || ["Protein +25g today", "Train 2–3× this week"])
