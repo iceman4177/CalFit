@@ -65,13 +65,11 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const streak = clamp(data?.streak_count ?? 1, 1, 999);
   const since = clamp(data?.since_points ?? 0, 0, 99);
   const wins = Array.isArray(data?.wins) ? data.wins.slice(0, 4) : [];
-  const poseImagesRaw = Array.isArray(data?.pose_images)
-    ? data.pose_images
+  const poseImages = Array.isArray(data?.pose_images)
+    ? data.pose_images.slice(0, 3)
     : Array.isArray(data?.poseImages)
-      ? data.poseImages
+      ? data.poseImages.slice(0, 3)
       : [];
-  const poseImages = poseImagesRaw.slice(0, 3);
-
   const headline = String(data?.headline ?? "").slice(0, 80);
   const subhead = String(data?.subhead ?? "").slice(0, 120);
 
@@ -120,7 +118,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
 
   // Header
   text(ctx, "POSE SESSION", 90, 90, 46, "rgba(140,255,200,0.98)", 950, "left", 18);
-  text(ctx, `3 poses • auto‑capture • week‑over‑week wins`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
+  text(ctx, `3 poses • auto‑capture • week‑over‑week momentum`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
 
   if (headline) {
     text(ctx, headline, 90, 190, 28, "rgba(255,255,255,0.92)", 850, "left", 10);

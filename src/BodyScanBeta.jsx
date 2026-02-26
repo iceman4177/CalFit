@@ -424,7 +424,7 @@ export default function BodyScanBeta() {
             </Stack>
 
             <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.62)" }}>
-              Upgrade levers
+              Next unlocks
             </Typography>
             <Stack spacing={0.6} sx={{ mt: 0.6, mb: 1 }}>
               {mockResults.levers.map((t) => (

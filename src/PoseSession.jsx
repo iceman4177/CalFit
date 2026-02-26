@@ -572,21 +572,6 @@ export default function PoseSession() {
     }
   }, [userId, todayISO, aiSession, aiError]);
 
-  // Copy Set #3 (positive / neutral only — never negative)
-  const COPY3 = useMemo(
-    () => ({
-      first: "Baseline captured ✅ Now we build. One session at a time.",
-      returning: "BUILD ARC rising — your consistency is showing. Keep stacking wins.",
-    }),
-    []
-  );
-
-  const hypeCopy = useCallback(
-    (hasPrev) => (hasPrev ? COPY3.returning : COPY3.first),
-    [COPY3]
-  );
-
-
   const share = useCallback(async () => {
     const session = aiSession || {};
     const buildArc =
@@ -595,7 +580,11 @@ export default function PoseSession() {
     const percentile = clamp(session?.percentile ?? 22, 1, 99);
     const strength = session?.strength || "Momentum";
 
-    const hype = session?.hype || hypeCopy(!!prevSession);
+    const hype =
+      session?.hype ||
+      (prevSession
+        ? "WHOA — your momentum is building. Keep showing up."
+        : "Great starting frame. You’re going to level up fast.");
 
     const wins =
       session?.highlights ||
@@ -617,13 +606,12 @@ export default function PoseSession() {
       levers,
       // embed the 3 pose images (viral payload)
       pose_images: captures.map((c) => c.image_data_url).slice(0, 3),
-      // (also supported: poseImages alias in generator)
     });
 
     await shareOrDownloadPng(png, {
       filename: `slimcal-pose-session-${todayISO}.png`,
       shareTitle: "SlimCal Pose Session",
-      shareText: "Pose Session ✅ #SlimcalAI",
+      shareText: "DROP YOUR BUILD ARC → #SlimcalAI",
     });
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
@@ -869,7 +857,10 @@ export default function PoseSession() {
                 </Stack>
 
                 <Typography sx={{ mt: 1, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
-                  {aiSession?.hype || hypeCopy(!!prevSession)}
+                  {aiSession?.hype ||
+                    (prevSession
+                      ? "WHOA — your momentum is building. Keep showing up."
+                      : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
 
                 {deltas ? (
@@ -883,7 +874,7 @@ export default function PoseSession() {
                 <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
 
                 <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>
-                  Wins
+                  Momentum wins
                 </Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
                   {(aiSession?.highlights || ["Chest pop", "Arms look fuller"]).slice(0, 3).map((t, idx) => (
@@ -902,7 +893,7 @@ export default function PoseSession() {
                 </Stack>
 
                 <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>
-                  Next unlocks (pick 1)
+                  Next unlock — pick 1
                 </Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
                   {(aiSession?.levers || ["Protein +25g today", "Train 2–3× this week"])
