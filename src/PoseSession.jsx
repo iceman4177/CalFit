@@ -583,8 +583,8 @@ export default function PoseSession() {
     const hype =
       session?.hype ||
       (prevSession
-        ? "WHOA — your consistency is showing. Keep the streak alive."
-        : "Baseline locked ✅ You’re already off to a strong start.");
+        ? "BUILD ARC rising — your consistency is showing. Keep stacking wins."
+        : "Baseline captured ✅ Now we build. One session at a time.");
 
     const wins =
       session?.highlights ||
@@ -605,7 +605,8 @@ export default function PoseSession() {
       wins,
       levers,
       // embed the 3 pose images (viral payload)
-      poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
+      pose_images: captures.map((c) => c.image_data_url).slice(0, 3),
+      // (also supported: poseImages alias in generator)
     });
 
     await shareOrDownloadPng(png, {
