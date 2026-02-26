@@ -572,6 +572,21 @@ export default function PoseSession() {
     }
   }, [userId, todayISO, aiSession, aiError]);
 
+  // Copy Set #3 (positive / neutral only — never negative)
+  const COPY3 = useMemo(
+    () => ({
+      first: "Baseline captured ✅ Now we build. One session at a time.",
+      returning: "BUILD ARC rising — your consistency is showing. Keep stacking wins.",
+    }),
+    []
+  );
+
+  const hypeCopy = useCallback(
+    (hasPrev) => (hasPrev ? COPY3.returning : COPY3.first),
+    [COPY3]
+  );
+
+
   const share = useCallback(async () => {
     const session = aiSession || {};
     const buildArc =
@@ -580,11 +595,7 @@ export default function PoseSession() {
     const percentile = clamp(session?.percentile ?? 22, 1, 99);
     const strength = session?.strength || "Momentum";
 
-    const hype =
-      session?.hype ||
-      (prevSession
-        ? "BUILD ARC rising — your consistency is showing. Keep stacking wins."
-        : "Baseline captured ✅ Now we build. One session at a time.");
+    const hype = session?.hype || hypeCopy(!!prevSession);
 
     const wins =
       session?.highlights ||
@@ -858,10 +869,7 @@ export default function PoseSession() {
                 </Stack>
 
                 <Typography sx={{ mt: 1, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
-                  {aiSession?.hype ||
-                    (prevSession
-                      ? "WHOA — your momentum is building. Keep showing up."
-                      : "Great starting frame. You’re going to level up fast.")}
+                  {aiSession?.hype || hypeCopy(!!prevSession)}
                 </Typography>
 
                 {deltas ? (

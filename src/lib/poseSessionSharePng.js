@@ -65,7 +65,13 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const streak = clamp(data?.streak_count ?? 1, 1, 999);
   const since = clamp(data?.since_points ?? 0, 0, 99);
   const wins = Array.isArray(data?.wins) ? data.wins.slice(0, 4) : [];
-  const poseImages = Array.isArray(data?.pose_images) ? data.pose_images.slice(0, 3) : [];
+  const poseImagesRaw = Array.isArray(data?.pose_images)
+    ? data.pose_images
+    : Array.isArray(data?.poseImages)
+      ? data.poseImages
+      : [];
+  const poseImages = poseImagesRaw.slice(0, 3);
+
   const headline = String(data?.headline ?? "").slice(0, 80);
   const subhead = String(data?.subhead ?? "").slice(0, 120);
 
@@ -267,7 +273,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   ctx.fill();
   ctx.stroke();
   ctx.restore();
-  text(ctx, "Share your arc → #SlimcalAI", cardX + cardW / 2, barY + 26, 30, "rgba(255,255,255,0.92)", 900, "center");
+  text(ctx, "DROP YOUR BUILD ARC → #SlimcalAI", cardX + cardW / 2, barY + 26, 30, "rgba(255,255,255,0.92)", 900, "center");
 
   // Footer branding
   text(ctx, "Slimcal.ai", 90, H - 110, 28, "rgba(255,255,255,0.60)", 900);
