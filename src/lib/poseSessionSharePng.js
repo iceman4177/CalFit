@@ -50,7 +50,63 @@ function text(ctx, str, x, y, size, color, weight = 800, align = "left", glow = 
     ctx.shadowBlur = glow;
   }
   ctx.fillText(str, x, y);
+  
+function wrapTextLines(ctx, str, maxWidth, font) {
+  const s = String(str || "").trim();
+  if (!s) return [];
+  ctx.save();
+  ctx.font = font;
+  const words = s.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? (line + " " + w) : w;
+    const width = ctx.measureText(test).width;
+    if (width <= maxWidth) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = w;
+    }
+  }
+  if (line) lines.push(line);
   ctx.restore();
+  return lines;
+}
+
+function normalizeBullets(arr, max = 4) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => (typeof x === "string" ? x : (x?.v || x?.k || "")))
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function orderedMuscleRows(ms) {
+  const m = ms || {};
+  // 0..1 friendly signals
+  return [
+    { key: "chest", label: "Chest" },
+    { key: "delts", label: "Shoulders" },
+    { key: "arms", label: "Arms" },
+    { key: "lats", label: "Lats" },
+    { key: "back", label: "Back" },
+    { key: "waist_taper", label: "Waist Taper" },
+    { key: "legs", label: "Legs" },
+  ].map((r) => ({ ...r, v: clamp(m[r.key] ?? 0, 0, 1) }));
+}
+
+function deltaLabel(d) {
+  const n = Number(d);
+  if (!Number.isFinite(n)) return "locked";
+  // Positive-only language: never show negative numbers.
+  if (n >= 0.015) return `+${Math.round(n * 100)}%`;
+  if (n >= 0.005) return "+1%";
+  if (n >= 0) return "locked";
+  return "steady";
+}
+ctx.restore();
 }
 
 export async function buildPoseSessionSharePng(data, opts = {}) {
@@ -64,14 +120,16 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const poseCount = clamp(data?.pose_count ?? 3, 1, 10);
   const streak = clamp(data?.streak_count ?? 1, 1, 999);
   const since = clamp(data?.since_points ?? 0, 0, 99);
-  const wins = Array.isArray(data?.wins) ? data.wins.slice(0, 4) : [];
+  const wins = normalizeBullets(data?.wins, 4);
+  const levers = normalizeBullets(data?.levers, 3);
   const poseImages = Array.isArray(data?.pose_images)
     ? data.pose_images.slice(0, 3)
-    : Array.isArray(data?.poseImages)
-      ? data.poseImages.slice(0, 3)
-      : [];
+    : (Array.isArray(data?.poseImages) ? data.poseImages.slice(0, 3) : []);
   const headline = String(data?.headline ?? "").slice(0, 80);
-  const subhead = String(data?.subhead ?? "").slice(0, 120);
+  const subhead = String(data?.subhead ?? "").slice(0, 140);
+  const summary = String(data?.summary ?? "").slice(0, 200);
+  const muscleSignals = data?.muscleSignals || data?.muscle_signals || {};
+  const prevMuscleSignals = data?.prevMuscleSignals || data?.prev_muscle_signals || {};
 
   async function loadImg(src) {
     if (!src) return null;
@@ -118,7 +176,7 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
 
   // Header
   text(ctx, "POSE SESSION", 90, 90, 46, "rgba(140,255,200,0.98)", 950, "left", 18);
-  text(ctx, `3 poses • auto‑capture • week‑over‑week momentum`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
+  text(ctx, `3 poses • auto‑capture • week‑over‑week wins`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
 
   if (headline) {
     text(ctx, headline, 90, 190, 28, "rgba(255,255,255,0.92)", 850, "left", 10);
@@ -161,6 +219,15 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   text(ctx, `Top ${percentile}%`, cardX + 70, cardY + 236, 34, "rgba(140,255,200,0.96)", 900, "left", 12);
   text(ctx, `Strength: ${strength}`, cardX + 70, cardY + 292, 28, "rgba(240,255,252,0.92)", 850);
   text(ctx, `${horizon}-Day upgrade horizon`, cardX + 70, cardY + 334, 22, "rgba(240,255,252,0.74)", 720);
+  // Affirmation summary (positive-only)
+  if (summary) {
+    const font = `800 22px system-ui, -apple-system, Segoe UI, Roboto`;
+    const lines = wrapTextLines(ctx, summary, cardW - 140, font).slice(0, 2);
+    const sy = cardY + 370;
+    text(ctx, lines[0] || "", cardX + 70, sy, 22, "rgba(255,255,255,0.74)", 800);
+    if (lines[1]) text(ctx, lines[1], cardX + 70, sy + 30, 22, "rgba(255,255,255,0.74)", 800);
+  }
+
 
   // Pose count pill
   ctx.save();
@@ -235,43 +302,70 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
       ctx.restore();
     }
 
-    // Move highlights down if we drew thumbnails
-    // (simple: overlay highlight title below thumbs)
-    text(ctx, "HIGHLIGHTS", cardX + 70, cardY + 640, 24, "rgba(255,255,255,0.72)", 900);
-    let y2 = cardY + 688;
-    wins.forEach((w) => {
-      const k = String(w?.k ?? "").slice(0, 18);
-      const v = String(w?.v ?? "").slice(0, 18);
-      text(ctx, k, cardX + 70, y2, 28, "rgba(255,255,255,0.82)", 850);
-      text(ctx, v, cardX + cardW - 70, y2, 28, "rgba(170,255,210,0.95)", 950, "right");
-      y2 += 52;
+    // Results sections (wins → levers → muscle breakdown)
+  const sectionY = poseImages.length ? (cardY + 640) : (cardY + 420);
+
+  // Momentum wins
+  text(ctx, "MOMENTUM WINS", cardX + 70, sectionY, 24, "rgba(255,255,255,0.72)", 900);
+  let y = sectionY + 46;
+  wins.slice(0, 3).forEach((w) => {
+    text(ctx, "•", cardX + 70, y, 28, "rgba(140,255,200,0.95)", 950);
+    text(ctx, String(w).slice(0, 46), cardX + 92, y, 24, "rgba(255,255,255,0.84)", 850);
+    y += 38;
+  });
+
+  // Next unlock
+  if (levers.length) {
+    y += 10;
+    text(ctx, "NEXT UNLOCK", cardX + 70, y, 24, "rgba(255,255,255,0.72)", 900);
+    y += 46;
+    levers.slice(0, 2).forEach((w) => {
+      text(ctx, "•", cardX + 70, y, 28, "rgba(70,140,255,0.95)", 950);
+      text(ctx, String(w).slice(0, 46), cardX + 92, y, 24, "rgba(255,255,255,0.84)", 850);
+      y += 38;
     });
   }
 
-  // Highlights (default position when no thumbs)
-  if (!poseImages.length) {
-    text(ctx, "HIGHLIGHTS", cardX + 70, cardY + 420, 24, "rgba(255,255,255,0.72)", 900);
-    let y = cardY + 468;
-    wins.forEach((w) => {
-      const k = String(w?.k ?? "").slice(0, 18);
-      const v = String(w?.v ?? "").slice(0, 18);
-      text(ctx, k, cardX + 70, y, 28, "rgba(255,255,255,0.82)", 850);
-      text(ctx, v, cardX + cardW - 70, y, 28, "rgba(170,255,210,0.95)", 950, "right");
-      y += 52;
-    });
-  }
+  // Muscle breakdown (positive-only movement)
+  y += 18;
+  text(ctx, "MUSCLE ARC", cardX + 70, y, 24, "rgba(255,255,255,0.72)", 900);
+  y += 44;
 
-  // Bottom CTA bar
-  const barY = cardY + cardH - 140;
-  ctx.save();
-  ctx.fillStyle = "rgba(70,140,255,0.16)";
-  ctx.strokeStyle = "rgba(70,140,255,0.32)";
-  ctx.lineWidth = 2;
-  roundRect(ctx, cardX + 70, barY, cardW - 140, 92, 28);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-  text(ctx, "DROP YOUR BUILD ARC → #SlimcalAI", cardX + cardW / 2, barY + 26, 30, "rgba(255,255,255,0.92)", 900, "center");
+  const rows = orderedMuscleRows(muscleSignals);
+  const prevRows = orderedMuscleRows(prevMuscleSignals).reduce((acc, r) => {
+    acc[r.key] = r.v;
+    return acc;
+  }, {});
+  const barX = cardX + 220;
+  const barW = cardW - 70 - (barX - cardX) - 110;
+  const barH = 16;
+
+  // Pick the top 5 by positive movement (fallback: top signal)
+  const ranked = rows
+    .map((r) => ({ ...r, d: (r.v - (prevRows[r.key] ?? 0)) }))
+    .sort((a, b) => (b.d - a.d) || (b.v - a.v))
+    .slice(0, 5);
+
+  ranked.forEach((r) => {
+    text(ctx, r.label, cardX + 70, y + 4, 22, "rgba(255,255,255,0.82)", 850);
+    // bar bg
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    roundRect(ctx, barX, y - 8, barW, barH, 999);
+    ctx.fill();
+    // bar fill
+    const fillW = Math.max(8, Math.floor(barW * clamp(r.v, 0, 1)));
+    ctx.fillStyle = "rgba(140,255,200,0.85)";
+    roundRect(ctx, barX, y - 8, fillW, barH, 999);
+    ctx.fill();
+    ctx.restore();
+
+    // delta (never negative)
+    const dTxt = deltaLabel(r.d);
+    text(ctx, dTxt, cardX + cardW - 70, y + 4, 22, "rgba(140,255,200,0.95)", 950, "right");
+    y += 38;
+  });
+
 
   // Footer branding
   text(ctx, "Slimcal.ai", 90, H - 110, 28, "rgba(255,255,255,0.60)", 900);
@@ -279,4 +373,5 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
   return blob;
+}
 }
