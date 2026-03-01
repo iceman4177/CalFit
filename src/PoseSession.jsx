@@ -229,9 +229,11 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          // Server expects poseKey or key (not pose_key)
-          poseKey: p.pose_key || p.poseKey || p.key,
-          // Send compressed thumbnail to avoid 413; keep full-res locally.
+          // server accepts poseKey or key; keep legacy pose_key too
+          poseKey: p.poseKey || p.key || p.pose_key,
+          key: p.key || p.poseKey || p.pose_key,
+          pose_key: p.pose_key || p.poseKey || p.key,
+          // IMPORTANT: send only compressed thumbnail to AI to avoid 413
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
@@ -405,16 +407,48 @@ export default function PoseSession() {
         const tpl = buildPoseTemplate(pose.key, anchors);
         drawNeonGhost(ctx, tpl, { w, h, glow: true });
 
-        // Match + stability gating (MrBeast simple: MOVE BACK -> MATCH -> HOLD)
-        let inFrame = false;
+        // Match + stability gating
+        // We want this to work on both mobile + desktop, and avoid flickery "almost in frame" signals.
+        let inFrameRaw = false;
+        let height = 0;
+        let width = 0;
+        let cx = 0.5;
+        let cy = 0.5;
+
         if (bbox) {
-          const height = bbox.maxY - bbox.minY;
-          inFrame = height > 0.55 && bbox.minY < 0.22 && bbox.maxY > 0.88;
+          height = bbox.maxY - bbox.minY;
+          width = bbox.maxX - bbox.minX;
+          cx = (bbox.minX + bbox.maxX) / 2;
+          cy = (bbox.minY + bbox.maxY) / 2;
+
+          // Full-body-ish gate with generous margins (feet may be jittery on some cameras).
+          // The "contain" video style can letterbox; bbox is still normalized within the video frame.
+          inFrameRaw =
+            height > 0.52 &&
+            width > 0.22 &&
+            bbox.minY < 0.28 &&
+            bbox.maxY > 0.84 &&
+            bbox.minX < 0.20 &&
+            bbox.maxX > 0.80 &&
+            cx > 0.35 &&
+            cx < 0.65;
         }
 
-        const ok = inFrame && match >= 0.72;
+        // Hysteresis for in-frame: we require a few consecutive "good" frames to enter,
+        // and a few consecutive "bad" frames to exit.
+        if (!stableRef.current.inFrameHold) stableRef.current.inFrameHold = 0;
+        if (inFrameRaw) stableRef.current.inFrameHold = Math.min(12, stableRef.current.inFrameHold + 1);
+        else stableRef.current.inFrameHold = Math.max(0, stableRef.current.inFrameHold - 2);
+        const inFrame = stableRef.current.inFrameHold >= 6;
 
-        // stability from landmark movement (much more reliable than pixel diff)
+        // Smooth match so tiny per-frame noise doesn't reset LOCK.
+        if (!Number.isFinite(stableRef.current.matchEma)) stableRef.current.matchEma = match;
+        stableRef.current.matchEma = stableRef.current.matchEma * 0.82 + match * 0.18;
+        const matchSm = clamp(stableRef.current.matchEma, 0, 1);
+
+        const ok = inFrame && matchSm >= 0.72;
+
+        // Stability from landmark movement (EMA-smoothed)
         let stable = false;
         if (landmarks && lastLmRef.current?.landmarks) {
           const prevLm = stableRef.current.prevLm;
@@ -426,33 +460,37 @@ export default function PoseSession() {
               sum += Math.sqrt(dx * dx + dy * dy);
             }
             const avg = sum / landmarks.length;
-            stable = avg < 0.0045; // small movement
+
+            if (!Number.isFinite(stableRef.current.moveEma)) stableRef.current.moveEma = avg;
+            stableRef.current.moveEma = stableRef.current.moveEma * 0.85 + avg * 0.15;
+
+            stable = stableRef.current.moveEma < 0.0065;
           }
           stableRef.current.prevLm = landmarks;
         }
 
+        // UX hints (MrBeast-simple: FRAME -> MATCH -> HOLD)
         if (!inFrame) {
           setLocked(false);
-          setLockHint("Move back • get full body inside the frame");
+          setLockHint("Move back • get full body in frame (feet if possible)");
           stableRef.current.okFrames = 0;
-        } else if (match < 0.72) {
+        } else if (matchSm < 0.72) {
           setLocked(false);
           setLockHint("Match the outline • then hold still");
           stableRef.current.okFrames = 0;
         } else if (!stable) {
           setLocked(false);
-          setLockHint("Hold still… almost locked");
+          setLockHint("Hold still… locking");
           stableRef.current.okFrames = 0;
         } else {
-          // locked candidate
           stableRef.current.okFrames += 1;
           setLockHint("LOCKED ✅");
           setLocked(true);
         }
 
         // Auto-capture after a short stable period
-        if (ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
-          // Start countdown
+        // (Hysteresis + EMA keeps this from flickering forever)
+        if (ok && stable && stableRef.current.okFrames >= 8 && !countdown) {
           setCountdown(3);
         }
 
@@ -506,30 +544,43 @@ export default function PoseSession() {
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
 
-    // Build a smaller AI thumbnail to avoid 413 payloads.
-    // Keep full-res PNG locally for share export, but send only this thumbnail to /api/ai/generate.
-    let aiThumbUrl = "";
-    try {
-      const maxEdge = 384; // keep small; viral share stays full-res locally
-      const scale = Math.min(1, maxEdge / Math.max(w, h));
-      const tw = Math.max(1, Math.round(w * scale));
-      const th = Math.max(1, Math.round(h * scale));
-      const tcv = document.createElement("canvas");
-      tcv.width = tw;
-      tcv.height = th;
-      const tctx = tcv.getContext("2d");
-      tctx.drawImage(tmp, 0, 0, tw, th);
-      aiThumbUrl = tcv.toDataURL("image/jpeg", 0.72);
-    } catch (_) {
-      aiThumbUrl = "";
-    }
+    // Create a small thumbnail ONLY for AI (prevents 413). Keep full-res PNG locally for share/export.
+    const makeAiThumb = async () => {
+      try {
+        const maxEdge = 384;
+        const scale = Math.min(1, maxEdge / Math.max(w, h));
+        const tw = Math.max(1, Math.round(w * scale));
+        const th = Math.max(1, Math.round(h * scale));
+
+        const c = document.createElement("canvas");
+        c.width = tw;
+        c.height = th;
+        const cctx = c.getContext("2d");
+        if (!cctx) return null;
+
+        // Re-draw mirrored/normal the same way we captured
+        if (cameraFacing === "user") {
+          cctx.translate(tw, 0);
+          cctx.scale(-1, 1);
+        }
+        cctx.drawImage(tmp, 0, 0, w, h, 0, 0, tw, th);
+
+        return c.toDataURL("image/jpeg", 0.72);
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const aiThumb = await makeAiThumb();
 
     setCaptures((cur) => [
       ...cur,
       {
-        pose_key: pose.key,
-        image_data_url: dataUrl, // full-res local PNG
-        ai_image_data_url: aiThumbUrl, // small thumbnail for AI
+        pose_key: pose.key, // keep legacy (local)
+        poseKey: pose.key,  // server expects poseKey/key
+        key: pose.key,
+        image_data_url: dataUrl,           // full-res local PNG (viral export)
+        ai_image_data_url: aiThumb || null // compressed AI thumbnail
       },
     ]);
     setLocked(false);
@@ -858,7 +909,12 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => onCapture()}
+                onClick={() => {
+                  // Instant capture (no countdown)
+                  if (countdown) return;
+                  setCountdown(null);
+                  onCapture();
+                }}
                 disabled={!!countdown}
               >
                 Capture now
@@ -866,7 +922,11 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="contained"
-                onClick={() => setCountdown(3)}
+                onClick={() => {
+                  // Manual timed capture (3-2-1)
+                  if (countdown) return;
+                  setCountdown(3);
+                }}
                 disabled={!!countdown}
               >
                 Timed capture
