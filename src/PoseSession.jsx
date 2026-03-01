@@ -17,6 +17,7 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
 import { useAuth } from "./context/AuthProvider";
+import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import {
@@ -60,6 +61,26 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
+function getContainVisibleRect(vw, vh, cw, ch) {
+  // objectFit: contain — whole video visible, may letterbox.
+  const s = Math.min(cw / Math.max(1, vw), ch / Math.max(1, vh));
+  const dw = vw * s;
+  const dh = vh * s;
+  const ox = (cw - dw) / 2;
+  const oy = (ch - dh) / 2;
+  return {
+    ox,
+    oy,
+    dw,
+    dh,
+    // normalized rect inside canvas
+    minX: ox / cw,
+    minY: oy / ch,
+    w: dw / cw,
+    h: dh / ch,
+  };
+}
+
 function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
   // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
   // { minX, minY, w, h } all in [0..1].
@@ -78,15 +99,17 @@ function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
 }
 
 function remapLandmarksToVisible(landmarks, vis) {
+  // vis is the normalized visible rect inside the canvas (either cover-crop or contain-letterbox)
   if (!landmarks || !vis) return landmarks;
-  const { minX, minY, w, h } = vis;
-  const invW = w ? 1 / w : 1;
-  const invH = h ? 1 / h : 1;
-  return landmarks.map((p) => ({
-    ...p,
-    x: (p.x - minX) * invW,
-    y: (p.y - minY) * invH,
-  }));
+  const out = [];
+  for (const lm of landmarks) {
+    // landmarks are normalized to original video.
+    // Map into the canvas normalized coords.
+    const x = vis.minX + lm.x * vis.w;
+    const y = vis.minY + lm.y * vis.h;
+    out.push({ ...lm, x: clamp(x, 0, 1), y: clamp(y, 0, 1) });
+  }
+  return out;
 }
 
 
@@ -335,6 +358,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
+  const { isProActive } = useEntitlements();
 
   const userId = user?.id || "guest";
   const todayISO = useMemo(() => localDayISO(), []);
@@ -479,7 +503,7 @@ export default function PoseSession() {
         let bbox = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
+          const vis = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
           const lmVis = remapLandmarksToVisible(landmarks, vis);
           const scored = scorePoseMatch(pose.key, lmVis);
           match = clamp(scored?.match || 0, 0, 1);
@@ -643,18 +667,20 @@ export default function PoseSession() {
     tmp.height = outH;
     const ctx = tmp.getContext("2d");
 
-    const vis = getCoverVisibleRect(vw, vh, outW, outH);
-    const sx = Math.max(0, Math.floor(vis.minX * vw));
-    const sy = Math.max(0, Math.floor(vis.minY * vh));
-    const sw = Math.max(1, Math.floor(vis.w * vw));
-    const sh = Math.max(1, Math.floor(vis.h * vh));
+    const vis = getContainVisibleRect(vw, vh, outW, outH);
+
+    const dx = Math.floor(vis.ox);
+    const dy = Math.floor(vis.oy);
+    const dw = Math.max(1, Math.floor(vis.dw));
+    const dh = Math.max(1, Math.floor(vis.dh));
 
     if (cameraFacing === "user") {
       ctx.translate(outW, 0);
       ctx.scale(-1, 1);
     }
 
-    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, outW, outH);
+    // Draw the full video into the canvas using objectFit: contain (letterbox safe)
+    ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
     const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
@@ -687,6 +713,23 @@ export default function PoseSession() {
     const run = async () => {
       setScanBusy(true);
       setAiError("");
+
+      // If user is not Pro, don't block the results screen on AI.
+      if (!isProActive) {
+        try {
+          const record = {
+            local_day: todayISO,
+            created_at: Date.now(),
+            build_arc: 78,
+            muscleSignals: {},
+            poseQuality: {},
+          };
+          appendPoseSession(userId, record);
+        } catch {}
+        setAiError("Upgrade to Pro to unlock AI summary + share card export.");
+        setScanBusy(false);
+        return;
+      }
 
       const r = await scorePoseSessionWithAI({
         poses: captures,
@@ -736,7 +779,7 @@ export default function PoseSession() {
     return () => {
       canceled = true;
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId, isProActive]);
 
   const latestRecord = useMemo(() => {
     try {
@@ -917,7 +960,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill container (no black bars)
+                  objectFit: "contain", // show whole body if possible (gym/laptop friendly)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
