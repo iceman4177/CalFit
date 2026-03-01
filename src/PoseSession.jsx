@@ -17,7 +17,6 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
 import { useAuth } from "./context/AuthProvider";
-import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import {
@@ -61,26 +60,6 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function getContainVisibleRect(vw, vh, cw, ch) {
-  // objectFit: contain — whole video visible, may letterbox.
-  const s = Math.min(cw / Math.max(1, vw), ch / Math.max(1, vh));
-  const dw = vw * s;
-  const dh = vh * s;
-  const ox = (cw - dw) / 2;
-  const oy = (ch - dh) / 2;
-  return {
-    ox,
-    oy,
-    dw,
-    dh,
-    // normalized rect inside canvas
-    minX: ox / cw,
-    minY: oy / ch,
-    w: dw / cw,
-    h: dh / ch,
-  };
-}
-
 function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
   // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
   // { minX, minY, w, h } all in [0..1].
@@ -99,17 +78,15 @@ function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
 }
 
 function remapLandmarksToVisible(landmarks, vis) {
-  // vis is the normalized visible rect inside the canvas (either cover-crop or contain-letterbox)
   if (!landmarks || !vis) return landmarks;
-  const out = [];
-  for (const lm of landmarks) {
-    // landmarks are normalized to original video.
-    // Map into the canvas normalized coords.
-    const x = vis.minX + lm.x * vis.w;
-    const y = vis.minY + lm.y * vis.h;
-    out.push({ ...lm, x: clamp(x, 0, 1), y: clamp(y, 0, 1) });
-  }
-  return out;
+  const { minX, minY, w, h } = vis;
+  const invW = w ? 1 / w : 1;
+  const invH = h ? 1 / h : 1;
+  return landmarks.map((p) => ({
+    ...p,
+    x: (p.x - minX) * invW,
+    y: (p.y - minY) * invH,
+  }));
 }
 
 
@@ -129,13 +106,26 @@ async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
 }
 
 // ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
-function buildPoseTemplate(poseKey, anchors) {
-  if (!anchors) return null;
-  const { midShoulder, midHip, shoulderWidth } = anchors;
+function buildPoseTemplate(poseKey, anchors, bbox) {
+  // anchors are derived from landmarks when available; fallback to bbox-derived anchors when legs are missing / jittery
+  let a = anchors;
+  if (!a && bbox) {
+    const cx = (bbox.minX + bbox.maxX) / 2;
+    const h = bbox.maxY - bbox.minY;
+    const w = bbox.maxX - bbox.minX;
+    a = {
+      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * h) },
+      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * h) },
+      shoulderWidth: w * 0.60,
+    };
+  }
+  if (!a) return null;
+  const { midShoulder, midHip, shoulderWidth } = a;
 
   // Create an abstract "ghost" using a few key points.
   // Everything is in normalized video coords [0..1].
-  const sw = shoulderWidth || 0.22;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const sw = clamp(shoulderWidth || 0.22, 0.12, 0.34);
 
   const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
   const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
@@ -189,43 +179,7 @@ function buildPoseTemplate(poseKey, anchors) {
   };
 }
 
-
-// ---- Anchor sanitization for gym-friendly setups ----
-// MediaPipe may hallucinate off-screen legs/hips; we clamp + derive reasonable midHip from shoulders.
-function sanitizeAnchors(anchors, landmarks) {
-  if (!anchors) return null;
-  const a = { ...anchors };
-  const ms = a.midShoulder || null;
-  if (!ms) return null;
-
-  const swRaw = Number(a.shoulderWidth || 0.22);
-  const sw = clamp(swRaw, 0.12, 0.55);
-
-  let mh = a.midHip || null;
-
-  // If midHip looks implausible (too close/far from shoulders), derive one.
-  if (!mh || !Number.isFinite(mh.x) || !Number.isFinite(mh.y)) mh = null;
-  if (mh) {
-    const dy = mh.y - ms.y;
-    if (dy < sw * 0.7 || dy > sw * 3.2) mh = null;
-  }
-  if (!mh) {
-    mh = { x: ms.x, y: clamp(ms.y + sw * 1.75, 0.38, 0.82) };
-  } else {
-    mh = { x: clamp(mh.x, 0.05, 0.95), y: clamp(mh.y, 0.25, 0.95) };
-  }
-
-  // Clamp shoulders center too (prevents drifting guides)
-  const ms2 = { x: clamp(ms.x, 0.05, 0.95), y: clamp(ms.y, 0.05, 0.85) };
-
-  return {
-    ...a,
-    midShoulder: ms2,
-    midHip: mh,
-    shoulderWidth: sw,
-  };
-}
-function drawNeonGhost(ctx, tpl, { w, h, glow = true, upperBodyOnly = false }) {
+function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
   if (!ctx || !tpl) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
@@ -242,15 +196,10 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true, upperBodyOnly = false }) {
     ["ls", "lh"],
     ["rs", "rh"],
     ["lh", "rh"],
-    // legs are optional for gym setups (phone on counter / laptop)
-    ...(!upperBodyOnly
-      ? [
-          ["lh", "lk"],
-          ["lk", "la"],
-          ["rh", "rk"],
-          ["rk", "ra"],
-        ]
-      : []),
+    ["lh", "lk"],
+    ["lk", "la"],
+    ["rh", "rk"],
+    ["rk", "ra"],
   ];
 
   ctx.save();
@@ -358,7 +307,6 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
-  const { isProActive } = useEntitlements();
 
   const userId = user?.id || "guest";
   const todayISO = useMemo(() => localDayISO(), []);
@@ -369,8 +317,8 @@ export default function PoseSession() {
   const [captureLayout, setCaptureLayout] = useState("portrait"); // portrait default (mobile-first)
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
-  const [autoSnapOn, setAutoSnapOn] = useState(false);
   const [countdown, setCountdown] = useState(null);
+  const [autoSnap, setAutoSnap] = useState(false);
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState("Move back - fit your body in frame");
   const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
@@ -503,7 +451,7 @@ export default function PoseSession() {
         let bbox = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const vis = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
+          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
           const lmVis = remapLandmarksToVisible(landmarks, vis);
           const scored = scorePoseMatch(pose.key, lmVis);
           match = clamp(scored?.match || 0, 0, 1);
@@ -515,41 +463,39 @@ export default function PoseSession() {
           lastLmRef.current = null;
         }
 
-        const anchorsSafe = sanitizeAnchors(anchors, landmarks);
-        const tpl = buildPoseTemplate(pose.key, anchorsSafe);
-        drawNeonGhost(ctx, tpl, { w, h, glow: true, upperBodyOnly: true });
+        const tpl = buildPoseTemplate(pose.key, anchors, bbox);
+        drawNeonGhost(ctx, tpl, { w, h, glow: true });
 
         // Match + stability gating (MOVE BACK → MATCH → HOLD)
         // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
         // We use hysteresis so "in frame" doesn't flicker on webcams.
         let inFrameRaw = false;
-        let distHint = null;
+        let bboxH = 0;
+        let bboxW = 0;
+        let bboxCX = 0.5;
+        let bboxCY = 0.5;
+        if (bbox) {
+          bboxH = bbox.maxY - bbox.minY;
+          bboxW = bbox.maxX - bbox.minX;
+          bboxCX = (bbox.minX + bbox.maxX) / 2;
+          bboxCY = (bbox.minY + bbox.maxY) / 2;
 
-        // Gym-friendly framing: require head/shoulders + hips (legs optional).
-        if (anchorsSafe) {
-          const ms = anchorsSafe.midShoulder;
-          const mh = anchorsSafe.midHip;
-          const sw = anchorsSafe.shoulderWidth;
+          // Adaptive framing:
+          // - Full body when available
+          // - Upper body + hips when legs aren't visible (common gym/counter setup)
+          const fullBody = bboxH >= 0.70 && bbox.minY <= 0.14 && bbox.maxY >= 0.88 && bboxW >= 0.24;
+          const upperBody = bboxH >= 0.34 && bbox.minY <= 0.26 && bbox.maxY >= 0.62 && bboxW >= 0.22;
 
-          // target shoulder width varies by aspect ratio
-          const aspect = h / Math.max(1, w);
-          const targetSW = aspect >= 1.25 ? 0.28 : 0.22;
+          inFrameRaw = fullBody || upperBody;
+        }
 
-          // distance guidance
-          if (sw > targetSW * 1.18) distHint = "Move back - you’re too close";
-          else if (sw < targetSW * 0.78) distHint = "Move closer - fill the frame";
-
-          // in-frame criteria (no legs needed)
-          const hasUpper = ms.y > 0.06 && ms.y < 0.55 && sw >= 0.12 && sw <= 0.55;
-          const hasHips = mh.y > ms.y + sw * 0.7 && mh.y < 0.95;
-          inFrameRaw = hasUpper && hasHips;
-        }// hysteresis
+        // hysteresis
         const fr = stableRef.current;
         fr.inFrameFrames = fr.inFrameFrames || 0;
         fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
         const inFrame = fr.inFrameFrames >= 6;
 
-        const ok = inFrame && match >= 0.68;
+        const ok = inFrame && match >= 0.72;
 
         // stability from landmark movement (much more reliable than pixel diff)
         let stable = false;
@@ -568,56 +514,47 @@ export default function PoseSession() {
           stableRef.current.prevLm = landmarks;
         }
 
-        if (!inFrame) {
+        // Coaching + lock gating
+        const tooClose = bboxH > 0.84;
+        const tooFar = bboxH > 0 && bboxH < 0.38;
+        const offLeft = bboxCX < 0.46;
+        const offRight = bboxCX > 0.54;
+        const tiltUp = bbox && bbox.minY > 0.22;   // head/shoulders too low in frame
+        const tiltDown = bbox && bbox.maxY < 0.64; // hips too high / not enough lower body visible
+
+        if (!bbox) {
           setLocked(false);
-          setLockHint(distHint || "Step back - get head + hips inside the frame");
+          setLockHint("Step into frame");
           stableRef.current.okFrames = 0;
-        } else if (distHint) {
+        } else if (!inFrame) {
           setLocked(false);
-          setLockHint(distHint);
+          if (tooClose) setLockHint("Move back");
+          else if (tooFar) setLockHint("Move closer");
+          else if (offLeft) setLockHint("Move right");
+          else if (offRight) setLockHint("Move left");
+          else if (tiltDown) setLockHint("Tilt phone down");
+          else if (tiltUp) setLockHint("Tilt phone up");
+          else setLockHint("Center yourself in frame");
           stableRef.current.okFrames = 0;
-        } else if (anchorsSafe) {
-          const ms = anchorsSafe.midShoulder;
-          // simple left/right + tilt guidance
-          if (ms.x < 0.42) {
-            setLocked(false);
-            setLockHint("Move right - center yourself");
-            stableRef.current.okFrames = 0;
-          } else if (ms.x > 0.58) {
-            setLocked(false);
-            setLockHint("Move left - center yourself");
-            stableRef.current.okFrames = 0;
-          } else if (ms.y < 0.16) {
-            setLocked(false);
-            setLockHint("Tilt phone down a bit");
-            stableRef.current.okFrames = 0;
-          } else if (ms.y > 0.44) {
-            setLocked(false);
-            setLockHint("Tilt phone up a bit");
-            stableRef.current.okFrames = 0;
-          } else if (match < 0.68) {
-            setLocked(false);
-            setLockHint("Match the pose - then hold still");
-            stableRef.current.okFrames = 0;
-          } else if (!stable) {
-            setLocked(false);
-            setLockHint("Hold still… locking");
-            stableRef.current.okFrames = 0;
-          } else {
-            stableRef.current.okFrames += 1;
-            setLockHint("LOCKED ✅");
-            setLocked(true);
-          }
-        } else if (match < 0.68) {
+        } else if (match < 0.72) {
           setLocked(false);
-          setLockHint("Match the pose - then hold still");
+          setLockHint("Match the neon outline");
           stableRef.current.okFrames = 0;
-        } 
+        } else if (!stable) {
+          setLocked(false);
+          setLockHint("Hold still…");
+          stableRef.current.okFrames = 0;
+        } else {
+          // locked candidate
+          stableRef.current.okFrames += 1;
+          setLockHint("LOCKED ✅");
+          setLocked(true);
+        }
 
         // Auto-capture after a short stable period
-        if (autoSnapOn && ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
-          // Quick snap once locked
-          setCountdown(1);
+        if (autoSnap && ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
+          // Start countdown
+          setCountdown(3);
         }
 
         rafRef.current = requestAnimationFrame(tick);
@@ -633,7 +570,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown, autoSnapOn]);
+  }, [started, isResults, pose.key, countdown]);
 
   // countdown -> snap
   useEffect(() => {
@@ -655,7 +592,7 @@ export default function PoseSession() {
     if (!v) return;
 
 
-    // Capture exactly what the user sees (no black bars): center-crop to the visible rect (objectFit:'cover')
+    // Capture full camera frame (no crop) and letterbox into the export canvas (matches objectFit:'contain')
     const vw = v.videoWidth || 720;
     const vh = v.videoHeight || 1280;
 
@@ -667,19 +604,17 @@ export default function PoseSession() {
     tmp.height = outH;
     const ctx = tmp.getContext("2d");
 
-    const vis = getContainVisibleRect(vw, vh, outW, outH);
-
-    const dx = Math.floor(vis.ox);
-    const dy = Math.floor(vis.oy);
-    const dw = Math.max(1, Math.floor(vis.dw));
-    const dh = Math.max(1, Math.floor(vis.dh));
+    const scale = Math.min(outW / vw, outH / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (outW - dw) / 2;
+    const dy = (outH - dh) / 2;
 
     if (cameraFacing === "user") {
       ctx.translate(outW, 0);
       ctx.scale(-1, 1);
     }
 
-    // Draw the full video into the canvas using objectFit: contain (letterbox safe)
     ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
@@ -713,23 +648,6 @@ export default function PoseSession() {
     const run = async () => {
       setScanBusy(true);
       setAiError("");
-
-      // If user is not Pro, don't block the results screen on AI.
-      if (!isProActive) {
-        try {
-          const record = {
-            local_day: todayISO,
-            created_at: Date.now(),
-            build_arc: 78,
-            muscleSignals: {},
-            poseQuality: {},
-          };
-          appendPoseSession(userId, record);
-        } catch {}
-        setAiError("Upgrade to Pro to unlock AI summary + share card export.");
-        setScanBusy(false);
-        return;
-      }
 
       const r = await scorePoseSessionWithAI({
         poses: captures,
@@ -779,7 +697,7 @@ export default function PoseSession() {
     return () => {
       canceled = true;
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId, isProActive]);
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
 
   const latestRecord = useMemo(() => {
     try {
@@ -960,7 +878,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "contain", // show whole body if possible (gym/laptop friendly)
+                  objectFit: "cover", // fill container (no black bars)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
@@ -1032,16 +950,18 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => { setCountdown(null); onCapture(); }}
+                onClick={() => onCapture()}
+                disabled={!!countdown}
               >
                 Capture now
               </Button>
               <Button
                 fullWidth
                 variant="contained"
-                onClick={() => setCountdown(3)}
+                onClick={() => setAutoSnap((a) => !a)}
+                disabled={!!countdown}
               >
-                Auto snap
+                {autoSnap ? "Auto snap On" : "Auto snap Off"}
               </Button>
             </Stack>
           </CardContent>
@@ -1077,16 +997,7 @@ export default function PoseSession() {
                     color="info"
                     sx={{ fontWeight: 800 }}
                   />
-                  <Chip
-                    label={`Streak ${streakCount}`}
-                    sx={{
-                      fontWeight: 800,
-                      border: "1px solid rgba(0,255,190,0.25)",
-                      color: "#eafffb",
-                    }}
-                    variant="outlined"
-                  />
-                </Stack>
+</Stack>
 
                 <Typography sx={{ mt: 1, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
                   {aiSession?.hype ||
