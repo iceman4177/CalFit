@@ -534,15 +534,7 @@ export default function PoseSession() {
           lastLmRef.current = null;
         }
 
-        // Draw either a framing guide (when cropped/too close) or the pose ghost
-        if (bbox && framingBad) {
-          drawFramingGuide(ctx, visCanvas, { w, h });
-        } else {
-          const tpl = buildPoseTemplate(pose.key, anchors, bbox);
-          drawNeonGhost(ctx, tpl, { w, h, glow: true });
-        }
-
-        // Match + stability gating (MOVE BACK → MATCH → HOLD)
+                // Match + stability gating (MOVE BACK → MATCH → HOLD)
         // NOTE: we render with objectFit:'contain' (letterboxed), so we compute framing in vis-local coords.
         // We use hysteresis so "in frame" doesn't flicker on webcams.
         let inFrameRaw = false;
@@ -582,6 +574,14 @@ export default function PoseSession() {
           inFrameRaw = fullBodyOk || upperBodyOk;
           framingBad = !inFrameRaw;
         }
+// Draw either a framing guide (when cropped/too close) or the pose ghost
+        if (bbox && framingBad) {
+          drawFramingGuide(ctx, visCanvas, { w, h });
+        } else {
+          const tpl = buildPoseTemplate(pose.key, anchors, bbox);
+          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+        }
+
 // hysteresis
         const fr = stableRef.current;
         fr.inFrameFrames = fr.inFrameFrames || 0;
