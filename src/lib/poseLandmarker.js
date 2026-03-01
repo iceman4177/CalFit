@@ -3,7 +3,7 @@
 // We intentionally lazy-load to avoid impacting initial bundle.
 
 let _landmarkerPromise = null;
-let _landmarkerInstance = null;
+let _landmarker = null;
 
 async function loadTasksVision() {
   // IMPORTANT:
@@ -14,19 +14,17 @@ async function loadTasksVision() {
 }
 
 export async function getPoseLandmarker() {
-  if (_landmarkerInstance) return _landmarkerInstance;
+  if (_landmarker) return _landmarker;
   if (_landmarkerPromise) return _landmarkerPromise;
 
   _landmarkerPromise = (async () => {
     const { FilesetResolver, PoseLandmarker } = await loadTasksVision();
 
-    // Use hosted wasm + model assets.
-    // Model URL pattern is documented across MediaPipe demos and examples.
     const wasm = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
     );
 
-    const landmarker = await PoseLandmarker.createFromOptions(wasm, {
+    const lm = await PoseLandmarker.createFromOptions(wasm, {
       baseOptions: {
         modelAssetPath:
           "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
@@ -35,27 +33,28 @@ export async function getPoseLandmarker() {
       numPoses: 1,
     });
 
-    _landmarkerInstance = landmarker;
-    return _landmarkerInstance;
+    _landmarker = lm;
+    return lm;
   })();
 
   return _landmarkerPromise;
 }
 
-// MediaPipe Tasks can enter a bad WebGL state if detectForVideo() is called
-// before the <video> has valid dimensions (0x0). This lets callers recover.
 export async function resetPoseLandmarker() {
+  // Safe to call multiple times.
   try {
-    if (_landmarkerInstance && typeof _landmarkerInstance.close === "function") {
-      _landmarkerInstance.close();
+    const lm = _landmarker;
+    _landmarker = null;
+    _landmarkerPromise = null;
+    if (lm && typeof lm.close === "function") {
+      lm.close();
     }
   } catch {
-    // ignore
-  } finally {
-    _landmarkerInstance = null;
+    _landmarker = null;
     _landmarkerPromise = null;
   }
 }
+
 
 function v(p) {
   return { x: p.x, y: p.y };

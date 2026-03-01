@@ -26,7 +26,7 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, resetPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
@@ -204,71 +204,65 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
   ctx.restore();
 }
 
-// ----- AI scoring call (kept from prior patch) -----
-function dataUrlApproxBytes(dataUrl) {
-  try {
-    const i = String(dataUrl || "").indexOf(",");
-    if (i < 0) return 0;
-    const b64 = String(dataUrl).slice(i + 1);
-    // base64 length -> bytes approximation (ignores padding nuance; good enough for guarding)
-    return Math.floor((b64.length * 3) / 4);
-  } catch {
-    return 0;
-  }
+
+// ----- payload helpers (avoid 413 on serverless limits) -----
+function estimateDataUrlBytes(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== "string") return 0;
+  const i = dataUrl.indexOf(",");
+  if (i < 0) return 0;
+  const b64 = dataUrl.slice(i + 1);
+  // base64 bytes ≈ 3/4 length
+  return Math.floor((b64.length * 3) / 4);
 }
 
-async function compressImageDataUrlForAI(dataUrl) {
-  // Goal: keep request body under typical serverless limits (413 seen in console)
-  // We keep originals for share export; AI only receives compressed thumbnails.
-  const MAX_BYTES = 220_000; // per-image target (3 images ~= 660KB)
-  if (!dataUrl) return dataUrl;
-  if (dataUrlApproxBytes(dataUrl) <= MAX_BYTES) return dataUrl;
-
-  try {
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image load failed"));
     img.src = dataUrl;
-    await new Promise((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = reject;
-    });
-
-    const make = async (maxDim, quality) => {
-      const w0 = img.naturalWidth || img.width;
-      const h0 = img.naturalHeight || img.height;
-      if (!w0 || !h0) return dataUrl;
-      const scale = Math.min(1, maxDim / Math.max(w0, h0));
-      const w = Math.max(1, Math.round(w0 * scale));
-      const h = Math.max(1, Math.round(h0 * scale));
-      const c = document.createElement("canvas");
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext("2d", { alpha: false });
-      ctx.drawImage(img, 0, 0, w, h);
-      return c.toDataURL("image/jpeg", quality);
-    };
-
-    // Ladder: progressively smaller & lower quality until under budget
-    const ladder = [
-      { d: 640, q: 0.72 },
-      { d: 512, q: 0.70 },
-      { d: 420, q: 0.66 },
-      { d: 360, q: 0.62 },
-      { d: 300, q: 0.58 },
-    ];
-
-    let best = dataUrl;
-    for (const s of ladder) {
-      const out = await make(s.d, s.q);
-      best = out;
-      if (dataUrlApproxBytes(out) <= MAX_BYTES) return out;
-    }
-    return best;
-  } catch {
-    return dataUrl;
-  }
+  });
 }
 
+async function compressPoseDataUrlForAI(pngDataUrl) {
+  // Keep share card full-res PNG locally, but send small JPEG to AI.
+  // Target <= ~220KB each to avoid 413.
+  if (!pngDataUrl) return "";
+  const img = await loadImageFromDataUrl(pngDataUrl);
+
+  const ladder = [
+    { max: 720, q: 0.78 },
+    { max: 640, q: 0.74 },
+    { max: 512, q: 0.70 },
+    { max: 420, q: 0.64 },
+    { max: 360, q: 0.60 },
+  ];
+
+  const srcW = img.naturalWidth || 0;
+  const srcH = img.naturalHeight || 0;
+  if (!srcW || !srcH) return "";
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: false });
+
+  for (const step of ladder) {
+    const scale = Math.min(1, step.max / Math.max(srcW, srcH));
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
+    canvas.width = w;
+    canvas.height = h;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const jpg = canvas.toDataURL("image/jpeg", step.q);
+    if (estimateDataUrlBytes(jpg) <= 220 * 1024) return jpg;
+  }
+
+  // last resort
+  return canvas.toDataURL("image/jpeg", 0.55);
+}
+
+// ----- AI scoring call (kept from prior patch) -----
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
     const clientKey = "slimcal_client_id";
@@ -284,11 +278,11 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }
     }
 
-    // Compress images BEFORE sending to serverless to avoid 413 payload too large.
-    const compressedPoses = await Promise.all(
+    const posesForAi = await Promise.all(
       (poses || []).map(async (p) => ({
         pose_key: p.pose_key,
-        image_data_url: await compressImageDataUrlForAI(p.image_data_url),
+        // Compress to avoid 413, keep original PNG for share card
+        image_data_url: await compressPoseDataUrlForAI(p.image_data_url),
       }))
     );
 
@@ -300,7 +294,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       },
       body: JSON.stringify({
         feature: "pose_session",
-        poses: compressedPoses,
+        poses: posesForAi,
         prev: prevSession || null,
         today_local_day: todayISO,
       }),
@@ -341,6 +335,8 @@ export default function PoseSession() {
   const rafRef = useRef(0);
   const lastLmRef = useRef(null);
   const stableRef = useRef({ t0: 0, okFrames: 0 });
+  const errStreakRef = useRef(0);
+  const zeroFrameStreakRef = useRef(0);
 
   const pose = POSES[Math.min(step, POSES.length - 1)];
   const isResults = step >= POSES.length;
@@ -405,6 +401,30 @@ export default function PoseSession() {
       const tick = async () => {
         if (!alive) return;
 
+        // If the tab is backgrounded or video has no real frame, DO NOT call MediaPipe.
+        // This prevents WebGL "texImage2D: no video" + ROI 0x0 graph failure loops.
+        if (typeof document !== "undefined" && document.hidden) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        if (!v || v.readyState < 2 || !v.videoWidth || !v.videoHeight) {
+          zeroFrameStreakRef.current += 1;
+          // If we keep seeing 0x0 for a while, restart camera stream (mobile tab switch)
+          if (zeroFrameStreakRef.current >= 30) {
+            zeroFrameStreakRef.current = 0;
+            try {
+              await stopStream();
+              await startStream();
+            } catch {}
+          }
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        zeroFrameStreakRef.current = 0;
+
+
         const w = canvas.clientWidth || v.clientWidth || 360;
         const h = canvas.clientHeight || v.clientHeight || 640;
         if (canvas.width !== w) canvas.width = w;
@@ -416,8 +436,24 @@ export default function PoseSession() {
         try {
           const r = landmarker.detectForVideo(v, t);
           landmarks = r?.landmarks?.[0] || null;
+          errStreakRef.current = 0;
         } catch {
           landmarks = null;
+          errStreakRef.current += 1;
+
+          // If the MediaPipe graph enters a bad state (often after tab switch),
+          // hard-reset it and restart the stream.
+          if (errStreakRef.current >= 2) {
+            errStreakRef.current = 0;
+            try {
+              await resetPoseLandmarker();
+              landmarker = await getPoseLandmarker();
+            } catch {}
+            try {
+              await stopStream();
+              await startStream();
+            } catch {}
+          }
         }
 
         let match = 0;
@@ -501,7 +537,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown]);
+  }, [started, isResults, pose.key, countdown, startStream, stopStream]);
 
   // countdown -> snap
   useEffect(() => {
