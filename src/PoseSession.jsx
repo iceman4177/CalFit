@@ -32,17 +32,17 @@ const POSES = [
   {
     key: "front_relaxed",
     title: "Front Relaxed",
-    subtitle: "Stand tall • arms relaxed • full body in frame",
+    subtitle: "Stand tall - arms relaxed - full body in frame",
   },
   {
     key: "front_double_bi",
     title: "Double Bi",
-    subtitle: "Hands up • elbows out • squeeze arms",
+    subtitle: "Hands up - elbows out - squeeze arms",
   },
   {
     key: "back_double_bi",
     title: "Back Double Bi",
-    subtitle: "Turn around • elbows up • spread back",
+    subtitle: "Turn around - elbows up - spread back",
   },
 ];
 
@@ -306,7 +306,7 @@ export default function PoseSession() {
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
   const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Move back • fit your body in frame");
+  const [lockHint, setLockHint] = useState("Move back - fit your body in frame");
   const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
@@ -492,11 +492,11 @@ export default function PoseSession() {
 
         if (!inFrame) {
           setLocked(false);
-          setLockHint("Move back • get full body inside the frame");
+          setLockHint("Move back - get full body inside the frame");
           stableRef.current.okFrames = 0;
         } else if (match < 0.72) {
           setLocked(false);
-          setLockHint("Match the outline • then hold still");
+          setLockHint("Match the outline - then hold still");
           stableRef.current.okFrames = 0;
         } else if (!stable) {
           setLocked(false);
@@ -693,7 +693,7 @@ export default function PoseSession() {
     const hype =
       session?.hype ||
       (prevSession
-        ? "WHOA — your consistency is showing. Keep the streak alive."
+        ? "WHOA - your consistency is showing. Keep the streak alive."
         : "Baseline locked ✅ You’re already off to a strong start.");
 
     const wins =
@@ -702,7 +702,7 @@ export default function PoseSession() {
 
     const levers =
       session?.levers ||
-      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2–3× this week"]);
+      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2-3× this week"]);
 
     const png = await buildPoseSessionSharePng({
       buildArc,
@@ -773,7 +773,7 @@ export default function PoseSession() {
               Pose Session
             </Typography>
             <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.9)" }}>
-              3 poses • auto-lock • share your progress
+              3 poses - auto-lock - share your progress
             </Typography>
             <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
             <Stack spacing={1.25}>
@@ -908,7 +908,7 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => setCountdown(3)}
+                onClick={() => onCapture()}
                 disabled={!!countdown}
               >
                 Capture now
@@ -969,7 +969,7 @@ export default function PoseSession() {
                 <Typography sx={{ mt: 1, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
                   {aiSession?.hype ||
                     (prevSession
-                      ? "WHOA — your momentum is building. Keep showing up."
+                      ? "WHOA - your momentum is building. Keep showing up."
                       : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
 
@@ -1006,7 +1006,7 @@ export default function PoseSession() {
                   Next unlocks (pick 1)
                 </Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.levers || ["Protein +25g today", "Train 2–3× this week"])
+                  {(aiSession?.levers || ["Protein +25g today", "Train 2-3× this week"])
                     .slice(0, 2)
                     .map((t, idx) => (
                       <Box
