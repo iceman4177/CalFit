@@ -257,6 +257,7 @@ export default function PoseSession() {
   const prevSession = prevHistory?.[0] || null;
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
+  const [frameOrientation, setFrameOrientation] = useState("portrait"); // portrait default
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
