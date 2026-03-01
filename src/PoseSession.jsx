@@ -229,9 +229,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          // api/ai/generate expects poseKey (or key) + image_data_url data URL
           poseKey: p.pose_key || p.poseKey || p.key,
-          title: p.title || "",
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
@@ -505,9 +503,26 @@ export default function PoseSession() {
     ctx.drawImage(v, 0, 0, w, h);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
+
+    // Build a smaller JPEG thumbnail for AI payloads (prevents 413).
+    // Full-res PNG stays local for high-quality share exports.
+    let aiThumb = dataUrl;
+    try {
+      const maxEdge = 384;
+      const scale = Math.min(1, maxEdge / Math.max(w, h));
+      const tw = Math.max(1, Math.round(w * scale));
+      const th = Math.max(1, Math.round(h * scale));
+      const tcan = document.createElement("canvas");
+      tcan.width = tw;
+      tcan.height = th;
+      const tctx = tcan.getContext("2d");
+      tctx.drawImage(tmp, 0, 0, tw, th);
+      aiThumb = tcan.toDataURL("image/jpeg", 0.72);
+    } catch {}
+
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl },
+      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
     ]);
     setLocked(false);
     setCountdown(null);
@@ -835,7 +850,7 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => setCountdown(3)}
+                onClick={() => onCapture()}
                 disabled={!!countdown}
               >
                 Capture now
@@ -846,7 +861,7 @@ export default function PoseSession() {
                 onClick={() => setCountdown(3)}
                 disabled={!!countdown}
               >
-                Auto snap
+                Timed capture
               </Button>
             </Stack>
           </CardContent>
