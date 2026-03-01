@@ -60,33 +60,47 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
-  // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
-  // { minX, minY, w, h } all in [0..1].
+function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
+  // Returns the drawn video rect (letterboxed) in *canvas-normalized* coords when rendering with objectFit:'contain'.
+  // { minX, minY, w, h } all in [0..1] relative to the canvas.
   if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
-  const scale = Math.max(canvasW / videoW, canvasH / videoH);
-  const visW = canvasW / scale;
-  const visH = canvasH / scale;
-  const x0 = (videoW - visW) / 2;
-  const y0 = (videoH - visH) / 2;
+  const scale = Math.min(canvasW / videoW, canvasH / videoH);
+  const drawW = videoW * scale;
+  const drawH = videoH * scale;
+  const x0 = (canvasW - drawW) / 2;
+  const y0 = (canvasH - drawH) / 2;
   return {
-    minX: x0 / videoW,
-    minY: y0 / videoH,
-    w: visW / videoW,
-    h: visH / videoH,
+    minX: x0 / canvasW,
+    minY: y0 / canvasH,
+    w: drawW / canvasW,
+    h: drawH / canvasH,
   };
 }
 
-function remapLandmarksToVisible(landmarks, vis) {
-  if (!landmarks || !vis) return landmarks;
-  const { minX, minY, w, h } = vis;
-  const invW = w ? 1 / w : 1;
-  const invH = h ? 1 / h : 1;
+function mapLandmarksVideoToCanvas(landmarks, visCanvas) {
+  // Landmarks are normalized to the *video* [0..1]. We map into *canvas-normalized* coords [0..1]
+  // accounting for the letterboxed "contain" rect.
+  if (!landmarks || !visCanvas) return landmarks;
+  const { minX, minY, w, h } = visCanvas;
   return landmarks.map((p) => ({
     ...p,
-    x: (p.x - minX) * invW,
-    y: (p.y - minY) * invH,
+    x: minX + p.x * w,
+    y: minY + p.y * h,
   }));
+}
+
+function bboxToLocal(bboxCanvas, visCanvas) {
+  // Convert a bbox in canvas-normalized coords into vis-local coords [0..1] inside the contain rect.
+  if (!bboxCanvas || !visCanvas) return null;
+  const { minX, minY, w, h } = visCanvas;
+  const invW = w ? 1 / w : 1;
+  const invH = h ? 1 / h : 1;
+  return {
+    minX: (bboxCanvas.minX - minX) * invW,
+    minY: (bboxCanvas.minY - minY) * invH,
+    maxX: (bboxCanvas.maxX - minX) * invW,
+    maxY: (bboxCanvas.maxY - minY) * invH,
+  };
 }
 
 
@@ -261,6 +275,61 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
 
   ctx.restore();
 }
+
+
+function drawFramingGuide(ctx, visCanvas, { w, h }) {
+  if (!ctx || !visCanvas) return;
+
+  const vx = visCanvas.minX * w;
+  const vy = visCanvas.minY * h;
+  const vw = visCanvas.w * w;
+  const vh = visCanvas.h * h;
+
+  // Target region inside the visible rect (aim for shoulders+hips)
+  const padX = vw * 0.18;
+  const padTop = vh * 0.10;
+  const padBottom = vh * 0.10;
+
+  const rx = vx + padX;
+  const ry = vy + padTop;
+  const rw = vw - padX * 2;
+  const rh = vh - padTop - padBottom;
+
+  ctx.save();
+  ctx.lineWidth = Math.max(3, Math.round(Math.min(w, h) * 0.006));
+  ctx.strokeStyle = "rgba(0, 255, 214, 0.75)";
+  ctx.shadowColor = "rgba(0, 255, 214, 0.9)";
+  ctx.shadowBlur = 18;
+
+  // Rounded rect
+  const r = Math.min(rw, rh) * 0.06;
+  ctx.beginPath();
+  ctx.moveTo(rx + r, ry);
+  ctx.lineTo(rx + rw - r, ry);
+  ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r);
+  ctx.lineTo(rx + rw, ry + rh - r);
+  ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r, ry + rh);
+  ctx.lineTo(rx + r, ry + rh);
+  ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r);
+  ctx.lineTo(rx, ry + r);
+  ctx.quadraticCurveTo(rx, ry, rx + r, ry);
+  ctx.closePath();
+  ctx.stroke();
+
+  // "shoulder" tick marks
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.004));
+  ctx.strokeStyle = "rgba(0, 255, 214, 0.55)";
+  ctx.beginPath();
+  ctx.moveTo(rx, ry + rh * 0.22);
+  ctx.lineTo(rx + rw, ry + rh * 0.22);
+  ctx.moveTo(rx, ry + rh * 0.62);
+  ctx.lineTo(rx + rw, ry + rh * 0.62);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 
 // ----- AI scoring call (kept from prior patch) -----
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
@@ -449,47 +518,71 @@ export default function PoseSession() {
         let match = 0;
         let anchors = null;
         let bbox = null;
+        let visCanvas = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
-          const lmVis = remapLandmarksToVisible(landmarks, vis);
-          const scored = scorePoseMatch(pose.key, lmVis);
+          visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
+          const vis = visCanvas;
+          const lmCanvas = mapLandmarksVideoToCanvas(landmarks, vis);
+          const scored = scorePoseMatch(pose.key, lmCanvas);
           match = clamp(scored?.match || 0, 0, 1);
           anchors = scored?.anchors || null;
           bbox = scored?.bbox || null;
-          landmarks = lmVis;
-          lastLmRef.current = { landmarks: lmVis, anchors, bbox, match };
+          landmarks = lmCanvas;
+          lastLmRef.current = { landmarks: lmCanvas, anchors, bbox, match };
         } else {
           lastLmRef.current = null;
         }
 
-        const tpl = buildPoseTemplate(pose.key, anchors, bbox);
-        drawNeonGhost(ctx, tpl, { w, h, glow: true });
+        // Draw either a framing guide (when cropped/too close) or the pose ghost
+        if (bbox && framingBad) {
+          drawFramingGuide(ctx, visCanvas, { w, h });
+        } else {
+          const tpl = buildPoseTemplate(pose.key, anchors, bbox);
+          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+        }
 
         // Match + stability gating (MOVE BACK → MATCH → HOLD)
-        // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
+        // NOTE: we render with objectFit:'contain' (letterboxed), so we compute framing in vis-local coords.
         // We use hysteresis so "in frame" doesn't flicker on webcams.
         let inFrameRaw = false;
+        let framingBad = false;
+        let bboxLocal = null; // bbox normalized inside the visible (contain) rect
         let bboxH = 0;
         let bboxW = 0;
         let bboxCX = 0.5;
         let bboxCY = 0.5;
+
         if (bbox) {
-          bboxH = bbox.maxY - bbox.minY;
-          bboxW = bbox.maxX - bbox.minX;
-          bboxCX = (bbox.minX + bbox.maxX) / 2;
-          bboxCY = (bbox.minY + bbox.maxY) / 2;
+          bboxLocal = bboxToLocal(bbox, visCanvas) || null;
 
-          // Adaptive framing:
-          // - Full body when available
-          // - Upper body + hips when legs aren't visible (common gym/counter setup)
-          const fullBody = bboxH >= 0.70 && bbox.minY <= 0.14 && bbox.maxY >= 0.88 && bboxW >= 0.24;
-          const upperBody = bboxH >= 0.34 && bbox.minY <= 0.26 && bbox.maxY >= 0.62 && bboxW >= 0.22;
+          // If we can't compute vis-local, fall back to the bbox itself (already normalized to whatever space scorePoseMatch used).
+          const b = bboxLocal || bbox;
 
-          inFrameRaw = fullBody || upperBody;
+          bboxH = b.maxY - b.minY;
+          bboxW = b.maxX - b.minX;
+          bboxCX = (b.minX + b.maxX) / 2;
+          bboxCY = (b.minY + b.maxY) / 2;
+
+          // --- Framing gate (real-world gym/counter/laptop setup) ---
+          // Minimum requirement to start pose-lock:
+          // - head/shoulders not cropped
+          // - hips visible (legs optional)
+          // - not absurdly close-up
+          const headOk = b.minY <= 0.30;
+          const hipsOk = b.maxY >= 0.62;
+          const sizeOk = bboxH >= 0.38 && bboxW >= 0.22;
+          const notTooClose = bboxH <= 0.88 && bboxW <= 0.82;
+
+          const upperBodyOk = headOk && hipsOk && sizeOk && notTooClose;
+
+          // Full-body is a bonus if it happens to be visible.
+          const fullBodyOk = bboxH >= 0.72 && b.minY <= 0.14 && b.maxY >= 0.90 && bboxW >= 0.24 && bboxW <= 0.82;
+
+          inFrameRaw = fullBodyOk || upperBodyOk;
+          framingBad = !inFrameRaw;
         }
-
-        // hysteresis
+// hysteresis
         const fr = stableRef.current;
         fr.inFrameFrames = fr.inFrameFrames || 0;
         fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
@@ -514,13 +607,19 @@ export default function PoseSession() {
           stableRef.current.prevLm = landmarks;
         }
 
-        // Coaching + lock gating
-        const tooClose = bboxH > 0.84;
-        const tooFar = bboxH > 0 && bboxH < 0.38;
-        const offLeft = bboxCX < 0.46;
-        const offRight = bboxCX > 0.54;
-        const tiltUp = bbox && bbox.minY > 0.22;   // head/shoulders too low in frame
-        const tiltDown = bbox && bbox.maxY < 0.64; // hips too high / not enough lower body visible
+        // Coaching + lock gating (framing-first)
+        const tooClose = bboxH > 0.88 || bboxW > 0.82;
+        const tooFar = bboxH > 0 && bboxH < 0.34;
+
+        const offLeft = bboxCX < 0.44;
+        const offRight = bboxCX > 0.56;
+
+        const headCropped = bboxLocal ? bboxLocal.minY > 0.32 : (bbox ? bbox.minY > 0.32 : false);
+        const hipsMissing = bboxLocal ? bboxLocal.maxY < 0.62 : (bbox ? bbox.maxY < 0.62 : false);
+
+        // If hips are missing, we almost always need the user to tilt down and/or back up.
+        const tiltDown = hipsMissing;
+        const tiltUp = headCropped;
 
         if (!bbox) {
           setLocked(false);
@@ -528,13 +627,13 @@ export default function PoseSession() {
           stableRef.current.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
-          if (tooClose) setLockHint("Move back");
+          if (tooClose) setLockHint("Move back (camera is too close)");
           else if (tooFar) setLockHint("Move closer");
           else if (offLeft) setLockHint("Move right");
           else if (offRight) setLockHint("Move left");
-          else if (tiltDown) setLockHint("Tilt phone down");
-          else if (tiltUp) setLockHint("Tilt phone up");
-          else setLockHint("Center yourself in frame");
+          else if (tiltDown) setLockHint("Tilt down until shoulders + hips are visible");
+          else if (tiltUp) setLockHint("Tilt up (your head is cropped)");
+          else setLockHint("Center yourself (shoulders + hips in view)");
           stableRef.current.okFrames = 0;
         } else if (match < 0.72) {
           setLocked(false);
@@ -878,7 +977,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill container (no black bars)
+                  objectFit: "contain", // show full camera frame (no crop)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
