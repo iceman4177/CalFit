@@ -26,11 +26,7 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import {
-  getPoseLandmarker,
-  resetPoseLandmarker,
-  scorePoseMatch,
-} from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
@@ -209,6 +205,70 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
 }
 
 // ----- AI scoring call (kept from prior patch) -----
+function dataUrlApproxBytes(dataUrl) {
+  try {
+    const i = String(dataUrl || "").indexOf(",");
+    if (i < 0) return 0;
+    const b64 = String(dataUrl).slice(i + 1);
+    // base64 length -> bytes approximation (ignores padding nuance; good enough for guarding)
+    return Math.floor((b64.length * 3) / 4);
+  } catch {
+    return 0;
+  }
+}
+
+async function compressImageDataUrlForAI(dataUrl) {
+  // Goal: keep request body under typical serverless limits (413 seen in console)
+  // We keep originals for share export; AI only receives compressed thumbnails.
+  const MAX_BYTES = 220_000; // per-image target (3 images ~= 660KB)
+  if (!dataUrl) return dataUrl;
+  if (dataUrlApproxBytes(dataUrl) <= MAX_BYTES) return dataUrl;
+
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = dataUrl;
+    await new Promise((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = reject;
+    });
+
+    const make = async (maxDim, quality) => {
+      const w0 = img.naturalWidth || img.width;
+      const h0 = img.naturalHeight || img.height;
+      if (!w0 || !h0) return dataUrl;
+      const scale = Math.min(1, maxDim / Math.max(w0, h0));
+      const w = Math.max(1, Math.round(w0 * scale));
+      const h = Math.max(1, Math.round(h0 * scale));
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d", { alpha: false });
+      ctx.drawImage(img, 0, 0, w, h);
+      return c.toDataURL("image/jpeg", quality);
+    };
+
+    // Ladder: progressively smaller & lower quality until under budget
+    const ladder = [
+      { d: 640, q: 0.72 },
+      { d: 512, q: 0.70 },
+      { d: 420, q: 0.66 },
+      { d: 360, q: 0.62 },
+      { d: 300, q: 0.58 },
+    ];
+
+    let best = dataUrl;
+    for (const s of ladder) {
+      const out = await make(s.d, s.q);
+      best = out;
+      if (dataUrlApproxBytes(out) <= MAX_BYTES) return out;
+    }
+    return best;
+  } catch {
+    return dataUrl;
+  }
+}
+
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
     const clientKey = "slimcal_client_id";
@@ -224,6 +284,14 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }
     }
 
+    // Compress images BEFORE sending to serverless to avoid 413 payload too large.
+    const compressedPoses = await Promise.all(
+      (poses || []).map(async (p) => ({
+        pose_key: p.pose_key,
+        image_data_url: await compressImageDataUrlForAI(p.image_data_url),
+      }))
+    );
+
     const res = await fetch("/api/ai/generate", {
       method: "POST",
       headers: {
@@ -232,10 +300,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       },
       body: JSON.stringify({
         feature: "pose_session",
-        poses: poses.map((p) => ({
-          pose_key: p.pose_key,
-          image_data_url: p.image_data_url,
-        })),
+        poses: compressedPoses,
         prev: prevSession || null,
         today_local_day: todayISO,
       }),
@@ -329,8 +394,6 @@ export default function PoseSession() {
 
     let alive = true;
     let landmarker = null;
-    let errorStreak = 0;
-    let lastResetAt = 0;
 
     const run = async () => {
       landmarker = await getPoseLandmarker();
@@ -342,36 +405,8 @@ export default function PoseSession() {
       const tick = async () => {
         if (!alive) return;
 
-        // Don't run CV when tab/backgrounded (iOS/Safari especially will freeze video frames)
-        if (typeof document !== "undefined" && document.hidden) {
-          rafRef.current = requestAnimationFrame(tick);
-          return;
-        }
-
-        // Hard gate: MediaPipe WebGL will crash if video has 0x0 dimensions.
-        const ready =
-          v.readyState >= 2 &&
-          (v.videoWidth || 0) > 0 &&
-          (v.videoHeight || 0) > 0;
-        if (!ready) {
-          // Reset stability so we don't auto-lock on stale landmarks after resume.
-          stableRef.current.okFrames = 0;
-          stableRef.current.prevLm = null;
-          lastLmRef.current = null;
-          rafRef.current = requestAnimationFrame(tick);
-          return;
-        }
-
-        const w =
-          canvas.clientWidth ||
-          v.clientWidth ||
-          v.videoWidth ||
-          360;
-        const h =
-          canvas.clientHeight ||
-          v.clientHeight ||
-          v.videoHeight ||
-          640;
+        const w = canvas.clientWidth || v.clientWidth || 360;
+        const h = canvas.clientHeight || v.clientHeight || 640;
         if (canvas.width !== w) canvas.width = w;
         if (canvas.height !== h) canvas.height = h;
 
@@ -381,27 +416,8 @@ export default function PoseSession() {
         try {
           const r = landmarker.detectForVideo(v, t);
           landmarks = r?.landmarks?.[0] || null;
-          errorStreak = 0;
         } catch {
           landmarks = null;
-          errorStreak += 1;
-
-          // If the graph has entered the "ROI 0x0 / texImage2D: no video" loop,
-          // force a reset (but rate-limit it).
-          const since = t - lastResetAt;
-          if (errorStreak >= 2 && since > 800) {
-            lastResetAt = t;
-            errorStreak = 0;
-            stableRef.current.okFrames = 0;
-            stableRef.current.prevLm = null;
-            lastLmRef.current = null;
-            try {
-              await resetPoseLandmarker();
-              landmarker = await getPoseLandmarker();
-            } catch {
-              // ignore and keep trying next frames
-            }
-          }
         }
 
         let match = 0;
@@ -654,17 +670,11 @@ export default function PoseSession() {
       streakCount,
       sincePoints: deltas?.since_points || 0,
       headline: "POSE SESSION",
-      // Copy Set #3 tone lives in `hype` upstream. Keep share subhead aligned.
       subhead: hype,
-      // Affirmation-based summary (always neutral/positive)
-      summary: String(session?.confidenceNote || "").trim() || hype,
       wins,
       levers,
-      // Muscle group signals + week-over-week movement (positive-only rendering handled in PNG generator)
-      muscleSignals: session?.muscleSignals || {},
-      prevMuscleSignals: (prevSession && prevSession.muscleSignals) ? prevSession.muscleSignals : {},
       // embed the 3 pose images (viral payload)
-      pose_images: captures.map((c) => c.image_data_url).slice(0, 3),
+      poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
     await shareOrDownloadPng(png, {
