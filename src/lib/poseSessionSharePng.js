@@ -1,6 +1,6 @@
 // src/lib/poseSessionSharePng.js
-// Zero-dependency PNG generator for Pose Session share assets.
-// Uses Canvas API only. No DOM capture. Safe for Vite builds.
+// Zero-dependency PNG generator for Pose Session share assets (story card).
+// Uses Canvas API only. Safe for Vite/Rollup builds.
 
 function clamp(n, a, b) {
   const x = Number(n);
@@ -8,7 +8,28 @@ function clamp(n, a, b) {
   return Math.min(b, Math.max(a, x));
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+function fmtPct(x) {
+  const v = clamp(x, 0, 100);
+  return `${Math.round(v)}%`;
+}
+
+function fmtNum(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "0";
+  return Math.round(n).toLocaleString();
+}
+
+async function loadImage(src) {
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    img.src = src;
+  });
+}
+
+function roundedRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
@@ -19,358 +40,212 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawGlowDot(ctx, x, y, r, color) {
-  ctx.save();
-  ctx.globalAlpha = 0.25;
-  ctx.fillStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = r * 3.2;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  ctx.globalAlpha = 0.95;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, Math.max(2, r * 0.35), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function text(ctx, str, x, y, size, color, weight = 800, align = "left", glow = 0) {
-  ctx.save();
-  ctx.font = `${weight} ${size}px system-ui, -apple-system, Segoe UI, Roboto`;
-  ctx.fillStyle = color;
-  ctx.textAlign = align;
-  ctx.textBaseline = "top";
-  if (glow && glow > 0) {
-    ctx.shadowColor = color;
-    ctx.shadowBlur = glow;
-  }
-  ctx.fillText(str, x, y);
-  
-function wrapTextLines(ctx, str, maxWidth, font) {
-  const s = String(str || "").trim();
-  if (!s) return [];
+function drawGlowText(ctx, text, x, y, opts = {}) {
+  const { font = "900 56px system-ui", fill = "#eafffb", glow = "rgba(0,255,190,0.35)" } = opts;
   ctx.save();
   ctx.font = font;
-  const words = s.split(/\s+/).filter(Boolean);
-  const lines = [];
-  let line = "";
-  for (const w of words) {
-    const test = line ? (line + " " + w) : w;
-    const width = ctx.measureText(test).width;
-    if (width <= maxWidth) {
-      line = test;
-    } else {
-      if (line) lines.push(line);
-      line = w;
-    }
-  }
-  if (line) lines.push(line);
+  ctx.textBaseline = "top";
+  ctx.fillStyle = fill;
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = 18;
+  ctx.fillText(text, x, y);
+  ctx.shadowBlur = 0;
   ctx.restore();
-  return lines;
 }
 
-function normalizeBullets(arr, max = 4) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((x) => (typeof x === "string" ? x : (x?.v || x?.k || "")))
-    .map((s) => String(s || "").trim())
-    .filter(Boolean)
-    .slice(0, max);
-}
+function drawCoverImage(ctx, img, dx, dy, dw, dh) {
+  // cover-crop the image into the destination rect
+  const sw = img.naturalWidth || img.width;
+  const sh = img.naturalHeight || img.height;
+  const sAR = sw / sh;
+  const dAR = dw / dh;
 
-function orderedMuscleRows(ms) {
-  const m = ms || {};
-  // 0..1 friendly signals
-  return [
-    { key: "chest", label: "Chest" },
-    { key: "delts", label: "Shoulders" },
-    { key: "arms", label: "Arms" },
-    { key: "lats", label: "Lats" },
-    { key: "back", label: "Back" },
-    { key: "waist_taper", label: "Waist Taper" },
-    { key: "legs", label: "Legs" },
-  ].map((r) => ({ ...r, v: clamp(m[r.key] ?? 0, 0, 1) }));
-}
-
-function deltaLabel(d) {
-  const n = Number(d);
-  if (!Number.isFinite(n)) return "locked";
-  // Positive-only language: never show negative numbers.
-  if (n >= 0.015) return `+${Math.round(n * 100)}%`;
-  if (n >= 0.005) return "+1%";
-  if (n >= 0) return "locked";
-  return "steady";
-}
-ctx.restore();
-}
-
-export async function buildPoseSessionSharePng(data, opts = {}) {
-  const W = opts.width || 1080;
-  const H = opts.height || 1350;
-
-  const buildArc = clamp(data?.build_arc ?? 80, 0, 100);
-  const percentile = clamp(data?.percentile ?? 20, 1, 99);
-  const strength = String(data?.strength ?? "Consistency").slice(0, 28);
-  const horizon = clamp(data?.horizon_days ?? 90, 7, 365);
-  const poseCount = clamp(data?.pose_count ?? 3, 1, 10);
-  const streak = clamp(data?.streak_count ?? 1, 1, 999);
-  const since = clamp(data?.since_points ?? 0, 0, 99);
-  const wins = normalizeBullets(data?.wins, 4);
-  const levers = normalizeBullets(data?.levers, 3);
-  const poseImages = Array.isArray(data?.pose_images)
-    ? data.pose_images.slice(0, 3)
-    : (Array.isArray(data?.poseImages) ? data.poseImages.slice(0, 3) : []);
-  const headline = String(data?.headline ?? "").slice(0, 80);
-  const subhead = String(data?.subhead ?? "").slice(0, 140);
-  const summary = String(data?.summary ?? "").slice(0, 200);
-  const muscleSignals = data?.muscleSignals || data?.muscle_signals || {};
-  const prevMuscleSignals = data?.prevMuscleSignals || data?.prev_muscle_signals || {};
-
-  async function loadImg(src) {
-    if (!src) return null;
-    return await new Promise((resolve) => {
-      const im = new Image();
-      im.crossOrigin = "anonymous";
-      im.onload = () => resolve(im);
-      im.onerror = () => resolve(null);
-      im.src = src;
-    });
+  let sx = 0, sy = 0, sW = sw, sH = sh;
+  if (sAR > dAR) {
+    // source wider -> crop left/right
+    sW = sh * dAR;
+    sx = (sw - sW) / 2;
+  } else {
+    // source taller -> crop top/bottom
+    sH = sw / dAR;
+    sy = (sh - sH) / 2;
   }
+  ctx.drawImage(img, sx, sy, sW, sH, dx, dy, dw, dh);
+}
 
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
+export async function buildPoseSessionSharePng({
+  headline = "POSE SESSION",
+  subhead = "",
+  buildArc = "Build Arc",
+  percentile = 0,
+  strength = 0,
+  streakCount = 0,
+  sincePoints = 0,
+  wins = [],
+  levers = [],
+  poseImages = [],
+} = {}) {
+  const W = 1080;
+  const H = 1920;
 
-  // Background
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#05070C");
-  bg.addColorStop(0.55, "#070B14");
-  bg.addColorStop(1, "#04060A");
-  ctx.fillStyle = bg;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d");
+
+  // Background gradient
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#05070a");
+  g.addColorStop(0.55, "#060b10");
+  g.addColorStop(1, "#05070a");
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
-  // Star dust
+  // Neon grid hint
   ctx.save();
-  ctx.globalAlpha = 0.18;
-  for (let i = 0; i < 220; i++) {
-    const x = Math.random() * W;
-    const y = Math.random() * H;
-    const r = Math.random() * 1.6;
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.globalAlpha = 0.10;
+  ctx.strokeStyle = "rgba(0,255,190,1)";
+  for (let y = 140; y < H; y += 80) {
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(80, y);
+    ctx.lineTo(W - 80, y);
+    ctx.stroke();
   }
   ctx.restore();
-
-  // Accent glows
-  drawGlowDot(ctx, W * 0.18, H * 0.22, 16, "rgba(120,255,180,1)");
-  drawGlowDot(ctx, W * 0.78, H * 0.34, 14, "rgba(70,140,255,1)");
-  drawGlowDot(ctx, W * 0.55, H * 0.74, 12, "rgba(120,255,180,1)");
 
   // Header
-  text(ctx, "POSE SESSION", 90, 90, 46, "rgba(140,255,200,0.98)", 950, "left", 18);
-  text(ctx, `3 poses • auto‑capture • week‑over‑week wins`, 90, 152, 26, "rgba(240,255,252,0.90)", 750);
-
-  if (headline) {
-    text(ctx, headline, 90, 190, 28, "rgba(255,255,255,0.92)", 850, "left", 10);
-  }
-  if (subhead) {
-    text(ctx, subhead, 90, 226, 22, "rgba(255,255,255,0.72)", 750);
-  }
-
-  // Streak chip
+  drawGlowText(ctx, headline, 72, 70, { font: "900 54px system-ui" });
   ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
-  ctx.lineWidth = 1;
-  roundRect(ctx, W - 350, 92, 260, 58, 999);
-  ctx.fill();
-  ctx.stroke();
+  ctx.font = "700 24px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.90)";
+  ctx.fillText(subhead || "Progress update", 72, 132);
   ctx.restore();
-  text(ctx, `STREAK ${streak}×`, W - 220, 106, 26, "rgba(240,255,252,0.94)", 950, "center", 10);
 
-  // Main card
-  const cardX = 90;
-  const cardY = 280;
-  const cardW = W - 180;
-  const cardH = 760;
-
-  // Card bg
+  // Main stats card
+  const cardX = 72, cardY = 190, cardW = W - 144, cardH = 260;
   ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = "rgba(0,0,0,0.40)";
-  ctx.strokeStyle = "rgba(120,255,180,0.22)";
+  ctx.shadowColor = "rgba(0,255,190,0.20)";
+  ctx.shadowBlur = 22;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  roundedRect(ctx, cardX, cardY, cardW, cardH, 32);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(0,255,190,0.22)";
   ctx.lineWidth = 2;
-  roundRect(ctx, cardX, cardY, cardW, cardH, 44);
-  ctx.fill();
   ctx.stroke();
   ctx.restore();
 
-  // Build Arc block
-  text(ctx, "BUILD ARC", cardX + 70, cardY + 70, 32, "rgba(140,255,200,0.98)", 950, "left", 14);
-  text(ctx, `${buildArc}/100`, cardX + 70, cardY + 118, 102, "rgba(240,255,252,0.98)", 980, "left", 18);
-  text(ctx, `Top ${percentile}%`, cardX + 70, cardY + 236, 34, "rgba(140,255,200,0.96)", 900, "left", 12);
-  text(ctx, `Strength: ${strength}`, cardX + 70, cardY + 292, 28, "rgba(240,255,252,0.92)", 850);
-  text(ctx, `${horizon}-Day upgrade horizon`, cardX + 70, cardY + 334, 22, "rgba(240,255,252,0.74)", 720);
-  // Affirmation summary (positive-only)
-  if (summary) {
-    const font = `800 22px system-ui, -apple-system, Segoe UI, Roboto`;
-    const lines = wrapTextLines(ctx, summary, cardW - 140, font).slice(0, 2);
-    const sy = cardY + 370;
-    text(ctx, lines[0] || "", cardX + 70, sy, 22, "rgba(255,255,255,0.74)", 800);
-    if (lines[1]) text(ctx, lines[1], cardX + 70, sy + 30, 22, "rgba(255,255,255,0.74)", 800);
-  }
-
-
-  // Pose count pill
   ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
-  ctx.lineWidth = 1;
-  roundRect(ctx, cardX + cardW - 300, cardY + 70, 210, 56, 999);
+  ctx.font = "900 34px system-ui";
+  ctx.fillStyle = "#eafffb";
+  ctx.fillText(String(buildArc || "Build Arc").toUpperCase(), cardX + 28, cardY + 26);
+
+  ctx.font = "800 22px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.88)";
+  ctx.fillText("Percentile", cardX + 28, cardY + 86);
+  ctx.fillText("Strength", cardX + 280, cardY + 86);
+  ctx.fillText("Streak", cardX + 520, cardY + 86);
+
+  ctx.font = "900 42px system-ui";
+  ctx.fillStyle = "#eafffb";
+  ctx.fillText(fmtPct(percentile), cardX + 28, cardY + 118);
+  ctx.fillText(fmtNum(strength), cardX + 280, cardY + 118);
+  ctx.fillText(`${fmtNum(streakCount)}d`, cardX + 520, cardY + 118);
+
+  ctx.font = "800 22px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.86)";
+  ctx.fillText(`+${fmtNum(sincePoints)} pts since last`, cardX + 28, cardY + 186);
+  ctx.restore();
+
+  // Pose images strip
+  const stripX = 72, stripY = 490, stripW = W - 144, stripH = 760;
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.50)";
+  roundedRect(ctx, stripX, stripY, stripW, stripH, 34);
   ctx.fill();
+  ctx.strokeStyle = "rgba(0,255,190,0.18)";
+  ctx.lineWidth = 2;
   ctx.stroke();
   ctx.restore();
-  text(ctx, `${poseCount} poses`, cardX + cardW - 195, cardY + 83, 26, "rgba(255,255,255,0.88)", 900, "center");
 
-  // Since last (positive-only)
-  if (since > 0) {
+  const imgs = (poseImages || []).filter(Boolean).slice(0, 3);
+  const slotGap = 18;
+  const slotW = (stripW - slotGap * 4) / 3;
+  const slotH = stripH - slotGap * 2;
+  const slotY = stripY + slotGap;
+
+  for (let i = 0; i < 3; i++) {
+    const slotX = stripX + slotGap + i * (slotW + slotGap);
     ctx.save();
-    ctx.fillStyle = "rgba(120,255,180,0.10)";
-    ctx.strokeStyle = "rgba(120,255,180,0.22)";
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, cardX + cardW - 300, cardY + 140, 210, 56, 999);
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    roundedRect(ctx, slotX, slotY, slotW, slotH, 26);
     ctx.fill();
+    ctx.strokeStyle = "rgba(0,255,190,0.22)";
+    ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.clip();
+
+    if (imgs[i]) {
+      try {
+        const img = await loadImage(imgs[i]);
+        drawCoverImage(ctx, img, slotX, slotY, slotW, slotH);
+      } catch {
+        // ignore image load failures
+      }
+    } else {
+      ctx.fillStyle = "rgba(220,255,245,0.20)";
+      ctx.font = "900 26px system-ui";
+      ctx.fillText("POSE", slotX + 24, slotY + 24);
+    }
     ctx.restore();
-    text(ctx, `+${since} pts`, cardX + cardW - 195, cardY + 153, 26, "rgba(140,255,200,0.98)", 950, "center", 12);
   }
 
-  // Divider line
+  // Bottom advice card
+  const tipsX = 72, tipsY = 1280, tipsW = W - 144, tipsH = 520;
   ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  roundedRect(ctx, tipsX, tipsY, tipsW, tipsH, 34);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,255,190,0.18)";
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cardX + 70, cardY + 390);
-  ctx.lineTo(cardX + cardW - 70, cardY + 390);
   ctx.stroke();
   ctx.restore();
 
-  // Pose strip (3 thumbnails)
-  if (poseImages.length) {
-    const thumbs = await Promise.all(poseImages.map(loadImg));
-    const tY = cardY + 430;
-    const tW = (cardW - 70 * 2 - 24 * 2) / 3;
-    const tH = 190;
-    for (let i = 0; i < 3; i++) {
-      const im = thumbs[i];
-      if (!im) continue;
-      const x = cardX + 70 + i * (tW + 24);
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.32)";
-      ctx.strokeStyle = "rgba(120,255,180,0.22)";
-      ctx.lineWidth = 2;
-      roundRect(ctx, x, tY, tW, tH, 24);
-      ctx.fill();
-      ctx.stroke();
-      ctx.clip();
-      // cover crop
-      const ar = im.width / im.height;
-      const tr = tW / tH;
-      let dw = tW,
-        dh = tH,
-        dx = x,
-        dy = tY;
-      if (ar > tr) {
-        dh = tH;
-        dw = dh * ar;
-        dx = x - (dw - tW) / 2;
-      } else {
-        dw = tW;
-        dh = dw / ar;
-        dy = tY - (dh - tH) / 2;
-      }
-      ctx.drawImage(im, dx, dy, dw, dh);
-      ctx.restore();
-    }
+  ctx.save();
+  ctx.font = "900 34px system-ui";
+  ctx.fillStyle = "#eafffb";
+  ctx.fillText("TODAY’S WINS", tipsX + 28, tipsY + 26);
+  ctx.font = "800 24px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.90)";
 
-    // Results sections (wins → levers → muscle breakdown)
-  const sectionY = poseImages.length ? (cardY + 640) : (cardY + 420);
-
-  // Momentum wins
-  text(ctx, "MOMENTUM WINS", cardX + 70, sectionY, 24, "rgba(255,255,255,0.72)", 900);
-  let y = sectionY + 46;
-  wins.slice(0, 3).forEach((w) => {
-    text(ctx, "•", cardX + 70, y, 28, "rgba(140,255,200,0.95)", 950);
-    text(ctx, String(w).slice(0, 46), cardX + 92, y, 24, "rgba(255,255,255,0.84)", 850);
-    y += 38;
-  });
-
-  // Next unlock
-  if (levers.length) {
-    y += 10;
-    text(ctx, "NEXT UNLOCK", cardX + 70, y, 24, "rgba(255,255,255,0.72)", 900);
+  const wLines = (Array.isArray(wins) ? wins : []).slice(0, 4);
+  let y = tipsY + 78;
+  for (const w of wLines) {
+    ctx.fillText(`• ${String(w)}`, tipsX + 28, y);
     y += 46;
-    levers.slice(0, 2).forEach((w) => {
-      text(ctx, "•", cardX + 70, y, 28, "rgba(70,140,255,0.95)", 950);
-      text(ctx, String(w).slice(0, 46), cardX + 92, y, 24, "rgba(255,255,255,0.84)", 850);
-      y += 38;
-    });
   }
 
-  // Muscle breakdown (positive-only movement)
-  y += 18;
-  text(ctx, "MUSCLE ARC", cardX + 70, y, 24, "rgba(255,255,255,0.72)", 900);
-  y += 44;
+  ctx.font = "900 34px system-ui";
+  ctx.fillStyle = "#eafffb";
+  ctx.fillText("NEXT LEVERS", tipsX + 28, y + 18);
+  ctx.font = "800 24px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.90)";
+  y += 70;
 
-  const rows = orderedMuscleRows(muscleSignals);
-  const prevRows = orderedMuscleRows(prevMuscleSignals).reduce((acc, r) => {
-    acc[r.key] = r.v;
-    return acc;
-  }, {});
-  const barX = cardX + 220;
-  const barW = cardW - 70 - (barX - cardX) - 110;
-  const barH = 16;
+  const lLines = (Array.isArray(levers) ? levers : []).slice(0, 4);
+  for (const l of lLines) {
+    ctx.fillText(`• ${String(l)}`, tipsX + 28, y);
+    y += 46;
+  }
+  ctx.restore();
 
-  // Pick the top 5 by positive movement (fallback: top signal)
-  const ranked = rows
-    .map((r) => ({ ...r, d: (r.v - (prevRows[r.key] ?? 0)) }))
-    .sort((a, b) => (b.d - a.d) || (b.v - a.v))
-    .slice(0, 5);
+  // Footer mark
+  ctx.save();
+  ctx.font = "800 22px system-ui";
+  ctx.fillStyle = "rgba(220,255,245,0.65)";
+  ctx.fillText("slimcal.ai", 72, H - 54);
+  ctx.restore();
 
-  ranked.forEach((r) => {
-    text(ctx, r.label, cardX + 70, y + 4, 22, "rgba(255,255,255,0.82)", 850);
-    // bar bg
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    roundRect(ctx, barX, y - 8, barW, barH, 999);
-    ctx.fill();
-    // bar fill
-    const fillW = Math.max(8, Math.floor(barW * clamp(r.v, 0, 1)));
-    ctx.fillStyle = "rgba(140,255,200,0.85)";
-    roundRect(ctx, barX, y - 8, fillW, barH, 999);
-    ctx.fill();
-    ctx.restore();
-
-    // delta (never negative)
-    const dTxt = deltaLabel(r.d);
-    text(ctx, dTxt, cardX + cardW - 70, y + 4, 22, "rgba(140,255,200,0.95)", 950, "right");
-    y += 38;
-  });
-
-
-  // Footer branding
-  text(ctx, "Slimcal.ai", 90, H - 110, 28, "rgba(255,255,255,0.60)", 900);
-  text(ctx, "POSE SESSION", W - 90, H - 110, 22, "rgba(170,255,210,0.65)", 900, "right");
-
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
+  const blob = await new Promise((resolve) => c.toBlob(resolve, "image/png"));
   return blob;
 }

@@ -60,51 +60,6 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
-  // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
-  // { minX, minY, w, h } all in [0..1].
-  if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
-  const scale = Math.max(canvasW / videoW, canvasH / videoH);
-  const visW = canvasW / scale;
-  const visH = canvasH / scale;
-  const x0 = (videoW - visW) / 2;
-  const y0 = (videoH - visH) / 2;
-  return {
-    minX: x0 / videoW,
-    minY: y0 / videoH,
-    w: visW / videoW,
-    h: visH / videoH,
-  };
-}
-
-function remapLandmarksToVisible(landmarks, vis) {
-  if (!landmarks || !vis) return landmarks;
-  const { minX, minY, w, h } = vis;
-  const invW = w ? 1 / w : 1;
-  const invH = h ? 1 / h : 1;
-  return landmarks.map((p) => ({
-    ...p,
-    x: (p.x - minX) * invW,
-    y: (p.y - minY) * invH,
-  }));
-}
-
-
-async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
-  const sw = srcCanvas.width;
-  const sh = srcCanvas.height;
-  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
-  const tw = Math.max(1, Math.round(sw * scale));
-  const th = Math.max(1, Math.round(sh * scale));
-
-  const c = document.createElement("canvas");
-  c.width = tw;
-  c.height = th;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(srcCanvas, 0, 0, sw, sh, 0, 0, tw, th);
-  return c.toDataURL("image/jpeg", quality);
-}
-
 // ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
 function buildPoseTemplate(poseKey, anchors) {
   if (!anchors) return null;
@@ -274,8 +229,8 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          poseKey: p.pose_key,
-          image_data_url: p.ai_image_data_url || p.image_data_url,
+          pose_key: p.pose_key,
+          image_data_url: p.image_data_url,
         })),
         prev: prevSession || null,
         today_local_day: todayISO,
@@ -301,12 +256,11 @@ export default function PoseSession() {
   const prevSession = prevHistory?.[0] || null;
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
-  const [captureLayout, setCaptureLayout] = useState("portrait"); // portrait default (mobile-first)
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
   const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Move back • fit your body in frame");
+  const [lockHint, setLockHint] = useState("Move back to fit your full body");
   const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
@@ -437,14 +391,11 @@ export default function PoseSession() {
         let bbox = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
-          const lmVis = remapLandmarksToVisible(landmarks, vis);
-          const scored = scorePoseMatch(pose.key, lmVis);
+          const scored = scorePoseMatch(pose.key, landmarks);
           match = clamp(scored?.match || 0, 0, 1);
           anchors = scored?.anchors || null;
           bbox = scored?.bbox || null;
-          landmarks = lmVis;
-          lastLmRef.current = { landmarks: lmVis, anchors, bbox, match };
+          lastLmRef.current = { landmarks, anchors, bbox, match };
         } else {
           lastLmRef.current = null;
         }
@@ -452,24 +403,18 @@ export default function PoseSession() {
         const tpl = buildPoseTemplate(pose.key, anchors);
         drawNeonGhost(ctx, tpl, { w, h, glow: true });
 
-        // Match + stability gating (MOVE BACK → MATCH → HOLD)
-        // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
-        // We use hysteresis so "in frame" doesn't flicker on webcams.
-        let inFrameRaw = false;
+        // Match + stability gating (MrBeast simple: MOVE BACK -> MATCH -> HOLD)
+        let inFrame = false;
         if (bbox) {
           const height = bbox.maxY - bbox.minY;
-          const width = bbox.maxX - bbox.minX;
-          // Full body preferred (mobile). On desktop webcams, allow "upper body + hips" to still lock.
-          const fullBody = height >= 0.72 && bbox.minY <= 0.12 && bbox.maxY >= 0.88;
-          const upperBody = height >= 0.48 && bbox.minY <= 0.08 && bbox.maxY >= 0.62 && width >= 0.28;
-          inFrameRaw = fullBody || upperBody;
+          if (frameOrientation === "portrait") {
+            // portrait wants mostly-full body, but still workable on phone cams
+            inFrame = height > 0.42 && bbox.minY < 0.28 && bbox.maxY > 0.80;
+          } else {
+            // landscape is more forgiving (PC webcams / seated)
+            inFrame = height > 0.28 && bbox.minY < 0.32 && bbox.maxY > 0.70;
+          }
         }
-
-        // hysteresis
-        const fr = stableRef.current;
-        fr.inFrameFrames = fr.inFrameFrames || 0;
-        fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
-        const inFrame = fr.inFrameFrames >= 6;
 
         const ok = inFrame && match >= 0.72;
 
@@ -492,7 +437,7 @@ export default function PoseSession() {
 
         if (!inFrame) {
           setLocked(false);
-          setLockHint("Move back • get full body inside the frame");
+          setLockHint("Adjust distance • try Landscape on PC if you can’t fit full body");
           stableRef.current.okFrames = 0;
         } else if (match < 0.72) {
           setLocked(false);
@@ -549,38 +494,24 @@ export default function PoseSession() {
     const v = videoRef.current;
     if (!v) return;
 
-
-    // Capture exactly what the user sees (no black bars): center-crop to the visible rect (objectFit:'cover')
-    const vw = v.videoWidth || 720;
-    const vh = v.videoHeight || 1280;
-
-    const outW = captureLayout === "landscape" ? 1920 : 1080;
-    const outH = captureLayout === "landscape" ? 1080 : 1920;
-
+    // draw current frame to a temp canvas (respect mirroring for selfie cam)
     const tmp = document.createElement("canvas");
-    tmp.width = outW;
-    tmp.height = outH;
+    const w = v.videoWidth || 720;
+    const h = v.videoHeight || 1280;
+    tmp.width = w;
+    tmp.height = h;
     const ctx = tmp.getContext("2d");
 
-    const vis = getCoverVisibleRect(vw, vh, outW, outH);
-    const sx = Math.max(0, Math.floor(vis.minX * vw));
-    const sy = Math.max(0, Math.floor(vis.minY * vh));
-    const sw = Math.max(1, Math.floor(vis.w * vw));
-    const sh = Math.max(1, Math.floor(vis.h * vh));
-
     if (cameraFacing === "user") {
-      ctx.translate(outW, 0);
+      ctx.translate(w, 0);
       ctx.scale(-1, 1);
     }
-
-    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, outW, outH);
+    ctx.drawImage(v, 0, 0, w, h);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
-    const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
-
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+      { pose_key: pose.key, image_data_url: dataUrl },
     ]);
     setLocked(false);
     setCountdown(null);
@@ -718,11 +649,7 @@ export default function PoseSession() {
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
-    await shareOrDownloadPng(
-      png,
-      `slimcal-pose-session-${todayISO}.png`,
-      "Pose Session ✅ #SlimcalAI"
-    );
+    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, `Pose Session ✅ #SlimcalAI`);
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
   const start = () => {
@@ -821,7 +748,7 @@ export default function PoseSession() {
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: captureLayout === "landscape" ? "16 / 9" : "9 / 16",
+                aspectRatio: frameOrientation === "portrait" ? "9 / 16" : "16 / 9",
                 borderRadius: 3,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
@@ -836,7 +763,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill container (no black bars)
+                  objectFit: "cover", // fill frame (no black bars)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
@@ -904,24 +831,37 @@ export default function PoseSession() {
               </Box>
             </Box>
 
-            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Button
-                fullWidth
-                variant="outlined"
-                onClick={() => setCountdown(3)}
-                disabled={!!countdown}
-              >
-                Capture now
-              </Button>
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={() => setCountdown(3)}
-                disabled={!!countdown}
-              >
-                Auto snap
-              </Button>
-            </Stack>
+<Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+  <Button
+    variant={frameOrientation === "portrait" ? "contained" : "outlined"}
+    onClick={() => setFrameOrientation("portrait")}
+    sx={{ minWidth: 0, px: 1.2 }}
+  >
+    Portrait
+  </Button>
+  <Button
+    variant={frameOrientation === "landscape" ? "contained" : "outlined"}
+    onClick={() => setFrameOrientation("landscape")}
+    sx={{ minWidth: 0, px: 1.2 }}
+  >
+    Landscape
+  </Button>
+  <Box sx={{ flex: 1 }} />
+  <Button
+    variant="outlined"
+    onClick={() => onCapture()}
+    disabled={!!countdown}
+  >
+    Capture now
+  </Button>
+  <Button
+    variant="contained"
+    onClick={() => setCountdown(3)}
+    disabled={!!countdown}
+  >
+    Timed capture
+  </Button>
+</Stack>
           </CardContent>
         </Card>
       ) : (
