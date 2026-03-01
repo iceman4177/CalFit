@@ -167,88 +167,142 @@ function buildPoseTemplate(poseKey, anchors) {
 }
 
 function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
+  // "Ghost matrix outline" guide — NOT a stick figure skeleton.
+  // Goal: help the user fit full body + limbs without feeling judged.
   if (!ctx || !tpl) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
 
   const segs = [
-    ["head", "neck"],
-    ["neck", "ls"],
-    ["neck", "rs"],
-    ["ls", "le"],
-    ["le", "lw"],
-    ["rs", "re"],
-    ["re", "rw"],
-    ["ls", "rs"],
-    ["ls", "lh"],
-    ["rs", "rh"],
-    ["lh", "rh"],
-    ["lh", "lk"],
-    ["lk", "la"],
-    ["rh", "rk"],
-    ["rk", "ra"],
+    ["neck", "ls"], ["neck", "rs"],
+    ["ls", "le"], ["le", "lw"],
+    ["rs", "re"], ["re", "rw"],
+    ["lh", "lk"], ["lk", "la"],
+    ["rh", "rk"], ["rk", "ra"],
   ];
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
 
-  // soft vignette to make ghost readable
-  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
+  // subtle scan vignette (readability)
+  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.08, w * 0.5, h * 0.55, h * 0.85);
   grd.addColorStop(0, "rgba(0,0,0,0)");
-  grd.addColorStop(1, "rgba(0,0,0,0.35)");
+  grd.addColorStop(1, "rgba(0,0,0,0.42)");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
+  // scan lines (matrix vibe)
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = "rgba(0,255,190,1)";
+  const stepY = Math.max(10, Math.floor(h / 60));
+  for (let y = 0; y < h; y += stepY) {
+    ctx.fillRect(0, y, w, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  const base = Math.max(6, Math.min(14, tpl.shoulderWidth * w * 0.085));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // glow layer
+  // TORSO "outline" (polygon) — feels like a silhouette guide, not a stickman
+  const ls = P(tpl.ls), rs = P(tpl.rs), lh = P(tpl.lh), rh = P(tpl.rh), neck = P(tpl.neck);
+  ctx.beginPath();
+  ctx.moveTo(ls.x, ls.y);
+  ctx.lineTo(rs.x, rs.y);
+  ctx.lineTo(rh.x, rh.y);
+  ctx.lineTo(lh.x, lh.y);
+  ctx.closePath();
+
   if (glow) {
-    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
-    ctx.lineWidth = baseWidth * 3.0;
-    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
-    ctx.shadowBlur = 18;
-    for (const [a, b] of segs) {
-      const A = P(tpl[a]);
-      const B = P(tpl[b]);
+    ctx.fillStyle = "rgba(0,255,190,0.08)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,255,190,0.20)";
+    ctx.lineWidth = base * 2.8;
+    ctx.shadowColor = "rgba(0,255,190,0.40)";
+    ctx.shadowBlur = 22;
+    ctx.stroke();
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(0,255,190,0.92)";
+  ctx.lineWidth = base * 1.25;
+  ctx.stroke();
+
+  // HEAD halo
+  const head = P(tpl.head);
+  const headR = Math.max(14, base * 1.9);
+  if (glow) {
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, headR * 1.2, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,255,190,0.20)";
+    ctx.lineWidth = base * 2.4;
+    ctx.shadowColor = "rgba(0,255,190,0.38)";
+    ctx.shadowBlur = 20;
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, headR, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(0,255,190,0.92)";
+  ctx.lineWidth = base * 1.1;
+  ctx.stroke();
+
+  // LIMBS (thicker, rounded, looks like an outline guide)
+  const drawSeg = (a, b, thick) => {
+    const A = P(tpl[a]);
+    const B = P(tpl[b]);
+
+    if (glow) {
+      ctx.strokeStyle = "rgba(0,255,190,0.20)";
+      ctx.lineWidth = thick * 2.6;
+      ctx.shadowColor = "rgba(0,255,190,0.35)";
+      ctx.shadowBlur = 18;
       ctx.beginPath();
       ctx.moveTo(A.x, A.y);
       ctx.lineTo(B.x, B.y);
       ctx.stroke();
     }
-  }
 
-  // core line
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
-  ctx.lineWidth = baseWidth * 1.15;
-  for (const [a, b] of segs) {
-    const A = P(tpl[a]);
-    const B = P(tpl[b]);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(0,255,190,0.95)";
+    ctx.lineWidth = thick;
     ctx.beginPath();
     ctx.moveTo(A.x, A.y);
     ctx.lineTo(B.x, B.y);
     ctx.stroke();
-  }
 
-  // hint zones for arms (makes matching obvious)
-  const zoneAlpha = 0.14;
+    // matrix "nodes" along the line (small squares)
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const steps = Math.max(3, Math.floor(dist / 52));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const x = A.x + dx * t;
+      const y = A.y + dy * t;
+      ctx.fillStyle = "rgba(0,255,190,0.20)";
+      ctx.fillRect(x - 2, y - 2, 4, 4);
+    }
+  };
+
+  for (const [a, b] of segs) drawSeg(a, b, base * 1.05);
+
+  // zones (help wrists/elbows alignment)
+  const zoneAlpha = 0.12;
   ctx.fillStyle = `rgba(0,255,190,${zoneAlpha})`;
-  const drawZone = (p, r) => {
+  const zone = (p, r) => {
     const c = P(p);
     ctx.beginPath();
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
     ctx.fill();
   };
-  drawZone(tpl.lw, baseWidth * 2.8);
-  drawZone(tpl.rw, baseWidth * 2.8);
-  drawZone(tpl.le, baseWidth * 2.8);
-  drawZone(tpl.re, baseWidth * 2.8);
+  zone(tpl.lw, base * 2.8);
+  zone(tpl.rw, base * 2.8);
+  zone(tpl.le, base * 2.8);
+  zone(tpl.re, base * 2.8);
 
   ctx.restore();
 }
-
 // ----- AI scoring call (kept from prior patch) -----
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
@@ -302,25 +356,6 @@ export default function PoseSession() {
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
   const [captureLayout, setCaptureLayout] = useState("portrait"); // portrait default (mobile-first)
-
-  // Patch B: defensive orientation derivation.
-  // Some deployed bundles referenced `frameOrientation` without defining it.
-  // Keeping this local, derived constant prevents runtime ReferenceErrors
-  // without changing any existing logic.
-  const frameOrientation = useMemo(() => {
-    try {
-      const t = String(globalThis?.screen?.orientation?.type || "").toLowerCase();
-      if (t.includes("landscape")) return "landscape";
-      if (t.includes("portrait")) return "portrait";
-    } catch {}
-    try {
-      if (typeof window !== "undefined" && window.innerWidth && window.innerHeight) {
-        return window.innerWidth > window.innerHeight ? "landscape" : "portrait";
-      }
-    } catch {}
-    return "portrait";
-  }, [captureLayout]);
-
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -870,7 +905,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill container (no black bars)
+                  objectFit: "contain", // no zoom/crop (full body stays visible)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
