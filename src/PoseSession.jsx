@@ -305,6 +305,7 @@ export default function PoseSession() {
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
+  const [autoSnapEnabled, setAutoSnapEnabled] = useState(false);
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState("Move back - fit your body in frame");
   const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
@@ -549,6 +550,18 @@ export default function PoseSession() {
     const v = videoRef.current;
     if (!v) return;
 
+    const isVideoReady =
+      !document.hidden &&
+      v.readyState >= 2 &&
+      (v.videoWidth || 0) > 0 &&
+      (v.videoHeight || 0) > 0;
+
+    if (!isVideoReady) {
+      // Prevent WebGL/MediaPipe errors when the camera feed is paused or not ready (tab switch, permission prompt, etc.)
+      setAiError("Camera is still warming up — try again in a second.");
+      return;
+    }
+
 
     // Capture exactly what the user sees (no black bars): center-crop to the visible rect (objectFit:'cover')
     const vw = v.videoWidth || 720;
@@ -733,6 +746,8 @@ export default function PoseSession() {
     setAiError("");
     setCountdown(null);
     setLocked(false);
+    setAutoSnapEnabled(false);
+    stableRef.current.okFrames = 0;
   };
 
   const back = () => history.push("/");
@@ -908,18 +923,39 @@ export default function PoseSession() {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => onCapture()}
-                disabled={!!countdown}
+                onClick={() => {
+                  // Capture should always be immediate (even if auto-snap countdown is running)
+                  if (countdown) setCountdown(null);
+                  onCapture();
+                }}
               >
                 Capture now
               </Button>
               <Button
                 fullWidth
-                variant="contained"
-                onClick={() => setCountdown(3)}
-                disabled={!!countdown}
+                variant={autoSnapEnabled ? "outlined" : "contained"}
+                onClick={() => {
+                  setAutoSnapEnabled((v) => {
+                    const next = !v;
+                    // If enabling auto-snap while already locked-in, start a countdown immediately.
+                    if (next) {
+                      // Only start a manual countdown immediately if the pose is already locked.
+                      if (locked) {
+                        setTimeout(() => {
+                          try {
+                            setCountdown((c) => (c ? c : 3));
+                          } catch {}
+                        }, 0);
+                      }
+                    } else {
+                      // If disabling, cancel any in-progress countdown.
+                      if (countdown) setCountdown(null);
+                    }
+                    return next;
+                  });
+                }}
               >
-                Auto snap
+                Auto snap {autoSnapEnabled ? "On" : "Off"}
               </Button>
             </Stack>
           </CardContent>
