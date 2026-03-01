@@ -167,140 +167,200 @@ function buildPoseTemplate(poseKey, anchors) {
   };
 }
 
-function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
-  // "Ghost matrix outline" guide — NOT a stick figure skeleton.
-  // Goal: help the user fit full body + limbs without feeling judged.
-  if (!ctx || !tpl) return;
+function drawNeonGhost(ctx, { tpl, landmarks }, { w, h, glow = true }) {
+  // "Ghost matrix outline" guide — NOT a stick skeleton.
+  // If we have live landmarks, we draw a soft neon contour that hugs the user's body.
+  // Otherwise we fall back to an abstract template so the UI still guides placement.
+  if (!ctx || !w || !h) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
 
-  const segs = [
-    ["neck", "ls"], ["neck", "rs"],
-    ["ls", "le"], ["le", "lw"],
-    ["rs", "re"], ["re", "rw"],
-    ["lh", "lk"], ["lk", "la"],
-    ["rh", "rk"], ["rk", "ra"],
-  ];
+  const lm = Array.isArray(landmarks) && landmarks.length >= 33 ? landmarks : null;
+
+  const idx = {
+    nose: 0,
+    lEar: 7,
+    rEar: 8,
+    lShoulder: 11,
+    rShoulder: 12,
+    lElbow: 13,
+    rElbow: 14,
+    lWrist: 15,
+    rWrist: 16,
+    lHip: 23,
+    rHip: 24,
+    lKnee: 25,
+    rKnee: 26,
+    lAnkle: 27,
+    rAnkle: 28,
+  };
+
+  const safePt = (i) => {
+    const p = lm?.[i];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+    return { x: clamp(p.x, 0, 1), y: clamp(p.y, 0, 1) };
+  };
+
+  const contourFromLandmarks = () => {
+    const pts = [
+      safePt(idx.lEar) || safePt(idx.nose),
+      safePt(idx.lShoulder),
+      safePt(idx.lElbow),
+      safePt(idx.lWrist),
+      safePt(idx.lHip),
+      safePt(idx.lKnee),
+      safePt(idx.lAnkle),
+      safePt(idx.rAnkle),
+      safePt(idx.rKnee),
+      safePt(idx.rHip),
+      safePt(idx.rWrist),
+      safePt(idx.rElbow),
+      safePt(idx.rShoulder),
+      safePt(idx.rEar) || safePt(idx.nose),
+    ].filter(Boolean);
+
+    if (pts.length < 10) return null;
+
+    // close the loop smoothly
+    pts.push(pts[0]);
+    return pts;
+  };
+
+  const contourFromTemplate = () => {
+    if (!tpl) return null;
+    const pts = [
+      tpl.head,
+      tpl.ls,
+      tpl.lw,
+      tpl.lh,
+      tpl.la,
+      tpl.ra,
+      tpl.rh,
+      tpl.rw,
+      tpl.rs,
+      tpl.head,
+    ].filter(Boolean);
+    if (pts.length < 6) return null;
+    return pts;
+  };
+
+  const contour = lm ? contourFromLandmarks() : contourFromTemplate();
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
 
-  // subtle scan vignette (readability)
-  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.08, w * 0.5, h * 0.55, h * 0.85);
+  // subtle vignette (readability)
+  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.08, w * 0.5, h * 0.55, h * 0.9);
   grd.addColorStop(0, "rgba(0,0,0,0)");
-  grd.addColorStop(1, "rgba(0,0,0,0.42)");
+  grd.addColorStop(1, "rgba(0,0,0,0.45)");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
   // scan lines (matrix vibe)
-  ctx.globalAlpha = 0.14;
+  ctx.globalAlpha = 0.12;
   ctx.fillStyle = "rgba(0,255,190,1)";
-  const stepY = Math.max(10, Math.floor(h / 60));
-  for (let y = 0; y < h; y += stepY) {
-    ctx.fillRect(0, y, w, 1);
-  }
+  const stepY = Math.max(10, Math.floor(h / 70));
+  for (let y = 0; y < h; y += stepY) ctx.fillRect(0, y, w, 1);
   ctx.globalAlpha = 1;
 
-  const base = Math.max(6, Math.min(14, tpl.shoulderWidth * w * 0.085));
-  ctx.lineCap = "round";
+  if (!contour) {
+    ctx.restore();
+    return;
+  }
+
+  // Build smooth path
+  const toPx = (pt) => P(pt);
+  const c0 = toPx(contour[0]);
+
+  const drawPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(c0.x, c0.y);
+    for (let i = 1; i < contour.length; i++) {
+      const a = toPx(contour[i - 1]);
+      const b = toPx(contour[i]);
+      const cx = (a.x + b.x) * 0.5;
+      const cy = (a.y + b.y) * 0.5;
+      ctx.quadraticCurveTo(a.x, a.y, cx, cy);
+    }
+    ctx.closePath();
+  };
+
+  // Outer glow
+  if (glow) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(6, Math.round(Math.min(w, h) * 0.012));
+    ctx.strokeStyle = "rgba(0,255,190,1)";
+    ctx.shadowColor = "rgba(0,255,190,1)";
+    ctx.shadowBlur = Math.max(12, Math.round(Math.min(w, h) * 0.03));
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    drawPath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Core outline
+  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = Math.max(3, Math.round(Math.min(w, h) * 0.0065));
+  ctx.strokeStyle = "rgba(0,255,210,1)";
+  ctx.shadowColor = "rgba(0,0,0,0)";
   ctx.lineJoin = "round";
-
-  // TORSO "outline" (polygon) — feels like a silhouette guide, not a stickman
-  const ls = P(tpl.ls), rs = P(tpl.rs), lh = P(tpl.lh), rh = P(tpl.rh), neck = P(tpl.neck);
-  ctx.beginPath();
-  ctx.moveTo(ls.x, ls.y);
-  ctx.lineTo(rs.x, rs.y);
-  ctx.lineTo(rh.x, rh.y);
-  ctx.lineTo(lh.x, lh.y);
-  ctx.closePath();
-
-  if (glow) {
-    ctx.fillStyle = "rgba(0,255,190,0.08)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,255,190,0.20)";
-    ctx.lineWidth = base * 2.8;
-    ctx.shadowColor = "rgba(0,255,190,0.40)";
-    ctx.shadowBlur = 22;
-    ctx.stroke();
-  }
-
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(0,255,190,0.92)";
-  ctx.lineWidth = base * 1.25;
+  ctx.lineCap = "round";
+  drawPath();
   ctx.stroke();
 
-  // HEAD halo
-  const head = P(tpl.head);
-  const headR = Math.max(14, base * 1.9);
-  if (glow) {
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, headR * 1.2, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(0,255,190,0.20)";
-    ctx.lineWidth = base * 2.4;
-    ctx.shadowColor = "rgba(0,255,190,0.38)";
-    ctx.shadowBlur = 20;
-    ctx.stroke();
+  // Matrix nodes along the outline (small dots)
+  const nodes = [];
+  for (let i = 0; i < contour.length - 1; i++) {
+    const a = toPx(contour[i]);
+    const b = toPx(contour[i + 1]);
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    const count = Math.max(1, Math.floor(segLen / 80));
+    for (let k = 0; k <= count; k++) {
+      const t = count ? k / count : 0;
+      nodes.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
   }
-  ctx.shadowBlur = 0;
-  ctx.beginPath();
-  ctx.arc(head.x, head.y, headR, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(0,255,190,0.92)";
-  ctx.lineWidth = base * 1.1;
-  ctx.stroke();
 
-  // LIMBS (thicker, rounded, looks like an outline guide)
-  const drawSeg = (a, b, thick) => {
-    const A = P(tpl[a]);
-    const B = P(tpl[b]);
-
-    if (glow) {
-      ctx.strokeStyle = "rgba(0,255,190,0.20)";
-      ctx.lineWidth = thick * 2.6;
-      ctx.shadowColor = "rgba(0,255,190,0.35)";
-      ctx.shadowBlur = 18;
-      ctx.beginPath();
-      ctx.moveTo(A.x, A.y);
-      ctx.lineTo(B.x, B.y);
-      ctx.stroke();
-    }
-
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(0,255,190,0.95)";
-    ctx.lineWidth = thick;
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "rgba(0,255,190,1)";
+  const r = Math.max(2, Math.round(Math.min(w, h) * 0.0025));
+  for (let i = 0; i < nodes.length; i += 3) {
+    const n = nodes[i];
     ctx.beginPath();
-    ctx.moveTo(A.x, A.y);
-    ctx.lineTo(B.x, B.y);
-    ctx.stroke();
-
-    // matrix "nodes" along the line (small squares)
-    const dx = B.x - A.x;
-    const dy = B.y - A.y;
-    const dist = Math.max(1, Math.hypot(dx, dy));
-    const steps = Math.max(3, Math.floor(dist / 52));
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const x = A.x + dx * t;
-      const y = A.y + dy * t;
-      ctx.fillStyle = "rgba(0,255,190,0.20)";
-      ctx.fillRect(x - 2, y - 2, 4, 4);
-    }
-  };
-
-  for (const [a, b] of segs) drawSeg(a, b, base * 1.05);
-
-  // zones (help wrists/elbows alignment)
-  const zoneAlpha = 0.12;
-  ctx.fillStyle = `rgba(0,255,190,${zoneAlpha})`;
-  const zone = (p, r) => {
-    const c = P(p);
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     ctx.fill();
-  };
-  zone(tpl.lw, base * 2.8);
-  zone(tpl.rw, base * 2.8);
-  zone(tpl.le, base * 2.8);
-  zone(tpl.re, base * 2.8);
+  }
+  ctx.restore();
+
+  // Head halo (friendly, non-judgy)
+  const nose = lm ? safePt(idx.nose) : null;
+  const le = lm ? safePt(idx.lEar) : null;
+  const re = lm ? safePt(idx.rEar) : null;
+  const headCenter = (() => {
+    if (nose) return P(nose);
+    if (le && re) return P({ x: (le.x + re.x) / 2, y: (le.y + re.y) / 2 });
+    if (tpl?.head) return P(tpl.head);
+    return { x: w * 0.5, y: h * 0.2 };
+  })();
+
+  const headR = (() => {
+    if (le && re) return Math.max(18, Math.hypot(P(re).x - P(le).x, P(re).y - P(le).y) * 0.75);
+    return Math.max(18, Math.round(Math.min(w, h) * 0.035));
+  })();
+
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = "rgba(0,255,190,1)";
+  ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.003));
+  ctx.shadowColor = "rgba(0,255,190,1)";
+  ctx.shadowBlur = Math.max(8, Math.round(Math.min(w, h) * 0.02));
+  ctx.beginPath();
+  ctx.arc(headCenter.x, headCenter.y, headR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 
   ctx.restore();
 }
@@ -517,7 +577,7 @@ export default function PoseSession() {
         }
 
         const tpl = buildPoseTemplate(pose.key, anchors);
-        drawNeonGhost(ctx, tpl, { w, h, glow: true });
+        drawNeonGhost(ctx, { tpl, landmarks }, { w, h, glow: true });
 
         // Match + stability gating (MOVE BACK → MATCH → HOLD)
         // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
