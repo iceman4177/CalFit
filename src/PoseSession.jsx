@@ -26,7 +26,7 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
@@ -60,31 +60,49 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
+function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
+  // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
+  // { minX, minY, w, h } all in [0..1].
+  if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
+  const scale = Math.max(canvasW / videoW, canvasH / videoH);
+  const visW = canvasW / scale;
+  const visH = canvasH / scale;
+  const x0 = (videoW - visW) / 2;
+  const y0 = (videoH - visH) / 2;
+  return {
+    minX: x0 / videoW,
+    minY: y0 / videoH,
+    w: visW / videoW,
+    h: visH / videoH,
+  };
+}
 
-async function makeAiThumbnailJpegFromVideo(videoEl, { maxEdge = 384, quality = 0.72, mirror = false } = {}) {
-  if (!videoEl) return "";
-  const w0 = videoEl.videoWidth || 0;
-  const h0 = videoEl.videoHeight || 0;
-  if (!w0 || !h0) return "";
-  const scale = Math.min(1, maxEdge / Math.max(w0, h0));
-  const w = Math.max(1, Math.round(w0 * scale));
-  const h = Math.max(1, Math.round(h0 * scale));
+function remapLandmarksToVisible(landmarks, vis) {
+  if (!landmarks || !vis) return landmarks;
+  const { minX, minY, w, h } = vis;
+  const invW = w ? 1 / w : 1;
+  const invH = h ? 1 / h : 1;
+  return landmarks.map((p) => ({
+    ...p,
+    x: (p.x - minX) * invW,
+    y: (p.y - minY) * invH,
+  }));
+}
+
+
+async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
+  const sw = srcCanvas.width;
+  const sh = srcCanvas.height;
+  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+  const tw = Math.max(1, Math.round(sw * scale));
+  const th = Math.max(1, Math.round(sh * scale));
+
   const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
+  c.width = tw;
+  c.height = th;
   const ctx = c.getContext("2d");
-  if (!ctx) return "";
-  if (mirror) {
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(videoEl, 0, 0, w, h);
-  try {
-    return c.toDataURL("image/jpeg", quality);
-  } catch {
-    // fallback: png (still smaller due to resize)
-    try { return c.toDataURL("image/png", 0.8); } catch { return ""; }
-  }
+  ctx.drawImage(srcCanvas, 0, 0, sw, sh, 0, 0, tw, th);
+  return c.toDataURL("image/jpeg", quality);
 }
 
 // ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
@@ -256,7 +274,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          poseKey: p.poseKey || p.pose_key || p.key,
+          poseKey: p.pose_key,
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
@@ -283,11 +301,12 @@ export default function PoseSession() {
   const prevSession = prevHistory?.[0] || null;
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
+  const [captureLayout, setCaptureLayout] = useState("portrait"); // portrait default (mobile-first)
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
   const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Move back to fit your full body");
+  const [lockHint, setLockHint] = useState("Move back • fit your body in frame");
   const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
@@ -418,11 +437,14 @@ export default function PoseSession() {
         let bbox = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const scored = scorePoseMatch(pose.key, landmarks);
+          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
+          const lmVis = remapLandmarksToVisible(landmarks, vis);
+          const scored = scorePoseMatch(pose.key, lmVis);
           match = clamp(scored?.match || 0, 0, 1);
           anchors = scored?.anchors || null;
           bbox = scored?.bbox || null;
-          lastLmRef.current = { landmarks, anchors, bbox, match };
+          landmarks = lmVis;
+          lastLmRef.current = { landmarks: lmVis, anchors, bbox, match };
         } else {
           lastLmRef.current = null;
         }
@@ -430,33 +452,26 @@ export default function PoseSession() {
         const tpl = buildPoseTemplate(pose.key, anchors);
         drawNeonGhost(ctx, tpl, { w, h, glow: true });
 
-        
-// Match + stability gating (MOVE BACK -> MATCH -> HOLD), tuned for both mobile + PC.
-const aspect = h / Math.max(1, w);
-const isPortrait = aspect > 1.15; // typical mobile 9:16
-const isLandscape = aspect < 0.95; // typical laptop webcam
+        // Match + stability gating (MOVE BACK → MATCH → HOLD)
+        // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
+        // We use hysteresis so "in frame" doesn't flicker on webcams.
+        let inFrameRaw = false;
+        if (bbox) {
+          const height = bbox.maxY - bbox.minY;
+          const width = bbox.maxX - bbox.minX;
+          // Full body preferred (mobile). On desktop webcams, allow "upper body + hips" to still lock.
+          const fullBody = height >= 0.72 && bbox.minY <= 0.12 && bbox.maxY >= 0.88;
+          const upperBody = height >= 0.48 && bbox.minY <= 0.08 && bbox.maxY >= 0.62 && width >= 0.28;
+          inFrameRaw = fullBody || upperBody;
+        }
 
-let inFrameRaw = false;
-if (bbox) {
-  const height = bbox.maxY - bbox.minY;
-  // Portrait: prefer near full body, but don't require perfect feet tracking.
-  const portraitOk =
-    height > 0.45 && bbox.minY < 0.30 && bbox.maxY > 0.78;
-  // Landscape: allow torso framing (PC webcams often can't see feet).
-  const landscapeOk =
-    height > 0.30 && bbox.minY < 0.35 && bbox.maxY > 0.70;
+        // hysteresis
+        const fr = stableRef.current;
+        fr.inFrameFrames = fr.inFrameFrames || 0;
+        fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
+        const inFrame = fr.inFrameFrames >= 6;
 
-  inFrameRaw = (isLandscape ? landscapeOk : portraitOk);
-}
-
-// Hysteresis to prevent flicker: need a few consecutive good frames to enter "in frame",
-// and a few consecutive bad frames to exit.
-if (!stableRef.current.inFrameScore) stableRef.current.inFrameScore = 0;
-stableRef.current.inFrameScore += inFrameRaw ? 1 : -1;
-stableRef.current.inFrameScore = clamp(stableRef.current.inFrameScore, -4, 6);
-const inFrame = stableRef.current.inFrameScore >= 2;
-
-const ok = inFrame && match >= 0.70;
+        const ok = inFrame && match >= 0.72;
 
         // stability from landmark movement (much more reliable than pixel diff)
         let stable = false;
@@ -470,36 +485,33 @@ const ok = inFrame && match >= 0.70;
               sum += Math.sqrt(dx * dx + dy * dy);
             }
             const avg = sum / landmarks.length;
-            stable = avg < (isLandscape ? 0.0065 : 0.0050); // movement tolerance (PC webcams jitter more)
+            stable = avg < 0.0045; // small movement
           }
           stableRef.current.prevLm = landmarks;
         }
 
-        
-// Lock state with hysteresis: don't fully reset progress on a single bad frame.
-if (!stableRef.current.okFrames) stableRef.current.okFrames = 0;
-if (!inFrame) {
-  setLocked(false);
-  setLockHint(isLandscape ? "Center your upper body • include hips if possible" : "Move back • fit your body in frame");
-  stableRef.current.okFrames = Math.max(0, stableRef.current.okFrames - 2);
-} else if (match < 0.70) {
-  setLocked(false);
-  setLockHint("Match the outline • then hold still");
-  stableRef.current.okFrames = Math.max(0, stableRef.current.okFrames - 1);
-} else if (!stable) {
-  setLocked(false);
-  setLockHint("Hold still… almost locked");
-  stableRef.current.okFrames = Math.max(0, stableRef.current.okFrames - 1);
-} else {
-  stableRef.current.okFrames += 1;
-  setLockHint("LOCKED ✅");
-  setLocked(true);
-}
+        if (!inFrame) {
+          setLocked(false);
+          setLockHint("Move back • get full body inside the frame");
+          stableRef.current.okFrames = 0;
+        } else if (match < 0.72) {
+          setLocked(false);
+          setLockHint("Match the outline • then hold still");
+          stableRef.current.okFrames = 0;
+        } else if (!stable) {
+          setLocked(false);
+          setLockHint("Hold still… almost locked");
+          stableRef.current.okFrames = 0;
+        } else {
+          // locked candidate
+          stableRef.current.okFrames += 1;
+          setLockHint("LOCKED ✅");
+          setLocked(true);
+        }
 
         // Auto-capture after a short stable period
-        if (ok && stable && stableRef.current.okFrames >= (isLandscape ? 8 : 6) && !countdown && !stableRef.current.didAuto) {
+        if (ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
           // Start countdown
-          stableRef.current.didAuto = true;
           setCountdown(3);
         }
 
@@ -537,36 +549,42 @@ if (!inFrame) {
     const v = videoRef.current;
     if (!v) return;
 
-    // draw current frame to a temp canvas (respect mirroring for selfie cam)
+
+    // Capture exactly what the user sees (no black bars): center-crop to the visible rect (objectFit:'cover')
+    const vw = v.videoWidth || 720;
+    const vh = v.videoHeight || 1280;
+
+    const outW = captureLayout === "landscape" ? 1920 : 1080;
+    const outH = captureLayout === "landscape" ? 1080 : 1920;
+
     const tmp = document.createElement("canvas");
-    const w = v.videoWidth || 720;
-    const h = v.videoHeight || 1280;
-    tmp.width = w;
-    tmp.height = h;
+    tmp.width = outW;
+    tmp.height = outH;
     const ctx = tmp.getContext("2d");
 
+    const vis = getCoverVisibleRect(vw, vh, outW, outH);
+    const sx = Math.max(0, Math.floor(vis.minX * vw));
+    const sy = Math.max(0, Math.floor(vis.minY * vh));
+    const sw = Math.max(1, Math.floor(vis.w * vw));
+    const sh = Math.max(1, Math.floor(vis.h * vh));
+
     if (cameraFacing === "user") {
-      ctx.translate(w, 0);
+      ctx.translate(outW, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(v, 0, 0, w, h);
+
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, outW, outH);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
+    const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
 
-    // Smaller AI thumbnail (prevents 413). Full-res PNG stays local for share export.
-    const aiThumb = await makeAiThumbnailJpegFromVideo(v, {
-      maxEdge: 384,
-      quality: 0.72,
-      mirror: cameraFacing === "user",
-    });
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, poseKey: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
     ]);
     setLocked(false);
     setCountdown(null);
     stableRef.current.okFrames = 0;
-    stableRef.current.didAuto = false;
 
     if (step + 1 >= POSES.length) {
       // go to results & score
@@ -700,11 +718,11 @@ if (!inFrame) {
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
-    await shareOrDownloadPng(png, {
-      filename: `slimcal-pose-session-${todayISO}.png`,
-      shareTitle: "SlimCal Pose Session",
-      shareText: "Pose Session ✅ #SlimcalAI",
-    });
+    await shareOrDownloadPng(
+      png,
+      `slimcal-pose-session-${todayISO}.png`,
+      "Pose Session ✅ #SlimcalAI"
+    );
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
   const start = () => {
@@ -803,7 +821,7 @@ if (!inFrame) {
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: "9 / 16",
+                aspectRatio: captureLayout === "landscape" ? "16 / 9" : "9 / 16",
                 borderRadius: 3,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
@@ -818,7 +836,7 @@ if (!inFrame) {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "contain", // FIX: no crop zoom
+                  objectFit: "cover", // fill container (no black bars)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
@@ -890,7 +908,7 @@ if (!inFrame) {
               <Button
                 fullWidth
                 variant="outlined"
-                onClick={() => onCapture()}
+                onClick={() => setCountdown(3)}
                 disabled={!!countdown}
               >
                 Capture now
@@ -901,7 +919,7 @@ if (!inFrame) {
                 onClick={() => setCountdown(3)}
                 disabled={!!countdown}
               >
-                Timed capture
+                Auto snap
               </Button>
             </Stack>
           </CardContent>
