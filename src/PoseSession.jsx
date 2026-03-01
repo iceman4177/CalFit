@@ -61,33 +61,18 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function getCoverVisibleRect(videoW, videoH, canvasW, canvasH) {
-  // Returns visible rect in normalized video coords when rendering with objectFit: 'cover'.
-  // { minX, minY, w, h } all in [0..1].
-  if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
-  const scale = Math.max(canvasW / videoW, canvasH / videoH);
-  const visW = canvasW / scale;
-  const visH = canvasH / scale;
-  const x0 = (videoW - visW) / 2;
-  const y0 = (videoH - visH) / 2;
-  return {
-    minX: x0 / videoW,
-    minY: y0 / videoH,
-    w: visW / videoW,
-    h: visH / videoH,
-  };
-}
-
-function remapLandmarksToVisible(landmarks, vis) {
-  if (!landmarks || !vis) return landmarks;
-  const { minX, minY, w, h } = vis;
-  const invW = w ? 1 / w : 1;
-  const invH = h ? 1 / h : 1;
-  return landmarks.map((p) => ({
-    ...p,
-    x: (p.x - minX) * invW,
-    y: (p.y - minY) * invH,
-  }));
+function getContainDrawRect(videoW, videoH, canvasW, canvasH) {
+  // For objectFit:'contain' (no zoom/crop): returns the rect (in canvas px)
+  // where the full video is actually drawn.
+  if (!videoW || !videoH || !canvasW || !canvasH) {
+    return { x: 0, y: 0, w: canvasW || 0, h: canvasH || 0, scale: 1 };
+  }
+  const scale = Math.min(canvasW / videoW, canvasH / videoH);
+  const w = videoW * scale;
+  const h = videoH * scale;
+  const x = (canvasW - w) / 2;
+  const y = (canvasH - h) / 2;
+  return { x, y, w, h, scale };
 }
 
 
@@ -106,145 +91,83 @@ async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
   return c.toDataURL("image/jpeg", quality);
 }
 
-// ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
-function buildPoseTemplate(poseKey, anchors) {
-  if (!anchors) return null;
-  const { midShoulder, midHip, shoulderWidth } = anchors;
-
-  // Create an abstract "ghost" using a few key points.
-  // Everything is in normalized video coords [0..1].
-  const sw = shoulderWidth || 0.22;
-
-  const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
-  const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
-  const ls = { x: midShoulder.x - sw * 0.5, y: midShoulder.y };
-  const rs = { x: midShoulder.x + sw * 0.5, y: midShoulder.y };
-  const lh = { x: midHip.x - sw * 0.42, y: midHip.y };
-  const rh = { x: midHip.x + sw * 0.42, y: midHip.y };
-
-  let le, re, lw, rw;
+// ---- Stable pose guide templates (NOT based on live landmarks) ----
+// Normalized to the *draw rect* where the video is rendered with objectFit:'contain'.
+// The guide must be stable so the user can "fit inside" it.
+function getPoseGuideTemplate(poseKey) {
+  const base = {
+    head: { x: 0.5, y: 0.14 },
+    neck: { x: 0.5, y: 0.22 },
+    ls: { x: 0.37, y: 0.28 },
+    rs: { x: 0.63, y: 0.28 },
+    lh: { x: 0.42, y: 0.50 },
+    rh: { x: 0.58, y: 0.50 },
+    lk: { x: 0.45, y: 0.70 },
+    rk: { x: 0.55, y: 0.70 },
+    la: { x: 0.46, y: 0.92 },
+    ra: { x: 0.54, y: 0.92 },
+  };
 
   if (poseKey === "front_double_bi" || poseKey === "back_double_bi") {
-    // elbows high + out, wrists near head
-    le = { x: midShoulder.x - sw * 1.05, y: midShoulder.y - sw * 0.45 };
-    re = { x: midShoulder.x + sw * 1.05, y: midShoulder.y - sw * 0.45 };
-    lw = { x: midShoulder.x - sw * 0.55, y: midShoulder.y - sw * 0.95 };
-    rw = { x: midShoulder.x + sw * 0.55, y: midShoulder.y - sw * 0.95 };
-  } else {
-    // relaxed: elbows down, wrists near hips
-    le = { x: midShoulder.x - sw * 0.65, y: midShoulder.y + sw * 0.62 };
-    re = { x: midShoulder.x + sw * 0.65, y: midShoulder.y + sw * 0.62 };
-    lw = { x: midHip.x - sw * 0.55, y: midHip.y + sw * 0.75 };
-    rw = { x: midHip.x + sw * 0.55, y: midHip.y + sw * 0.75 };
+    return {
+      ...base,
+      le: { x: 0.28, y: 0.22 },
+      re: { x: 0.72, y: 0.22 },
+      lw: { x: 0.36, y: 0.12 },
+      rw: { x: 0.64, y: 0.12 },
+      torsoWide: poseKey === "back_double_bi" ? 1.08 : 1.0,
+    };
   }
 
-  const kneeY = midHip.y + sw * 1.75;
-  const ankleY = midHip.y + sw * 2.65;
-
-  const lk = { x: midHip.x - sw * 0.28, y: kneeY };
-  const rk = { x: midHip.x + sw * 0.28, y: kneeY };
-  const la = { x: midHip.x - sw * 0.22, y: ankleY };
-  const ra = { x: midHip.x + sw * 0.22, y: ankleY };
-
+  // front_relaxed
   return {
-    head,
-    neck,
-    ls,
-    rs,
-    le,
-    re,
-    lw,
-    rw,
-    lh,
-    rh,
-    lk,
-    rk,
-    la,
-    ra,
-    midShoulder,
-    midHip,
-    shoulderWidth: sw,
+    ...base,
+    le: { x: 0.32, y: 0.42 },
+    re: { x: 0.68, y: 0.42 },
+    lw: { x: 0.36, y: 0.60 },
+    rw: { x: 0.64, y: 0.60 },
+    torsoWide: 1.0,
   };
 }
 
-function drawNeonGhost(ctx, { tpl, landmarks }, { w, h, glow = true }) {
+function drawNeonGhost(ctx, { tpl }, { w, h, glow = true, rect = null }) {
   // "Ghost matrix outline" guide — NOT a stick skeleton.
-  // If we have live landmarks, we draw a soft neon contour that hugs the user's body.
-  // Otherwise we fall back to an abstract template so the UI still guides placement.
+  // IMPORTANT: this outline must be STABLE and represent the TARGET POSE.
+  // We do NOT draw the outline from live landmarks (that causes jitter / "all over the place").
   if (!ctx || !w || !h) return;
 
-  const P = (p) => ({ x: p.x * w, y: p.y * h });
-
-  const lm = Array.isArray(landmarks) && landmarks.length >= 33 ? landmarks : null;
-
-  const idx = {
-    nose: 0,
-    lEar: 7,
-    rEar: 8,
-    lShoulder: 11,
-    rShoulder: 12,
-    lElbow: 13,
-    rElbow: 14,
-    lWrist: 15,
-    rWrist: 16,
-    lHip: 23,
-    rHip: 24,
-    lKnee: 25,
-    rKnee: 26,
-    lAnkle: 27,
-    rAnkle: 28,
-  };
-
-  const safePt = (i) => {
-    const p = lm?.[i];
-    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
-    return { x: clamp(p.x, 0, 1), y: clamp(p.y, 0, 1) };
-  };
-
-  const contourFromLandmarks = () => {
-    const pts = [
-      safePt(idx.lEar) || safePt(idx.nose),
-      safePt(idx.lShoulder),
-      safePt(idx.lElbow),
-      safePt(idx.lWrist),
-      safePt(idx.lHip),
-      safePt(idx.lKnee),
-      safePt(idx.lAnkle),
-      safePt(idx.rAnkle),
-      safePt(idx.rKnee),
-      safePt(idx.rHip),
-      safePt(idx.rWrist),
-      safePt(idx.rElbow),
-      safePt(idx.rShoulder),
-      safePt(idx.rEar) || safePt(idx.nose),
-    ].filter(Boolean);
-
-    if (pts.length < 10) return null;
-
-    // close the loop smoothly
-    pts.push(pts[0]);
-    return pts;
-  };
+  const r = rect || { x: 0, y: 0, w, h };
+  const P = (p) => ({ x: r.x + p.x * r.w, y: r.y + p.y * r.h });
 
   const contourFromTemplate = () => {
     if (!tpl) return null;
+
+    const torsoWide = Number.isFinite(tpl.torsoWide) ? tpl.torsoWide : 1.0;
+    const widen = (pt) => ({ x: 0.5 + (pt.x - 0.5) * torsoWide, y: pt.y });
+
+    // Closed silhouette loop: head -> left arm -> left leg -> right leg -> right arm -> head
     const pts = [
-      tpl.head,
-      tpl.ls,
-      tpl.lw,
-      tpl.lh,
-      tpl.la,
-      tpl.ra,
-      tpl.rh,
-      tpl.rw,
-      tpl.rs,
-      tpl.head,
+      widen(tpl.head),
+      widen(tpl.ls),
+      widen(tpl.le),
+      widen(tpl.lw),
+      widen(tpl.lh),
+      widen(tpl.lk),
+      widen(tpl.la),
+      widen(tpl.ra),
+      widen(tpl.rk),
+      widen(tpl.rh),
+      widen(tpl.rw),
+      widen(tpl.re),
+      widen(tpl.rs),
+      widen(tpl.head),
     ].filter(Boolean);
-    if (pts.length < 6) return null;
+
+    if (pts.length < 10) return null;
     return pts;
   };
 
-  const contour = lm ? contourFromLandmarks() : contourFromTemplate();
+  const contour = contourFromTemplate();
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
@@ -326,30 +249,18 @@ function drawNeonGhost(ctx, { tpl, landmarks }, { w, h, glow = true }) {
   ctx.save();
   ctx.globalAlpha = 0.22;
   ctx.fillStyle = "rgba(0,255,190,1)";
-  const r = Math.max(2, Math.round(Math.min(w, h) * 0.0025));
+  const nodeR = Math.max(2, Math.round(Math.min(w, h) * 0.0025));
   for (let i = 0; i < nodes.length; i += 3) {
     const n = nodes[i];
     ctx.beginPath();
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
 
   // Head halo (friendly, non-judgy)
-  const nose = lm ? safePt(idx.nose) : null;
-  const le = lm ? safePt(idx.lEar) : null;
-  const re = lm ? safePt(idx.rEar) : null;
-  const headCenter = (() => {
-    if (nose) return P(nose);
-    if (le && re) return P({ x: (le.x + re.x) / 2, y: (le.y + re.y) / 2 });
-    if (tpl?.head) return P(tpl.head);
-    return { x: w * 0.5, y: h * 0.2 };
-  })();
-
-  const headR = (() => {
-    if (le && re) return Math.max(18, Math.hypot(P(re).x - P(le).x, P(re).y - P(le).y) * 0.75);
-    return Math.max(18, Math.round(Math.min(w, h) * 0.035));
-  })();
+  const headCenter = tpl?.head ? P(tpl.head) : { x: r.x + r.w * 0.5, y: r.y + r.h * 0.18 };
+  const headR = Math.max(18, Math.round(Math.min(r.w, r.h) * 0.05));
 
   ctx.save();
   ctx.globalAlpha = 0.18;
@@ -564,20 +475,21 @@ export default function PoseSession() {
         let bbox = null;
 
         if (landmarks && landmarks.length >= 33) {
-          const vis = getCoverVisibleRect(v.videoWidth, v.videoHeight, w, h);
-          const lmVis = remapLandmarksToVisible(landmarks, vis);
-          const scored = scorePoseMatch(pose.key, lmVis);
+          // Landmarks are returned in normalized *video* coords (0..1) — keep them stable.
+          // The on-screen video is rendered with objectFit:'contain'; the guide outline is drawn
+          // inside the contain rect, but scoring should use raw video coords.
+          const scored = scorePoseMatch(pose.key, landmarks);
           match = clamp(scored?.match || 0, 0, 1);
           anchors = scored?.anchors || null;
           bbox = scored?.bbox || null;
-          landmarks = lmVis;
-          lastLmRef.current = { landmarks: lmVis, anchors, bbox, match };
+          lastLmRef.current = { landmarks, anchors, bbox, match };
         } else {
           lastLmRef.current = null;
         }
 
-        const tpl = buildPoseTemplate(pose.key, anchors);
-        drawNeonGhost(ctx, { tpl, landmarks }, { w, h, glow: true });
+        const rect = getContainDrawRect(v.videoWidth, v.videoHeight, w, h);
+        const tpl = getPoseGuideTemplate(pose.key);
+        drawNeonGhost(ctx, { tpl }, { w, h, glow: true, rect });
 
         // Match + stability gating (MOVE BACK → MATCH → HOLD)
         // NOTE: we render with objectFit:'cover' (no black bars), so bbox is already in visible coords.
@@ -636,9 +548,12 @@ export default function PoseSession() {
           setLocked(true);
         }
 
-        // Auto-capture after a short stable period
-        if (ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
-          // Start countdown
+        // Auto-capture after a short stable period (ONLY when Auto Snap is enabled)
+        if (!autoSnapEnabled && countdown) {
+          setCountdown(0);
+        }
+
+        if (autoSnapEnabled && ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
           setCountdown(3);
         }
 
@@ -655,7 +570,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown]);
+  }, [started, isResults, pose.key, countdown, autoSnapEnabled]);
 
   // countdown -> snap
   useEffect(() => {
@@ -689,7 +604,8 @@ export default function PoseSession() {
     }
 
 
-    // Capture exactly what the user sees (no black bars): center-crop to the visible rect (objectFit:'cover')
+    // Capture the full camera frame (no zoom/crop). We render the preview with objectFit:'contain'
+    // so the user can fit their full body. The capture matches that intent.
     const vw = v.videoWidth || 720;
     const vh = v.videoHeight || 1280;
 
@@ -701,18 +617,23 @@ export default function PoseSession() {
     tmp.height = outH;
     const ctx = tmp.getContext("2d");
 
-    const vis = getCoverVisibleRect(vw, vh, outW, outH);
-    const sx = Math.max(0, Math.floor(vis.minX * vw));
-    const sy = Math.max(0, Math.floor(vis.minY * vh));
-    const sw = Math.max(1, Math.floor(vis.w * vw));
-    const sh = Math.max(1, Math.floor(vis.h * vh));
+    // Letterbox into output while preserving the camera aspect ratio.
+    const scale = Math.min(outW / vw, outH / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (outW - dw) / 2;
+    const dy = (outH - dh) / 2;
+
+    // Background
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, outW, outH);
 
     if (cameraFacing === "user") {
       ctx.translate(outW, 0);
       ctx.scale(-1, 1);
     }
 
-    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, outW, outH);
+    ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
     const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
