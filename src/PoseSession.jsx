@@ -302,6 +302,25 @@ export default function PoseSession() {
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
   const [captureLayout, setCaptureLayout] = useState("portrait"); // portrait default (mobile-first)
+
+  // Patch B: defensive orientation derivation.
+  // Some deployed bundles referenced `frameOrientation` without defining it.
+  // Keeping this local, derived constant prevents runtime ReferenceErrors
+  // without changing any existing logic.
+  const frameOrientation = useMemo(() => {
+    try {
+      const t = String(globalThis?.screen?.orientation?.type || "").toLowerCase();
+      if (t.includes("landscape")) return "landscape";
+      if (t.includes("portrait")) return "portrait";
+    } catch {}
+    try {
+      if (typeof window !== "undefined" && window.innerWidth && window.innerHeight) {
+        return window.innerWidth > window.innerHeight ? "landscape" : "portrait";
+      }
+    } catch {}
+    return "portrait";
+  }, [captureLayout]);
+
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
