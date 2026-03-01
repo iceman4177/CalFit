@@ -120,8 +120,10 @@ async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
 }
 
 // ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
-function buildPoseTemplate(poseKey, anchors, bbox) {
+function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   // anchors are derived from landmarks when available; fallback to bbox-derived anchors when legs are missing / jittery
+  const bboxLocal = opts?.bboxLocal || null;
+  const isUpperBodyOnly = !!opts?.upperBodyOnly;
   let a = anchors;
   if (!a && bbox) {
     const cx = (bbox.minX + bbox.maxX) / 2;
@@ -139,7 +141,13 @@ function buildPoseTemplate(poseKey, anchors, bbox) {
   // Create an abstract "ghost" using a few key points.
   // Everything is in normalized video coords [0..1].
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const sw = clamp(shoulderWidth || 0.22, 0.12, 0.34);
+
+  const b = bboxLocal || bbox;
+  const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
+  const bboxH = b ? Math.max(0.12, Math.min(0.95, b.maxY - b.minY)) : null;
+  const swFromBbox = bboxW ? bboxW * 0.55 : null;
+  const swRaw = Number.isFinite(shoulderWidth) ? shoulderWidth : null;
+  const sw = clamp(swFromBbox || swRaw || 0.22, 0.10, 0.28);
 
   const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
   const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
@@ -164,15 +172,22 @@ function buildPoseTemplate(poseKey, anchors, bbox) {
     rw = { x: midHip.x + sw * 0.55, y: midHip.y + sw * 0.75 };
   }
 
-  const kneeY = midHip.y + sw * 1.75;
-  const ankleY = midHip.y + sw * 2.65;
+  // Legs are optional. If we're in "upper-body" capture mode (common for counter / mirror setups),
+  // do NOT draw legs beyond the visible bbox, otherwise it looks gigantic and confusing.
+  let lk = null,
+    rk = null,
+    la = null,
+    ra = null;
+  if (!isUpperBodyOnly) {
+    const kneeY = midHip.y + sw * 1.75;
+    const ankleY = midHip.y + sw * 2.65;
+    lk = { x: midHip.x - sw * 0.28, y: kneeY };
+    rk = { x: midHip.x + sw * 0.28, y: kneeY };
+    la = { x: midHip.x - sw * 0.22, y: ankleY };
+    ra = { x: midHip.x + sw * 0.22, y: ankleY };
+  }
 
-  const lk = { x: midHip.x - sw * 0.28, y: kneeY };
-  const rk = { x: midHip.x + sw * 0.28, y: kneeY };
-  const la = { x: midHip.x - sw * 0.22, y: ankleY };
-  const ra = { x: midHip.x + sw * 0.22, y: ankleY };
-
-  return {
+  const raw = {
     head,
     neck,
     ls,
@@ -191,6 +206,73 @@ function buildPoseTemplate(poseKey, anchors, bbox) {
     midHip,
     shoulderWidth: sw,
   };
+
+  // --- Normalize/fit the ghost into the user's current bbox ---
+  // This prevents the overlay from being "way too large" when legs are missing or anchors jitter.
+  if (!b || !bboxW || !bboxH) return raw;
+
+  const pts = Object.entries(raw)
+    .filter(
+      ([k, v]) =>
+        v &&
+        typeof v?.x === "number" &&
+        typeof v?.y === "number" &&
+        k !== "midShoulder" &&
+        k !== "midHip" &&
+        k !== "shoulderWidth"
+    )
+    .map(([, v]) => v);
+  if (!pts.length) return raw;
+
+  let minX = 1e9,
+    minY = 1e9,
+    maxX = -1e9,
+    maxY = -1e9;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const rawW = Math.max(1e-6, maxX - minX);
+  const rawH = Math.max(1e-6, maxY - minY);
+
+  const inset = 0.02;
+  const targetMinX = clamp(b.minX + inset, 0, 1);
+  const targetMaxX = clamp(b.maxX - inset, 0, 1);
+  const targetMinY = clamp(b.minY + inset, 0, 1);
+  const targetMaxY = clamp(b.maxY - inset, 0, 1);
+  const targetW = Math.max(1e-6, targetMaxX - targetMinX);
+  const targetH = Math.max(1e-6, targetMaxY - targetMinY);
+
+  const widen = poseKey === "front_double_bi" || poseKey === "back_double_bi" ? 1.1 : 1.0;
+  const s = Math.min((targetW * widen) / rawW, targetH / rawH);
+
+  const cxRaw = (minX + maxX) / 2;
+  const cyRaw = (minY + maxY) / 2;
+  const cxT = (targetMinX + targetMaxX) / 2;
+  const cyT = (targetMinY + targetMaxY) / 2;
+
+  const scalePoint = (p) => ({
+    x: clamp(cxT + (p.x - cxRaw) * s, 0, 1),
+    y: clamp(cyT + (p.y - cyRaw) * s, 0, 1),
+  });
+
+  const fitted = { ...raw };
+  for (const k of Object.keys(fitted)) {
+    if (fitted[k] && typeof fitted[k]?.x === "number" && typeof fitted[k]?.y === "number" && k !== "midShoulder" && k !== "midHip") {
+      fitted[k] = scalePoint(fitted[k]);
+    }
+  }
+
+  // Shoulder width used for line thickness – derive from fitted shoulder distance.
+  if (fitted.ls && fitted.rs) {
+    const dx = fitted.rs.x - fitted.ls.x;
+    const dy = fitted.rs.y - fitted.ls.y;
+    fitted.shoulderWidth = clamp(Math.sqrt(dx * dx + dy * dy), 0.10, 0.32);
+  }
+
+  return fitted;
 }
 
 function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
@@ -578,7 +660,8 @@ export default function PoseSession() {
         if (bbox && framingBad) {
           drawFramingGuide(ctx, visCanvas, { w, h });
         } else {
-          const tpl = buildPoseTemplate(pose.key, anchors, bbox);
+          const upperBodyOnly = upperBodyOk && !fullBodyOk;
+          const tpl = buildPoseTemplate(pose.key, anchors, bbox, { bboxLocal, upperBodyOnly });
           drawNeonGhost(ctx, tpl, { w, h, glow: true });
         }
 
