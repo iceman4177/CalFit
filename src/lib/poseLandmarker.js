@@ -3,6 +3,7 @@
 // We intentionally lazy-load to avoid impacting initial bundle.
 
 let _landmarkerPromise = null;
+let _landmarkerInstance = null;
 
 async function loadTasksVision() {
   // IMPORTANT:
@@ -13,6 +14,7 @@ async function loadTasksVision() {
 }
 
 export async function getPoseLandmarker() {
+  if (_landmarkerInstance) return _landmarkerInstance;
   if (_landmarkerPromise) return _landmarkerPromise;
 
   _landmarkerPromise = (async () => {
@@ -33,10 +35,26 @@ export async function getPoseLandmarker() {
       numPoses: 1,
     });
 
-    return landmarker;
+    _landmarkerInstance = landmarker;
+    return _landmarkerInstance;
   })();
 
   return _landmarkerPromise;
+}
+
+// MediaPipe Tasks can enter a bad WebGL state if detectForVideo() is called
+// before the <video> has valid dimensions (0x0). This lets callers recover.
+export async function resetPoseLandmarker() {
+  try {
+    if (_landmarkerInstance && typeof _landmarkerInstance.close === "function") {
+      _landmarkerInstance.close();
+    }
+  } catch {
+    // ignore
+  } finally {
+    _landmarkerInstance = null;
+    _landmarkerPromise = null;
+  }
 }
 
 function v(p) {

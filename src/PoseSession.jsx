@@ -26,7 +26,11 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
+import {
+  getPoseLandmarker,
+  resetPoseLandmarker,
+  scorePoseMatch,
+} from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
@@ -325,6 +329,8 @@ export default function PoseSession() {
 
     let alive = true;
     let landmarker = null;
+    let errorStreak = 0;
+    let lastResetAt = 0;
 
     const run = async () => {
       landmarker = await getPoseLandmarker();
@@ -336,8 +342,36 @@ export default function PoseSession() {
       const tick = async () => {
         if (!alive) return;
 
-        const w = canvas.clientWidth || v.clientWidth || 360;
-        const h = canvas.clientHeight || v.clientHeight || 640;
+        // Don't run CV when tab/backgrounded (iOS/Safari especially will freeze video frames)
+        if (typeof document !== "undefined" && document.hidden) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        // Hard gate: MediaPipe WebGL will crash if video has 0x0 dimensions.
+        const ready =
+          v.readyState >= 2 &&
+          (v.videoWidth || 0) > 0 &&
+          (v.videoHeight || 0) > 0;
+        if (!ready) {
+          // Reset stability so we don't auto-lock on stale landmarks after resume.
+          stableRef.current.okFrames = 0;
+          stableRef.current.prevLm = null;
+          lastLmRef.current = null;
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        const w =
+          canvas.clientWidth ||
+          v.clientWidth ||
+          v.videoWidth ||
+          360;
+        const h =
+          canvas.clientHeight ||
+          v.clientHeight ||
+          v.videoHeight ||
+          640;
         if (canvas.width !== w) canvas.width = w;
         if (canvas.height !== h) canvas.height = h;
 
@@ -347,8 +381,27 @@ export default function PoseSession() {
         try {
           const r = landmarker.detectForVideo(v, t);
           landmarks = r?.landmarks?.[0] || null;
+          errorStreak = 0;
         } catch {
           landmarks = null;
+          errorStreak += 1;
+
+          // If the graph has entered the "ROI 0x0 / texImage2D: no video" loop,
+          // force a reset (but rate-limit it).
+          const since = t - lastResetAt;
+          if (errorStreak >= 2 && since > 800) {
+            lastResetAt = t;
+            errorStreak = 0;
+            stableRef.current.okFrames = 0;
+            stableRef.current.prevLm = null;
+            lastLmRef.current = null;
+            try {
+              await resetPoseLandmarker();
+              landmarker = await getPoseLandmarker();
+            } catch {
+              // ignore and keep trying next frames
+            }
+          }
         }
 
         let match = 0;
