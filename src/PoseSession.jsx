@@ -229,8 +229,9 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          pose_key: p.pose_key,
-          image_data_url: p.image_data_url,
+          poseKey: p.pose_key || p.poseKey || p.key,
+          // Send ONLY the compressed thumbnail to avoid 413 payload limits.
+          image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
         today_local_day: todayISO,
@@ -256,7 +257,6 @@ export default function PoseSession() {
   const prevSession = prevHistory?.[0] || null;
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
-  const [frameOrientation, setFrameOrientation] = useState("portrait"); // portrait default; user can switch
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -269,8 +269,58 @@ export default function PoseSession() {
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const containerRef = useRef(null);
   const overlayRef = useRef(null);
-  const rafRef = useRef(0);
+
+  const [videoDims, setVideoDims] = useState({ w: 0, h: 0 });
+  const [boxDims, setBoxDims] = useState({ w: 0, h: 0 });
+
+  const computeCoverTransform = useCallback(() => {
+    const vw = videoDims.w || 0;
+    const vh = videoDims.h || 0;
+    const bw = boxDims.w || 0;
+    const bh = boxDims.h || 0;
+    if (!vw || !vh || !bw || !bh) return null;
+
+    const scale = Math.max(bw / vw, bh / vh); // cover
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const ox = (bw - dw) / 2;
+    const oy = (bh - dh) / 2;
+
+    // source rect visible in the cover crop
+    const sw = bw / scale;
+    const sh = bh / scale;
+    const sx = (vw - sw) / 2;
+    const sy = (vh - sh) / 2;
+
+    return { vw, vh, bw, bh, scale, ox, oy, sx, sy, sw, sh };
+  }, [videoDims, boxDims]);
+
+  const mapNormToBox = useCallback(
+    (nx, ny, t, mirrored) => {
+      if (!t) return { x: 0, y: 0 };
+      let px = nx * t.vw;
+      const py = ny * t.vh;
+      if (mirrored) px = t.vw - px;
+      return { x: px * t.scale + t.ox, y: py * t.scale + t.oy };
+    },
+    []
+  );
+  
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setBoxDims({ w: Math.round(r.width), h: Math.round(r.height) });
+    });
+    ro.observe(el);
+    const r0 = el.getBoundingClientRect();
+    setBoxDims({ w: Math.round(r0.width), h: Math.round(r0.height) });
+    return () => ro.disconnect();
+  }, []);
+const rafRef = useRef(0);
   const lastLmRef = useRef(null);
   const stableRef = useRef({ t0: 0, okFrames: 0 });
 
@@ -353,7 +403,16 @@ export default function PoseSession() {
           (v.videoHeight || 0) > 0 &&
           Number.isFinite(v.currentTime);
 
-        // Throttle to ~12fps to reduce CPU/GPU churn.
+        
+        // Sync intrinsic video dimensions for cover-math / capture-crop.
+        if (
+          isVideoReady &&
+          (videoDims.w !== v.videoWidth || videoDims.h !== v.videoHeight)
+        ) {
+          setVideoDims({ w: v.videoWidth, h: v.videoHeight });
+        }
+
+// Throttle to ~12fps to reduce CPU/GPU churn.
         if (!stableRef.current.lastDetectAt) stableRef.current.lastDetectAt = 0;
         const shouldDetect = isVideoReady && t - stableRef.current.lastDetectAt >= 85;
 
@@ -408,16 +467,22 @@ export default function PoseSession() {
         let inFrame = false;
         if (bbox) {
           const height = bbox.maxY - bbox.minY;
-          if (frameOrientation === "portrait") {
-            // portrait wants mostly-full body, but still workable on phone cams
-            inFrame = height > 0.42 && bbox.minY < 0.28 && bbox.maxY > 0.80;
-          } else {
-            // landscape is more forgiving (PC webcams / seated)
-            inFrame = height > 0.28 && bbox.minY < 0.32 && bbox.maxY > 0.70;
-          }
+
+          // PC webcams often can't include feet in portrait.
+          // Portrait: require head+hips in view. Landscape: looser (upper body OK).
+          const minHeight = frameOrientation === "landscape" ? 0.30 : 0.42;
+          const topOk = bbox.minY < (frameOrientation === "landscape" ? 0.28 : 0.22);
+          const bottomOk = bbox.maxY > (frameOrientation === "landscape" ? 0.70 : 0.80);
+
+          const candidate = height > minHeight && topOk && bottomOk;
+
+          // Hysteresis: don't flicker out on a single bad frame.
+          const prev = !!stableRef.current.inFrame;
+          inFrame = candidate || (prev && height > minHeight * 0.9);
+          stableRef.current.inFrame = inFrame;
         }
 
-        const ok = inFrame && match >= 0.72;
+        const ok = inFrame && match >= (frameOrientation === "landscape" ? 0.68 : 0.72);
 
         // stability from landmark movement (much more reliable than pixel diff)
         let stable = false;
@@ -438,7 +503,7 @@ export default function PoseSession() {
 
         if (!inFrame) {
           setLocked(false);
-          setLockHint("Adjust distance • try Landscape on PC if you can’t fit full body");
+          setLockHint("Move back • get full body inside the frame");
           stableRef.current.okFrames = 0;
         } else if (match < 0.72) {
           setLocked(false);
@@ -493,38 +558,66 @@ export default function PoseSession() {
 
   const onCapture = useCallback(async () => {
     const v = videoRef.current;
-    if (!v) return;
+    const boxEl = containerRef.current;
+    if (!v || !boxEl) return;
 
-    // draw current frame to a temp canvas (respect mirroring for selfie cam)
-    const tmp = document.createElement("canvas");
-    const w = v.videoWidth || 720;
-    const h = v.videoHeight || 1280;
-    tmp.width = w;
-    tmp.height = h;
-    const ctx = tmp.getContext("2d");
+    const t = computeCoverTransform();
+    if (!t) return;
 
-    if (cameraFacing === "user") {
-      ctx.translate(w, 0);
+    const mirrored = cameraFacing === "user";
+
+    // Capture exactly what the user sees (cover crop) at a stable export resolution.
+    const outW = frameOrientation === "landscape" ? 1920 : 1080;
+    const outH = frameOrientation === "landscape" ? 1080 : 1920;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d");
+
+    // Mirror the output if selfie cam so the capture matches on-screen preview.
+    if (mirrored) {
+      ctx.translate(outW, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(v, 0, 0, w, h);
 
-    const dataUrl = tmp.toDataURL("image/png", 0.92);
+    // Draw the visible cover-cropped region.
+    ctx.drawImage(v, t.sx, t.sy, t.sw, t.sh, 0, 0, outW, outH);
+
+    const pngDataUrl = canvas.toDataURL("image/png", 0.92);
+
+    // Build a tiny JPEG thumbnail for AI (prevents 413).
+    const maxEdge = 384;
+    const thumbScale = Math.min(1, maxEdge / Math.max(outW, outH));
+    const tw = Math.round(outW * thumbScale);
+    const th = Math.round(outH * thumbScale);
+
+    const thumb = document.createElement("canvas");
+    thumb.width = tw;
+    thumb.height = th;
+    const tctx = thumb.getContext("2d");
+    tctx.drawImage(canvas, 0, 0, outW, outH, 0, 0, tw, th);
+    const aiThumbDataUrl = thumb.toDataURL("image/jpeg", 0.72);
+
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl },
+      {
+        pose_key: pose.key,
+        image_data_url: pngDataUrl, // full-res local for share
+        ai_image_data_url: aiThumbDataUrl, // small for AI
+      },
     ]);
+
     setLocked(false);
     setCountdown(null);
     stableRef.current.okFrames = 0;
 
     if (step + 1 >= POSES.length) {
-      // go to results & score
       setStep(POSES.length);
     } else {
       setStep((s) => s + 1);
     }
-  }, [pose.key, step, cameraFacing]);
+  }, [pose.key, step, cameraFacing, computeCoverTransform, frameOrientation]);
 
   // Score session when finished capturing
   useEffect(() => {
@@ -650,7 +743,11 @@ export default function PoseSession() {
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
-    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, `Pose Session ✅ #SlimcalAI`);
+    await shareOrDownloadPng(
+      png,
+      `slimcal-pose-session-${todayISO}.png`,
+      "Pose Session ✅ #SlimcalAI"
+    );
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
   const start = () => {
@@ -745,11 +842,12 @@ export default function PoseSession() {
             </Typography>
 
             <Box
+              ref={containerRef}
               sx={{
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: frameOrientation === "portrait" ? "9 / 16" : "16 / 9",
+                aspectRatio: "9 / 16",
                 borderRadius: 3,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
@@ -764,7 +862,7 @@ export default function PoseSession() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill frame (no black bars)
+                  objectFit: "cover", // fill the frame (no letterbox)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
@@ -832,37 +930,24 @@ export default function PoseSession() {
               </Box>
             </Box>
 
-<Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-  <Button
-    variant={frameOrientation === "portrait" ? "contained" : "outlined"}
-    onClick={() => setFrameOrientation("portrait")}
-    sx={{ minWidth: 0, px: 1.2 }}
-  >
-    Portrait
-  </Button>
-  <Button
-    variant={frameOrientation === "landscape" ? "contained" : "outlined"}
-    onClick={() => setFrameOrientation("landscape")}
-    sx={{ minWidth: 0, px: 1.2 }}
-  >
-    Landscape
-  </Button>
-  <Box sx={{ flex: 1 }} />
-  <Button
-    variant="outlined"
-    onClick={() => onCapture()}
-    disabled={!!countdown}
-  >
-    Capture now
-  </Button>
-  <Button
-    variant="contained"
-    onClick={() => setCountdown(3)}
-    disabled={!!countdown}
-  >
-    Timed capture
-  </Button>
-</Stack>
+            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={() => setCountdown(3)}
+                disabled={!!countdown}
+              >
+                Capture now
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={() => setCountdown(3)}
+                disabled={!!countdown}
+              >
+                Auto snap
+              </Button>
+            </Stack>
           </CardContent>
         </Card>
       ) : (
