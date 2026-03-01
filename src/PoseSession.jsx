@@ -17,6 +17,7 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
 import { useAuth } from "./context/AuthProvider";
+import { useEntitlements } from "./context/EntitlementsContext";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import {
@@ -336,6 +337,15 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }),
     });
 
+    // Handle paywall cleanly (avoid leaving UI stuck on "Scanning...")
+    if (res.status === 402) {
+      return {
+        ok: false,
+        paywalled: true,
+        error: "Upgrade to Pro to unlock AI scan results.",
+      };
+    }
+
     const j = await res.json().catch(() => null);
     if (!res.ok) throw new Error((j && j.error) || "AI failed");
     if (!j || !j.session) throw new Error("Bad AI response");
@@ -348,6 +358,8 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
+  const ent = useEntitlements();
+  const isProActive = !!ent?.isProActive;
 
   const userId = user?.id || "guest";
   const todayISO = useMemo(() => localDayISO(), []);
@@ -674,6 +686,14 @@ export default function PoseSession() {
       setScanBusy(true);
       setAiError("");
 
+      // If not Pro, skip server AI call and show results instantly (with upsell copy).
+      if (!isProActive) {
+        setAiSession({ paywalled: true });
+        setAiError("Upgrade to Pro to unlock your AI scan summary and share card export.");
+        setScanBusy(false);
+        return;
+      }
+
       const r = await scorePoseSessionWithAI({
         poses: captures,
         prevSession,
@@ -700,7 +720,12 @@ export default function PoseSession() {
           appendPoseSession(userId, record);
         } catch {}
       } else {
-        setAiError(r.error || "Scan failed");
+        if (r.paywalled) {
+          setAiSession({ paywalled: true });
+          setAiError(r.error || "Upgrade to Pro to unlock AI scan results.");
+        } else {
+          setAiError(r.error || "Scan failed");
+        }
         // Still save baseline record (positive-only) so next session has context
         try {
           const hist = readPoseSessionHistory(userId);
@@ -722,7 +747,7 @@ export default function PoseSession() {
     return () => {
       canceled = true;
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId, isProActive]);
 
   const latestRecord = useMemo(() => {
     try {
@@ -1128,6 +1153,7 @@ export default function PoseSession() {
                     variant="contained"
                     startIcon={<IosShareIcon />}
                     onClick={share}
+                    disabled={!isProActive}
                   >
                     Share
                   </Button>
