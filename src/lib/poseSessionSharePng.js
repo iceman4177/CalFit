@@ -374,4 +374,3 @@ export async function buildPoseSessionSharePng(data, opts = {}) {
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
   return blob;
 }
-}
