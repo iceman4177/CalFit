@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   Divider,
   Stack,
   Typography,
@@ -21,26 +22,27 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
+  computeSessionStreak,
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
     key: "front_relaxed",
     title: "Front Relaxed",
-    subtitle: "Stand tall — arms relaxed — shoulders + hips visible",
+    subtitle: "Stand tall - arms relaxed - full body in frame",
   },
   {
     key: "front_double_bi",
     title: "Double Bi",
-    subtitle: "Hands up — elbows out — squeeze arms",
+    subtitle: "Hands up - elbows out - squeeze arms",
   },
   {
     key: "back_double_bi",
     title: "Back Double Bi",
-    subtitle: "Turn around — elbows up — spread back",
+    subtitle: "Turn around - elbows up - spread back",
   },
 ];
 
@@ -59,8 +61,6 @@ function nowMs() {
 }
 
 function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
-  // When rendering with objectFit:'contain', the video is letterboxed. Return the actual drawn rect
-  // in canvas-normalized coordinates.
   if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
   const scale = Math.min(canvasW / videoW, canvasH / videoH);
   const drawW = videoW * scale;
@@ -76,8 +76,6 @@ function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
 }
 
 function mapLandmarksVideoToCanvas(landmarks, visCanvas) {
-  // Landmarks are normalized to the *video* [0..1]. Map into *canvas-normalized* coords [0..1]
-  // accounting for the contain rect.
   if (!landmarks || !visCanvas) return landmarks;
   const { minX, minY, w, h } = visCanvas;
   return landmarks.map((p) => ({
@@ -88,7 +86,6 @@ function mapLandmarksVideoToCanvas(landmarks, visCanvas) {
 }
 
 function bboxToLocal(bboxCanvas, visCanvas) {
-  // Convert a bbox in canvas-normalized coords into vis-local coords [0..1] inside the contain rect.
   if (!bboxCanvas || !visCanvas) return null;
   const { minX, minY, w, h } = visCanvas;
   const invW = w ? 1 / w : 1;
@@ -116,36 +113,32 @@ async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
   return c.toDataURL("image/jpeg", quality);
 }
 
-// ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
 function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   const bboxLocal = opts?.bboxLocal || null;
   const isUpperBodyOnly = !!opts?.upperBodyOnly;
 
-  // anchors derived from landmarks; fallback to bbox-derived anchors when legs are missing / jittery
   let a = anchors;
   if (!a && bbox) {
     const cx = (bbox.minX + bbox.maxX) / 2;
-    const h = bbox.maxY - bbox.minY;
-    const w = bbox.maxX - bbox.minX;
+    const hh = bbox.maxY - bbox.minY;
+    const ww = bbox.maxX - bbox.minX;
     a = {
-      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * h) },
-      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * h) },
-      shoulderWidth: w * 0.60,
+      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * hh) },
+      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * hh) },
+      shoulderWidth: ww * 0.60,
     };
   }
   if (!a) return null;
-
   const { midShoulder, midHip, shoulderWidth } = a;
 
   const clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const b = bboxLocal || bbox;
 
+  const b = bboxLocal || bbox;
   const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
   const bboxH = b ? Math.max(0.12, Math.min(0.95, b.maxY - b.minY)) : null;
-
   const swFromBbox = bboxW ? bboxW * 0.55 : null;
   const swRaw = Number.isFinite(shoulderWidth) ? shoulderWidth : null;
-  const sw = clamp2(swFromBbox || swRaw || 0.22, 0.10, 0.30);
+  const sw = clamp2(swFromBbox || swRaw || 0.22, 0.10, 0.28);
 
   const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
   const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
@@ -157,21 +150,21 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   let le, re, lw, rw;
 
   if (poseKey === "front_double_bi" || poseKey === "back_double_bi") {
-    // elbows high + out, wrists near head
     le = { x: midShoulder.x - sw * 1.05, y: midShoulder.y - sw * 0.45 };
     re = { x: midShoulder.x + sw * 1.05, y: midShoulder.y - sw * 0.45 };
     lw = { x: midShoulder.x - sw * 0.55, y: midShoulder.y - sw * 0.95 };
     rw = { x: midShoulder.x + sw * 0.55, y: midShoulder.y - sw * 0.95 };
   } else {
-    // relaxed
     le = { x: midShoulder.x - sw * 0.65, y: midShoulder.y + sw * 0.62 };
     re = { x: midShoulder.x + sw * 0.65, y: midShoulder.y + sw * 0.62 };
     lw = { x: midHip.x - sw * 0.55, y: midHip.y + sw * 0.75 };
     rw = { x: midHip.x + sw * 0.55, y: midHip.y + sw * 0.75 };
   }
 
-  // Legs optional. In upper-body mode, do NOT draw legs to avoid giant confusing overlay.
-  let lk = null, rk = null, la = null, ra = null;
+  let lk = null,
+    rk = null,
+    la = null,
+    ra = null;
   if (!isUpperBodyOnly) {
     const kneeY = midHip.y + sw * 1.75;
     const ankleY = midHip.y + sw * 2.65;
@@ -182,27 +175,50 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   }
 
   const raw = {
-    head, neck, ls, rs, le, re, lw, rw, lh, rh, lk, rk, la, ra,
-    midShoulder, midHip, shoulderWidth: sw,
+    head,
+    neck,
+    ls,
+    rs,
+    le,
+    re,
+    lw,
+    rw,
+    lh,
+    rh,
+    lk,
+    rk,
+    la,
+    ra,
+    midShoulder,
+    midHip,
+    shoulderWidth: sw,
   };
 
-  // Fit the ghost to the user's current bbox to prevent "way too large" overlays.
   if (!b || !bboxW || !bboxH) return raw;
 
   const pts = Object.entries(raw)
-    .filter(([k, v]) => v && typeof v?.x === "number" && typeof v?.y === "number" && !["midShoulder","midHip","shoulderWidth"].includes(k))
+    .filter(
+      ([k, v]) =>
+        v &&
+        typeof v?.x === "number" &&
+        typeof v?.y === "number" &&
+        k !== "midShoulder" &&
+        k !== "midHip" &&
+        k !== "shoulderWidth"
+    )
     .map(([, v]) => v);
-
   if (!pts.length) return raw;
 
-  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  let minX = 1e9,
+    minY = 1e9,
+    maxX = -1e9,
+    maxY = -1e9;
   for (const p of pts) {
     minX = Math.min(minX, p.x);
     minY = Math.min(minY, p.y);
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
-
   const rawW = Math.max(1e-6, maxX - minX);
   const rawH = Math.max(1e-6, maxY - minY);
 
@@ -211,11 +227,10 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   const targetMaxX = clamp2(b.maxX - inset, 0, 1);
   const targetMinY = clamp2(b.minY + inset, 0, 1);
   const targetMaxY = clamp2(b.maxY - inset, 0, 1);
-
   const targetW = Math.max(1e-6, targetMaxX - targetMinX);
   const targetH = Math.max(1e-6, targetMaxY - targetMinY);
 
-  const widen = (poseKey === "front_double_bi" || poseKey === "back_double_bi") ? 1.1 : 1.0;
+  const widen = poseKey === "front_double_bi" || poseKey === "back_double_bi" ? 1.1 : 1.0;
   const s = Math.min((targetW * widen) / rawW, targetH / rawH);
 
   const cxRaw = (minX + maxX) / 2;
@@ -230,7 +245,13 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
 
   const fitted = { ...raw };
   for (const k of Object.keys(fitted)) {
-    if (fitted[k] && typeof fitted[k]?.x === "number" && typeof fitted[k]?.y === "number" && !["midShoulder","midHip","shoulderWidth"].includes(k)) {
+    if (
+      fitted[k] &&
+      typeof fitted[k]?.x === "number" &&
+      typeof fitted[k]?.y === "number" &&
+      k !== "midShoulder" &&
+      k !== "midHip"
+    ) {
       fitted[k] = scalePoint(fitted[k]);
     }
   }
@@ -238,7 +259,7 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   if (fitted.ls && fitted.rs) {
     const dx = fitted.rs.x - fitted.ls.x;
     const dy = fitted.rs.y - fitted.ls.y;
-    fitted.shoulderWidth = clamp2(Math.sqrt(dx * dx + dy * dy), 0.10, 0.34);
+    fitted.shoulderWidth = clamp2(Math.sqrt(dx * dx + dy * dy), 0.10, 0.32);
   }
 
   return fitted;
@@ -251,36 +272,42 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
 
   const segs = [
     ["head", "neck"],
-    ["neck", "ls"], ["neck", "rs"],
-    ["ls", "le"], ["le", "lw"],
-    ["rs", "re"], ["re", "rw"],
+    ["neck", "ls"],
+    ["neck", "rs"],
+    ["ls", "le"],
+    ["le", "lw"],
+    ["rs", "re"],
+    ["re", "rw"],
     ["ls", "rs"],
-    ["ls", "lh"], ["rs", "rh"],
+    ["ls", "lh"],
+    ["rs", "rh"],
     ["lh", "rh"],
-    ["lh", "lk"], ["lk", "la"],
-    ["rh", "rk"], ["rk", "ra"],
-  ].filter(([a, b]) => tpl[a] && tpl[b]);
+    ["lh", "lk"],
+    ["lk", "la"],
+    ["rh", "rk"],
+    ["rk", "ra"],
+  ];
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
 
-  // subtle vignette to make ghost readable
   const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
   grd.addColorStop(0, "rgba(0,0,0,0)");
-  grd.addColorStop(1, "rgba(0,0,0,0.32)");
+  grd.addColorStop(1, "rgba(0,0,0,0.35)");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  const baseWidth = Math.max(4, Math.min(11, tpl.shoulderWidth * w * 0.06));
+  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
   if (glow) {
-    ctx.strokeStyle = "rgba(0, 255, 170, 0.22)";
-    ctx.lineWidth = baseWidth * 3.1;
-    ctx.shadowColor = "rgba(0, 255, 170, 0.42)";
+    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
+    ctx.lineWidth = baseWidth * 3.0;
+    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
     ctx.shadowBlur = 18;
     for (const [a, b] of segs) {
+      if (!tpl[a] || !tpl[b]) continue;
       const A = P(tpl[a]);
       const B = P(tpl[b]);
       ctx.beginPath();
@@ -294,6 +321,7 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
   ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
   ctx.lineWidth = baseWidth * 1.15;
   for (const [a, b] of segs) {
+    if (!tpl[a] || !tpl[b]) continue;
     const A = P(tpl[a]);
     const B = P(tpl[b]);
     ctx.beginPath();
@@ -302,8 +330,7 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
     ctx.stroke();
   }
 
-  // hint zones for arms (makes matching obvious)
-  const zoneAlpha = 0.13;
+  const zoneAlpha = 0.14;
   ctx.fillStyle = `rgba(0,255,190,${zoneAlpha})`;
   const drawZone = (p, r) => {
     if (!p) return;
@@ -328,10 +355,9 @@ function drawFramingGuide(ctx, visCanvas, { w, h }) {
   const vw = visCanvas.w * w;
   const vh = visCanvas.h * h;
 
-  // Target region inside the visible rect (shoulders + hips)
-  const padX = vw * 0.16;
+  const padX = vw * 0.18;
   const padTop = vh * 0.10;
-  const padBottom = vh * 0.12;
+  const padBottom = vh * 0.10;
 
   const rx = vx + padX;
   const ry = vy + padTop;
@@ -339,14 +365,12 @@ function drawFramingGuide(ctx, visCanvas, { w, h }) {
   const rh = vh - padTop - padBottom;
 
   ctx.save();
-  ctx.clearRect(0, 0, w, h);
-
   ctx.lineWidth = Math.max(3, Math.round(Math.min(w, h) * 0.006));
   ctx.strokeStyle = "rgba(0, 255, 214, 0.75)";
   ctx.shadowColor = "rgba(0, 255, 214, 0.9)";
   ctx.shadowBlur = 18;
 
-  const r = Math.min(rw, rh) * 0.08;
+  const r = Math.min(rw, rh) * 0.06;
   ctx.beginPath();
   ctx.moveTo(rx + r, ry);
   ctx.lineTo(rx + rw - r, ry);
@@ -360,21 +384,19 @@ function drawFramingGuide(ctx, visCanvas, { w, h }) {
   ctx.closePath();
   ctx.stroke();
 
-  // ticks (shoulders & hips)
   ctx.shadowBlur = 0;
   ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.004));
   ctx.strokeStyle = "rgba(0, 255, 214, 0.55)";
   ctx.beginPath();
-  ctx.moveTo(rx, ry + rh * 0.24);
-  ctx.lineTo(rx + rw, ry + rh * 0.24);
-  ctx.moveTo(rx, ry + rh * 0.66);
-  ctx.lineTo(rx + rw, ry + rh * 0.66);
+  ctx.moveTo(rx, ry + rh * 0.22);
+  ctx.lineTo(rx + rw, ry + rh * 0.22);
+  ctx.moveTo(rx, ry + rh * 0.62);
+  ctx.lineTo(rx + rw, ry + rh * 0.62);
   ctx.stroke();
 
   ctx.restore();
 }
 
-// ----- AI scoring call -----
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
     const clientKey = "slimcal_client_id";
@@ -429,7 +451,6 @@ export default function PoseSession() {
   const [captureLayout] = useState("portrait");
   const [step, setStep] = useState(0);
   const [started, setStarted] = useState(false);
-  const [countdown, setCountdown] = useState(null);
   const [autoSnap, setAutoSnap] = useState(true);
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState("Step into frame");
@@ -442,7 +463,8 @@ export default function PoseSession() {
   const streamRef = useRef(null);
   const overlayRef = useRef(null);
   const rafRef = useRef(0);
-  const stableRef = useRef({ t0: 0, okFrames: 0, lastDetectAt: 0 });
+  const stableRef = useRef({ t0: 0, okFrames: 0, inFrameFrames: 0, lastDetectAt: 0, justCapturedAt: 0, prevLm: null });
+  const onCaptureRef = useRef(null);
 
   const pose = POSES[Math.min(step, POSES.length - 1)];
   const isResults = step >= POSES.length;
@@ -489,7 +511,60 @@ export default function PoseSession() {
     return () => stopStream();
   }, [started, startStream, stopStream]);
 
-  // Keypoint loop: detect pose and update lock state + draw ghost
+  const onCapture = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const vw = v.videoWidth || 720;
+    const vh = v.videoHeight || 1280;
+
+    const outW = 1080;
+    const outH = 1920;
+
+    const tmp = document.createElement("canvas");
+    tmp.width = outW;
+    tmp.height = outH;
+    const ctx = tmp.getContext("2d");
+
+    const scale = Math.min(outW / vw, outH / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (outW - dw) / 2;
+    const dy = (outH - dh) / 2;
+
+    if (cameraFacing === "user") {
+      ctx.translate(outW, 0);
+      ctx.scale(-1, 1);
+    }
+
+    ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
+
+    const dataUrl = tmp.toDataURL("image/png", 0.92);
+    const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
+
+    setCaptures((cur) => [
+      ...cur,
+      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+    ]);
+
+    // reset gating
+    setLocked(false);
+    stableRef.current.okFrames = 0;
+    stableRef.current.inFrameFrames = 0;
+    stableRef.current.justCapturedAt = nowMs();
+
+    if (step + 1 >= POSES.length) {
+      setStep(POSES.length);
+    } else {
+      setStep((s) => s + 1);
+    }
+  }, [pose.key, step, cameraFacing]);
+
+  useEffect(() => {
+    onCaptureRef.current = onCapture;
+  }, [onCapture]);
+
+  // Pose loop: detect pose, update lock, draw guide/ghost, auto-capture
   useEffect(() => {
     if (!started) return;
     if (isResults) return;
@@ -523,22 +598,19 @@ export default function PoseSession() {
           (v.videoHeight || 0) > 0 &&
           Number.isFinite(v.currentTime);
 
-        const shouldDetect = isVideoReady && t - (stableRef.current.lastDetectAt || 0) >= 85;
-
-        let match = 0;
-        let anchors = null;
-        let bbox = null;
-        let visCanvas = null;
+        const fr = stableRef.current;
+        if (!fr.lastDetectAt) fr.lastDetectAt = 0;
+        const shouldDetect = isVideoReady && t - fr.lastDetectAt >= 85;
 
         if (shouldDetect) {
-          stableRef.current.lastDetectAt = t;
+          fr.lastDetectAt = t;
           try {
             const r = landmarker.detectForVideo(v, t);
             landmarks = r?.landmarks?.[0] || null;
-            stableRef.current.detectErrStreak = 0;
+            fr.detectErrStreak = 0;
           } catch (e) {
             landmarks = null;
-            stableRef.current.detectErrStreak = (stableRef.current.detectErrStreak || 0) + 1;
+            fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
 
             const msg = String(e?.message || e || "");
             const looksLikeGraphPoison =
@@ -549,9 +621,8 @@ export default function PoseSession() {
               msg.includes("no video") ||
               msg.includes("Framebuffer is incomplete");
 
-            if (looksLikeGraphPoison && stableRef.current.detectErrStreak >= 2) {
-              stableRef.current.detectErrStreak = 0;
-              try { await resetPoseLandmarker(); } catch {}
+            if (looksLikeGraphPoison && fr.detectErrStreak >= 2) {
+              fr.detectErrStreak = 0;
               try { stopStream(); } catch {}
               await new Promise((r2) => setTimeout(r2, 180));
               try { await startStream(); } catch {}
@@ -559,17 +630,10 @@ export default function PoseSession() {
           }
         }
 
-        // Default these so we never throw ReferenceErrors when we render.
-        let upperBodyOk = false;
-        let fullBodyOk = false;
-
-        // Gate variables
-        let inFrameRaw = false;
-        let framingBad = true;
-        let bboxLocal = null;
-        let bboxH = 0;
-        let bboxW = 0;
-        let bboxCX = 0.5;
+        let match = 0;
+        let anchors = null;
+        let bbox = null;
+        let visCanvas = null;
 
         if (landmarks && landmarks.length >= 33) {
           visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
@@ -578,109 +642,118 @@ export default function PoseSession() {
           match = clamp(scored?.match || 0, 0, 1);
           anchors = scored?.anchors || null;
           bbox = scored?.bbox || null;
-
-          if (bbox) {
-            bboxLocal = bboxToLocal(bbox, visCanvas) || null;
-            const b = bboxLocal || bbox;
-
-            bboxH = b.maxY - b.minY;
-            bboxW = b.maxX - b.minX;
-            bboxCX = (b.minX + b.maxX) / 2;
-
-            // Framing gate: shoulders + hips is the minimum; legs are optional.
-            const headOk = b.minY <= 0.30;
-            const hipsOk = b.maxY >= 0.62;
-            const sizeOk = bboxH >= 0.38 && bboxW >= 0.22;
-            const notTooClose = bboxH <= 0.90 && bboxW <= 0.86;
-
-            upperBodyOk = headOk && hipsOk && sizeOk && notTooClose;
-
-            // Full-body is a bonus if present
-            fullBodyOk =
-              bboxH >= 0.72 &&
-              b.minY <= 0.14 &&
-              b.maxY >= 0.90 &&
-              bboxW >= 0.24 &&
-              bboxW <= 0.86;
-
-            inFrameRaw = fullBodyOk || upperBodyOk;
-            framingBad = !inFrameRaw;
-          }
         }
 
-        // Render: if framing is bad, show the guide; else draw the pose ghost fitted to bbox.
-        if (!bbox || framingBad) {
-          // Use contain-rect guide even if bbox isn't available yet.
-          const vis = visCanvas || getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
-          drawFramingGuide(ctx, vis, { w, h });
+        // --- framing gate ---
+        let inFrameRaw = false;
+        let framingBad = false;
+        let bboxLocal = null;
+        let bboxH = 0;
+        let bboxW = 0;
+        let bboxCX = 0.5;
+
+        let upperBodyOk = false;
+        let fullBodyOk = false;
+
+        if (bbox) {
+          bboxLocal = bboxToLocal(bbox, visCanvas) || null;
+          const b = bboxLocal || bbox;
+
+          bboxH = b.maxY - b.minY;
+          bboxW = b.maxX - b.minX;
+          bboxCX = (b.minX + b.maxX) / 2;
+
+          const headOk = b.minY <= 0.30;
+          const hipsOk = b.maxY >= 0.62;
+          const sizeOk = bboxH >= 0.38 && bboxW >= 0.22;
+          const notTooClose = bboxH <= 0.88 && bboxW <= 0.82;
+
+          upperBodyOk = headOk && hipsOk && sizeOk && notTooClose;
+          fullBodyOk = bboxH >= 0.72 && b.minY <= 0.14 && b.maxY >= 0.90 && bboxW >= 0.24 && bboxW <= 0.82;
+
+          inFrameRaw = fullBodyOk || upperBodyOk;
+          framingBad = !inFrameRaw;
+        }
+
+        if (bbox && framingBad) {
+          drawFramingGuide(ctx, visCanvas, { w, h });
         } else {
           const upperBodyOnly = upperBodyOk && !fullBodyOk;
           const tpl = buildPoseTemplate(pose.key, anchors, bbox, { bboxLocal, upperBodyOnly });
           drawNeonGhost(ctx, tpl, { w, h, glow: true });
         }
 
-        // Hysteresis to prevent flicker
-        const fr = stableRef.current;
+        // hysteresis
         fr.inFrameFrames = fr.inFrameFrames || 0;
         fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
         const inFrame = fr.inFrameFrames >= 6;
 
         const ok = inFrame && match >= 0.72;
 
-        // Stability from landmark movement
+        // stability from landmark movement
         let stable = false;
-        if (landmarks && landmarks.length >= 33) {
-          const lmCanvas = mapLandmarksVideoToCanvas(landmarks, visCanvas || { minX: 0, minY: 0, w: 1, h: 1 });
-          const prevLm = stableRef.current.prevLm;
-          if (prevLm && prevLm.length === lmCanvas.length) {
+        if (landmarks && landmarks.length) {
+          const prevLm = fr.prevLm;
+          if (prevLm && prevLm.length === landmarks.length) {
             let sum = 0;
-            for (let i = 0; i < lmCanvas.length; i++) {
-              const dx = lmCanvas[i].x - prevLm[i].x;
-              const dy = lmCanvas[i].y - prevLm[i].y;
+            for (let i = 0; i < landmarks.length; i++) {
+              const dx = landmarks[i].x - prevLm[i].x;
+              const dy = landmarks[i].y - prevLm[i].y;
               sum += Math.sqrt(dx * dx + dy * dy);
             }
-            const avg = sum / lmCanvas.length;
+            const avg = sum / landmarks.length;
             stable = avg < 0.0045;
           }
-          stableRef.current.prevLm = lmCanvas;
+          fr.prevLm = landmarks;
         }
 
-        // Coaching + lock gating
+        // coaching
+        const tooClose = bboxH > 0.88 || bboxW > 0.82;
+        const tooFar = bboxH > 0 && bboxH < 0.34;
+        const offLeft = bboxCX < 0.44;
+        const offRight = bboxCX > 0.56;
+        const headCropped = bboxLocal ? bboxLocal.minY > 0.32 : (bbox ? bbox.minY > 0.32 : false);
+        const hipsMissing = bboxLocal ? bboxLocal.maxY < 0.62 : (bbox ? bbox.maxY < 0.62 : false);
+
         if (!bbox) {
           setLocked(false);
           setLockHint("Step into frame");
-          stableRef.current.okFrames = 0;
+          fr.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
-
-          const tooClose = bboxH > 0.90 || bboxW > 0.86;
-          const tooFar = bboxH > 0 && bboxH < 0.34;
-          const offLeft = bboxCX < 0.44;
-          const offRight = bboxCX > 0.56;
-
-          if (tooClose) setLockHint("Move back (camera too close)");
+          if (tooClose) setLockHint("Move back (camera is too close)");
           else if (tooFar) setLockHint("Move closer");
           else if (offLeft) setLockHint("Move right");
           else if (offRight) setLockHint("Move left");
-          else setLockHint("Get shoulders + hips in view");
-          stableRef.current.okFrames = 0;
+          else if (hipsMissing) setLockHint("Tilt down until shoulders + hips are visible");
+          else if (headCropped) setLockHint("Tilt up (your head is cropped)");
+          else setLockHint("Center yourself (shoulders + hips in view)");
+          fr.okFrames = 0;
         } else if (match < 0.72) {
           setLocked(false);
           setLockHint("Match the neon outline");
-          stableRef.current.okFrames = 0;
+          fr.okFrames = 0;
         } else if (!stable) {
           setLocked(false);
           setLockHint("Hold still…");
-          stableRef.current.okFrames = 0;
+          fr.okFrames = 0;
         } else {
-          stableRef.current.okFrames += 1;
-          setLockHint("LOCKED ✅");
-          setLocked(true);
+          fr.okFrames = (fr.okFrames || 0) + 1;
+          setLockHint(fr.okFrames >= 3 ? "LOCKED ✅" : "Hold…");
+          setLocked(fr.okFrames >= 3);
         }
 
-        // Auto-capture after a short stable period (no regressions: manual capture is immediate)
-        if (autoSnap && ok && stable && stableRef.current.okFrames >= 6 && !countdown) {
-          setCountdown(3);
+        // --- auto snap (no countdown): fire once when locked & stable for a few frames ---
+        const enough = ok && stable && (fr.okFrames || 0) >= 6;
+        const coolDownOk = !fr.justCapturedAt || t - fr.justCapturedAt > 1400;
+
+        if (autoSnap && enough && coolDownOk && typeof onCaptureRef.current === "function") {
+          fr.justCapturedAt = t;
+          fr.okFrames = 0;
+          fr.inFrameFrames = 0;
+          try {
+            await onCaptureRef.current();
+          } catch {}
         }
 
         rafRef.current = requestAnimationFrame(tick);
@@ -696,67 +769,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown, autoSnap, startStream, stopStream]);
-
-  // countdown -> snap
-  useEffect(() => {
-    if (!countdown) return;
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => (c ? c - 1 : null)), 750);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const onCapture = useCallback(async () => {
-    const v = videoRef.current;
-    if (!v) return;
-
-    // Capture full camera frame (no crop) and letterbox into export canvas (matches contain)
-    const vw = v.videoWidth || 720;
-    const vh = v.videoHeight || 1280;
-
-    const outW = captureLayout === "landscape" ? 1920 : 1080;
-    const outH = captureLayout === "landscape" ? 1080 : 1920;
-
-    const tmp = document.createElement("canvas");
-    tmp.width = outW;
-    tmp.height = outH;
-    const ctx = tmp.getContext("2d");
-
-    const scale = Math.min(outW / vw, outH / vh);
-    const dw = vw * scale;
-    const dh = vh * scale;
-    const dx = (outW - dw) / 2;
-    const dy = (outH - dh) / 2;
-
-    if (cameraFacing === "user") {
-      ctx.translate(outW, 0);
-      ctx.scale(-1, 1);
-    }
-
-    ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
-
-    const dataUrl = tmp.toDataURL("image/png", 0.92);
-    const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
-
-    setCaptures((cur) => [
-      ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
-    ]);
-
-    setLocked(false);
-    setCountdown(null);
-    stableRef.current.okFrames = 0;
-
-    if (step + 1 >= POSES.length) setStep(POSES.length);
-    else setStep((s) => s + 1);
-  }, [pose.key, step, cameraFacing, captureLayout]);
-
-  useEffect(() => {
-    if (countdown === 0) {
-      setCountdown(null);
-      onCapture();
-    }
-  }, [countdown, onCapture]);
+  }, [started, isResults, pose.key, autoSnap, startStream, stopStream]);
 
   // Score session when finished capturing
   useEffect(() => {
@@ -771,12 +784,20 @@ export default function PoseSession() {
       setScanBusy(true);
       setAiError("");
 
-      const r = await scorePoseSessionWithAI({ poses: captures, prevSession, todayISO });
+      const r = await scorePoseSessionWithAI({
+        poses: captures,
+        prevSession,
+        todayISO,
+      });
+
       if (canceled) return;
 
       if (r.ok) {
         setAiSession(r.session);
         try {
+          const hist = readPoseSessionHistory(userId);
+          computeSessionStreak(hist, todayISO);
+
           const record = {
             local_day: todayISO,
             created_at: Date.now(),
@@ -784,18 +805,20 @@ export default function PoseSession() {
             muscleSignals: r.session?.muscleSignals || {},
             poseQuality: r.session?.poseQuality || {},
           };
+
           appendPoseSession(userId, record);
         } catch {}
       } else {
         setAiError(r.error || "Scan failed");
         try {
-          appendPoseSession(userId, {
+          const record = {
             local_day: todayISO,
             created_at: Date.now(),
             build_arc: 78,
             muscleSignals: {},
             poseQuality: {},
-          });
+          };
+          appendPoseSession(userId, record);
         } catch {}
       }
 
@@ -803,7 +826,9 @@ export default function PoseSession() {
     };
 
     run();
-    return () => { canceled = true; };
+    return () => {
+      canceled = true;
+    };
   }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
 
   const latestRecord = useMemo(() => {
@@ -823,47 +848,48 @@ export default function PoseSession() {
   }, [latestRecord, userId]);
 
   const share = useCallback(async () => {
-    // Neutral/positive-only: no percentile / no streak / no "top X%" comparisons.
     const session = aiSession || {};
-    const buildArc = clamp(session?.build_arc ?? session?.buildArcScore ?? latestRecord?.build_arc ?? 78, 0, 100);
 
     const hype =
       session?.hype ||
       (prevSession
-        ? "Momentum check ✅ You’re building something real — keep going."
-        : "Baseline locked ✅ This is your starting point — only up from here.");
+        ? "Momentum check ✅ You’re building something real."
+        : "Baseline locked ✅ Your first scan is in the books.");
 
     const wins =
-      (session?.highlights && Array.isArray(session.highlights) ? session.highlights : null) ||
-      (prevSession ? ["Chest signal up", "Arms looking fuller"] : ["Strong starting frame", "Great pose control"]);
+      session?.highlights ||
+      (prevSession ? ["Clean pose control", "Strong symmetry"] : ["Strong starting frame", "Great pose control"]);
 
     const levers =
-      (session?.levers && Array.isArray(session.levers) ? session.levers : null) ||
-      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2–3× this week"]);
+      session?.levers ||
+      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2-3× this week"]);
 
     const png = await buildPoseSessionSharePng({
-      // Keep buildArc available to the share-card logic if it uses it for subtle progress visuals,
-      // but the UI no longer shows comparison stats.
-      buildArc,
-      sincePoints: deltas?.since_points || 0,
       headline: "POSE SESSION",
       subhead: hype,
-      wins: wins.slice(0, 3),
-      levers: levers.slice(0, 2),
+      wins,
+      levers,
+      sincePoints: deltas?.since_points || 0,
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
+      localDay: todayISO,
     });
 
-    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, "Pose Session ✅ #SlimcalAI");
-  }, [aiSession, captures, todayISO, deltas, prevSession, latestRecord]);
+    await shareOrDownloadPng(
+      png,
+      `slimcal-pose-session-${todayISO}.png`,
+      "Pose Session ✅ #SlimcalAI"
+    );
+  }, [aiSession, captures, todayISO, deltas, prevSession]);
 
   const start = () => {
+    stableRef.current = { t0: 0, okFrames: 0, inFrameFrames: 0, lastDetectAt: 0, justCapturedAt: 0, prevLm: null };
     setStarted(true);
     setStep(0);
     setCaptures([]);
     setAiSession(null);
     setAiError("");
-    setCountdown(null);
     setLocked(false);
+    setLockHint("Step into frame");
   };
 
   const back = () => history.push("/");
@@ -885,9 +911,7 @@ export default function PoseSession() {
             Flip
           </Button>
         )}
-        <Typography sx={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
-          {started ? `${Math.min(step + 1, 3)}/3` : "BETA"}
-        </Typography>
+        {!started ? <Chip label="BETA" color="success" size="small" /> : <Chip label={`${Math.min(step + 1, 3)}/3`} color="info" size="small" />}
       </Stack>
 
       {!started ? (
@@ -897,7 +921,7 @@ export default function PoseSession() {
               Pose Session
             </Typography>
             <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.9)" }}>
-              3 poses — auto-lock — share your progress
+              3 poses • auto-lock • instant share card
             </Typography>
             <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
             <Stack spacing={1.25}>
@@ -918,14 +942,7 @@ export default function PoseSession() {
                 </Box>
               ))}
             </Stack>
-            <Button
-              sx={{ mt: 2 }}
-              fullWidth
-              size="large"
-              variant="contained"
-              startIcon={<CameraAltIcon />}
-              onClick={start}
-            >
+            <Button sx={{ mt: 2 }} fullWidth size="large" variant="contained" startIcon={<CameraAltIcon />} onClick={start}>
               Start Pose Session
             </Button>
           </CardContent>
@@ -945,7 +962,7 @@ export default function PoseSession() {
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: captureLayout === "landscape" ? "16 / 9" : "9 / 16",
+                aspectRatio: "9 / 16",
                 borderRadius: 3,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
@@ -978,35 +995,6 @@ export default function PoseSession() {
                 }}
               />
 
-              {countdown ? (
-                <Box
-                  sx={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "grid",
-                    placeItems: "center",
-                    pointerEvents: "none",
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 120,
-                      height: 120,
-                      borderRadius: "999px",
-                      border: "2px solid rgba(0,255,190,0.55)",
-                      boxShadow: "0 0 22px rgba(0,255,190,0.25)",
-                      display: "grid",
-                      placeItems: "center",
-                      background: "rgba(0,0,0,0.45)",
-                    }}
-                  >
-                    <Typography sx={{ fontSize: 54, fontWeight: 900, color: "#eafffb" }}>
-                      {countdown}
-                    </Typography>
-                  </Box>
-                </Box>
-              ) : null}
-
               <Box
                 sx={{
                   position: "absolute",
@@ -1020,17 +1008,15 @@ export default function PoseSession() {
                   boxShadow: locked ? "0 0 18px rgba(0,255,190,0.18)" : "none",
                 }}
               >
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#eafffb" }}>
-                  {lockHint}
-                </Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#eafffb" }}>{lockHint}</Typography>
               </Box>
             </Box>
 
             <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Button fullWidth variant="outlined" onClick={() => onCapture()} disabled={!!countdown}>
+              <Button fullWidth variant="outlined" onClick={() => onCapture()}>
                 Capture now
               </Button>
-              <Button fullWidth variant="contained" onClick={() => setAutoSnap((a) => !a)} disabled={!!countdown}>
+              <Button fullWidth variant="contained" onClick={() => setAutoSnap((a) => !a)}>
                 {autoSnap ? "Auto snap On" : "Auto snap Off"}
               </Button>
             </Stack>
@@ -1057,60 +1043,52 @@ export default function PoseSession() {
                 <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
                   {aiSession?.hype ||
                     (prevSession
-                      ? "Momentum check ✅ You’re building something real — keep going."
+                      ? "Momentum check ✅ You’re building something real."
                       : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
 
                 {deltas ? (
                   <Box sx={{ mt: 1.25 }}>
                     <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
-                      Since last: <b>+{deltas.since_points || 0}</b>
+                      Since last: <b>+{deltas.since_points || 0} levels</b>
                     </Typography>
                   </Box>
                 ) : null}
 
                 <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
 
-                <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>
-                  Wins
-                </Typography>
+                <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>Wins</Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.highlights || ["Chest pop", "Arms look fuller"])
-                    .slice(0, 3)
-                    .map((t, idx) => (
-                      <Box
-                        key={idx}
-                        sx={{
-                          p: 1,
-                          borderRadius: 2,
-                          background: "rgba(0,255,190,0.05)",
-                          border: "1px solid rgba(0,255,190,0.14)",
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
-                      </Box>
-                    ))}
+                  {(aiSession?.highlights || ["Clean pose control", "Strong symmetry"]).slice(0, 3).map((t, idx) => (
+                    <Box
+                      key={idx}
+                      sx={{
+                        p: 1,
+                        borderRadius: 2,
+                        background: "rgba(0,255,190,0.05)",
+                        border: "1px solid rgba(0,255,190,0.14)",
+                      }}
+                    >
+                      <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
+                    </Box>
+                  ))}
                 </Stack>
 
-                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>
-                  Next unlocks (pick 1)
-                </Typography>
+                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>Next unlocks (pick 1)</Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.levers || ["Protein +25g today", "Train 2–3× this week"])
-                    .slice(0, 2)
-                    .map((t, idx) => (
-                      <Box
-                        key={idx}
-                        sx={{
-                          p: 1,
-                          borderRadius: 2,
-                          background: "rgba(0,255,255,0.04)",
-                          border: "1px solid rgba(0,255,255,0.14)",
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
-                      </Box>
-                    ))}
+                  {(aiSession?.levers || ["Protein +25g today", "Train 2-3× this week"]).slice(0, 2).map((t, idx) => (
+                    <Box
+                      key={idx}
+                      sx={{
+                        p: 1,
+                        borderRadius: 2,
+                        background: "rgba(0,255,255,0.04)",
+                        border: "1px solid rgba(0,255,255,0.14)",
+                      }}
+                    >
+                      <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
+                    </Box>
+                  ))}
                 </Stack>
 
                 {aiError ? (
