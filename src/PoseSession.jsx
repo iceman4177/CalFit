@@ -121,10 +121,10 @@ function buildPoseTemplate(poseKey, anchors) {
   };
 }
 
-function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
+function drawNeonGhost(ctx, tpl, { w, h, glow = true, mapFn = null }) {
   if (!ctx || !tpl) return;
 
-  const P = (p) => ({ x: p.x * w, y: p.y * h });
+  const P = (p) => (mapFn ? mapFn(p) : { x: p.x * w, y: p.y * h });
 
   const segs = [
     ["head", "neck"],
@@ -229,8 +229,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          poseKey: p.pose_key || p.poseKey || p.key,
-          // Send ONLY the compressed thumbnail to avoid 413 payload limits.
+          poseKey: p.pose_key,
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
@@ -257,7 +256,6 @@ export default function PoseSession() {
   const prevSession = prevHistory?.[0] || null;
 
   const [cameraFacing, setCameraFacing] = useState("user"); // default front
-  const [frameOrientation, setFrameOrientation] = useState("portrait"); // portrait default
   const [step, setStep] = useState(0); // 0..POSES-1 then results
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -270,58 +268,8 @@ export default function PoseSession() {
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const containerRef = useRef(null);
   const overlayRef = useRef(null);
-
-  const [videoDims, setVideoDims] = useState({ w: 0, h: 0 });
-  const [boxDims, setBoxDims] = useState({ w: 0, h: 0 });
-
-  const computeCoverTransform = useCallback(() => {
-    const vw = videoDims.w || 0;
-    const vh = videoDims.h || 0;
-    const bw = boxDims.w || 0;
-    const bh = boxDims.h || 0;
-    if (!vw || !vh || !bw || !bh) return null;
-
-    const scale = Math.max(bw / vw, bh / vh); // cover
-    const dw = vw * scale;
-    const dh = vh * scale;
-    const ox = (bw - dw) / 2;
-    const oy = (bh - dh) / 2;
-
-    // source rect visible in the cover crop
-    const sw = bw / scale;
-    const sh = bh / scale;
-    const sx = (vw - sw) / 2;
-    const sy = (vh - sh) / 2;
-
-    return { vw, vh, bw, bh, scale, ox, oy, sx, sy, sw, sh };
-  }, [videoDims, boxDims]);
-
-  const mapNormToBox = useCallback(
-    (nx, ny, t, mirrored) => {
-      if (!t) return { x: 0, y: 0 };
-      let px = nx * t.vw;
-      const py = ny * t.vh;
-      if (mirrored) px = t.vw - px;
-      return { x: px * t.scale + t.ox, y: py * t.scale + t.oy };
-    },
-    []
-  );
-  
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      setBoxDims({ w: Math.round(r.width), h: Math.round(r.height) });
-    });
-    ro.observe(el);
-    const r0 = el.getBoundingClientRect();
-    setBoxDims({ w: Math.round(r0.width), h: Math.round(r0.height) });
-    return () => ro.disconnect();
-  }, []);
-const rafRef = useRef(0);
+  const rafRef = useRef(0);
   const lastLmRef = useRef(null);
   const stableRef = useRef({ t0: 0, okFrames: 0 });
 
@@ -404,16 +352,7 @@ const rafRef = useRef(0);
           (v.videoHeight || 0) > 0 &&
           Number.isFinite(v.currentTime);
 
-        
-        // Sync intrinsic video dimensions for cover-math / capture-crop.
-        if (
-          isVideoReady &&
-          (videoDims.w !== v.videoWidth || videoDims.h !== v.videoHeight)
-        ) {
-          setVideoDims({ w: v.videoWidth, h: v.videoHeight });
-        }
-
-// Throttle to ~12fps to reduce CPU/GPU churn.
+        // Throttle to ~12fps to reduce CPU/GPU churn.
         if (!stableRef.current.lastDetectAt) stableRef.current.lastDetectAt = 0;
         const shouldDetect = isVideoReady && t - stableRef.current.lastDetectAt >= 85;
 
@@ -462,28 +401,34 @@ const rafRef = useRef(0);
         }
 
         const tpl = buildPoseTemplate(pose.key, anchors);
-        drawNeonGhost(ctx, tpl, { w, h, glow: true });
 
-        // Match + stability gating (MrBeast simple: MOVE BACK -> MATCH -> HOLD)
+        // Map normalized landmark/template coords (0..1 in video space) into the visible "cover" crop on canvas
+        const vw = v.videoWidth || 1280;
+        const vh = v.videoHeight || 720;
+        const scale = Math.max(w / vw, h / vh);
+        const ox = (w - vw * scale) / 2;
+        const oy = (h - vh * scale) / 2;
+        const mapFn = (p) => ({ x: p.x * vw * scale + ox, y: p.y * vh * scale + oy });
+
+        drawNeonGhost(ctx, tpl, { w, h, glow: true, mapFn });
+
+        // Match + stability gating (MOVE -> MATCH -> HOLD)
         let inFrame = false;
+        let bodyHeight = 0;
         if (bbox) {
-          const height = bbox.maxY - bbox.minY;
+          bodyHeight = bbox.maxY - bbox.minY;
 
-          // PC webcams often can't include feet in portrait.
-          // Portrait: require head+hips in view. Landscape: looser (upper body OK).
-          const minHeight = frameOrientation === "landscape" ? 0.30 : 0.42;
-          const topOk = bbox.minY < (frameOrientation === "landscape" ? 0.28 : 0.22);
-          const bottomOk = bbox.maxY > (frameOrientation === "landscape" ? 0.70 : 0.80);
-
-          const candidate = height > minHeight && topOk && bottomOk;
-
-          // Hysteresis: don't flicker out on a single bad frame.
-          const prev = !!stableRef.current.inFrame;
-          inFrame = candidate || (prev && height > minHeight * 0.9);
-          stableRef.current.inFrame = inFrame;
+          // Portrait expects "mostly body", but do NOT make it impossible on PC webcams.
+          if (frameOrientation === "portrait") {
+            inFrame = bodyHeight > 0.32 && bbox.minY < 0.30 && bbox.maxY > 0.70;
+          } else {
+            // Landscape is more forgiving (PC-friendly)
+            inFrame = bodyHeight > 0.26 && bbox.minY < 0.36 && bbox.maxY > 0.64;
+          }
         }
 
-        const ok = inFrame && match >= (frameOrientation === "landscape" ? 0.68 : 0.72);
+        // Lower match threshold so auto-capture can actually progress; alignment is reinforced by the ghost itself.
+        const ok = inFrame && match >= 0.58;
 
         // stability from landmark movement (much more reliable than pixel diff)
         let stable = false;
@@ -540,7 +485,7 @@ const rafRef = useRef(0);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown]);
+  }, [started, isResults, pose.key, countdown, cameraFacing, frameOrientation]);
 
   // countdown -> snap
   useEffect(() => {
@@ -559,54 +504,68 @@ const rafRef = useRef(0);
 
   const onCapture = useCallback(async () => {
     const v = videoRef.current;
-    const boxEl = containerRef.current;
-    if (!v || !boxEl) return;
+    if (!v) return;
 
-    const t = computeCoverTransform();
-    if (!t) return;
+    const vw = v.videoWidth || 1280;
+    const vh = v.videoHeight || 720;
 
-    const mirrored = cameraFacing === "user";
+    // The user sees a "cover" crop. Capture exactly that visible region at viral export resolution.
+    const viewW = v.clientWidth || 360;
+    const viewH = v.clientHeight || 640;
+    const targetW = frameOrientation === "portrait" ? 1080 : 1920;
+    const targetH = frameOrientation === "portrait" ? 1920 : 1080;
 
-    // Capture exactly what the user sees (cover crop) at a stable export resolution.
-    const outW = frameOrientation === "landscape" ? 1920 : 1080;
-    const outH = frameOrientation === "landscape" ? 1080 : 1920;
+    // Determine crop rect in source video pixels that matches the visible aspect ratio.
+    const targetAspect = viewW / viewH;
+    const srcAspect = vw / vh;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = outW;
-    canvas.height = outH;
-    const ctx = canvas.getContext("2d");
-
-    // Mirror the output if selfie cam so the capture matches on-screen preview.
-    if (mirrored) {
-      ctx.translate(outW, 0);
-      ctx.scale(-1, 1);
+    let sx = 0, sy = 0, sw = vw, sh = vh;
+    if (srcAspect > targetAspect) {
+      // source is wider -> crop width
+      sw = Math.round(vh * targetAspect);
+      sx = Math.round((vw - sw) / 2);
+    } else {
+      // source is taller -> crop height
+      sh = Math.round(vw / targetAspect);
+      sy = Math.round((vh - sh) / 2);
     }
 
-    // Draw the visible cover-cropped region.
-    ctx.drawImage(v, t.sx, t.sy, t.sw, t.sh, 0, 0, outW, outH);
+    // Full-res PNG (kept local only for share card)
+    const tmp = document.createElement("canvas");
+    tmp.width = targetW;
+    tmp.height = targetH;
+    const ctx = tmp.getContext("2d");
 
-    const pngDataUrl = canvas.toDataURL("image/png", 0.92);
+    // Mirror for selfie cam so export matches what the user saw.
+    if (cameraFacing === "user") {
+      ctx.translate(targetW, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-    // Build a tiny JPEG thumbnail for AI (prevents 413).
-    const maxEdge = 384;
-    const thumbScale = Math.min(1, maxEdge / Math.max(outW, outH));
-    const tw = Math.round(outW * thumbScale);
-    const th = Math.round(outH * thumbScale);
+    const fullPng = tmp.toDataURL("image/png", 0.92);
 
-    const thumb = document.createElement("canvas");
-    thumb.width = tw;
-    thumb.height = th;
-    const tctx = thumb.getContext("2d");
-    tctx.drawImage(canvas, 0, 0, outW, outH, 0, 0, tw, th);
-    const aiThumbDataUrl = thumb.toDataURL("image/jpeg", 0.72);
+    // AI thumbnail (small JPEG to avoid 413)
+    const thumbMax = 384;
+    const tAspect = targetW / targetH;
+    const tw = tAspect >= 1 ? thumbMax : Math.round(thumbMax * tAspect);
+    const th = tAspect >= 1 ? Math.round(thumbMax / tAspect) : thumbMax;
+
+    const tcan = document.createElement("canvas");
+    tcan.width = tw;
+    tcan.height = th;
+    const tctx = tcan.getContext("2d");
+    // mirror thumbnail too for consistency
+    if (cameraFacing === "user") {
+      tctx.translate(tw, 0);
+      tctx.scale(-1, 1);
+    }
+    tctx.drawImage(v, sx, sy, sw, sh, 0, 0, tw, th);
+    const aiThumb = tcan.toDataURL("image/jpeg", 0.72);
 
     setCaptures((cur) => [
       ...cur,
-      {
-        pose_key: pose.key,
-        image_data_url: pngDataUrl, // full-res local for share
-        ai_image_data_url: aiThumbDataUrl, // small for AI
-      },
+      { pose_key: pose.key, image_data_url: fullPng, ai_image_data_url: aiThumb },
     ]);
 
     setLocked(false);
@@ -618,7 +577,7 @@ const rafRef = useRef(0);
     } else {
       setStep((s) => s + 1);
     }
-  }, [pose.key, step, cameraFacing, computeCoverTransform, frameOrientation]);
+  }, [pose.key, step, cameraFacing, frameOrientation]);
 
   // Score session when finished capturing
   useEffect(() => {
@@ -744,11 +703,7 @@ const rafRef = useRef(0);
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
     });
 
-    await shareOrDownloadPng(
-      png,
-      `slimcal-pose-session-${todayISO}.png`,
-      "Pose Session ✅ #SlimcalAI"
-    );
+    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, `Pose Session ✅ #SlimcalAI`);
   }, [aiSession, captures, todayISO, streakCount, deltas, prevSession, latestRecord]);
 
   const start = () => {
@@ -784,6 +739,24 @@ const rafRef = useRef(0);
           >
             Flip
           </Button>
+        )}
+        {started && !isResults && (
+          <Box sx={{ display: "flex", gap: 1, ml: 1 }}>
+            <Button
+              variant={frameOrientation === "portrait" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setFrameOrientation("portrait")}
+            >
+              Portrait
+            </Button>
+            <Button
+              variant={frameOrientation === "landscape" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setFrameOrientation("landscape")}
+            >
+              Landscape
+            </Button>
+          </Box>
         )}
         {!started ? (
           <Chip label="BETA" color="success" size="small" />
@@ -843,7 +816,6 @@ const rafRef = useRef(0);
             </Typography>
 
             <Box
-              ref={containerRef}
               sx={{
                 mt: 1.5,
                 position: "relative",
@@ -863,7 +835,7 @@ const rafRef = useRef(0);
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover", // fill the frame (no letterbox)
+                  objectFit: "cover", // Fill frame (no black bars)
                   transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
                   background: "#000",
                 }}
