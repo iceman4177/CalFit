@@ -229,8 +229,7 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
-          poseKey: p.pose_key,
-          title: p.title || "",
+          pose_key: p.pose_key,
           image_data_url: p.image_data_url,
         })),
         prev: prevSession || null,
@@ -238,13 +237,8 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }),
     });
 
-    const rawText = await res.text();
-    let j = null;
-    try { j = rawText ? JSON.parse(rawText) : null; } catch (e) {}
-    if (!res.ok) {
-      console.error("[pose_session] /api/ai/generate error", { status: res.status, body: rawText });
-      throw new Error((j && j.error) || rawText || "AI failed");
-    }
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((j && j.error) || "AI failed");
     if (!j || !j.session) throw new Error("Bad AI response");
     return { ok: true, session: j.session };
   } catch (e) {
@@ -347,14 +341,49 @@ export default function PoseSession() {
         if (canvas.width !== w) canvas.width = w;
         if (canvas.height !== h) canvas.height = h;
 
-        // Run pose detection at ~10fps
+        // Run pose detection (guarded): never call MediaPipe unless video has a real frame.
         const t = nowMs();
         let landmarks = null;
-        try {
-          const r = landmarker.detectForVideo(v, t);
-          landmarks = r?.landmarks?.[0] || null;
-        } catch {
-          landmarks = null;
+
+        const isVideoReady =
+          !document.hidden &&
+          v.readyState >= 2 &&
+          (v.videoWidth || 0) > 0 &&
+          (v.videoHeight || 0) > 0 &&
+          Number.isFinite(v.currentTime);
+
+        // Throttle to ~12fps to reduce CPU/GPU churn.
+        if (!stableRef.current.lastDetectAt) stableRef.current.lastDetectAt = 0;
+        const shouldDetect = isVideoReady && t - stableRef.current.lastDetectAt >= 85;
+
+        if (shouldDetect) {
+          stableRef.current.lastDetectAt = t;
+          try {
+            const r = landmarker.detectForVideo(v, t);
+            landmarks = r?.landmarks?.[0] || null;
+            stableRef.current.detectErrStreak = 0;
+          } catch (e) {
+            landmarks = null;
+            stableRef.current.detectErrStreak = (stableRef.current.detectErrStreak || 0) + 1;
+
+            const msg = String(e?.message || e || "");
+            const looksLikeGraphPoison =
+              msg.includes("roi->width") ||
+              msg.includes("ROI width and height") ||
+              msg.includes("Graph has errors") ||
+              msg.includes("texImage2D") ||
+              msg.includes("no video") ||
+              msg.includes("Framebuffer is incomplete");
+
+            // If the graph is poisoned (tab-switch/camera pause), hard-reset landmarker + restart stream.
+            if (looksLikeGraphPoison && stableRef.current.detectErrStreak >= 2) {
+              stableRef.current.detectErrStreak = 0;
+              try { await resetPoseLandmarker(); } catch {}
+              try { stopStream(); } catch {}
+              await new Promise((r) => setTimeout(r, 180));
+              try { await startStream(); } catch {}
+            }
+          }
         }
 
         let match = 0;

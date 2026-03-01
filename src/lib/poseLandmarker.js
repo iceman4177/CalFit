@@ -3,7 +3,7 @@
 // We intentionally lazy-load to avoid impacting initial bundle.
 
 let _landmarkerPromise = null;
-let _landmarker = null;
+let _landmarkerInstance = null;
 
 async function loadTasksVision() {
   // IMPORTANT:
@@ -14,17 +14,18 @@ async function loadTasksVision() {
 }
 
 export async function getPoseLandmarker() {
-  if (_landmarker) return _landmarker;
   if (_landmarkerPromise) return _landmarkerPromise;
 
   _landmarkerPromise = (async () => {
     const { FilesetResolver, PoseLandmarker } = await loadTasksVision();
 
+    // Use hosted wasm + model assets.
+    // Model URL pattern is documented across MediaPipe demos and examples.
     const wasm = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
     );
 
-    const lm = await PoseLandmarker.createFromOptions(wasm, {
+    const landmarker = await PoseLandmarker.createFromOptions(wasm, {
       baseOptions: {
         modelAssetPath:
           "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
@@ -33,28 +34,25 @@ export async function getPoseLandmarker() {
       numPoses: 1,
     });
 
-    _landmarker = lm;
-    return lm;
+    _landmarkerInstance = landmarker;
+    return landmarker;
   })();
 
   return _landmarkerPromise;
 }
 
-export async function resetPoseLandmarker() {
-  // Safe to call multiple times.
-  try {
-    const lm = _landmarker;
-    _landmarker = null;
-    _landmarkerPromise = null;
-    if (lm && typeof lm.close === "function") {
-      lm.close();
-    }
-  } catch {
-    _landmarker = null;
-    _landmarkerPromise = null;
-  }
-}
 
+export async function resetPoseLandmarker() {
+  // Allow caller to force MediaPipe graph recreation after a WebGL/camera glitch.
+  try {
+    const inst = await _landmarkerPromise;
+    if (inst && typeof inst.close === "function") {
+      try { inst.close(); } catch {}
+    }
+  } catch {}
+  _landmarkerPromise = null;
+  _landmarkerInstance = null;
+}
 
 function v(p) {
   return { x: p.x, y: p.y };
