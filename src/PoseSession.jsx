@@ -26,7 +26,7 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, resetPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
@@ -204,64 +204,6 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
   ctx.restore();
 }
 
-
-// ----- payload helpers (avoid 413 on serverless limits) -----
-function estimateDataUrlBytes(dataUrl) {
-  if (!dataUrl || typeof dataUrl !== "string") return 0;
-  const i = dataUrl.indexOf(",");
-  if (i < 0) return 0;
-  const b64 = dataUrl.slice(i + 1);
-  // base64 bytes ≈ 3/4 length
-  return Math.floor((b64.length * 3) / 4);
-}
-
-function loadImageFromDataUrl(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("image load failed"));
-    img.src = dataUrl;
-  });
-}
-
-async function compressPoseDataUrlForAI(pngDataUrl) {
-  // Keep share card full-res PNG locally, but send small JPEG to AI.
-  // Target <= ~220KB each to avoid 413.
-  if (!pngDataUrl) return "";
-  const img = await loadImageFromDataUrl(pngDataUrl);
-
-  const ladder = [
-    { max: 720, q: 0.78 },
-    { max: 640, q: 0.74 },
-    { max: 512, q: 0.70 },
-    { max: 420, q: 0.64 },
-    { max: 360, q: 0.60 },
-  ];
-
-  const srcW = img.naturalWidth || 0;
-  const srcH = img.naturalHeight || 0;
-  if (!srcW || !srcH) return "";
-
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: false });
-
-  for (const step of ladder) {
-    const scale = Math.min(1, step.max / Math.max(srcW, srcH));
-    const w = Math.max(1, Math.round(srcW * scale));
-    const h = Math.max(1, Math.round(srcH * scale));
-    canvas.width = w;
-    canvas.height = h;
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-
-    const jpg = canvas.toDataURL("image/jpeg", step.q);
-    if (estimateDataUrlBytes(jpg) <= 220 * 1024) return jpg;
-  }
-
-  // last resort
-  return canvas.toDataURL("image/jpeg", 0.55);
-}
-
 // ----- AI scoring call (kept from prior patch) -----
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   try {
@@ -278,14 +220,6 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }
     }
 
-    const posesForAi = await Promise.all(
-      (poses || []).map(async (p) => ({
-        pose_key: p.pose_key,
-        // Compress to avoid 413, keep original PNG for share card
-        image_data_url: await compressPoseDataUrlForAI(p.image_data_url),
-      }))
-    );
-
     const res = await fetch("/api/ai/generate", {
       method: "POST",
       headers: {
@@ -294,14 +228,23 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       },
       body: JSON.stringify({
         feature: "pose_session",
-        poses: posesForAi,
+        poses: poses.map((p) => ({
+          poseKey: p.pose_key,
+          title: p.title || "",
+          image_data_url: p.image_data_url,
+        })),
         prev: prevSession || null,
         today_local_day: todayISO,
       }),
     });
 
-    const j = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((j && j.error) || "AI failed");
+    const rawText = await res.text();
+    let j = null;
+    try { j = rawText ? JSON.parse(rawText) : null; } catch (e) {}
+    if (!res.ok) {
+      console.error("[pose_session] /api/ai/generate error", { status: res.status, body: rawText });
+      throw new Error((j && j.error) || rawText || "AI failed");
+    }
     if (!j || !j.session) throw new Error("Bad AI response");
     return { ok: true, session: j.session };
   } catch (e) {
@@ -335,8 +278,6 @@ export default function PoseSession() {
   const rafRef = useRef(0);
   const lastLmRef = useRef(null);
   const stableRef = useRef({ t0: 0, okFrames: 0 });
-  const errStreakRef = useRef(0);
-  const zeroFrameStreakRef = useRef(0);
 
   const pose = POSES[Math.min(step, POSES.length - 1)];
   const isResults = step >= POSES.length;
@@ -401,30 +342,6 @@ export default function PoseSession() {
       const tick = async () => {
         if (!alive) return;
 
-        // If the tab is backgrounded or video has no real frame, DO NOT call MediaPipe.
-        // This prevents WebGL "texImage2D: no video" + ROI 0x0 graph failure loops.
-        if (typeof document !== "undefined" && document.hidden) {
-          rafRef.current = requestAnimationFrame(tick);
-          return;
-        }
-
-        if (!v || v.readyState < 2 || !v.videoWidth || !v.videoHeight) {
-          zeroFrameStreakRef.current += 1;
-          // If we keep seeing 0x0 for a while, restart camera stream (mobile tab switch)
-          if (zeroFrameStreakRef.current >= 30) {
-            zeroFrameStreakRef.current = 0;
-            try {
-              await stopStream();
-              await startStream();
-            } catch {}
-          }
-          rafRef.current = requestAnimationFrame(tick);
-          return;
-        }
-
-        zeroFrameStreakRef.current = 0;
-
-
         const w = canvas.clientWidth || v.clientWidth || 360;
         const h = canvas.clientHeight || v.clientHeight || 640;
         if (canvas.width !== w) canvas.width = w;
@@ -436,24 +353,8 @@ export default function PoseSession() {
         try {
           const r = landmarker.detectForVideo(v, t);
           landmarks = r?.landmarks?.[0] || null;
-          errStreakRef.current = 0;
         } catch {
           landmarks = null;
-          errStreakRef.current += 1;
-
-          // If the MediaPipe graph enters a bad state (often after tab switch),
-          // hard-reset it and restart the stream.
-          if (errStreakRef.current >= 2) {
-            errStreakRef.current = 0;
-            try {
-              await resetPoseLandmarker();
-              landmarker = await getPoseLandmarker();
-            } catch {}
-            try {
-              await stopStream();
-              await startStream();
-            } catch {}
-          }
         }
 
         let match = 0;
@@ -537,7 +438,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, countdown, startStream, stopStream]);
+  }, [started, isResults, pose.key, countdown]);
 
   // countdown -> snap
   useEffect(() => {
