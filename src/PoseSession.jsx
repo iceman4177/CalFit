@@ -229,7 +229,9 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
+          // Server expects poseKey or key (not pose_key)
           poseKey: p.pose_key || p.poseKey || p.key,
+          // Send compressed thumbnail to avoid 413; keep full-res locally.
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
@@ -504,25 +506,31 @@ export default function PoseSession() {
 
     const dataUrl = tmp.toDataURL("image/png", 0.92);
 
-    // Build a smaller JPEG thumbnail for AI payloads (prevents 413).
-    // Full-res PNG stays local for high-quality share exports.
-    let aiThumb = dataUrl;
+    // Build a smaller AI thumbnail to avoid 413 payloads.
+    // Keep full-res PNG locally for share export, but send only this thumbnail to /api/ai/generate.
+    let aiThumbUrl = "";
     try {
-      const maxEdge = 384;
+      const maxEdge = 384; // keep small; viral share stays full-res locally
       const scale = Math.min(1, maxEdge / Math.max(w, h));
       const tw = Math.max(1, Math.round(w * scale));
       const th = Math.max(1, Math.round(h * scale));
-      const tcan = document.createElement("canvas");
-      tcan.width = tw;
-      tcan.height = th;
-      const tctx = tcan.getContext("2d");
+      const tcv = document.createElement("canvas");
+      tcv.width = tw;
+      tcv.height = th;
+      const tctx = tcv.getContext("2d");
       tctx.drawImage(tmp, 0, 0, tw, th);
-      aiThumb = tcan.toDataURL("image/jpeg", 0.72);
-    } catch {}
+      aiThumbUrl = tcv.toDataURL("image/jpeg", 0.72);
+    } catch (_) {
+      aiThumbUrl = "";
+    }
 
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+      {
+        pose_key: pose.key,
+        image_data_url: dataUrl, // full-res local PNG
+        ai_image_data_url: aiThumbUrl, // small thumbnail for AI
+      },
     ]);
     setLocked(false);
     setCountdown(null);
