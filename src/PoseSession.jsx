@@ -202,7 +202,7 @@ function sanitizeAnchors(anchors, landmarks) {
     shoulderWidth: sw,
   };
 }
-function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
+function drawNeonGhost(ctx, tpl, { w, h, glow = true, upperBodyOnly = false }) {
   if (!ctx || !tpl) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
