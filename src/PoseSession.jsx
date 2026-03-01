@@ -230,7 +230,9 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
         feature: "pose_session",
         poses: poses.map((p) => ({
           pose_key: p.pose_key,
-          image_data_url: p.image_data_url,
+          // IMPORTANT: send the compressed AI thumbnail, not the full-res PNG.
+          // Full-res PNGs stay local for the viral share card export.
+          image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
         prev: prevSession || null,
         today_local_day: todayISO,
@@ -261,7 +263,9 @@ export default function PoseSession() {
   const [countdown, setCountdown] = useState(null);
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState("Move back to fit your full body");
-  const [captures, setCaptures] = useState([]); // [{pose_key, dataUrl}]
+  // captures keep full-res PNGs for the share card.
+  // We also store a compressed thumbnail for AI requests to avoid 413 payload errors.
+  const [captures, setCaptures] = useState([]); // [{pose_key, image_data_url, ai_image_data_url}]
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
   const [aiError, setAiError] = useState("");
@@ -502,10 +506,34 @@ export default function PoseSession() {
     }
     ctx.drawImage(v, 0, 0, w, h);
 
+    // Full-res PNG (kept local for share card quality)
     const dataUrl = tmp.toDataURL("image/png", 0.92);
+
+    // Compressed thumbnail for AI payload (prevents Vercel 413)
+    // Target: <= 384px long edge, JPEG @ ~0.72 quality.
+    let aiThumbUrl = "";
+    try {
+      const maxEdge = 384;
+      const scale = Math.min(1, maxEdge / Math.max(w, h));
+      const tw = Math.max(1, Math.round(w * scale));
+      const th = Math.max(1, Math.round(h * scale));
+      const tcv = document.createElement("canvas");
+      tcv.width = tw;
+      tcv.height = th;
+      const tctx = tcv.getContext("2d");
+      // draw from tmp so we don't have to decode the dataUrl
+      tctx.drawImage(tmp, 0, 0, w, h, 0, 0, tw, th);
+      aiThumbUrl = tcv.toDataURL("image/jpeg", 0.72);
+    } catch {
+      aiThumbUrl = "";
+    }
     setCaptures((cur) => [
       ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl },
+      {
+        pose_key: pose.key,
+        image_data_url: dataUrl,
+        ai_image_data_url: aiThumbUrl,
+      },
     ]);
     setLocked(false);
     setCountdown(null);
