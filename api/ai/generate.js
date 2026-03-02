@@ -1150,7 +1150,7 @@ const freeBypass =
         strengthTag: String(parsed.strengthTag || fb.strengthTag).slice(0, 48),
         horizon: String(parsed.horizon || fb.horizon).slice(0, 80),
         levers: Array.isArray(parsed.levers)
-          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
+          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 6)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 140),
       };
@@ -1185,7 +1185,7 @@ const freeBypass =
           imageDataUrl: String(p?.image_data_url || p?.imageDataUrl || p?.image || "").trim(),
         }))
         .filter((p) => p.poseKey && p.imageDataUrl && p.imageDataUrl.startsWith("data:image"))
-        .slice(0, 5);
+        .slice(0, 6);
 
       if (cleanPoses.length < 2) {
         res.status(400).json({ error: "At least 2 valid pose images required" });
@@ -1199,23 +1199,27 @@ const freeBypass =
 
       const sys =
         "You are SlimCal Pose Session Scanner. Return VALID JSON ONLY (no markdown, no extra text). " +
-        "This is NOT a medical device. You are estimating 'physique signals' and 'pose quality' from 2-3 bodybuilding photos. " +
-        "Tone MUST be neutral or positive only. No insults, no shaming, no harsh labels. Avoid influencer names or references. " +
-        "Do NOT assume prior user context. Treat each request as brand-new and analyze only what you can infer from the images. " +
+        "You are generating a detailed, coach-level physique analysis from 2-3 progress photos. " +
+        "This is NOT a medical device; avoid medical claims. " +
+        "Tone MUST be neutral or positive only - never insulting, shaming, or negative. " +
+        "Avoid influencer names, comparisons, or stereotypes. Do NOT assume any prior user context; treat every request as brand-new. " +
+        "Write with crisp, specific observations and constructive framing (e.g., 'will pop more when...', 'next lever'). " +
         "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), strength (string), horizon_days (int), " +
         "muscleSignals (object keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
-        "poseQuality (object mapping poseKey to number 0..1), highlights (array 2-5 short strings), levers (array 2-4 short strings), confidenceNote (string), " +
-        "report (string with section headers and bullet points; 500-1200 words; positive/constructive), " +
-        "muscleBreakdown (object with keys delts, arms, chest, lats, back, core, legs, calves, symmetry each a short paragraph), " +
-        "rankings (object with keys bestDeveloped (array), canImprove (array))";
+        "poseQuality (object mapping poseKey to number 0..1), highlights (array 2-6 short strings), levers (array 3-6 short strings), confidenceNote (string), " +
+        "report (string; 900-1800 words; must include labeled sections: BIG PICTURE, WHAT'S ALREADY STRONG, NEXT TO LEVEL UP, POSE NOTES, TRAINING LEVERS, NUTRITION LEVERS), " +
+        "muscleBreakdown (object with keys delts, arms, chest, lats, back, core, legs, calves, symmetry - each 90-170 words), " +
+        "rankings (object with keys bestDeveloped (array of 3-6 muscle groups), canImprove (array of 3-6 muscle groups))";
 
       const userText =
-        "Analyze these pose images and produce a detailed physique breakdown. " +
-        "Be specific like a thoughtful coach, but stay positive/constructive. " +
-        "No influencer mentions. No 'you are weak/bad' language. If something could improve, phrase it as 'next lever' or 'will pop more when X'. " +
-        "Provide: (1) Big Picture summary, (2) Muscle Group Rankings (best developed + next to improve), (3) Pose-by-pose notes, " +
-        "(4) Muscle group breakdown paragraphs, (5) 3-5 actionable next steps, (6) a short confidence note about lighting/angles. " +
-        "build_arc should be an overall friendly score 55..96 that rewards consistency. percentile should be 1..99 (lower is better).";
+        "Analyze these pose images and produce a deep, coach-level physique breakdown. " +
+        "Be specific and attentive to visible shape, proportions, and overall development - but keep tone neutral/positive only. " +
+        "No influencer mentions. No harsh or negative language. Frame improvements as 'next lever' or 'will stand out more when X'. " +
+        "In the report: (1) BIG PICTURE (overall look + vibe), (2) WHAT'S ALREADY STRONG (3-6 bullets), (3) NEXT TO LEVEL UP (3-6 bullets), " +
+        "(4) POSE NOTES (front/side/back - quick tips), (5) TRAINING LEVERS (4-6 very specific actions), (6) NUTRITION LEVERS (3-5 actions), " +
+        "(7) a short confidence note about lighting/angles/clothing. " +
+        "For muscleBreakdown, write solid paragraphs for each key. Mention upper/lower emphasis where relevant (e.g., upper chest, quad sweep, lat width, rear delts). " +
+        "build_arc should be a friendly overall score (55..96) that rewards consistency. percentile should be 1..99 (lower is better).";
 
       const content = [
         { type: "text", text: userText },
@@ -1232,7 +1236,7 @@ const freeBypass =
           { role: "user", content },
         ],
         temperature: 0.35,
-        max_tokens: 900,
+        max_tokens: 1400,
       });
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -1268,10 +1272,10 @@ const freeBypass =
           back_double_bi: clamp(pq?.back_double_bi ?? pq?.backDoubleBi ?? fb.poseQuality.back_double_bi, 0, 1),
         },
         highlights: Array.isArray(parsed.highlights)
-          ? parsed.highlights.map((s) => String(s).slice(0, 90)).slice(0, 5)
+          ? parsed.highlights.map((s) => String(s).slice(0, 90)).slice(0, 6)
           : fb.highlights,
         levers: Array.isArray(parsed.levers)
-          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
+          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 6)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
         report: String(parsed.report || parsed.report_md || parsed.narrative || "").slice(0, 9000),
