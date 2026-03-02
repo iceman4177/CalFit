@@ -141,7 +141,6 @@ function fallbackPoseSession() {
       front_double_bi: 0.74,
       back_double_bi: 0.73,
     },
-    share_summary: "Strong structure + clean lines — keep building. #SlimcalAI",
     highlights: ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
     levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
     confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
@@ -1128,7 +1127,7 @@ const freeBypass =
             ],
           },
         ],
-        temperature: 0.35,
+        temperature: 0.4,
         max_tokens: 650,
       });
 
@@ -1172,6 +1171,8 @@ const freeBypass =
 
   if (feature === "pose_session" || feature === "pose_session_beta") {
     try {
+
+      const style = String(body?.style || "").toLowerCase();
       const poses = Array.isArray(body?.poses) ? body.poses : [];
       if (!poses.length) {
         res.status(400).json({ error: "Missing poses" });
@@ -1198,20 +1199,31 @@ const freeBypass =
         return;
       }
 
-      const sys =
-        "You are SlimCal Pose Session Scanner (Beta). " +
+      const sysBase =
+        "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "This is NOT a medical device. You are estimating 'physique signals' and 'pose quality' from 3 bodybuilding poses. " +
-        "Tone MUST be neutral or positive only. Never insult. Never say 'bad', 'weak', 'behind', or shame language. " +
-        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), strength (string), horizon_days (int), " +
+        "You are NOT a medical device. You are estimating visual physique cues from uploaded bodybuilding poses. " +
+        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels. " +
+        "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
+        "Write as a fresh, careful analyst focusing on what is visible. " +
+        "Output JSON keys (required): " +
+        "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
+        "aesthetic_score (number 0-10), " +
         "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
-        "poseQuality (object mapping poseKey to number 0..1), share_summary (string <= 120 chars, flattering, includes #SlimcalAI), highlights (array 2-5 short strings), levers (array 2-4 short strings), confidenceNote (string).";
+        "poseQuality (object mapping poseKey to number 0..1), " +
+        "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
+        "report (string: 6-10 short paragraphs separated by \n\n), " +
+        "muscleBreakdown (array 8-12 items; each {group: string, note: string} where note is 2-5 sentences, specific, supportive), " +
+        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
+
+      const sys = sysBase;
+
 
       const userText =
-        "Analyze the following pose images: Front Relaxed, Front Double Biceps, Back Double Biceps (or similar). " +
+        "Analyze the following pose images: Front Double Biceps, Lat Spread, Back Double Biceps (or similar). " +
         "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
-        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency. Also write share_summary as a short, flattering one-liner suitable for a share card caption, and include #SlimcalAI.";
+        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
         { type: "text", text: userText },
@@ -1227,8 +1239,8 @@ const freeBypass =
           { role: "system", content: sys },
           { role: "user", content },
         ],
-        temperature: 0.35,
-        max_tokens: 900,
+        temperature: 0.4,
+        max_tokens: 1400,
       });
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -1249,6 +1261,13 @@ const freeBypass =
         percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
         strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
+        tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
+        aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
+        report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
+        bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
+        biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
+        poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
+        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 900) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),

@@ -193,32 +193,25 @@ export async function buildFrameCheckSharePng(data, opts = {}) {
   return blob;
 }
 
-export async function shareOrDownloadPng(blob, fileName = "slimcal-frame-check.png") {
+export async function shareOrDownloadPng(blob, fileName = "slimcal-frame-check.png", text = "") {
   if (!blob) return;
 
-  // Ensure we always share a real PNG file with a filename + correct MIME type.
-  const safeName = String(fileName || "slimcal-share.png").endsWith(".png")
-    ? String(fileName || "slimcal-share.png")
-    : `${String(fileName || "slimcal-share")}.png`;
+  const file = new File([blob], fileName, { type: "image/png" });
 
-  const file = new File([blob], safeName, { type: "image/png" });
-
-  // Native share sheet (best on mobile). Some share targets (IG/FB) are picky if you include text alongside files,
-  // so we ONLY share the file payload here.
+  // Native share sheet (best on mobile)
   try {
     if (navigator?.canShare?.({ files: [file] }) && navigator?.share) {
-      await navigator.share({ files: [file] });
+      await navigator.share({ files: [file], text });
       return;
     }
   } catch {
     // fall back to download
   }
 
-  // Download fallback (works everywhere)
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = safeName;
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   a.remove();
