@@ -248,7 +248,9 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 
 // ----------------------------- UI primitives ---------------------------------
 function CardShell({ title, subtitle, children, right }) {
-  return (
+    const isSingleView = view !== "full";
+
+return (
     <Card
       elevation={0}
       sx={{
@@ -700,8 +702,10 @@ function SparkBurst({ tick = 0 }) {
   );
 }
 
-export default function DailyEvaluationHome() {
+export default function DailyEvaluationHome({ view = "full" } = {}) {
   const history = useHistory();
+
+  const pageTitle = view === "checklist" ? "Daily Checklist" : view === "scoreboard" ? "Daily Eval" : "Daily Evaluation";
   const { isProActive } = useEntitlements();
   const pro = !!isProActive || localStorage.getItem("isPro") === "true";
 
@@ -1585,7 +1589,7 @@ Score: ${bundle.derived.score}/100
       >
         <Box>
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(2,6,23,0.98)" }}>
-            Daily Evaluation
+            {pageTitle}
           </Typography>
           <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
             {topSubtitle}
@@ -1607,15 +1611,16 @@ Score: ${bundle.derived.score}/100
             sm: "auto",
           },
           display: "flex",
+          flexDirection: isSingleView ? "column" : "row",
           gap: 1.5,
-          overflowX: "auto",
-          overflowY: { xs: "hidden", sm: "visible" },
+          overflowX: isSingleView ? "hidden" : "auto",
+          overflowY: { xs: isSingleView ? "auto" : "hidden", sm: "visible" },
           pb: { xs: 0, sm: 1 },
-          scrollSnapType: "x mandatory",
+          scrollSnapType: isSingleView ? "none" : "x mandatory",
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {/* Card 1 */}
+        {(view === "full" || view === "scoreboard") && (
         <CardShell
           title="Today"
           subtitle="Your scoreboard"
@@ -1665,8 +1670,10 @@ Score: ${bundle.derived.score}/100
             ) : null}
           </Stack>
         </CardShell>
+        )}
 
-        {/* Card 2 */}
+
+        {(view === "full" || view === "checklist") && (
         <CardShell title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
@@ -1859,8 +1866,10 @@ Score: ${bundle.derived.score}/100
 
           </Stack>
         </CardShell>
+        )}
 
-{/* Card 3 */}
+
+{view === "full" && (
         <CardShell title="Coach" subtitle="Your daily verdict">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
@@ -1905,8 +1914,10 @@ Score: ${bundle.derived.score}/100
             </Stack>
           </Stack>
         </CardShell>
+        )}
 
-        {/* Card 4 */}
+
+        {view === "full" && (
 <CardShell title="Pose Session" subtitle="Beta">
   <Stack spacing={1.1}>
     <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
@@ -1962,6 +1973,8 @@ Score: ${bundle.derived.score}/100
     </Typography>
   </Stack>
 </CardShell>
+        )}
+
 
       </Box>
 

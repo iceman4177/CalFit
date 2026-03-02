@@ -927,17 +927,35 @@ export default function App() {
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={HomeHub} />
-          <Route exact path="/verdict" component={DailyEvaluationHome} />
 
-          {/* ✅ Retention side: Recap Coach */}
+          {/* Daily Eval (scoreboard only) */}
           <Route
-            path="/coach"
+            exact
+            path="/daily-eval"
+            render={() => <DailyEvaluationHome view="scoreboard" />}
+          />
+
+          {/* Daily Checklist (quests only) */}
+          <Route
+            exact
+            path="/daily-checklist"
+            render={() => <DailyEvaluationHome view="checklist" />}
+          />
+
+          {/* Daily Verdict (AI coach) */}
+          <Route
+            exact
+            path="/verdict"
             render={() => (
               <DailyRecapCoach
                 userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
               />
             )}
           />
+
+
+          {/* ✅ Retention side: Recap Coach */}
+          <Route path="/coach" render={() => <Redirect to="/verdict" />} />
         </Switch>
 
         <UpgradeModal

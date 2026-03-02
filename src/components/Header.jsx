@@ -246,6 +246,9 @@ const [authUser, setAuthUser] = useState(null);
             <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>
               Workout
             </NavLink>
+            <NavLink to="/body-scan" style={linkStyle} activeStyle={activeStyle}>
+              Scan
+            </NavLink>
             <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
               History
             </NavLink>

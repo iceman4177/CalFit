@@ -7,28 +7,20 @@ import BottomNavigationAction from '@mui/material/BottomNavigationAction';
 
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
-import HistoryIcon from '@mui/icons-material/History';
-import DashboardIcon from '@mui/icons-material/Dashboard';
 import HomeIcon from '@mui/icons-material/Home';
+import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
-import ChatIcon from '@mui/icons-material/Chat';
-
-// Hide Recap Coach from bottom navigation (page remains accessible via direct URL).
-const SHOW_COACH_NAV = false;
 
 const tabs = [
   { label: 'Home', value: '/', icon: <HomeIcon /> },
-  { label: 'Verdict', value: '/verdict', icon: <FactCheckIcon /> },
-  ...(SHOW_COACH_NAV ? [{ label: 'Coach', value: '/coach', icon: <ChatIcon /> }] : []),
-  { label: 'Workout', value: '/workout', icon: <FitnessCenterIcon /> },
   { label: 'Meals', value: '/meals', icon: <RestaurantIcon /> },
-  { label: 'History', value: '/history', icon: <HistoryIcon /> },
-  { label: 'Dashboard', value: '/dashboard', icon: <DashboardIcon /> },
+  { label: 'Workout', value: '/workout', icon: <FitnessCenterIcon /> },
+  { label: 'Scan', value: '/body-scan', icon: <CenterFocusStrongIcon /> },
+  { label: 'Verdict', value: '/verdict', icon: <FactCheckIcon /> },
 ];
 
 function pickActiveTab(pathname) {
-  // If user manually navigates to /coach, keep nav highlighted on Home.
-  if (pathname === '/coach' || pathname.startsWith('/coach/')) return '/';
+  if (pathname === '/body-scan' || pathname.startsWith('/body-scan/')) return '/body-scan';
 
   if (pathname === '/verdict' || pathname.startsWith('/verdict/')) return '/verdict';
 

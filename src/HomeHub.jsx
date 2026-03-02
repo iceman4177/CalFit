@@ -13,6 +13,8 @@ import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import DinnerDiningIcon from "@mui/icons-material/DinnerDining";
 import CenterFocusStrongIcon from "@mui/icons-material/CenterFocusStrong";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
+import DonutLargeIcon from "@mui/icons-material/DonutLarge";
+import ChecklistIcon from "@mui/icons-material/Checklist";
 
 function AppIcon({ icon, label, onClick }) {
   return (
@@ -71,7 +73,7 @@ export default function HomeHub() {
               variant="body2"
               sx={{ color: "rgba(255,255,255,0.72)" }}
             >
-              Tap an icon to log, scan, or get your Daily Verdict.
+              Tap an icon to log, scan, or get your verdict.
             </Typography>
           </Stack>
 
@@ -94,6 +96,17 @@ export default function HomeHub() {
               label="Meals"
               icon={<DinnerDiningIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/meals")}
+            />
+
+            <AppIcon
+              label="Daily Eval"
+              icon={<DonutLargeIcon sx={{ fontSize: 44 }} />}
+              onClick={() => history.push("/daily-eval")}
+            />
+            <AppIcon
+              label="Checklist"
+              icon={<ChecklistIcon sx={{ fontSize: 44 }} />}
+              onClick={() => history.push("/daily-checklist")}
             />
             <AppIcon
               label="Scan"
