@@ -1,760 +1,575 @@
 // src/PoseSession.jsx
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+// SIMPLE (v1) Pose Session: no live detection, no overlays, no camera tracking.
+// User provides 3 images (Front / Side / Back), we send compressed thumbs to /api/ai/generate (feature: pose_session)
+// and then render a shareable result card that can be exported as a PNG.
+
+import React, { useMemo, useState, useCallback } from "react";
 import { useHistory } from "react-router-dom";
 import {
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
   Divider,
   Stack,
   Typography,
-  CircularProgress,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
-import CameraAltIcon from "@mui/icons-material/CameraAlt";
-import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
-import { useAuth } from "./context/AuthProvider";
-import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
-import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import {
-  readPoseSessionHistory,
-  appendPoseSession,
-  computeDeltasPositiveOnly,
-  localDayISO,
-} from "./lib/poseSessionStore.js";
+import { postAI } from "./lib/ai";
+import { shareOrDownloadPng } from "./lib/frameCheckSharePng";
+import { buildPoseSimpleSharePng } from "./lib/poseSimpleSharePng";
 
 const POSES = [
-  { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
-  { key: "lat_spread", title: "Lat Spread", subtitle: "Chest up · spread lats · stay tall" },
-  { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
+  { key: "front", title: "Front", hint: "Stand tall · upper body centered" },
+  { key: "side", title: "Side", hint: "Side profile · shoulders + hips in frame" },
+  { key: "back", title: "Back", hint: "Turn around · show your back" },
 ];
 
-const CAPTURE_DELAY_MS = 3000; // selfie timer (simple + reliable)
-
-function clamp(n, a, b) {
+function clamp(n, lo, hi) {
   const x = Number(n);
-  if (!Number.isFinite(x)) return a;
-  return Math.max(a, Math.min(b, x));
+  if (!Number.isFinite(x)) return lo;
+  return Math.max(lo, Math.min(hi, x));
 }
 
-function dataUrlToBlob(dataUrl) {
-  const [hdr, b64] = String(dataUrl || "").split(",");
-  const m = /data:([^;]+);base64/.exec(hdr || "");
-  const mime = m?.[1] || "image/jpeg";
-  const bin = atob(b64 || "");
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
-async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
-  // Keep it simple: draw into canvas and export JPEG.
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxW / img.width);
-      const w = Math.max(1, Math.round(img.width * scale));
-      const h = Math.max(1, Math.round(img.height * scale));
-      const c = document.createElement("canvas");
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(c.toDataURL("image/jpeg", quality));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ""));
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
   });
+}
+
+async function makeThumb(dataUrl, maxEdge = 512, quality = 0.72) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = dataUrl;
+  });
+  const sw = img.naturalWidth || img.width;
+  const sh = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+  const tw = Math.max(1, Math.round(sw * scale));
+  const th = Math.max(1, Math.round(sh * scale));
+  const c = document.createElement("canvas");
+  c.width = tw;
+  c.height = th;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(img, 0, 0, sw, sh, 0, 0, tw, th);
+  return c.toDataURL("image/jpeg", quality);
+}
+
+function ScorePill({ score10 }) {
+  return (
+    <Box
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        px: 2,
+        py: 1,
+        borderRadius: 999,
+        background:
+          "linear-gradient(90deg, rgba(0,255,190,0.22), rgba(0,200,255,0.18))",
+        border: "1px solid rgba(0,255,190,0.22)",
+      }}
+    >
+      <Typography sx={{ fontWeight: 900, letterSpacing: 0.6 }}>
+        AESTHETIC: {score10.toFixed(1)}/10
+      </Typography>
+    </Box>
+  );
 }
 
 export default function PoseSession() {
   const history = useHistory();
-  const { user } = useAuth();
 
-  const userId = user?.id || "anon";
+  const [fullData, setFullData] = useState({ front: "", side: "", back: "" });
+  const [thumbs, setThumbs] = useState({ front: "", side: "", back: "" });
+  const [step, setStep] = useState("upload"); // upload | generating | result
+  const [error, setError] = useState("");
+  const [ai, setAi] = useState(null);
 
-  const [stage, setStage] = useState("intro"); // intro | capture | scanning | results
-  const [poseIdx, setPoseIdx] = useState(0);
-  const [facingMode, setFacingMode] = useState("user");
+  const ready = useMemo(() => Boolean(thumbs.front && thumbs.side && thumbs.back), [thumbs]);
 
-  const [countdownMs, setCountdownMs] = useState(0);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
-  const [result, setResult] = useState(null);
-  const [shareBusy, setShareBusy] = useState(false);
-
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const timerRef = useRef(null);
-  const countdownRef = useRef(null);
-
-  const pose = POSES[poseIdx] || POSES[0];
-
-  const todayISO = useMemo(() => localDayISO(), []);
-  const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
-  const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
-
-  const stopCamera = useCallback(() => {
+  const onPick = useCallback(async (poseKey, file) => {
+    setError("");
+    if (!file) return;
     try {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      timerRef.current = null;
-      countdownRef.current = null;
-      setCountdownMs(0);
-      setCameraReady(false);
-    } catch {}
-    try {
-      const s = streamRef.current;
-      streamRef.current = null;
-      if (s) s.getTracks().forEach((t) => t.stop());
-    } catch {}
-  }, []);
-
-  const startCamera = useCallback(async () => {
-    setErrorMsg("");
-    stopCamera();
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const v = videoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        await v.play();
-      }
-      setCameraReady(true);
+      const dataUrl = await fileToDataUrl(file);
+      const thumb = await makeThumb(dataUrl, 512, 0.72);
+      setFullData((p) => ({ ...p, [poseKey]: dataUrl }));
+      setThumbs((p) => ({ ...p, [poseKey]: thumb }));
     } catch (e) {
       console.error(e);
-      setErrorMsg("Camera unavailable. Please allow camera permissions and retry.");
+      setError("Couldn’t read that image. Try a different photo.");
     }
-  }, [facingMode, stopCamera]);
-
-  useEffect(() => {
-    if (stage === "capture") startCamera();
-    else stopCamera();
-    return () => stopCamera();
-  }, [stage, startCamera, stopCamera]);
-
-  const takeSnapshot = useCallback(async () => {
-    const v = videoRef.current;
-    if (!v) return null;
-    const w = v.videoWidth || 1280;
-    const h = v.videoHeight || 720;
-
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(v, 0, 0, w, h);
-
-    // Full-res stored locally for share PNG export.
-    const fullDataUrl = c.toDataURL("image/jpeg", 0.92);
-    const thumbDataUrl = await makeThumbDataUrl(fullDataUrl, 720, 0.72);
-    return { fullDataUrl, thumbDataUrl };
   }, []);
 
-  const beginTimedCapture = useCallback(() => {
-    if (!cameraReady) return;
-    setCountdownMs(CAPTURE_DELAY_MS);
-
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    countdownRef.current = setInterval(() => {
-      setCountdownMs((ms) => Math.max(0, ms - 250));
-    }, 250);
-
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(async () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      countdownRef.current = null;
-      setCountdownMs(0);
-
-      const snap = await takeSnapshot();
-      if (!snap) return;
-
-      setCaptures((prev) => [
-        ...prev,
-        { poseKey: pose.key, title: pose.title, fullDataUrl: snap.fullDataUrl, thumbDataUrl: snap.thumbDataUrl },
-      ]);
-
-      // Advance pose
-      if (poseIdx < POSES.length - 1) {
-        setPoseIdx((i) => i + 1);
-      } else {
-        setStage("scanning");
-      }
-    }, CAPTURE_DELAY_MS);
-  }, [cameraReady, pose.key, pose.title, poseIdx, takeSnapshot]);
-
-  // Auto start the timer when camera is ready (no manual actions)
-  useEffect(() => {
-    if (stage !== "capture") return;
-    if (!cameraReady) return;
-    beginTimedCapture();
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      timerRef.current = null;
-      countdownRef.current = null;
-    };
-  }, [stage, cameraReady, beginTimedCapture, poseIdx]);
-
-  const flipCamera = useCallback(() => {
-    setFacingMode((m) => (m === "user" ? "environment" : "user"));
+  const onClear = useCallback((poseKey) => {
+    setFullData((p) => ({ ...p, [poseKey]: "" }));
+    setThumbs((p) => ({ ...p, [poseKey]: "" }));
   }, []);
 
-  const retakePose = useCallback(() => {
-    // Remove last capture for current pose and re-open capture stage
-    setCaptures((prev) => prev.filter((c) => c.poseKey !== pose.key));
-    setStage("capture");
-  }, [pose.key]);
-
-  const startScan = useCallback(() => {
-    setCaptures([]);
-    setResult(null);
-    setPoseIdx(0);
-    setStage("capture");
-  }, []);
-
-  const callAI = useCallback(async () => {
-    if (captures.length < 3) return;
-    setErrorMsg("");
-
+  const generate = useCallback(async () => {
+    if (!ready) return;
+    setStep("generating");
+    setError("");
     try {
-      const payload = {
-        feature: "pose_session",
-        style: "detailed_muscle_groups_v1",
-        poses: captures.map((c) => ({
-          poseKey: c.poseKey,
-          title: c.title,
-          imageDataUrl: c.thumbDataUrl, // keep payload small
-        })),
-        deltas, // optional; app uses positive-only deltas
-      };
+      const poses = [
+        { poseKey: "front_relaxed", title: "Front", imageDataUrl: thumbs.front },
+        { poseKey: "side_profile", title: "Side", imageDataUrl: thumbs.side },
+        { poseKey: "back_relaxed", title: "Back", imageDataUrl: thumbs.back },
+      ];
 
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const resp = await postAI("pose_session", {
+        poses,
+        style: "viral_build_arc_v1",
       });
 
-      const json = await res.json();
-      const session = json?.session || null;
-
-      // Persist a small record for deltas
-      try {
-        appendPoseSession(userId, {
-          local_day: todayISO,
-          created_at: Date.now(),
-          build_arc: clamp(session?.build_arc ?? session?.buildArcScore ?? 78, 0, 100),
-          muscleSignals: session?.muscleSignals || {},
-          poseQuality: session?.poseQuality || {},
-        });
-      } catch {}
-
-      setResult(session);
-      setStage("results");
+      setAi(resp?.session || null);
+      setStep("result");
     } catch (e) {
       console.error(e);
-      setErrorMsg("AI analysis failed. Please try again.");
-      setStage("results");
-      setResult(null);
+      setError("AI couldn’t generate right now. Try again in a moment.");
+      setStep("upload");
     }
-  }, [captures, deltas, todayISO, userId]);
+  }, [ready, thumbs]);
 
-  useEffect(() => {
-    if (stage !== "scanning") return;
-    callAI();
-  }, [stage, callAI]);
-
-  const onShare = useCallback(async () => {
-    if (!captures.length) return;
-    setShareBusy(true);
+  const share = useCallback(async () => {
     try {
-      const rawScore = Number(result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 78);
-      const aesthetic10 = rawScore > 10 ? rawScore / 10 : rawScore;
+      const buildArc = clamp(ai?.build_arc ?? 80, 0, 100);
+      const score10 = clamp((buildArc / 100) * 10, 0, 10);
+      const tier =
+        buildArc >= 86 ? "V-TAPER RISING" : buildArc >= 78 ? "ARC BUILDING" : "BASELINE LOCKED";
+      const bullets = Array.isArray(ai?.highlights)
+        ? ai.highlights.map((s) => String(s)).filter(Boolean).slice(0, 3)
+        : ["Solid baseline locked", "Good momentum signal", "Re-scan weekly for progress"];
 
-      // buildPoseSessionSharePng expects headline/subhead/wins/levers.
-      const pngDataUrl = await buildPoseSessionSharePng({
-        headline: "Slimcal.ai",
-        subhead: `AESTHETIC: ${clamp(aesthetic10, 0, 10).toFixed(1)}/10`,
-        wins: Array.isArray(result?.highlights)
-          ? result.highlights
-          : (Array.isArray(result?.levers) ? result.levers : []),
-        levers: Array.isArray(result?.levers) ? result.levers : [],
-        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res
-        muscleSignals: result?.muscleSignals || null,
-        trackLabel: String(result?.strength || ""),
-        localDay: todayISO,
+      const png = await buildPoseSimpleSharePng({
+        brand: "Slimcal.ai",
+        tier,
+        score10,
+        bullets,
+        poseImages: [fullData.front, fullData.side, fullData.back].filter(Boolean),
       });
-      await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
+
+      await shareOrDownloadPng(png, "slimcal_build_arc.png");
     } catch (e) {
       console.error(e);
-      setErrorMsg("Could not generate share card.");
-    } finally {
-      setShareBusy(false);
+      setError("Couldn’t export the card. Try again.");
     }
-  }, [captures, result]);
+  }, [ai, fullData]);
 
-  const titleColor = "rgba(245,250,255,0.92)";
-  const bodyColor = "rgba(220,235,245,0.86)";
-
-  const prettyKey = useCallback((k) => {
-    const key = String(k || "").trim();
-    if (!key) return "";
-    const map = {
-      delts: "Delts",
-      arms: "Arms",
-      chest: "Chest",
-      lats: "Lats",
-      back: "Back",
-      core: "Core / Midsection",
-      legs: "Legs (Quads/Hams/Glutes)",
-      calves: "Calves",
-      symmetry: "Symmetry",
-      waist_taper: "Waist / Taper",
-    };
-    if (map[key]) return map[key];
-    return key
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (m) => m.toUpperCase());
+  const resetAll = useCallback(() => {
+    setFullData({ front: "", side: "", back: "" });
+    setThumbs({ front: "", side: "", back: "" });
+    setAi(null);
+    setError("");
+    setStep("upload");
   }, []);
 
-  const reportLines = useMemo(() => {
-    const txt = String(result?.report || "").trim();
-    if (!txt) return [];
-    return txt
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .slice(0, 260);
-  }, [result?.report]);
-
-  const muscleRows = useMemo(() => {
-    const mb = result?.muscleBreakdown;
-    if (!mb) return [];
-    if (Array.isArray(mb)) {
-      return mb
-        .map((row) => ({ group: row?.group, note: row?.note }))
-        .filter((r) => r.group && r.note);
-    }
-    if (typeof mb === "object") {
-      return Object.entries(mb)
-        .map(([k, v]) => ({ group: prettyKey(k), note: String(v || "").trim() }))
-        .filter((r) => r.group && r.note);
-    }
-    return [];
-  }, [result?.muscleBreakdown, prettyKey]);
+  const bg =
+    "radial-gradient(1200px 600px at 50% 10%, rgba(0,255,190,0.12), rgba(0,0,0,0) 55%), #05070b";
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
-      <Card
-        sx={{
-          width: "min(980px, 100%)",
-          bgcolor: "#0c1218",
-          borderRadius: "28px",
-          border: "1px solid rgba(120,255,220,0.18)",
-          boxShadow: "0 0 24px rgba(0,0,0,0.45)",
-          overflow: "hidden",
-        }}
-      >
-        <CardContent sx={{ p: { xs: 2.2, md: 3 } }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => history.goBack()}
-              sx={{ color: bodyColor, textTransform: "none" }}
-            >
-              Back
-            </Button>
+    <Box sx={{ minHeight: "100vh", background: bg, color: "#E9FFF8", px: { xs: 2, sm: 3 }, py: 3 }}>
+      <Box sx={{ maxWidth: 980, mx: "auto" }}>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => history.push("/evaluate")}
+          sx={{ color: "rgba(233,255,248,0.85)", mb: 2 }}
+        >
+          Back
+        </Button>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              {stage === "capture" && (
-                <Button
-                  startIcon={<FlipCameraAndroidIcon />}
-                  onClick={flipCamera}
-                  sx={{
-                    color: bodyColor,
-                    textTransform: "none",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    borderRadius: 999,
-                    px: 1.6,
-                  }}
-                >
-                  Flip
-                </Button>
-              )}
-              {stage === "results" && (
-                <Button
-                  variant="outlined"
-                  onClick={startScan}
-                  sx={{
-                    color: bodyColor,
-                    textTransform: "none",
-                    borderColor: "rgba(120,255,220,0.35)",
-                    borderRadius: 999,
-                  }}
-                >
-                  New Scan
-                </Button>
-              )}
-            </Stack>
-          </Stack>
+        <Card
+          sx={{
+            borderRadius: 6,
+            overflow: "hidden",
+            background: "rgba(10,14,20,0.88)",
+            border: "1px solid rgba(0,255,190,0.16)",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
+          }}
+        >
+          <CardContent sx={{ p: { xs: 2.5, sm: 4 } }}>
+            {step !== "result" ? (
+              <>
+                <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0.2 }}>
+                  AI Physique Tracker
+                </Typography>
+                <Typography sx={{ opacity: 0.85, mt: 0.5 }}>
+                  3 photos · shareable results
+                </Typography>
 
-          {errorMsg ? (
-            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: "rgba(255,80,80,0.08)", border: "1px solid rgba(255,80,80,0.18)" }}>
-              <Typography sx={{ color: "rgba(255,200,200,0.95)", fontSize: 14 }}>{errorMsg}</Typography>
-            </Box>
-          ) : null}
+                <Divider sx={{ my: 2.5, borderColor: "rgba(0,255,190,0.16)" }} />
 
-          {stage === "intro" && (
-            <Stack spacing={2.2}>
-              <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
-                AI Physique Tracker
-              </Typography>
-              <Typography sx={{ color: bodyColor }}>
-                3 poses · 15 seconds · shareable results
-              </Typography>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  {POSES.map((p) => {
+                    const has = Boolean(fullData[p.key]);
+                    return (
+                      <Card
+                        key={p.key}
+                        sx={{
+                          flex: 1,
+                          borderRadius: 5,
+                          background: "rgba(0,0,0,0.28)",
+                          border: "1px solid rgba(0,255,190,0.14)",
+                        }}
+                      >
+                        <CardContent>
+                          <Typography sx={{ fontWeight: 900 }}>{p.title}</Typography>
+                          <Typography sx={{ opacity: 0.75, fontSize: 13, mt: 0.5 }}>{p.hint}</Typography>
 
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                {POSES.map((p) => (
-                  <Box
-                    key={p.key}
+                          <Box
+                            sx={{
+                              mt: 1.5,
+                              borderRadius: 4,
+                              overflow: "hidden",
+                              border: "1px solid rgba(0,255,190,0.16)",
+                              background: "rgba(0,0,0,0.35)",
+                              aspectRatio: "3 / 4",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            {has ? (
+                              <img
+                                src={fullData[p.key]}
+                                alt={p.title}
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              />
+                            ) : (
+                              <Typography sx={{ opacity: 0.55, fontWeight: 700 }}>Add photo</Typography>
+                            )}
+                          </Box>
+
+                          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                            <Button
+                              variant="contained"
+                              component="label"
+                              fullWidth
+                              sx={{
+                                borderRadius: 999,
+                                fontWeight: 900,
+                                textTransform: "none",
+                                background:
+                                  "linear-gradient(90deg, rgba(0,255,190,0.85), rgba(0,200,255,0.65))",
+                                color: "#061015",
+                                boxShadow: "0 10px 30px rgba(0,255,190,0.18)",
+                              }}
+                            >
+                              {has ? "Retake" : "Upload"}
+                              <input
+                                hidden
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                onChange={(e) => onPick(p.key, e.target.files?.[0] || null)}
+                              />
+                            </Button>
+                            {has ? (
+                              <Button
+                                variant="outlined"
+                                onClick={() => onClear(p.key)}
+                                sx={{
+                                  borderRadius: 999,
+                                  minWidth: 92,
+                                  borderColor: "rgba(233,255,248,0.22)",
+                                  color: "rgba(233,255,248,0.88)",
+                                  textTransform: "none",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                Clear
+                              </Button>
+                            ) : null}
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </Stack>
+
+                {error ? (
+                  <Typography sx={{ mt: 2, color: "rgba(255,150,150,0.95)", fontWeight: 700 }}>{error}</Typography>
+                ) : null}
+
+                <Box sx={{ mt: 3, display: "flex", justifyContent: "center" }}>
+                  <Button
+                    disabled={!ready || step === "generating"}
+                    onClick={generate}
+                    variant="contained"
                     sx={{
-                      flex: 1,
-                      borderRadius: 3,
-                      border: "1px solid rgba(120,255,220,0.18)",
-                      bgcolor: "rgba(0,0,0,0.22)",
-                      p: 2,
-                      textAlign: "center",
+                      px: 5,
+                      py: 1.6,
+                      borderRadius: 999,
+                      fontWeight: 900,
+                      textTransform: "none",
+                      background: ready
+                        ? "linear-gradient(90deg, rgba(0,255,190,0.92), rgba(0,200,255,0.75))"
+                        : "rgba(255,255,255,0.10)",
+                      color: ready ? "#061015" : "rgba(233,255,248,0.60)",
+                      boxShadow: ready ? "0 16px 40px rgba(0,255,190,0.18)" : "none",
                     }}
                   >
-                    <Box
-                      sx={{
-                        height: 120,
-                        borderRadius: 3,
-                        bgcolor: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.06)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        mb: 1.2,
-                      }}
-                    >
-                      <Typography sx={{ color: "rgba(120,255,220,0.7)", fontWeight: 800 }}>
-                        {p.title}
-                      </Typography>
-                    </Box>
-                    <Typography sx={{ color: bodyColor, fontSize: 13 }}>{p.subtitle}</Typography>
-                  </Box>
-                ))}
-              </Stack>
+                    {step === "generating" ? "Generating…" : "Generate Build Arc Card"}
+                  </Button>
+                </Box>
 
-              <Stack spacing={1}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip label="Auto-captures after a short timer" size="small" sx={{ bgcolor: "rgba(120,255,220,0.12)", color: bodyColor, border: "1px solid rgba(120,255,220,0.18)" }} />
-                  <Chip label="Private — you control sharing" size="small" sx={{ bgcolor: "rgba(255,255,255,0.06)", color: bodyColor, border: "1px solid rgba(255,255,255,0.10)" }} />
-                </Stack>
-              </Stack>
-
-              <Button
-                variant="contained"
-                onClick={startScan}
-                startIcon={<CameraAltIcon />}
-                sx={{
-                  mt: 1,
-                  borderRadius: 999,
-                  py: 1.4,
-                  fontWeight: 800,
-                  textTransform: "none",
-                  bgcolor: "rgba(40, 220, 190, 0.95)",
-                  color: "#061014",
-                  boxShadow: "0 10px 28px rgba(40,220,190,0.22)",
-                  "&:hover": { bgcolor: "rgba(40, 220, 190, 1)" },
-                }}
-              >
-                Start Scan
-              </Button>
-              <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: 12 }}>
-                Tip: step back so your full upper body is in frame.
-              </Typography>
-            </Stack>
-          )}
-
-          {stage === "capture" && (
-            <Stack spacing={2}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography sx={{ color: titleColor, fontWeight: 800 }}>
-                  Pose {poseIdx + 1} of {POSES.length}
+                <Typography sx={{ mt: 2, opacity: 0.75, textAlign: "center", fontSize: 13 }}>
+                  Private — you control sharing.
                 </Typography>
-                <Button
-                  onClick={retakePose}
-                  sx={{ color: bodyColor, textTransform: "none", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 999 }}
-                >
-                  Retake
-                </Button>
-              </Stack>
-
-              <Box
-                sx={{
-                  position: "relative",
-                  width: "100%",
-                  aspectRatio: "3/4",
-                  borderRadius: 4,
-                  overflow: "hidden",
-                  border: "1px solid rgba(120,255,220,0.16)",
-                  bgcolor: "#000",
-                }}
-              >
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    transform: facingMode === "user" ? "scaleX(-1)" : "none",
-                  }}
-                />
-                {/* Minimal “fancy” prompt overlay (no tracking) */}
-                <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                  <Box
+              </>
+            ) : (
+              <>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                  <Box>
+                    <Typography variant="h4" sx={{ fontWeight: 900 }}>
+                      Slimcal.ai
+                    </Typography>
+                    <Typography sx={{ opacity: 0.85 }}>Build Arc</Typography>
+                  </Box>
+                  <Button
+                    onClick={resetAll}
+                    variant="outlined"
                     sx={{
-                      position: "absolute",
-                      left: 14,
-                      right: 14,
-                      bottom: 14,
-                      p: 2,
-                      borderRadius: 3,
-                      bgcolor: "rgba(0,0,0,0.55)",
-                      border: "1px solid rgba(120,255,220,0.20)",
-                      backdropFilter: "blur(6px)",
+                      borderRadius: 999,
+                      borderColor: "rgba(233,255,248,0.22)",
+                      color: "rgba(233,255,248,0.88)",
+                      textTransform: "none",
+                      fontWeight: 800,
                     }}
                   >
-                    <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>
-                      {pose.title}
-                    </Typography>
-                    <Typography sx={{ color: bodyColor, fontSize: 13, mt: 0.5 }}>
-                      {pose.subtitle}
-                    </Typography>
+                    New Scan
+                  </Button>
+                </Stack>
 
-                    <Divider sx={{ my: 1.2, borderColor: "rgba(255,255,255,0.08)" }} />
+                <Divider sx={{ my: 2.5, borderColor: "rgba(0,255,190,0.16)" }} />
 
-                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: 12 }}>
-                      Auto-capturing in{" "}
-                      <b style={{ color: "rgba(120,255,220,0.95)" }}>
-                        {Math.max(0, Math.ceil(countdownMs / 1000))}
-                      </b>{" "}
-                      …
-                    </Typography>
+                <Box sx={{ textAlign: "center" }}>
+                  <Typography sx={{ fontWeight: 900, letterSpacing: 1.2, fontSize: 34 }}>
+                    {(ai?.build_arc ?? 80) >= 86
+                      ? "V-TAPER RISING"
+                      : (ai?.build_arc ?? 80) >= 78
+                      ? "ARC BUILDING"
+                      : "BASELINE LOCKED"}
+                  </Typography>
+                  <Box sx={{ mt: 1.2 }}>
+                    <ScorePill score10={clamp(((ai?.build_arc ?? 80) / 100) * 10, 0, 10)} />
                   </Box>
                 </Box>
-              </Box>
 
-              <Box
-                sx={{
-                  px: 2,
-                  py: 1.4,
-                  borderRadius: 999,
-                  border: "1px solid rgba(120,255,220,0.18)",
-                  bgcolor: "rgba(0,0,0,0.22)",
-                }}
-              >
-                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: 12 }}>
-                  LOCK-ON
-                </Typography>
-                <Box sx={{ mt: 1, height: 8, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <Box
-                    sx={{
-                      height: "100%",
-                      width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
-                      bgcolor: "rgba(120,255,220,0.85)",
-                      boxShadow: "0 0 18px rgba(120,255,220,0.25)",
-                    }}
-                  />
-                </Box>
-                <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 1 }}>
-                  <Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
-                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
-                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
-                </Stack>
-              </Box>
-            </Stack>
-          )}
+                <Card
+                  sx={{
+                    mt: 2.5,
+                    borderRadius: 5,
+                    background: "rgba(0,0,0,0.28)",
+                    border: "1px solid rgba(0,255,190,0.14)",
+                  }}
+                >
+                  <CardContent>
+                    <Typography sx={{ fontWeight: 900, letterSpacing: 0.8, mb: 1.2 }}>
+                      WHAT’S POPPING
+                    </Typography>
+                    <Stack spacing={1}>
+                      {(Array.isArray(ai?.highlights) ? ai.highlights : [])
+                        .slice(0, 3)
+                        .map((t, idx) => (
+                          <Typography key={idx} sx={{ opacity: 0.92, fontWeight: 750 }}>
+                            • {String(t)}
+                          </Typography>
+                        ))}
+                      {!Array.isArray(ai?.highlights) ? (
+                        <>
+                          <Typography sx={{ opacity: 0.92, fontWeight: 750 }}>• Upper body reading stronger</Typography>
+                          <Typography sx={{ opacity: 0.92, fontWeight: 750 }}>• Clean structure — great tracking baseline</Typography>
+                          <Typography sx={{ opacity: 0.92, fontWeight: 750 }}>• Momentum signal: keep showing up</Typography>
+                        </>
+                      ) : null}
+                    </Stack>
 
-          {stage === "scanning" && (
-            <Stack spacing={2} alignItems="center" sx={{ py: 6 }}>
-              <CircularProgress />
-              <Typography sx={{ color: titleColor, fontWeight: 800 }}>Scanning poses…</Typography>
-              <Typography sx={{ color: bodyColor, textAlign: "center", maxWidth: 520 }}>
-                Generating your private physique breakdown.
+                    <Stack direction="row" spacing={1.5} sx={{ mt: 2 }}>
+                      {POSES.map((p) => (
+                        <Box key={p.key} sx={{ flex: 1 }}>
+                          <Box
+                            sx={{
+                              borderRadius: 4,
+                              overflow: "hidden",
+                              border: "1px solid rgba(0,255,190,0.16)",
+                              background: "rgba(0,0,0,0.35)",
+                              aspectRatio: "3 / 4",
+                            }}
+                          >
+                            <img
+                              src={fullData[p.key]}
+                              alt={p.title}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          </Box>
+                          <Typography sx={{ mt: 0.7, textAlign: "center", opacity: 0.9, fontWeight: 800 }}>
+                            {p.title}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+
+                    {error ? (
+                      <Typography sx={{ mt: 2, color: "rgba(255,150,150,0.95)", fontWeight: 700 }}>{error}</Typography>
+                    ) : null}
+
+                    <Stack direction="row" spacing={1.5} sx={{ mt: 2.5 }}>
+                      <Button
+                        onClick={share}
+                        variant="contained"
+                        startIcon={<IosShareIcon />}
+                        fullWidth
+                        sx={{
+                          borderRadius: 999,
+                          fontWeight: 900,
+                          textTransform: "none",
+                          background:
+                            "linear-gradient(90deg, rgba(0,255,190,0.92), rgba(0,200,255,0.75))",
+                          color: "#061015",
+                          boxShadow: "0 16px 40px rgba(0,255,190,0.18)",
+                        }}
+                      >
+                        Share Card
+                      </Button>
+                      <Button
+                        onClick={resetAll}
+                        variant="outlined"
+                        sx={{
+                          borderRadius: 999,
+                          minWidth: 140,
+                          borderColor: "rgba(233,255,248,0.22)",
+                          color: "rgba(233,255,248,0.88)",
+                          textTransform: "none",
+                          fontWeight: 800,
+                        }}
+                      >
+                        Retake
+                      </Button>
+                    </Stack>
+
+                    <Typography sx={{ mt: 1.6, opacity: 0.75, textAlign: "center", fontSize: 13 }}>
+                      Drop your Build Arc — #SlimcalAI
+                    </Typography>
+                  </CardContent>
+
+{(ai?.report || ai?.muscleBreakdown) ? (
+  <Card
+    sx={{
+      mt: 2.5,
+      borderRadius: 5,
+      background: "rgba(0,0,0,0.22)",
+      border: "1px solid rgba(0,255,190,0.14)",
+    }}
+  >
+    <CardContent>
+      <Typography sx={{ fontWeight: 900, letterSpacing: 0.8, mb: 1.2 }}>
+        DETAILED PHYSIQUE BREAKDOWN
+      </Typography>
+
+      {ai?.report ? (
+        <Stack spacing={1.2} sx={{ mb: 2 }}>
+          {String(ai.report)
+            .split(/\n\n+/)
+            .map((p, idx) => String(p || "").trim())
+            .filter(Boolean)
+            .slice(0, 30)
+            .map((p, idx) => (
+              <Typography key={idx} sx={{ opacity: 0.92, lineHeight: 1.6 }}>
+                {p}
               </Typography>
-            </Stack>
-          )}
+            ))}
+        </Stack>
+      ) : null}
 
-          {stage === "results" && (
-            <Stack spacing={2}>
-              {(() => {
-                const raw = Number(result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 70);
-                const aesthetic10 = raw > 10 ? raw / 10 : raw;
-                return (
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900 }}>
-                  {String(result?.tierLabel || result?.tier || "BASELINE LOCKED").toUpperCase()}
+      {ai?.muscleBreakdown && typeof ai.muscleBreakdown === "object" ? (
+        <Stack spacing={1.4}>
+          {[
+            ["delts", "Delts"],
+            ["arms", "Arms"],
+            ["chest", "Chest"],
+            ["lats", "Lats"],
+            ["back", "Back"],
+            ["core", "Core"],
+            ["legs", "Legs"],
+            ["calves", "Calves"],
+            ["symmetry", "Symmetry"],
+          ]
+            .map(([k, label]) => ({ k, label, v: ai?.muscleBreakdown?.[k] }))
+            .filter((x) => Boolean(String(x.v || "").trim()))
+            .map((x) => (
+              <Box key={x.k}>
+                <Typography sx={{ fontWeight: 900, opacity: 0.95 }}>
+                  {x.label}
                 </Typography>
-                <Chip
-                  label={`AESTHETIC: ${clamp(aesthetic10, 0, 10).toFixed(1)}/10`}
-                  sx={{ bgcolor: "rgba(120,255,220,0.14)", color: titleColor, border: "1px solid rgba(120,255,220,0.22)" }}
-                />
-              </Stack>
-                );
-              })()}
+                <Typography sx={{ opacity: 0.9, lineHeight: 1.6, mt: 0.4 }}>
+                  {String(x.v)}
+                </Typography>
+              </Box>
+            ))}
+        </Stack>
+      ) : null}
 
-              <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-
-              <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                WHAT’S POPPING
-              </Typography>
-
-              <Stack spacing={0.8}>
-                {(result?.highlights || result?.levers || []).slice(0, 6).map((t, i) => (
-                  <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
+      {(Array.isArray(ai?.bestDeveloped) && ai.bestDeveloped.length) ||
+      (Array.isArray(ai?.biggestOpportunity) && ai.biggestOpportunity.length) ? (
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 2.5 }}>
+          {Array.isArray(ai?.bestDeveloped) && ai.bestDeveloped.length ? (
+            <Box sx={{ flex: 1 }}>
+              <Typography sx={{ fontWeight: 900, mb: 0.8 }}>Best developed</Typography>
+              <Stack spacing={0.6}>
+                {ai.bestDeveloped.slice(0, 4).map((t, idx) => (
+                  <Typography key={idx} sx={{ opacity: 0.92, fontWeight: 750 }}>
                     • {String(t)}
                   </Typography>
                 ))}
               </Stack>
+            </Box>
+          ) : null}
 
-              {reportLines.length ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    DEEP DIVE
+          {Array.isArray(ai?.biggestOpportunity) && ai.biggestOpportunity.length ? (
+            <Box sx={{ flex: 1 }}>
+              <Typography sx={{ fontWeight: 900, mb: 0.8 }}>Next to level up</Typography>
+              <Stack spacing={0.6}>
+                {ai.biggestOpportunity.slice(0, 4).map((t, idx) => (
+                  <Typography key={idx} sx={{ opacity: 0.92, fontWeight: 750 }}>
+                    • {String(t)}
                   </Typography>
-                  <Stack spacing={0.7}>
-                    {reportLines.map((line, idx) => {
-                      const isHeader =
-                        /^[\u{1F300}-\u{1FAFF}]/u.test(line) ||
-                        /:\s*$/.test(line) ||
-                        (line.length <= 44 && /^[A-Z0-9\s&/()'"\-]+$/.test(line));
-                      return (
-                        <Typography
-                          key={idx}
-                          sx={{
-                            color: isHeader ? titleColor : bodyColor,
-                            fontWeight: isHeader ? 900 : 500,
-                            letterSpacing: isHeader ? 0.25 : 0,
-                            fontSize: isHeader ? 16 : 14,
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          {line}
-                        </Typography>
-                      );
-                    })}
-                  </Stack>
-                </>
-              ) : null}
-
-              {/* Detailed muscle-by-muscle breakdown */}
-              {muscleRows.length ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    MUSCLE BREAKDOWN
-                  </Typography>
-                  <Stack spacing={1}>
-                    {muscleRows.slice(0, 12).map((row, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          p: 1.4,
-                          borderRadius: 2,
-                          bgcolor: "rgba(255,255,255,0.04)",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                          {row.group}
-                        </Typography>
-                        <Typography sx={{ color: bodyColor, mt: 0.3 }}>
-                          {row.note}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </>
-              ) : null}
-
-              <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
-                <Stack direction="row" spacing={1.2} sx={{ overflowX: "auto", pb: 0.5 }}>
-                  {captures.map((c) => (
-                    <Box key={c.poseKey} sx={{ minWidth: 140 }}>
-                      <Box
-                        sx={{
-                          width: 140,
-                          height: 170,
-                          borderRadius: 3,
-                          overflow: "hidden",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                          bgcolor: "rgba(255,255,255,0.04)",
-                        }}
-                      >
-                        <img src={c.fullDataUrl} alt={c.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </Box>
-                      <Typography sx={{ color: "rgba(190,220,230,0.75)", fontSize: 12, mt: 0.6, textAlign: "center" }}>
-                        {c.title}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Stack>
-
-                <Stack direction="row" spacing={1.2}>
-                  <Button
-                    variant="outlined"
-                    onClick={startScan}
-                    sx={{
-                      color: bodyColor,
-                      textTransform: "none",
-                      borderColor: "rgba(255,255,255,0.14)",
-                      borderRadius: 2.5,
-                      px: 2,
-                    }}
-                  >
-                    Retake
-                  </Button>
-                  <Button
-                    variant="contained"
-                    onClick={onShare}
-                    startIcon={<IosShareIcon />}
-                    disabled={shareBusy}
-                    sx={{
-                      textTransform: "none",
-                      borderRadius: 2.5,
-                      px: 2.6,
-                      bgcolor: "rgba(40, 220, 190, 0.95)",
-                      color: "#061014",
-                      fontWeight: 900,
-                      "&:hover": { bgcolor: "rgba(40, 220, 190, 1)" },
-                    }}
-                  >
-                    {shareBusy ? "Preparing…" : "Share Card"}
-                  </Button>
-                </Stack>
+                ))}
               </Stack>
-            </Stack>
-          )}
-        </CardContent>
-      </Card>
+            </Box>
+          ) : null}
+        </Stack>
+      ) : null}
+
+      {Array.isArray(ai?.poseNotes) && ai.poseNotes.length ? (
+        <Box sx={{ mt: 2.5 }}>
+          <Typography sx={{ fontWeight: 900, mb: 0.8 }}>Pose notes</Typography>
+          <Stack spacing={0.6}>
+            {ai.poseNotes.slice(0, 6).map((t, idx) => (
+              <Typography key={idx} sx={{ opacity: 0.9 }}>
+                • {String(t)}
+              </Typography>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+    </CardContent>
+  </Card>
+) : null}
+                </Card>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </Box>
     </Box>
   );
 }
