@@ -278,13 +278,18 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
-      const pngDataUrl = await buildPoseSessionSharePng({
-        tier: result?.tier || result?.tierLabel || result?.strength || "Build Arc",
-        score: result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 78,
-        highlights: result?.highlights || result?.levers || [],
-        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res
+      const pngBlob = await buildPoseSessionSharePng({
+        poseImages: captures.map((c) => c.fullDataUrl),
+        analysis: result || null,
+        title: "Physique Breakdown",
+        subtitle: "3-pose scan",
+        hashtag: "#slimcalAI",
       });
-      await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
+      await shareOrDownloadPng(pngBlob, {
+        filename: "slimcalAI-physique.png",
+        title: "Slimcal AI",
+        text: "#slimcalAI",
+      });
     } catch (e) {
       console.error(e);
       setErrorMsg("Could not generate share card.");
@@ -569,81 +574,7 @@ export default function PoseSession() {
                 ))}
               </Stack>
 
-              
-              {/* Long-form detailed report */}
-              {typeof result?.report === "string" && result.report.trim() ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    DETAILED PHYSIQUE REPORT
-                  </Typography>
-                  <Stack spacing={1}>
-                    {String(result.report)
-                      .split(/\n\s*\n/)
-                      .map((p) => p.trim())
-                      .filter(Boolean)
-                      .slice(0, 12)
-                      .map((p, i) => (
-                        <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.5 }}>
-                          {p}
-                        </Typography>
-                      ))}
-                  </Stack>
-
-                  {(Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length) ||
-                  (Array.isArray(result?.biggestOpportunity) && result.biggestOpportunity.length) ||
-                  (Array.isArray(result?.poseNotes) && result.poseNotes.length) ? (
-                    <Box sx={{ mt: 1 }}>
-                      {Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length ? (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                            Best Developed
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.bestDeveloped.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-
-                      {Array.isArray(result?.biggestOpportunity) && result.biggestOpportunity.length ? (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography sx={{ color: "rgba(255,210,120,0.92)", fontWeight: 900 }}>
-                            Biggest Opportunity
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.biggestOpportunity.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-
-                      {Array.isArray(result?.poseNotes) && result.poseNotes.length ? (
-                        <Box>
-                          <Typography sx={{ color: "rgba(160,180,255,0.92)", fontWeight: 900 }}>
-                            Pose Notes
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.poseNotes.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-                    </Box>
-                  ) : null}
-                </>
-              ) : null}
-
-{/* Detailed muscle-by-muscle breakdown */}
+              {/* Detailed muscle-by-muscle breakdown */}
               {Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length ? (
                 <>
                   <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />

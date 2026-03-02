@@ -1127,7 +1127,7 @@ const freeBypass =
             ],
           },
         ],
-        temperature: 0.4,
+        temperature: 0.35,
         max_tokens: 650,
       });
 
@@ -1202,21 +1202,22 @@ const freeBypass =
       const sysBase =
         "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "You are NOT a medical device. You are estimating visual physique cues from uploaded bodybuilding poses. " +
-        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels. " +
-        "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
-        "Write as a fresh, careful analyst focusing on what is visible. " +
-        "Output JSON keys (required): " +
-        "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
+        "This is NOT a medical device. You are estimating physique signals from 3 bodybuilding poses. " +
+        "Tone MUST be neutral or positive only. Never insult. Never shame. Never use negative labels. " +
+        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
         "aesthetic_score (number 0-10), " +
         "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
         "poseQuality (object mapping poseKey to number 0..1), " +
-        "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
-        "report (string: 6-10 short paragraphs separated by \n\n), " +
-        "muscleBreakdown (array 8-12 items; each {group: string, note: string} where note is 2-5 sentences, specific, supportive), " +
-        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
+        "highlights (array 3-6 short strings), levers (array 2-4 short strings), confidenceNote (string), " +
+        "share_summary (string <= 140 chars: a flattering, neutral/positive one-liner suitable for a social share card).";
 
-      const sys = sysBase;
+      let sys = sysBase;
+      if (style.includes("detailed")) {
+        sys +=
+          " Also include muscleBreakdown: an array of 6-10 items, each {group: string, note: string}. " +
+          "Groups should be major muscle groups (Upper Chest, Mid Chest, Delts, Arms, Lats, Back, Waist/Taper, Quads/Hams/Glutes, Calves). " +
+          "Notes must be detailed, specific, and positive/neutral only. No negatives.";
+      }
 
 
       const userText =
@@ -1239,8 +1240,8 @@ const freeBypass =
           { role: "system", content: sys },
           { role: "user", content },
         ],
-        temperature: 0.4,
-        max_tokens: 1400,
+        temperature: 0.35,
+        max_tokens: 900,
       });
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -1263,11 +1264,7 @@ const freeBypass =
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
         tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
         aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
-        report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
-        bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
-        biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
-        poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
-        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 900) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
+        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 220) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
@@ -1289,6 +1286,7 @@ const freeBypass =
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
+        share_summary: String(parsed.share_summary || parsed.shareSummary || "").slice(0, 160) || undefined,
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
 

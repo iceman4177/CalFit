@@ -1,292 +1,192 @@
 // src/lib/poseSessionSharePng.js
-// Produces a shareable PNG for Pose Session.
-// - Keeps tone neutral/positive.
-// - Supports embedding the 3 captured pose images.
+// Builds a social-share-ready PNG (Instagram feed friendly 4:5).
+// Returns a Blob (image/png) so iOS share sheets recognize it as an image.
 
 function clamp(n, a, b) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return a;
-  return Math.max(a, Math.min(b, x));
+  return Math.max(a, Math.min(b, n));
 }
 
-function roundRectPath(ctx, x, y, w, h, r) {
-  const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 6) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + " " + words[i] : words[i];
+    if (ctx.measureText(test).width <= maxWidth) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = words[i];
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  // Ellipsis if overflow
+  const didTruncate = (words.join(" ").length > lines.join(" ").length + 3);
+  if (didTruncate && lines.length) {
+    let last = lines[lines.length - 1];
+    while (ctx.measureText(last + "…").width > maxWidth && last.length > 0) last = last.slice(0, -1);
+    lines[lines.length - 1] = (last || "").trim() + "…";
+  }
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x, y + i * lineHeight);
+  }
+  return lines.length;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = clamp(r, 0, Math.min(w, h) / 2);
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
-  ctx.lineTo(x + w - rr, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
-  ctx.lineTo(x + w, y + h - rr);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
-  ctx.lineTo(x + rr, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
-  ctx.lineTo(x, y + rr);
-  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
 }
 
-async function loadImage(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
+async function loadToBitmap(src) {
+  if (!src) return null;
+  // src can be a Blob, File, or dataURL/http url string
+  if (src instanceof Blob) {
+    return await createImageBitmap(src);
+  }
+  const url = typeof src === "string" ? src : URL.createObjectURL(src);
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.decoding = "async";
+  const p = new Promise((resolve, reject) => {
     img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = dataUrl;
+    img.onerror = reject;
   });
+  img.src = url;
+  const loaded = await p;
+  try {
+    return await createImageBitmap(loaded);
+  } finally {
+    if (typeof src !== "string") URL.revokeObjectURL(url);
+  }
 }
 
-function drawCover(ctx, img, x, y, w, h) {
-  const iw = img.naturalWidth || img.width;
-  const ih = img.naturalHeight || img.height;
-  if (!iw || !ih) return;
-  const s = Math.max(w / iw, h / ih);
-  const dw = iw * s;
-  const dh = ih * s;
-  const dx = x + (w - dw) / 2;
-  const dy = y + (h - dh) / 2;
-  ctx.drawImage(img, dx, dy, dw, dh);
+function pickSummary(analysis) {
+  if (!analysis) return "";
+  // Prefer explicit share summary
+  if (analysis.share_summary) return String(analysis.share_summary);
+  // Fall back to first paragraph / first sentence of report
+  const report = String(analysis.report || "").trim();
+  if (!report) return "";
+  const firstPara = report.split(/\n\s*\n/)[0] || report;
+  const firstSentence = firstPara.split(/(?<=[.!?])\s+/)[0] || firstPara;
+  return firstSentence.trim();
 }
 
 export async function buildPoseSessionSharePng({
-  headline = "POSE SESSION",
-  subhead = "Baseline locked ✅",
-  wins = [],
-  levers = [],
-  sincePoints = 0,
-  // Back-compat: either pass poseImages (array of data URLs) + poseTitles,
-  // or pass thumbs = [{ title, dataUrl }].
-  poseImages = [],
-  poseTitles = [],
-  thumbs = [],
-  muscleSignals = null,
-  trackLabel = "",
-  localDay = "",
+  poseImages = [], // array of 3 (dataURL / Blob / File)
+  analysis = null,
+  title = "Physique Breakdown",
+  subtitle = "Scan results",
+  hashtag = "#slimcalAI",
 } = {}) {
+  // Instagram feed friendly: 1080x1350 (4:5)
   const W = 1080;
   const H = 1350;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
 
-  const c = document.createElement("canvas");
-  c.width = W;
-  c.height = H;
-  const ctx = c.getContext("2d");
-
-  // background
-  ctx.fillStyle = "#04070b";
-  ctx.fillRect(0, 0, W, H);
-
-  // subtle neon gradient
-  const g = ctx.createRadialGradient(W * 0.5, H * 0.25, 40, W * 0.5, H * 0.25, H * 0.95);
-  g.addColorStop(0, "rgba(0,255,190,0.12)");
-  g.addColorStop(0.55, "rgba(0,255,190,0.03)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
+  // Background
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0b0c10");
+  g.addColorStop(1, "#121422");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
-  const pad = 60;
-  const cardX = pad;
-  const cardY = pad;
-  const cardW = W - pad * 2;
-  const cardH = H - pad * 2;
+  // Header
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = "700 54px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Slimcal AI", 72, 110);
 
-  // outer card
-  ctx.save();
-  roundRectPath(ctx, cardX, cardY, cardW, cardH, 42);
-  ctx.fillStyle = "rgba(10,14,20,0.88)";
-  ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(0,255,190,0.18)";
-  ctx.stroke();
-  ctx.restore();
+  ctx.fillStyle = "rgba(255,255,255,0.80)";
+  ctx.font = "600 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText(title, 72, 160);
 
-  // header
-  ctx.fillStyle = "rgba(0,255,190,0.18)";
-  ctx.fillRect(cardX + 26, cardY + 26, cardW - 52, 2);
+  ctx.fillStyle = "rgba(255,255,255,0.60)";
+  ctx.font = "500 24px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText(subtitle, 72, 200);
 
-  ctx.fillStyle = "#E9FFF8";
-  ctx.font = "900 56px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(String(headline || "POSE SESSION"), cardX + 26, cardY + 98);
+  // Image row (3)
+  const pad = 72;
+  const gap = 22;
+  const rowTop = 250;
+  const rowH = 520;
+  const cellW = Math.floor((W - pad * 2 - gap * 2) / 3);
+  const r = 26;
 
-  ctx.fillStyle = "rgba(233,255,248,0.90)";
-  ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto";
-  const safeSub = String(subhead || "Baseline locked ✅").slice(0, 120);
-  ctx.fillText(safeSub, cardX + 26, cardY + 142);
-
-  // optional streak delta
-  if (sincePoints > 0) {
-    ctx.fillStyle = "rgba(0,255,190,0.92)";
-    ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(`+${sincePoints} levels since last`, cardX + 26, cardY + 184);
-  }
-
-  // images row
-  const imgTop = cardY + 220;
-  const imgH = 360;
-  const gap = 18;
-  const imgW = Math.floor((cardW - 52 - gap * 2) / 3);
-  const imgX0 = cardX + 26;
-
-  const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
-    ? thumbs
-    : (Array.isArray(poseImages) ? poseImages : []).slice(0, 3).map((u, i) => ({
-        title: (Array.isArray(poseTitles) ? poseTitles[i] : "") || "",
-        dataUrl: u,
-      }));
-
-  const imgs = [];
+  const bitmaps = await Promise.all(poseImages.slice(0, 3).map(loadToBitmap));
   for (let i = 0; i < 3; i++) {
-    const u = normalizedThumbs[i]?.dataUrl;
-    try {
-      imgs.push(u ? await loadImage(u) : null);
-    } catch {
-      imgs.push(null);
-    }
-  }
-
-  for (let i = 0; i < 3; i++) {
-    const x = imgX0 + i * (imgW + gap);
-    const y = imgTop;
-
+    const x = pad + i * (cellW + gap);
+    const y = rowTop;
+    // Card
     ctx.save();
-    roundRectPath(ctx, x, y, imgW, imgH, 28);
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fill();
+    roundRect(ctx, x, y, cellW, rowH, r);
     ctx.clip();
+    // soft bg in case image missing
+    const gg = ctx.createLinearGradient(x, y, x, y + rowH);
+    gg.addColorStop(0, "rgba(255,255,255,0.10)");
+    gg.addColorStop(1, "rgba(255,255,255,0.04)");
+    ctx.fillStyle = gg;
+    ctx.fillRect(x, y, cellW, rowH);
 
-    if (imgs[i]) {
-      drawCover(ctx, imgs[i], x, y, imgW, imgH);
-    } else {
-      // fallback placeholder
-      ctx.fillStyle = "rgba(0,255,190,0.08)";
-      ctx.fillRect(x, y, imgW, imgH);
-      ctx.fillStyle = "rgba(233,255,248,0.65)";
-      ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText("Pose", x + 18, y + 44);
+    const bm = bitmaps[i];
+    if (bm) {
+      // cover-fit
+      const scale = Math.max(cellW / bm.width, rowH / bm.height);
+      const dw = bm.width * scale;
+      const dh = bm.height * scale;
+      const dx = x + (cellW - dw) / 2;
+      const dy = y + (rowH - dh) / 2;
+      ctx.drawImage(bm, dx, dy, dw, dh);
     }
+
+    // subtle vignette
+    const vg = ctx.createLinearGradient(x, y, x, y + rowH);
+    vg.addColorStop(0, "rgba(0,0,0,0.05)");
+    vg.addColorStop(1, "rgba(0,0,0,0.35)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(x, y, cellW, rowH);
 
     ctx.restore();
-
-    // neon stroke
-    ctx.save();
-    roundRectPath(ctx, x, y, imgW, imgH, 28);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0,255,190,0.22)";
-    ctx.stroke();
-    ctx.restore();
-
-    // label
-    const lbl = normalizedThumbs?.[i]?.title
-      ? String(normalizedThumbs[i].title).slice(0, 18)
-      : "";
-    if (lbl) {
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.50)";
-      roundRectPath(ctx, x + 14, y + imgH - 54, Math.min(imgW - 28, 240), 40, 14);
-      ctx.fill();
-      ctx.fillStyle = "rgba(233,255,248,0.92)";
-      ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText(lbl, x + 28, y + imgH - 26);
-      ctx.restore();
-    }
   }
 
-  // sections
-  const textX = cardX + 26;
-  let y = imgTop + imgH + 40;
+  // Divider line
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(pad, rowTop + rowH + 40, W - pad * 2, 2);
 
-  const drawSection = (title, items, accent = "rgba(0,255,190,0.22)") => {
-    ctx.fillStyle = "#E9FFF8";
-    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(title, textX, y);
-    y += 18;
+  // Summary block
+  const summary = pickSummary(analysis);
+  const sumTop = rowTop + rowH + 90;
 
-    const shown = (items || []).filter(Boolean).slice(0, 3);
-    if (!shown.length) {
-      y += 18;
-      return;
-    }
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Quick read", pad, sumTop);
 
-    for (const t of shown) {
-      y += 22;
-      const boxH = 64;
-      ctx.save();
-      roundRectPath(ctx, textX, y, cardW - 52, boxH, 18);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = accent;
-      ctx.stroke();
-      ctx.restore();
+  ctx.fillStyle = "rgba(255,255,255,0.78)";
+  ctx.font = "500 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const linesUsed = wrapText(ctx, summary || "Strong base with visible athletic shape — keep building momentum.", pad, sumTop + 50, W - pad * 2, 40, 5);
 
-      ctx.fillStyle = "rgba(233,255,248,0.92)";
-      ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-      const line = String(t).slice(0, 60);
-      ctx.fillText(line, textX + 18, y + 42);
-      y += boxH;
-    }
+  // Hashtag + footer
+  const footerY = H - 110;
+  ctx.fillStyle = "rgba(255,255,255,0.86)";
+  ctx.font = "700 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText(hashtag, pad, footerY);
 
-    y += 26;
-  };
+  ctx.fillStyle = "rgba(255,255,255,0.50)";
+  ctx.font = "500 22px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Generate your own at slimcal.ai", pad, footerY + 42);
 
-  drawSection("Wins", wins, "rgba(0,255,190,0.18)");
-  drawSection("Next unlocks", levers, "rgba(0,255,255,0.18)");
-
-  // optional signals (simple bars, always positive framing)
-  if (muscleSignals && typeof muscleSignals === "object") {
-    const order = [
-      ["chest", "Chest"],
-      ["lats", "Lats"],
-      ["delts", "Delts"],
-      ["arms", "Arms"],
-      ["waist_taper", "Taper"],
-    ];
-    ctx.fillStyle = "#E9FFF8";
-    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
-    const tl = String(trackLabel || "").trim();
-    ctx.fillText(tl ? `Signals · ${tl.slice(0, 14)}` : "Signals", textX, y);
-    y += 26;
-
-    const barW = cardW - 52;
-    const barH = 18;
-    const rowGap = 18;
-
-    for (const [k, label] of order) {
-      const v = clamp(muscleSignals?.[k] ?? 0.6, 0, 1);
-
-      ctx.fillStyle = "rgba(233,255,248,0.86)";
-      ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText(label, textX, y + 24);
-
-      const bx = textX + 180;
-      const by = y + 10;
-
-      // track
-      ctx.save();
-      roundRectPath(ctx, bx, by, barW - 180, barH, 10);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.fill();
-      ctx.restore();
-
-      // fill
-      ctx.save();
-      roundRectPath(ctx, bx, by, (barW - 180) * v, barH, 10);
-      ctx.fillStyle = "rgba(0,255,190,0.40)";
-      ctx.fill();
-      ctx.restore();
-
-      y += barH + rowGap;
-    }
-
-    y += 10;
-  }
-
-  // footer
-  ctx.fillStyle = "rgba(233,255,248,0.55)";
-  ctx.font = "700 22px system-ui, -apple-system, Segoe UI, Roboto";
-  const footerLeft = "Slimcal.ai";
-  const footerRight = localDay ? String(localDay) : "";
-  ctx.fillText(footerLeft, cardX + 26, cardY + cardH - 26);
-  if (footerRight) {
-    const m = ctx.measureText(footerRight);
-    ctx.fillText(footerRight, cardX + cardW - 26 - m.width, cardY + cardH - 26);
-  }
-
-  return c.toDataURL("image/png");
+  // Export
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
+  if (!blob) throw new Error("Failed to build PNG");
+  return blob;
 }
