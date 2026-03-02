@@ -59,6 +59,132 @@ function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
+// --- Pose lock helpers (upper-body + hips only) ---
+// MediaPipe landmark indices we care about (ignore legs/feet for framing + stability).
+const LK = {
+  NOSE: 0,
+  L_SHOULDER: 11,
+  R_SHOULDER: 12,
+  L_ELBOW: 13,
+  R_ELBOW: 14,
+  L_WRIST: 15,
+  R_WRIST: 16,
+  L_HIP: 23,
+  R_HIP: 24,
+};
+
+const UPPER_HIPS_IDXS = [
+  LK.NOSE,
+  LK.L_SHOULDER, LK.R_SHOULDER,
+  LK.L_ELBOW, LK.R_ELBOW,
+  LK.L_WRIST, LK.R_WRIST,
+  LK.L_HIP, LK.R_HIP,
+];
+
+function lmOk(p) {
+  if (!p) return false;
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+  // Tasks Vision landmarks sometimes include visibility/presence. If present, honor them.
+  const vis = Number.isFinite(p.visibility) ? p.visibility : null;
+  const pres = Number.isFinite(p.presence) ? p.presence : null;
+  if (vis !== null && vis < 0.35) return false;
+  if (pres !== null && pres < 0.35) return false;
+  return true;
+}
+
+function dist2(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function bboxFromIdxs(landmarks, idxs, pad = 0.0) {
+  if (!Array.isArray(landmarks) || !landmarks.length) return null;
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  let any = false;
+  for (const i of idxs) {
+    const p = landmarks[i];
+    if (!lmOk(p)) continue;
+    any = true;
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  if (!any) return null;
+  const px = pad;
+  const py = pad;
+  return {
+    minX: clamp(minX - px, 0, 1),
+    minY: clamp(minY - py, 0, 1),
+    maxX: clamp(maxX + px, 0, 1),
+    maxY: clamp(maxY + py, 0, 1),
+  };
+}
+
+function computeUpperHipsGate(landmarks) {
+  // Returns { inFrameRaw, hint, metrics: { shoulderW, bbox } }
+  if (!Array.isArray(landmarks) || landmarks.length < 33) {
+    return { inFrameRaw: false, hint: "Step into frame", metrics: { shoulderW: 0, bbox: null } };
+  }
+
+  const nose = landmarks[LK.NOSE];
+  const ls = landmarks[LK.L_SHOULDER];
+  const rs = landmarks[LK.R_SHOULDER];
+  const lh = landmarks[LK.L_HIP];
+  const rh = landmarks[LK.R_HIP];
+
+  const shouldersOk = lmOk(ls) && lmOk(rs);
+  const hipsOk = lmOk(lh) && lmOk(rh);
+
+  const shoulderW = shouldersOk ? dist2(ls, rs) : 0;
+
+  // Upper bbox (pad helps ghost template not "snap" when elbows extend)
+  const upperBBox = bboxFromIdxs(landmarks, UPPER_HIPS_IDXS, 0.04);
+
+  // We want: head/shoulders/elbows/hips visible, not too close, not too far.
+  const headOk = lmOk(nose) ? (nose.y >= 0.03 && nose.y <= 0.55) : true; // nose can be flaky; don't hard-fail.
+  const centerOk = upperBBox
+    ? (upperBBox.minX >= 0.02 && upperBBox.maxX <= 0.98 && upperBBox.minY >= 0.01 && upperBBox.maxY <= 0.98)
+    : false;
+
+  const sizeOk = shoulderW >= 0.09 && shoulderW <= 0.34; // distance from camera
+  const hipsInLowerHalf = shouldersOk && hipsOk ? (Math.max(lh.y, rh.y) >= Math.min(ls.y, rs.y) + 0.12) : true;
+
+  const inFrameRaw = !!(upperBBox && shouldersOk && hipsOk && headOk && centerOk && sizeOk && hipsInLowerHalf);
+
+  let hint = "Match the neon outline";
+  if (!upperBBox || (!shouldersOk && !hipsOk)) hint = "Step into frame";
+  else if (!shouldersOk) hint = "Bring shoulders into view";
+  else if (!hipsOk) hint = "Bring hips into view";
+  else if (!centerOk) hint = "Center your upper body + hips";
+  else if (!sizeOk) hint = shoulderW < 0.09 ? "Step closer" : "Step back a bit";
+  else if (!headOk) hint = "Keep your head in frame";
+  else if (!hipsInLowerHalf) hint = "Stand tall — hips below shoulders";
+
+  return { inFrameRaw, hint, metrics: { shoulderW, bbox: upperBBox } };
+}
+
+function computeStableUpper(prevLm, landmarks) {
+  // stability from head/shoulders/hips only (ignore hands/feet jitter)
+  const idxs = [LK.NOSE, LK.L_SHOULDER, LK.R_SHOULDER, LK.L_HIP, LK.R_HIP];
+  if (!Array.isArray(prevLm) || !Array.isArray(landmarks)) return false;
+  let sum = 0;
+  let n = 0;
+  for (const i of idxs) {
+    const a = prevLm[i];
+    const b = landmarks[i];
+    if (!lmOk(a) || !lmOk(b)) continue;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    sum += Math.sqrt(dx * dx + dy * dy);
+    n++;
+  }
+  if (!n) return false;
+  const avg = sum / n;
+  return avg < 0.0056; // slightly forgiving for mobile jitter
+}
+
 function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
   if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
   const scale = Math.min(canvasW / videoW, canvasH / videoH);
@@ -681,27 +807,12 @@ export default function PoseSession() {
           }
         }
 
-        // ---- Framing gate (simple, forgiving) ----
-        // We only require shoulders + hips visible (full body is bonus).
-        let inFrameRaw = false;
-        let upperBodyOk = false;
-        let fullBodyOk = false;
-
-        if (bbox) {
-          const b = bboxLocal || bbox;
-          const bboxH = b.maxY - b.minY;
-          const bboxW = b.maxX - b.minX;
-
-          const headOk = b.minY <= 0.34;
-          const hipsOk = b.maxY >= 0.58;
-          const sizeOk = bboxH >= 0.30 && bboxW >= 0.18;
-          const notTooClose = bboxH <= 0.92 && bboxW <= 0.90;
-
-          upperBodyOk = headOk && hipsOk && sizeOk && notTooClose;
-          fullBodyOk = bboxH >= 0.70 && b.minY <= 0.18 && b.maxY >= 0.92;
-
-          inFrameRaw = upperBodyOk || fullBodyOk;
-        }
+        // ---- Framing gate (upper-body + hips only) ----
+        // Ignore legs/feet entirely. We only care about head/shoulders/elbows/hips.
+        const gate = computeUpperHipsGate(landmarks);
+        const inFrameRaw = gate.inFrameRaw;
+        const frameHint = gate.hint;
+        const bboxUpper = gate.metrics?.bbox || null;
 
         // hysteresis (prevents flicker)
         fr.inFrameFrames = fr.inFrameFrames || 0;
@@ -710,46 +821,41 @@ export default function PoseSession() {
           : Math.max(0, fr.inFrameFrames - 2);
         const inFrame = fr.inFrameFrames >= 6;
 
-        // stability from landmark movement
+        // stability from landmark movement (upper-body + hips only)
         let stable = false;
         if (landmarks && landmarks.length) {
           const prevLm = fr.prevLm;
           if (prevLm && prevLm.length === landmarks.length) {
-            let sum = 0;
-            for (let i = 0; i < landmarks.length; i++) {
-              const dx = landmarks[i].x - prevLm[i].x;
-              const dy = landmarks[i].y - prevLm[i].y;
-              sum += Math.sqrt(dx * dx + dy * dy);
-            }
-            const avg = sum / landmarks.length;
-            stable = avg < 0.0048;
+            stable = computeStableUpper(prevLm, landmarks);
           }
           fr.prevLm = landmarks;
         }
 
         // draw overlay
-        if (!bbox || !visCanvas) {
-          ctx.clearRect(0, 0, w, h);
+        if (!visCanvas) {
+          // no-op
         } else if (!inFrame) {
+          ctx.clearRect(0, 0, w, h);
           drawFramingGuide(ctx, visCanvas, { w, h });
         } else {
-          const tpl = buildPoseTemplate(pose.key, anchors, bbox, {
-            bboxLocal,
-            upperBodyOnly: upperBodyOk && !fullBodyOk,
+          const tpl = buildPoseTemplate(pose.key, anchors, bboxUpper || bbox, {
+            bboxLocal: bboxUpper && visCanvas ? bboxToLocal(bboxUpper, visCanvas) : bboxLocal,
+            upperBodyOnly: true,
           });
+          ctx.clearRect(0, 0, w, h);
           drawNeonGhost(ctx, tpl, { w, h, glow: true });
         }
 
-        // lock gating (forgiving, matches earlier behavior)
+        // lock gating (upper-body + hips only)
         const ok = inFrame && match >= 0.66;
 
-        if (!bbox) {
+        if (!landmarks || !bboxUpper) {
           setLocked(false);
           setLockHint("Step into frame");
           fr.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
-          setLockHint("Move back so shoulders + hips are visible");
+          setLockHint(frameHint || "Center your upper body + hips");
           fr.okFrames = 0;
         } else if (match < 0.66) {
           setLocked(false);
