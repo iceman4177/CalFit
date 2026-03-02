@@ -74,11 +74,13 @@ const LK = {
 };
 
 const UPPER_HIPS_IDXS = [
+  // Core anchors (required)
   LK.NOSE,
   LK.L_SHOULDER, LK.R_SHOULDER,
+  LK.L_HIP, LK.R_HIP,
+  // Arms are helpful but optional (don’t gate framing on them)
   LK.L_ELBOW, LK.R_ELBOW,
   LK.L_WRIST, LK.R_WRIST,
-  LK.L_HIP, LK.R_HIP,
 ];
 
 function lmOk(p) {
@@ -123,9 +125,15 @@ function bboxFromIdxs(landmarks, idxs, pad = 0.0) {
 }
 
 function computeUpperHipsGate(landmarks) {
-  // Returns { inFrameRaw, hint, metrics: { shoulderW, bbox } }
+  // Returns { inFrameRaw, hint, metrics: { shoulderW, bbox, shouldersOk, hipsOk, headOk, centerOk, sizeOk } }
+  // This gate is intentionally forgiving: we ignore legs/feet, and we don’t require wrists/elbows
+  // to be detected (they frequently drop out on mobile when cropped).
   if (!Array.isArray(landmarks) || landmarks.length < 33) {
-    return { inFrameRaw: false, hint: "Step into frame", metrics: { shoulderW: 0, bbox: null } };
+    return {
+      inFrameRaw: false,
+      hint: "Step into frame",
+      metrics: { shoulderW: 0, bbox: null, shouldersOk: false, hipsOk: false, headOk: false, centerOk: false, sizeOk: false },
+    };
   }
 
   const nose = landmarks[LK.NOSE];
@@ -135,42 +143,48 @@ function computeUpperHipsGate(landmarks) {
   const rh = landmarks[LK.R_HIP];
 
   const shouldersOk = lmOk(ls) && lmOk(rs);
-  const hipsOk = lmOk(lh) && lmOk(rh);
+  const hipsOk = lmOk(lh) || lmOk(rh); // one hip is enough to confirm “hips in frame”
+  const headOk = lmOk(nose) ? (nose.y >= 0.02 && nose.y <= 0.62) : true; // nose can be flaky; don’t hard-fail.
 
   const shoulderW = shouldersOk ? dist2(ls, rs) : 0;
 
-  // Upper bbox (pad helps ghost template not "snap" when elbows extend)
-  const upperBBox = bboxFromIdxs(landmarks, UPPER_HIPS_IDXS, 0.04);
+  // Build a bbox from the *core* points (nose + shoulders + hips). Arms are optional.
+  const coreIdxs = [LK.NOSE, LK.L_SHOULDER, LK.R_SHOULDER, LK.L_HIP, LK.R_HIP];
+  const upperBBox = bboxFromIdxs(landmarks, coreIdxs, 0.05);
 
-  // We want: head/shoulders/elbows/hips visible, not too close, not too far.
-  const headOk = lmOk(nose) ? (nose.y >= 0.03 && nose.y <= 0.55) : true; // nose can be flaky; don't hard-fail.
   const centerOk = upperBBox
-    ? (upperBBox.minX >= 0.02 && upperBBox.maxX <= 0.98 && upperBBox.minY >= 0.01 && upperBBox.maxY <= 0.98)
+    ? (upperBBox.minX >= 0.02 && upperBBox.maxX <= 0.98 && upperBBox.minY >= 0.01 && upperBBox.maxY <= 0.99)
     : false;
 
-  const sizeOk = shoulderW >= 0.09 && shoulderW <= 0.34; // distance from camera
-  const hipsInLowerHalf = shouldersOk && hipsOk ? (Math.max(lh.y, rh.y) >= Math.min(ls.y, rs.y) + 0.12) : true;
+  // distance from camera — based on shoulder width
+  const sizeOk = shoulderW >= 0.075 && shoulderW <= 0.38;
 
-  const inFrameRaw = !!(upperBBox && shouldersOk && hipsOk && headOk && centerOk && sizeOk && hipsInLowerHalf);
+  // Raw in-frame = core bbox exists + shoulders + at least one hip + centered + reasonable distance.
+  const inFrameRaw = !!(upperBBox && shouldersOk && hipsOk && headOk && centerOk && sizeOk);
 
   let hint = "Match the neon outline";
-  if (!upperBBox || (!shouldersOk && !hipsOk)) hint = "Step into frame";
+  if (!upperBBox) hint = "Step into frame";
   else if (!shouldersOk) hint = "Bring shoulders into view";
-  else if (!hipsOk) hint = "Bring hips into view";
+  else if (!hipsOk) hint = "Put your hips into frame";
   else if (!centerOk) hint = "Center your upper body + hips";
-  else if (!sizeOk) hint = shoulderW < 0.09 ? "Step closer" : "Step back a bit";
+  else if (!sizeOk) hint = shoulderW < 0.075 ? "Step closer" : "Step back a bit";
   else if (!headOk) hint = "Keep your head in frame";
-  else if (!hipsInLowerHalf) hint = "Stand tall — hips below shoulders";
 
-  return { inFrameRaw, hint, metrics: { shoulderW, bbox: upperBBox } };
+  return {
+    inFrameRaw,
+    hint,
+    metrics: { shoulderW, bbox: upperBBox, shouldersOk, hipsOk, headOk, centerOk, sizeOk },
+  };
 }
 
 function computeStableUpper(prevLm, landmarks) {
-  // stability from head/shoulders/hips only (ignore hands/feet jitter)
+  // Stability from *core* points only (nose + shoulders + hips). We skip missing points.
   const idxs = [LK.NOSE, LK.L_SHOULDER, LK.R_SHOULDER, LK.L_HIP, LK.R_HIP];
   if (!Array.isArray(prevLm) || !Array.isArray(landmarks)) return false;
+
   let sum = 0;
   let n = 0;
+
   for (const i of idxs) {
     const a = prevLm[i];
     const b = landmarks[i];
@@ -180,9 +194,10 @@ function computeStableUpper(prevLm, landmarks) {
     sum += Math.sqrt(dx * dx + dy * dy);
     n++;
   }
-  if (!n) return false;
+
+  if (n < 3) return false; // need at least 3 stable points to trust it
   const avg = sum / n;
-  return avg < 0.0056; // slightly forgiving for mobile jitter
+  return avg < 0.0062;
 }
 
 function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
@@ -833,25 +848,33 @@ export default function PoseSession() {
 
         // draw overlay
         if (!visCanvas) {
-          // no-op
-        } else if (!inFrame) {
+          ctx.clearRect(0, 0, w, h);
+        } else {
+          // Always draw a framing guide, then draw the ghost when we have enough info.
           ctx.clearRect(0, 0, w, h);
           drawFramingGuide(ctx, visCanvas, { w, h });
-        } else {
-          const tpl = buildPoseTemplate(pose.key, anchors, bboxUpper || bbox, {
-            bboxLocal: bboxUpper && visCanvas ? bboxToLocal(bboxUpper, visCanvas) : bboxLocal,
-            upperBodyOnly: true,
-          });
-          ctx.clearRect(0, 0, w, h);
-          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+
+          // Use our upper-body+hips bbox when available; fall back to scorer bbox.
+          const useBBox = bboxUpper || bbox;
+          const useLocal = bboxUpper && visCanvas ? bboxToLocal(bboxUpper, visCanvas) : bboxLocal;
+
+          if (useBBox) {
+            const tpl = buildPoseTemplate(pose.key, anchors, useBBox, {
+              bboxLocal: useLocal,
+              upperBodyOnly: true,
+            });
+
+            // If we’re not “inFrame” yet, draw the ghost slightly dimmer so it still guides.
+            drawNeonGhost(ctx, tpl, { w, h, glow: true, alpha: inFrame ? 1 : 0.55 });
+          }
         }
 
         // lock gating (upper-body + hips only)
         const ok = inFrame && match >= 0.66;
 
-        if (!landmarks || !bboxUpper) {
+        if (!landmarks || !gate.metrics?.shouldersOk) {
           setLocked(false);
-          setLockHint("Step into frame");
+          setLockHint(frameHint || "Step into frame");
           fr.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
