@@ -45,26 +45,19 @@ function drawCover(ctx, img, x, y, w, h) {
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
-// Backward-compatible builder.
-// Newer callers (PoseSession.jsx) pass:
-//   { tier, score, highlights, thumbs:[{title,dataUrl}] }
-// Older callers may pass:
-//   { headline, subhead, wins, levers, poseImages:[dataUrl], poseTitles:[string] }
 export async function buildPoseSessionSharePng({
-  // New API
-  tier,
-  score,
-  highlights,
-  thumbs,
-  levers,
-
-  // Legacy API
   headline = "POSE SESSION",
   subhead = "Baseline locked ✅",
   wins = [],
+  levers = [],
   sincePoints = 0,
+  // Back-compat: either pass poseImages (array of data URLs) + poseTitles,
+  // or pass thumbs = [{ title, dataUrl }].
   poseImages = [],
   poseTitles = [],
+  thumbs = [],
+  muscleSignals = null,
+  trackLabel = "",
   localDay = "",
 } = {}) {
   const W = 1080;
@@ -107,20 +100,13 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(0,255,190,0.18)";
   ctx.fillRect(cardX + 26, cardY + 26, cardW - 52, 2);
 
-  const resolvedHeadline = String(tier || headline || "POSE SESSION").toUpperCase().slice(0, 26);
-  const resolvedScore = Number.isFinite(Number(score)) ? clamp(score, 0, 10) : null;
-  const resolvedWins = Array.isArray(highlights) ? highlights : wins;
-  const resolvedLevers = Array.isArray(levers) ? levers : [];
-
   ctx.fillStyle = "#E9FFF8";
   ctx.font = "900 56px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(resolvedHeadline || "POSE SESSION", cardX + 26, cardY + 98);
+  ctx.fillText(String(headline || "POSE SESSION"), cardX + 26, cardY + 98);
 
   ctx.fillStyle = "rgba(233,255,248,0.90)";
   ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto";
-  const safeSub = resolvedScore !== null
-    ? `AESTHETIC: ${resolvedScore.toFixed(1)}/10`
-    : String(subhead || "Baseline locked ✅").slice(0, 120);
+  const safeSub = String(subhead || "Baseline locked ✅").slice(0, 120);
   ctx.fillText(safeSub, cardX + 26, cardY + 142);
 
   // optional streak delta
@@ -137,20 +123,18 @@ export async function buildPoseSessionSharePng({
   const imgW = Math.floor((cardW - 52 - gap * 2) / 3);
   const imgX0 = cardX + 26;
 
-  const poseList = Array.isArray(thumbs) && thumbs.length
-    ? thumbs.slice(0, 3).map((t) => ({
-        title: String(t?.title || "").slice(0, 18),
-        dataUrl: String(t?.dataUrl || t?.url || ""),
-      }))
-    : poseImages.slice(0, 3).map((url, i) => ({
-        title: String(poseTitles?.[i] || "").slice(0, 18),
-        dataUrl: String(url || ""),
+  const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
+    ? thumbs
+    : (Array.isArray(poseImages) ? poseImages : []).slice(0, 3).map((u, i) => ({
+        title: (Array.isArray(poseTitles) ? poseTitles[i] : "") || "",
+        dataUrl: u,
       }));
 
   const imgs = [];
-  for (let i = 0; i < Math.min(3, poseList.length); i++) {
+  for (let i = 0; i < 3; i++) {
+    const u = normalizedThumbs[i]?.dataUrl;
     try {
-      imgs.push(await loadImage(poseList[i].dataUrl));
+      imgs.push(u ? await loadImage(u) : null);
     } catch {
       imgs.push(null);
     }
@@ -188,7 +172,9 @@ export async function buildPoseSessionSharePng({
     ctx.restore();
 
     // label
-    const lbl = String(poseList?.[i]?.title || "").slice(0, 18);
+    const lbl = normalizedThumbs?.[i]?.title
+      ? String(normalizedThumbs[i].title).slice(0, 18)
+      : "";
     if (lbl) {
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,0.50)";
@@ -239,12 +225,57 @@ export async function buildPoseSessionSharePng({
     y += 26;
   };
 
-  drawSection("Wins", resolvedWins, "rgba(0,255,190,0.18)");
-  drawSection("Next unlocks", resolvedLevers, "rgba(0,255,255,0.18)");
+  drawSection("Wins", wins, "rgba(0,255,190,0.18)");
+  drawSection("Next unlocks", levers, "rgba(0,255,255,0.18)");
 
-  // NOTE: The prior implementation attempted to render optional signal bars but
-  // referenced undefined variables (muscleSignals/trackLabel) and could crash.
-  // We can re-add them later if we explicitly pass those values in.
+  // optional signals (simple bars, always positive framing)
+  if (muscleSignals && typeof muscleSignals === "object") {
+    const order = [
+      ["chest", "Chest"],
+      ["lats", "Lats"],
+      ["delts", "Delts"],
+      ["arms", "Arms"],
+      ["waist_taper", "Taper"],
+    ];
+    ctx.fillStyle = "#E9FFF8";
+    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
+    const tl = String(trackLabel || "").trim();
+    ctx.fillText(tl ? `Signals · ${tl.slice(0, 14)}` : "Signals", textX, y);
+    y += 26;
+
+    const barW = cardW - 52;
+    const barH = 18;
+    const rowGap = 18;
+
+    for (const [k, label] of order) {
+      const v = clamp(muscleSignals?.[k] ?? 0.6, 0, 1);
+
+      ctx.fillStyle = "rgba(233,255,248,0.86)";
+      ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
+      ctx.fillText(label, textX, y + 24);
+
+      const bx = textX + 180;
+      const by = y + 10;
+
+      // track
+      ctx.save();
+      roundRectPath(ctx, bx, by, barW - 180, barH, 10);
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fill();
+      ctx.restore();
+
+      // fill
+      ctx.save();
+      roundRectPath(ctx, bx, by, (barW - 180) * v, barH, 10);
+      ctx.fillStyle = "rgba(0,255,190,0.40)";
+      ctx.fill();
+      ctx.restore();
+
+      y += barH + rowGap;
+    }
+
+    y += 10;
+  }
 
   // footer
   ctx.fillStyle = "rgba(233,255,248,0.55)";

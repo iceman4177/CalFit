@@ -1171,8 +1171,6 @@ const freeBypass =
 
   if (feature === "pose_session" || feature === "pose_session_beta") {
     try {
-
-      const style = String(body?.style || "").toLowerCase();
       const poses = Array.isArray(body?.poses) ? body.poses : [];
       if (!poses.length) {
         res.status(400).json({ error: "Missing poses" });
@@ -1199,35 +1197,25 @@ const freeBypass =
         return;
       }
 
-      const sysBase =
-        "You are SlimCal Pose Session Scanner. " +
-        "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "This is NOT a medical device. You are estimating physique signals from 3 bodybuilding poses. " +
-        "Tone MUST be neutral or positive only. Never insult. Never shame. Never use negative labels. " +
-        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
-        "aesthetic_score (number 0-10), " +
-        "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
-        "poseQuality (object mapping poseKey to number 0..1), " +
-        "highlights (array 3-6 short strings), levers (array 2-4 short strings), confidenceNote (string).";
-
-      let sys = sysBase;
-      if (style.includes("detailed")) {
-        sys +=
-          " Also include muscleBreakdown: an array of 6-10 items, each {group: string, note: string}. " +
-          "Groups should be major muscle groups (Upper Chest, Mid Chest, Delts, Arms, Lats, Back, Waist/Taper, Quads/Hams/Glutes, Calves). " +
-          "Notes must be detailed, specific, and positive/neutral only. No negatives." +
-          " Also include chatgptStyle: a single string with multiple sections and bullets separated by newlines. " +
-          "It should read like a high-quality physique coach breakdown: " +
-          "sections: 'Big Picture', 'Muscle Group Rankings (Right Now)', 'If Your Goal Is Alex Eubank Lean Aesthetic', and 'Pose-by-Pose'. " +
-          "Keep it supportive and honest, but frame weak areas as 'Next Up' or 'Will Pop With More Definition' (never insults).";
-      }
-
+      const sys =
+        "You are SlimCal Pose Session Scanner. Return VALID JSON ONLY (no markdown, no extra text). " +
+        "This is NOT a medical device. You are estimating 'physique signals' and 'pose quality' from 2-3 bodybuilding photos. " +
+        "Tone MUST be neutral or positive only. No insults, no shaming, no harsh labels. Avoid influencer names or references. " +
+        "Do NOT assume prior user context. Treat each request as brand-new and analyze only what you can infer from the images. " +
+        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), strength (string), horizon_days (int), " +
+        "muscleSignals (object keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
+        "poseQuality (object mapping poseKey to number 0..1), highlights (array 2-5 short strings), levers (array 2-4 short strings), confidenceNote (string), " +
+        "report (string with section headers and bullet points; 500-1200 words; positive/constructive), " +
+        "muscleBreakdown (object with keys delts, arms, chest, lats, back, core, legs, calves, symmetry each a short paragraph), " +
+        "rankings (object with keys bestDeveloped (array), canImprove (array))";
 
       const userText =
-        "Analyze the following pose images: Front Double Biceps, Lat Spread, Back Double Biceps (or similar). " +
-        "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
-        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
-        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
+        "Analyze these pose images and produce a detailed physique breakdown. " +
+        "Be specific like a thoughtful coach, but stay positive/constructive. " +
+        "No influencer mentions. No 'you are weak/bad' language. If something could improve, phrase it as 'next lever' or 'will pop more when X'. " +
+        "Provide: (1) Big Picture summary, (2) Muscle Group Rankings (best developed + next to improve), (3) Pose-by-pose notes, " +
+        "(4) Muscle group breakdown paragraphs, (5) 3-5 actionable next steps, (6) a short confidence note about lighting/angles. " +
+        "build_arc should be an overall friendly score 55..96 that rewards consistency. percentile should be 1..99 (lower is better).";
 
       const content = [
         { type: "text", text: userText },
@@ -1265,18 +1253,6 @@ const freeBypass =
         percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
         strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
-        tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
-        aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
-        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown)
-          ? (parsed.muscleBreakdown || parsed.muscle_breakdown)
-              .map((r) => ({
-                group: String(r.group || r.name || r.key || "").slice(0, 48),
-                note: String(r.note || r.text || "").slice(0, 520),
-              }))
-              .filter((r) => r.group && r.note)
-              .slice(0, 24)
-          : undefined,
-        chatgptStyle: String(parsed.chatgptStyle || parsed.chat_style || parsed.longform || "").slice(0, 2600) || undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
@@ -1298,8 +1274,40 @@ const freeBypass =
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
+        report: String(parsed.report || parsed.report_md || parsed.narrative || "").slice(0, 9000),
+        rankings: {
+          bestDeveloped: Array.isArray(parsed?.rankings?.bestDeveloped)
+            ? parsed.rankings.bestDeveloped.map((s) => String(s).slice(0, 48)).slice(0, 7)
+            : [],
+          canImprove: Array.isArray(parsed?.rankings?.canImprove)
+            ? parsed.rankings.canImprove.map((s) => String(s).slice(0, 48)).slice(0, 7)
+            : [],
+        },
+        muscleBreakdown:
+          parsed.muscleBreakdown && typeof parsed.muscleBreakdown === "object" ? parsed.muscleBreakdown : {},
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
+
+      // Normalize muscleBreakdown to a stable shape (keeps UI simple; all strings)
+      const mb = session.muscleBreakdown || {};
+      session.muscleBreakdown = {
+        delts: String(mb.delts || mb.shoulders || "").slice(0, 380),
+        arms: String(mb.arms || "").slice(0, 380),
+        chest: String(mb.chest || "").slice(0, 380),
+        lats: String(mb.lats || "").slice(0, 380),
+        back: String(mb.back || "").slice(0, 380),
+        core: String(mb.core || mb.midsection || "").slice(0, 380),
+        legs: String(mb.legs || mb.quads || "").slice(0, 380),
+        calves: String(mb.calves || "").slice(0, 380),
+        symmetry: String(mb.symmetry || mb.proportions || "").slice(0, 380),
+      };
+
+      if (!session.rankings.bestDeveloped?.length && Array.isArray(parsed.bestDeveloped)) {
+        session.rankings.bestDeveloped = parsed.bestDeveloped.map((s) => String(s).slice(0, 48)).slice(0, 7);
+      }
+      if (!session.rankings.canImprove?.length && Array.isArray(parsed.canImprove)) {
+        session.rankings.canImprove = parsed.canImprove.map((s) => String(s).slice(0, 48)).slice(0, 7);
+      }
 
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
