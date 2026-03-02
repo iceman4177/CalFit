@@ -38,6 +38,57 @@ const POSES = [
   { key: "double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral", guide: "double_bi" },
   { key: "lat_spread", title: "Lat Spread", subtitle: "Elbows forward · widen lats · tall posture", guide: "lat_spread" },
   { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back", guide: "back_double_bi" },
+
+function PoseGuide({ poseKey }) {
+  // Static smooth guide (never flashes). Mirrors the “match the pose” vibe without CV rendering risk.
+  const arms = (() => {
+    if (poseKey === "front_double_bi" || poseKey === "back_double_bi") {
+      return (
+        <>
+          <path d="M118 210c-40 12-67 40-78 80" />
+          <path d="M40 290c22 6 45-4 62-34" />
+          <path d="M182 210c40 12 67 40 78 80" />
+          <path d="M260 290c-22 6-45-4-62-34" />
+        </>
+      );
+    }
+    // relaxed/lat spread: arms outward
+    return (
+      <>
+        <path d="M115 225c-55 12-90 45-105 95" />
+        <path d="M185 225c55 12 90 45 105 95" />
+      </>
+    );
+  })();
+
+  return (
+    <svg
+      viewBox="0 0 300 500"
+      width="100%"
+      height="100%"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ display: "block" }}
+    >
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="10"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M150 70c28 0 50 22 50 50s-22 50-50 50-50-22-50-50 22-50 50-50z" />
+        <path d="M110 165c10 35 25 55 40 65s30 10 40 0 30-30 40-65" />
+        <path d="M120 232c0 55 10 115 30 165" />
+        <path d="M180 232c0 55-10 115-30 165" />
+        {arms}
+        <path d="M150 425c-24 0-42 18-42 42" />
+        <path d="M150 425c24 0 42 18 42 42" />
+      </g>
+    </svg>
+  );
+}
+
+
 ];
 
 function clamp(n, a, b) {
