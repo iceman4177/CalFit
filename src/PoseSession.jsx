@@ -27,23 +27,55 @@ import {
 } from "./lib/poseSessionStore.js";
 import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
 
-const POSES = [
-  {
-    key: "front_relaxed",
-    title: "Front Relaxed",
-    subtitle: "Stand tall · arms relaxed · shoulders + hips in frame",
-  },
-  {
-    key: "front_double_bi",
-    title: "Double Bi",
-    subtitle: "Hands up · elbows out · squeeze arms",
-  },
-  {
-    key: "back_double_bi",
-    title: "Back Double Bi",
-    subtitle: "Turn around · elbows up · spread back",
-  },
-];
+const DEFAULT_POSE_PLANS = {
+  male_bodybuilding: [
+    { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
+    { key: "lat_spread", title: "Lat Spread", subtitle: "Ribs up · spread lats · stay tall" },
+    { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
+  ],
+  female_pilates: [
+    { key: "front_relaxed", title: "Front Pose", subtitle: "Stand tall · relaxed arms · shoulders in frame" },
+    { key: "angle_45", title: "45° Angle", subtitle: "Turn slightly · long posture · relaxed" },
+    { key: "side_pose", title: "Side Pose", subtitle: "Turn sideways · tall spine · relaxed" },
+  ],
+  female_general: [
+    { key: "front_relaxed", title: "Front Pose", subtitle: "Stand tall · relaxed arms · shoulders in frame" },
+    { key: "angle_45", title: "45° Angle", subtitle: "Turn slightly · long posture · relaxed" },
+    { key: "side_pose", title: "Side Pose", subtitle: "Turn sideways · tall spine · relaxed" },
+  ],
+};
+
+function inferPosePlanFromLocalStorage() {
+  try {
+    const gender = String(window?.localStorage?.getItem("gender") || "").toLowerCase();
+    const trainingIntent = String(window?.localStorage?.getItem("training_intent") || "").toLowerCase();
+    const fitnessGoal = String(window?.localStorage?.getItem("fitness_goal") || "").toLowerCase();
+
+    const isFemale = gender === "female" || gender === "f";
+    const isMale = gender === "male" || gender === "m";
+
+    if (isMale) return { planKey: "male_bodybuilding", label: "Muscle", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
+
+    if (isFemale) {
+      const pilatesy =
+        trainingIntent.includes("pilates") ||
+        trainingIntent.includes("ton") ||
+        fitnessGoal.includes("weight") ||
+        fitnessGoal.includes("lose") ||
+        fitnessGoal.includes("tone");
+      return {
+        planKey: pilatesy ? "female_pilates" : "female_general",
+        label: pilatesy ? "Tone" : "Fitness",
+        poses: pilatesy ? DEFAULT_POSE_PLANS.female_pilates : DEFAULT_POSE_PLANS.female_general,
+      };
+    }
+
+    // Unknown gender: default to bodybuilding but keep copy positive/neutral.
+    return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
+  } catch {
+    return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
+  }
+}
 
 function clamp(n, a, b) {
   const x = Number(n);
@@ -130,6 +162,7 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   }
   if (!a) return null;
   const { midShoulder, midHip, shoulderWidth } = a;
+  if (!midShoulder || !midHip || typeof midShoulder.x !== "number" || typeof midHip.x !== "number") return null;
 
   const b = bboxLocal || bbox;
   const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
@@ -264,70 +297,91 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   return fitted;
 }
 
-function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
-  if (!ctx || !tpl) return;
+function drawNeonGhost(ctx, tpl, { w, h, glow = true, dim = false } = {}) {
+  // Smooth OUTLINE ONLY (no stick/skeleton lines).
+  // Also crash-proof if any landmark points are missing.
+  if (!ctx || !tpl || !w || !h) return;
+
+  const has = (k) => tpl && tpl[k] && typeof tpl[k].x === "number" && typeof tpl[k].y === "number";
+
+  // Core points (upper body + hips). Arms are optional.
+  if (!has("head") || !has("ls") || !has("rs") || (!has("lh") && !has("rh"))) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
 
-  const segs = [
-    ["head", "neck"],
-    ["neck", "ls"],
-    ["neck", "rs"],
-    ["ls", "le"],
-    ["le", "lw"],
-    ["rs", "re"],
-    ["re", "rw"],
-    ["ls", "rs"],
-    ["ls", "lh"],
-    ["rs", "rh"],
-    ["lh", "rh"],
-    ["lh", "lk"],
-    ["lk", "la"],
-    ["rh", "rk"],
-    ["rk", "ra"],
-  ];
+  const head = P(tpl.head);
+  const ls = P(tpl.ls);
+  const rs = P(tpl.rs);
+  const lh = has("lh") ? P(tpl.lh) : { x: (ls.x + rs.x) / 2 - (rs.x - ls.x) * 0.22, y: (ls.y + rs.y) / 2 + (rs.x - ls.x) * 0.9 };
+  const rh = has("rh") ? P(tpl.rh) : { x: (ls.x + rs.x) / 2 + (rs.x - ls.x) * 0.22, y: (ls.y + rs.y) / 2 + (rs.x - ls.x) * 0.9 };
 
+  // Optional arms
+  const le = has("le") ? P(tpl.le) : null;
+  const re = has("re") ? P(tpl.re) : null;
+  const lw = has("lw") ? P(tpl.lw) : null;
+  const rw = has("rw") ? P(tpl.rw) : null;
+
+  // Build an outer silhouette path:
+  // start at top of head -> left shoulder -> outer left arm -> left hip -> right hip -> outer right arm -> right shoulder -> back to top head
+  const shoulderW = Math.max(40, Math.min(w * 0.35, Math.hypot(rs.x - ls.x, rs.y - ls.y)));
+  const headR = Math.max(26, Math.min(70, shoulderW * 0.22));
+  const topHead = { x: head.x, y: head.y - headR };
+
+  const leftOuter = lw || le || { x: ls.x - shoulderW * 0.55, y: ls.y + shoulderW * 0.55 };
+  const rightOuter = rw || re || { x: rs.x + shoulderW * 0.55, y: rs.y + shoulderW * 0.55 };
+
+  // Clear + subtle vignette
   ctx.save();
   ctx.clearRect(0, 0, w, h);
-
-  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
+  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.85);
   grd.addColorStop(0, "rgba(0,0,0,0)");
   grd.addColorStop(1, "rgba(0,0,0,0.35)");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
+  const alpha = dim ? 0.55 : 1.0;
+  const baseWidth = Math.max(4, Math.round(Math.min(w, h) * 0.008));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
+  const drawPath = (isGlow) => {
+    ctx.beginPath();
+
+    // Top head -> left head -> left shoulder
+    ctx.moveTo(topHead.x, topHead.y);
+    ctx.quadraticCurveTo(head.x - headR * 1.15, head.y - headR * 0.35, ls.x - shoulderW * 0.12, ls.y - shoulderW * 0.08);
+
+    // Left shoulder -> left outer arm -> left hip
+    ctx.quadraticCurveTo(ls.x - shoulderW * 0.40, ls.y + shoulderW * 0.10, leftOuter.x, leftOuter.y);
+    ctx.quadraticCurveTo(leftOuter.x - shoulderW * 0.10, leftOuter.y + shoulderW * 0.35, lh.x - shoulderW * 0.05, lh.y);
+
+    // Left hip -> right hip (torso bottom)
+    const midHip = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+    ctx.quadraticCurveTo(midHip.x, midHip.y + shoulderW * 0.20, rh.x + shoulderW * 0.05, rh.y);
+
+    // Right hip -> right outer arm -> right shoulder
+    ctx.quadraticCurveTo(rightOuter.x + shoulderW * 0.10, rightOuter.y + shoulderW * 0.35, rightOuter.x, rightOuter.y);
+    ctx.quadraticCurveTo(rs.x + shoulderW * 0.40, rs.y + shoulderW * 0.10, rs.x + shoulderW * 0.12, rs.y - shoulderW * 0.08);
+
+    // Right shoulder -> top head
+    ctx.quadraticCurveTo(head.x + headR * 1.15, head.y - headR * 0.35, topHead.x, topHead.y);
+
+    ctx.closePath();
+    ctx.stroke();
+  };
+
   if (glow) {
-    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
-    ctx.lineWidth = baseWidth * 3.0;
-    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
-    ctx.shadowBlur = 18;
-    for (const [a, b] of segs) {
-      const A = P(tpl[a]);
-      const B = P(tpl[b]);
-      if (!A || !B) continue;
-      ctx.beginPath();
-      ctx.moveTo(A.x, A.y);
-      ctx.lineTo(B.x, B.y);
-      ctx.stroke();
-    }
+    ctx.strokeStyle = `rgba(0, 255, 190, ${0.22 * alpha})`;
+    ctx.lineWidth = baseWidth * 3.2;
+    ctx.shadowColor = `rgba(0, 255, 190, ${0.55 * alpha})`;
+    ctx.shadowBlur = 22;
+    drawPath(true);
   }
 
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
+  ctx.strokeStyle = `rgba(0, 255, 190, ${0.92 * alpha})`;
   ctx.lineWidth = baseWidth * 1.15;
-  for (const [a, b] of segs) {
-    const A = P(tpl[a]);
-    const B = P(tpl[b]);
-    if (!A || !B) continue;
-    ctx.beginPath();
-    ctx.moveTo(A.x, A.y);
-    ctx.lineTo(B.x, B.y);
-    ctx.stroke();
-  }
+  drawPath(false);
 
   ctx.restore();
 }
@@ -402,7 +456,7 @@ function synthesizePositiveSession({ prevSession, todayISO }) {
   };
 }
 
-async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
+async function scorePoseSessionWithAI({ poses, prevSession, todayISO, posePlan }) {
   // IMPORTANT: never block the results screen.
   // If AI is slow/fails, we fall back to a positive local session.
   const fallback = synthesizePositiveSession({ prevSession, todayISO });
@@ -435,8 +489,11 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
         feature: "pose_session",
         poses: poses.map((p) => ({
           poseKey: p.pose_key,
+          title: p.title || "",
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
+        track: posePlan?.planKey || "",
+        track_label: posePlan?.label || "",
         prev: prevSession || null,
         today_local_day: todayISO,
       }),
@@ -474,13 +531,20 @@ export default function PoseSession() {
   const prevHistory = useMemo(() => readPoseSessionHistory(userId), [userId]);
   const prevSession = prevHistory?.[0] || null;
 
+  const posePlan = useMemo(() => {
+    if (typeof window === "undefined") return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
+    return inferPosePlanFromLocalStorage();
+  }, []);
+
+  const POSES = posePlan?.poses || DEFAULT_POSE_PLANS.male_bodybuilding;
+
   const [cameraFacing, setCameraFacing] = useState("user");
   const [captureLayout] = useState("portrait");
   const [step, setStep] = useState(0);
   const [started, setStarted] = useState(false);
   const [autoSnap, setAutoSnap] = useState(true);
   const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Step into frame");
+  const [lockHint, setLockHint] = useState("Step into view");
   const [captures, setCaptures] = useState([]);
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
@@ -494,7 +558,7 @@ export default function PoseSession() {
   const stableRef = useRef({ okFrames: 0, inFrameFrames: 0, prevLm: null, lastDetectAt: 0 });
   const captureGuardRef = useRef({ busy: false, lastAt: 0 });
 
-  const pose = POSES[Math.min(step, POSES.length - 1)];
+  const pose = POSES[Math.min(step, Math.max(0, POSES.length - 1))];
   const isResults = step >= POSES.length;
 
   const stopStream = useCallback(() => {
@@ -580,7 +644,7 @@ export default function PoseSession() {
 
       setCaptures((cur) => [
         ...cur,
-        { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+        { pose_key: pose.key, title: pose.title, image_data_url: dataUrl, ai_image_data_url: aiThumb },
       ]);
 
       setLocked(false);
@@ -681,156 +745,75 @@ export default function PoseSession() {
           }
         }
 
-        // ---- Framing gate (simple + robust: head/shoulders/arms only) ----
-        // Goal: work on mobile + desktop without flicker.
-        // Require: nose + both shoulders (primary). Arms (elbows/wrists) are optional.
-        const IDX = {
-          NOSE: 0,
-          L_SHOULDER: 11,
-          R_SHOULDER: 12,
-          L_ELBOW: 13,
-          R_ELBOW: 14,
-          L_WRIST: 15,
-          R_WRIST: 16,
-          L_HIP: 23,
-          R_HIP: 24,
-        };
-
-        const safeP = (arr, i) => {
-          const p = arr && arr[i];
-          if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
-          return p;
-        };
-
-        const pts = [];
-        const pN = safeP(landmarks, IDX.NOSE);
-        const pLS = safeP(landmarks, IDX.L_SHOULDER);
-        const pRS = safeP(landmarks, IDX.R_SHOULDER);
-        const pLE = safeP(landmarks, IDX.L_ELBOW);
-        const pRE = safeP(landmarks, IDX.R_ELBOW);
-        const pLW = safeP(landmarks, IDX.L_WRIST);
-        const pRW = safeP(landmarks, IDX.R_WRIST);
-        const pLH = safeP(landmarks, IDX.L_HIP);
-        const pRH = safeP(landmarks, IDX.R_HIP);
-
-        if (pN) pts.push(pN);
-        if (pLS) pts.push(pLS);
-        if (pRS) pts.push(pRS);
-        if (pLE) pts.push(pLE);
-        if (pRE) pts.push(pRE);
-        if (pLW) pts.push(pLW);
-        if (pRW) pts.push(pRW);
-
-        // Fallback: include hips only to improve auto-resize (NOT required for framing).
-        if (pts.length < 4) {
-          if (pLH) pts.push(pLH);
-          if (pRH) pts.push(pRH);
-        }
-
-        // Build a bbox from available points (in *canvas* coords).
-        let upperBBox = null;
-        if (pts.length >= 3) {
-          let minX = 1, minY = 1, maxX = 0, maxY = 0;
-          for (const p of pts) {
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x);
-            maxY = Math.max(maxY, p.y);
-          }
-          // pad a bit so the ghost wraps around arms/head nicely
-          const padX = (maxX - minX) * 0.18 + 0.04;
-          const padY = (maxY - minY) * 0.18 + 0.04;
-          upperBBox = {
-            minX: clamp(minX - padX, 0, 1),
-            minY: clamp(minY - padY, 0, 1),
-            maxX: clamp(maxX + padX, 0, 1),
-            maxY: clamp(maxY + padY, 0, 1),
-          };
-        }
-
-        // Primary "in frame" requirement: nose + both shoulders.
-        const haveCore = !!(pN && pLS && pRS);
+        // ---- Framing gate (simple, forgiving) ----
+        // We only require HEAD + SHOULDERS (and ideally upper arms) visible.
+        // This avoids the hips/ROI flicker across devices and distances.
         let inFrameRaw = false;
+        let upperBodyOk = false;
 
-        if (haveCore && upperBBox) {
-          const b = upperBBox;
+        if (bbox) {
+          const b = bboxLocal || bbox;
           const bboxH = b.maxY - b.minY;
           const bboxW = b.maxX - b.minX;
 
-          // Head must be visible, and we need enough width for shoulders/arms.
-          const headOk = b.minY <= 0.42;
-          const sizeOk = bboxH >= 0.26 && bboxW >= 0.22;
+          const headOk = b.minY <= 0.36; // head not cut off
+          const shouldersOk = b.maxY >= 0.46; // includes shoulders + upper torso
+          const sizeOk = bboxH >= 0.22 && bboxW >= 0.18; // not too tiny
           const notTooClose = bboxH <= 0.92 && bboxW <= 0.92;
 
-          inFrameRaw = headOk && sizeOk && notTooClose;
+          upperBodyOk = headOk && shouldersOk && sizeOk && notTooClose;
+          inFrameRaw = upperBodyOk;
         }
 
         // hysteresis (prevents flicker)
         fr.inFrameFrames = fr.inFrameFrames || 0;
         fr.inFrameFrames = inFrameRaw
-          ? Math.min(22, fr.inFrameFrames + 1)
+          ? Math.min(20, fr.inFrameFrames + 1)
           : Math.max(0, fr.inFrameFrames - 2);
         const inFrame = fr.inFrameFrames >= 6;
 
-        // stability from landmark movement (core points only; ignore nulls)
+        // stability from landmark movement
         let stable = false;
         if (landmarks && landmarks.length) {
           const prevLm = fr.prevLm;
           if (prevLm && prevLm.length === landmarks.length) {
-            const stableIdx = [
-              IDX.NOSE,
-              IDX.L_SHOULDER,
-              IDX.R_SHOULDER,
-              IDX.L_ELBOW,
-              IDX.R_ELBOW,
-            ];
             let sum = 0;
-            let count = 0;
-            for (const i of stableIdx) {
-              const a = safeP(landmarks, i);
-              const b = safeP(prevLm, i);
-              if (!a || !b) continue;
-              const dx = a.x - b.x;
-              const dy = a.y - b.y;
+            for (let i = 0; i < landmarks.length; i++) {
+              const dx = landmarks[i].x - prevLm[i].x;
+              const dy = landmarks[i].y - prevLm[i].y;
               sum += Math.sqrt(dx * dx + dy * dy);
-              count += 1;
             }
-            const avg = count ? sum / count : 999;
-            stable = avg < 0.006;
+            const avg = sum / landmarks.length;
+            stable = avg < 0.0048;
           }
-          // store a shallow copy to avoid accidental mutation surprises
-          fr.prevLm = landmarks.map((p) => (p ? { ...p } : p));
+          fr.prevLm = landmarks;
         }
 
-        // draw overlay (always show guide + ghost; dim when not inFrame)
-        ctx.clearRect(0, 0, w, h);
-        if (visCanvas) {
+        // draw overlay
+        if (!bbox || !visCanvas) {
+          ctx.clearRect(0, 0, w, h);
+        } else if (!inFrame) {
           drawFramingGuide(ctx, visCanvas, { w, h });
-
-          const bForTpl = upperBBox || (bboxLocal || bbox);
-          const tpl = buildPoseTemplate(pose.key, anchors, bForTpl, {
-            bboxLocal: bboxToLocal(bForTpl, visCanvas),
-            upperBodyOnly: true,
+        } else {
+          const tpl = buildPoseTemplate(pose.key, anchors, bbox, {
+            bboxLocal,
+            upperBodyOnly: upperBodyOk,
           });
-
-          if (tpl) {
-            drawNeonGhost(ctx, tpl, { w, h, glow: inFrame });
-          }
+          drawNeonGhost(ctx, tpl, { w, h, glow: true });
         }
 
-        // lock gating (keep it simple: inFrame + stable + decent match)
-// lock gating (forgiving, matches earlier behavior)
-        const ok = haveCore && inFrame && stable && match >= 0.62;
+        // lock gating (forgiving, matches earlier behavior)
+        const ok = inFrame && match >= 0.66;
 
-        if (!haveCore) {
+        if (!bbox) {
           setLocked(false);
           setLockHint("Step into view");
           fr.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
-          setLockHint("Put head + shoulders + arms in frame");
+          setLockHint("Center head + shoulders in frame");
           fr.okFrames = 0;
-        } else if (match < 0.62) {
+        } else if (match < 0.66) {
           setLocked(false);
           setLockHint("Match the neon outline");
           fr.okFrames = 0;
@@ -839,7 +822,7 @@ export default function PoseSession() {
           setLockHint("Hold still…");
           fr.okFrames = 0;
         } else {
-          fr.okFrames = Math.min(40, (fr.okFrames || 0) + 1);
+          fr.okFrames = Math.min(30, (fr.okFrames || 0) + 1);
           setLocked(true);
           setLockHint("LOCKED ✅");
         }
@@ -883,6 +866,7 @@ export default function PoseSession() {
         poses: captures,
         prevSession,
         todayISO,
+        posePlan,
       });
 
       if (canceled) return;
@@ -909,7 +893,7 @@ export default function PoseSession() {
     return () => {
       canceled = true;
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId, posePlan]);
 
   const latestRecord = useMemo(() => {
     try {
@@ -1084,11 +1068,15 @@ export default function PoseSession() {
             </Box>
 
             <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Button fullWidth variant="outlined" onClick={() => onCapture()}>
+              <Button fullWidth variant="contained" startIcon={<CameraAltIcon />} onClick={() => onCapture()}>
                 Capture now
               </Button>
-              <Button fullWidth variant="contained" onClick={() => setAutoSnap((a) => !a)}>
-                {autoSnap ? "Auto snap On" : "Auto snap Off"}
+              <Button
+                variant="outlined"
+                onClick={() => setCameraFacing((f) => (f === "user" ? "environment" : "user"))}
+                startIcon={<FlipCameraAndroidIcon />}
+              >
+                Flip
               </Button>
             </Stack>
           </CardContent>
@@ -1107,7 +1095,7 @@ export default function PoseSession() {
 
             {scanBusy ? (
               <Typography sx={{ fontWeight: 800, color: "rgba(220,255,245,0.9)" }}>
-                Finalizing your share card…
+                Generating your private AI analysis…
               </Typography>
             ) : (
               <>
@@ -1117,6 +1105,16 @@ export default function PoseSession() {
                       ? "Nice — your momentum is building. Keep showing up."
                       : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
+
+                {(aiSession?.breakdown || []).slice(0, 3).length ? (
+                  <Stack spacing={0.75} sx={{ mt: 1 }}>
+                    {(aiSession.breakdown || []).slice(0, 3).map((t, idx) => (
+                      <Typography key={idx} sx={{ fontSize: 13, color: "rgba(220,255,245,0.82)", fontWeight: 650 }}>
+                        {t}
+                      </Typography>
+                    ))}
+                  </Stack>
+                ) : null}
 
                 {deltas ? (
                   <Box sx={{ mt: 1.25 }}>

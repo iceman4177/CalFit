@@ -156,6 +156,19 @@ export async function buildPoseSessionSharePng({
     ctx.strokeStyle = "rgba(0,255,190,0.22)";
     ctx.stroke();
     ctx.restore();
+
+    // label
+    const lbl = (poseTitles && poseTitles[i]) ? String(poseTitles[i]).slice(0, 18) : "";
+    if (lbl) {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.50)";
+      roundRectPath(ctx, x + 14, y + imgH - 54, Math.min(imgW - 28, 240), 40, 14);
+      ctx.fill();
+      ctx.fillStyle = "rgba(233,255,248,0.92)";
+      ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+      ctx.fillText(lbl, x + 28, y + imgH - 26);
+      ctx.restore();
+    }
   }
 
   // sections
@@ -198,6 +211,54 @@ export async function buildPoseSessionSharePng({
 
   drawSection("Wins", wins, "rgba(0,255,190,0.18)");
   drawSection("Next unlocks", levers, "rgba(0,255,255,0.18)");
+
+  // optional signals (simple bars, always positive framing)
+  if (muscleSignals && typeof muscleSignals === "object") {
+    const order = [
+      ["chest", "Chest"],
+      ["lats", "Lats"],
+      ["delts", "Delts"],
+      ["arms", "Arms"],
+      ["waist_taper", "Taper"],
+    ];
+    ctx.fillStyle = "#E9FFF8";
+    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText(trackLabel ? `Signals · ${String(trackLabel).slice(0, 14)}` : "Signals", textX, y);
+    y += 26;
+
+    const barW = cardW - 52;
+    const barH = 18;
+    const rowGap = 18;
+
+    for (const [k, label] of order) {
+      const v = clamp(muscleSignals?.[k] ?? 0.6, 0, 1);
+
+      ctx.fillStyle = "rgba(233,255,248,0.86)";
+      ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
+      ctx.fillText(label, textX, y + 24);
+
+      const bx = textX + 180;
+      const by = y + 10;
+
+      // track
+      ctx.save();
+      roundRectPath(ctx, bx, by, barW - 180, barH, 10);
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fill();
+      ctx.restore();
+
+      // fill
+      ctx.save();
+      roundRectPath(ctx, bx, by, (barW - 180) * v, barH, 10);
+      ctx.fillStyle = "rgba(0,255,190,0.40)";
+      ctx.fill();
+      ctx.restore();
+
+      y += barH + rowGap;
+    }
+
+    y += 10;
+  }
 
   // footer
   ctx.fillStyle = "rgba(233,255,248,0.55)";
