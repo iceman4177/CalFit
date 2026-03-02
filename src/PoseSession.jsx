@@ -27,55 +27,23 @@ import {
 } from "./lib/poseSessionStore.js";
 import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
 
-const DEFAULT_POSE_PLANS = {
-  male_bodybuilding: [
-    { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
-    { key: "lat_spread", title: "Lat Spread", subtitle: "Ribs up · spread lats · stay tall" },
-    { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
-  ],
-  female_pilates: [
-    { key: "front_relaxed", title: "Front Pose", subtitle: "Stand tall · relaxed arms · shoulders in frame" },
-    { key: "angle_45", title: "45° Angle", subtitle: "Turn slightly · long posture · relaxed" },
-    { key: "side_pose", title: "Side Pose", subtitle: "Turn sideways · tall spine · relaxed" },
-  ],
-  female_general: [
-    { key: "front_relaxed", title: "Front Pose", subtitle: "Stand tall · relaxed arms · shoulders in frame" },
-    { key: "angle_45", title: "45° Angle", subtitle: "Turn slightly · long posture · relaxed" },
-    { key: "side_pose", title: "Side Pose", subtitle: "Turn sideways · tall spine · relaxed" },
-  ],
-};
-
-function inferPosePlanFromLocalStorage() {
-  try {
-    const gender = String(window?.localStorage?.getItem("gender") || "").toLowerCase();
-    const trainingIntent = String(window?.localStorage?.getItem("training_intent") || "").toLowerCase();
-    const fitnessGoal = String(window?.localStorage?.getItem("fitness_goal") || "").toLowerCase();
-
-    const isFemale = gender === "female" || gender === "f";
-    const isMale = gender === "male" || gender === "m";
-
-    if (isMale) return { planKey: "male_bodybuilding", label: "Muscle", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
-
-    if (isFemale) {
-      const pilatesy =
-        trainingIntent.includes("pilates") ||
-        trainingIntent.includes("ton") ||
-        fitnessGoal.includes("weight") ||
-        fitnessGoal.includes("lose") ||
-        fitnessGoal.includes("tone");
-      return {
-        planKey: pilatesy ? "female_pilates" : "female_general",
-        label: pilatesy ? "Tone" : "Fitness",
-        poses: pilatesy ? DEFAULT_POSE_PLANS.female_pilates : DEFAULT_POSE_PLANS.female_general,
-      };
-    }
-
-    // Unknown gender: default to bodybuilding but keep copy positive/neutral.
-    return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
-  } catch {
-    return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
-  }
-}
+const POSES = [
+  {
+    key: "front_relaxed",
+    title: "Front Relaxed",
+    subtitle: "Stand tall · arms relaxed · shoulders + hips in frame",
+  },
+  {
+    key: "front_double_bi",
+    title: "Double Bi",
+    subtitle: "Hands up · elbows out · squeeze arms",
+  },
+  {
+    key: "back_double_bi",
+    title: "Back Double Bi",
+    subtitle: "Turn around · elbows up · spread back",
+  },
+];
 
 function clamp(n, a, b) {
   const x = Number(n);
@@ -162,7 +130,6 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   }
   if (!a) return null;
   const { midShoulder, midHip, shoulderWidth } = a;
-  if (!midShoulder || !midHip || typeof midShoulder.x !== "number" || typeof midHip.x !== "number") return null;
 
   const b = bboxLocal || bbox;
   const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
@@ -297,204 +264,150 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   return fitted;
 }
 
-function drawNeonGhost(ctx, tpl, { w, h, glow = true, dim = false } = {}) {
-  // Smooth OUTLINE ONLY (no stick/skeleton lines).
-  // Also crash-proof if any landmark points are missing.
-  if (!ctx || !tpl || !w || !h) return;
-
-  const has = (k) => tpl && tpl[k] && typeof tpl[k].x === "number" && typeof tpl[k].y === "number";
-
-  // Core points (upper body + hips). Arms are optional.
-  if (!has("head") || !has("ls") || !has("rs") || (!has("lh") && !has("rh"))) return;
+function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
+  if (!ctx || !tpl) return;
 
   const P = (p) => ({ x: p.x * w, y: p.y * h });
 
-  const head = P(tpl.head);
-  const ls = P(tpl.ls);
-  const rs = P(tpl.rs);
-  const lh = has("lh") ? P(tpl.lh) : { x: (ls.x + rs.x) / 2 - (rs.x - ls.x) * 0.22, y: (ls.y + rs.y) / 2 + (rs.x - ls.x) * 0.9 };
-  const rh = has("rh") ? P(tpl.rh) : { x: (ls.x + rs.x) / 2 + (rs.x - ls.x) * 0.22, y: (ls.y + rs.y) / 2 + (rs.x - ls.x) * 0.9 };
+  const segs = [
+    ["head", "neck"],
+    ["neck", "ls"],
+    ["neck", "rs"],
+    ["ls", "le"],
+    ["le", "lw"],
+    ["rs", "re"],
+    ["re", "rw"],
+    ["ls", "rs"],
+    ["ls", "lh"],
+    ["rs", "rh"],
+    ["lh", "rh"],
+    ["lh", "lk"],
+    ["lk", "la"],
+    ["rh", "rk"],
+    ["rk", "ra"],
+  ];
 
-  // Optional arms
-  const le = has("le") ? P(tpl.le) : null;
-  const re = has("re") ? P(tpl.re) : null;
-  const lw = has("lw") ? P(tpl.lw) : null;
-  const rw = has("rw") ? P(tpl.rw) : null;
-
-  // Build an outer silhouette path:
-  // start at top of head -> left shoulder -> outer left arm -> left hip -> right hip -> outer right arm -> right shoulder -> back to top head
-  const shoulderW = Math.max(40, Math.min(w * 0.35, Math.hypot(rs.x - ls.x, rs.y - ls.y)));
-  const headR = Math.max(26, Math.min(70, shoulderW * 0.22));
-  const topHead = { x: head.x, y: head.y - headR };
-
-  const leftOuter = lw || le || { x: ls.x - shoulderW * 0.55, y: ls.y + shoulderW * 0.55 };
-  const rightOuter = rw || re || { x: rs.x + shoulderW * 0.55, y: rs.y + shoulderW * 0.55 };
-
-  // Clear + subtle vignette
   ctx.save();
   ctx.clearRect(0, 0, w, h);
-  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.85);
+
+  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
   grd.addColorStop(0, "rgba(0,0,0,0)");
   grd.addColorStop(1, "rgba(0,0,0,0.35)");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  const alpha = dim ? 0.55 : 1.0;
-  const baseWidth = Math.max(4, Math.round(Math.min(w, h) * 0.008));
+  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  const drawPath = (isGlow) => {
-    ctx.beginPath();
-
-    // Top head -> left head -> left shoulder
-    ctx.moveTo(topHead.x, topHead.y);
-    ctx.quadraticCurveTo(head.x - headR * 1.15, head.y - headR * 0.35, ls.x - shoulderW * 0.12, ls.y - shoulderW * 0.08);
-
-    // Left shoulder -> left outer arm -> left hip
-    ctx.quadraticCurveTo(ls.x - shoulderW * 0.40, ls.y + shoulderW * 0.10, leftOuter.x, leftOuter.y);
-    ctx.quadraticCurveTo(leftOuter.x - shoulderW * 0.10, leftOuter.y + shoulderW * 0.35, lh.x - shoulderW * 0.05, lh.y);
-
-    // Left hip -> right hip (torso bottom)
-    const midHip = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
-    ctx.quadraticCurveTo(midHip.x, midHip.y + shoulderW * 0.20, rh.x + shoulderW * 0.05, rh.y);
-
-    // Right hip -> right outer arm -> right shoulder
-    ctx.quadraticCurveTo(rightOuter.x + shoulderW * 0.10, rightOuter.y + shoulderW * 0.35, rightOuter.x, rightOuter.y);
-    ctx.quadraticCurveTo(rs.x + shoulderW * 0.40, rs.y + shoulderW * 0.10, rs.x + shoulderW * 0.12, rs.y - shoulderW * 0.08);
-
-    // Right shoulder -> top head
-    ctx.quadraticCurveTo(head.x + headR * 1.15, head.y - headR * 0.35, topHead.x, topHead.y);
-
-    ctx.closePath();
-    ctx.stroke();
-  };
-
   if (glow) {
-    ctx.strokeStyle = `rgba(0, 255, 190, ${0.22 * alpha})`;
-    ctx.lineWidth = baseWidth * 3.2;
-    ctx.shadowColor = `rgba(0, 255, 190, ${0.55 * alpha})`;
-    ctx.shadowBlur = 22;
-    drawPath(true);
+    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
+    ctx.lineWidth = baseWidth * 3.0;
+    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
+    ctx.shadowBlur = 18;
+    for (const [a, b] of segs) {
+      const A = P(tpl[a]);
+      const B = P(tpl[b]);
+      if (!A || !B) continue;
+      ctx.beginPath();
+      ctx.moveTo(A.x, A.y);
+      ctx.lineTo(B.x, B.y);
+      ctx.stroke();
+    }
   }
 
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = `rgba(0, 255, 190, ${0.92 * alpha})`;
+  ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
   ctx.lineWidth = baseWidth * 1.15;
-  drawPath(false);
+  for (const [a, b] of segs) {
+    const A = P(tpl[a]);
+    const B = P(tpl[b]);
+    if (!A || !B) continue;
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
+  }
 
   ctx.restore();
 }
 
 
-function drawUpperBodyOutline(ctx, { w, h, nose, ls, rs, locked = false } = {}) {
-  if (!ctx || !w || !h || !nose || !ls || !rs) return;
+function drawUpperBodyShell(ctx, shell, { w, h, locked }) {
+  if (!ctx || !shell) return;
+  const { cx, cy, shellW, shellH } = shell;
 
-  // All coords are normalized (0..1) in canvas space.
-  const cx = (ls.x + rs.x) / 2;
-  const cy = (ls.y + rs.y) / 2;
-  const sw = Math.max(0.001, Math.abs(rs.x - ls.x));
+  // Smooth outline path (upper-body "capsule" with gentle shoulder/arm flare)
+  const halfW = shellW / 2;
+  const halfH = shellH / 2;
 
-  // Build a smooth "upper-body shell" (no skeleton / no boxes).
-  const topY = Math.max(0.02, nose.y - sw * 1.15);
-  const neckY = cy - sw * 0.25;
-  const shoulderY = cy;
-  const midY = cy + sw * 0.65;
-  const botY = cy + sw * 2.10;
+  // Keep within canvas bounds a bit
+  const x0 = clamp(cx - halfW, 8, w - 8);
+  const x1 = clamp(cx + halfW, 8, w - 8);
+  const y0 = clamp(cy - halfH * 0.92, 8, h - 8);
+  const y1 = clamp(cy + halfH * 0.92, 8, h - 8);
 
-  const leftShoulderX = cx - sw * 1.05;
-  const rightShoulderX = cx + sw * 1.05;
+  const ww = x1 - x0;
+  const hh = y1 - y0;
 
-  const leftArmX = cx - sw * 2.05;
-  const rightArmX = cx + sw * 2.05;
+  const rTop = Math.min(ww, hh) * 0.42;   // big head/shoulder round
+  const rBot = Math.min(ww, hh) * 0.22;   // smaller bottom round
 
-  const leftBotX = cx - sw * 1.35;
-  const rightBotX = cx + sw * 1.35;
-
-  const px = (x) => x * w;
-  const py = (y) => y * h;
-
-  ctx.save();
-  ctx.clearRect(0, 0, w, h);
-
-  // Neon stroke
-  ctx.lineWidth = Math.max(3, Math.min(10, w * 0.008));
-  ctx.strokeStyle = locked ? "rgba(120,255,220,0.95)" : "rgba(120,255,220,0.45)";
-  ctx.shadowColor = locked ? "rgba(0,255,190,0.55)" : "rgba(0,255,190,0.28)";
-  ctx.shadowBlur = locked ? 22 : 14;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  ctx.beginPath();
-  // Start at top center
-  ctx.moveTo(px(cx), py(topY));
-  // Top right head curve
-  ctx.bezierCurveTo(px(cx + sw * 0.85), py(topY + sw * 0.10), px(rightShoulderX + sw * 0.55), py(neckY - sw * 0.10), px(rightShoulderX), py(neckY));
-  // Right shoulder to right arm bulge
-  ctx.bezierCurveTo(px(rightShoulderX + sw * 0.60), py(shoulderY + sw * 0.15), px(rightArmX), py(midY - sw * 0.10), px(rightArmX - sw * 0.10), py(midY + sw * 0.25));
-  // Down to bottom right
-  ctx.bezierCurveTo(px(rightArmX - sw * 0.10), py(midY + sw * 1.10), px(rightBotX + sw * 0.35), py(botY - sw * 0.20), px(rightBotX), py(botY));
-  // Bottom curve to left
-  ctx.bezierCurveTo(px(cx + sw * 0.35), py(botY + sw * 0.25), px(cx - sw * 0.35), py(botY + sw * 0.25), px(leftBotX), py(botY));
-  // Up left side
-  ctx.bezierCurveTo(px(leftBotX - sw * 0.35), py(botY - sw * 0.20), px(leftArmX + sw * 0.10), py(midY + sw * 1.10), px(leftArmX + sw * 0.10), py(midY + sw * 0.25));
-  // Left arm bulge to shoulder
-  ctx.bezierCurveTo(px(leftArmX), py(midY - sw * 0.10), px(leftShoulderX - sw * 0.60), py(shoulderY + sw * 0.15), px(leftShoulderX), py(neckY));
-  // Top left head curve back to start
-  ctx.bezierCurveTo(px(leftShoulderX - sw * 0.55), py(neckY - sw * 0.10), px(cx - sw * 0.85), py(topY + sw * 0.10), px(cx), py(topY));
-
-  ctx.stroke();
-  ctx.restore();
-}
-function drawFramingGuide(ctx, visCanvas, { w, h }) {
-  if (!ctx || !visCanvas) return;
-
-  const vx = visCanvas.minX * w;
-  const vy = visCanvas.minY * h;
-  const vw = visCanvas.w * w;
-  const vh = visCanvas.h * h;
-
-  const padX = vw * 0.18;
-  const padTop = vh * 0.10;
-  const padBottom = vh * 0.10;
-
-  const rx = vx + padX;
-  const ry = vy + padTop;
-  const rw = vw - padX * 2;
-  const rh = vh - padTop - padBottom;
+  // Control points for a slightly "human" flare
+  const flare = ww * 0.14;
+  const neckIn = ww * 0.08;
+  const shoulderY = y0 + hh * 0.28;
+  const waistY = y0 + hh * 0.78;
 
   ctx.save();
-  ctx.lineWidth = Math.max(3, Math.round(Math.min(w, h) * 0.006));
-  ctx.strokeStyle = "rgba(0, 255, 214, 0.75)";
-  ctx.shadowColor = "rgba(0, 255, 214, 0.9)";
-  ctx.shadowBlur = 18;
 
-  const r = Math.min(rw, rh) * 0.06;
+  // Dim when not locked
+  const alpha = locked ? 0.95 : 0.55;
+
+  // Outer glow pass
   ctx.beginPath();
-  ctx.moveTo(rx + r, ry);
-  ctx.lineTo(rx + rw - r, ry);
-  ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r);
-  ctx.lineTo(rx + rw, ry + rh - r);
-  ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r, ry + rh);
-  ctx.lineTo(rx + r, ry + rh);
-  ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r);
-  ctx.lineTo(rx, ry + r);
-  ctx.quadraticCurveTo(rx, ry, rx + r, ry);
+  ctx.moveTo(cx - neckIn, y0 + rTop * 0.45);
+  ctx.quadraticCurveTo(x0, y0 + rTop * 0.10, x0 + rTop * 0.25, y0);
+  ctx.quadraticCurveTo(cx, y0 - rTop * 0.15, x1 - rTop * 0.25, y0);
+  ctx.quadraticCurveTo(x1, y0 + rTop * 0.10, cx + neckIn, y0 + rTop * 0.45);
+
+  // Right side (arm space flare)
+  ctx.bezierCurveTo(
+    x1 + flare, shoulderY,
+    x1 + flare * 0.65, waistY,
+    x1 - rBot * 0.35, y1 - rBot * 0.10
+  );
+
+  // Bottom curve
+  ctx.quadraticCurveTo(cx, y1 + rBot * 0.25, x0 + rBot * 0.35, y1 - rBot * 0.10);
+
+  // Left side
+  ctx.bezierCurveTo(
+    x0 - flare * 0.65, waistY,
+    x0 - flare, shoulderY,
+    cx - neckIn, y0 + rTop * 0.45
+  );
+
   ctx.closePath();
+
+  const baseW = Math.max(3, Math.round(Math.min(w, h) * 0.006));
+
+  // Glow
+  ctx.strokeStyle = `rgba(0, 255, 200, ${0.25 * alpha})`;
+  ctx.lineWidth = baseW * 3.2;
+  ctx.shadowColor = `rgba(0, 255, 200, ${0.55 * alpha})`;
+  ctx.shadowBlur = 22;
   ctx.stroke();
 
+  // Core stroke
   ctx.shadowBlur = 0;
-  ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.004));
-  ctx.strokeStyle = "rgba(0, 255, 214, 0.55)";
-  ctx.beginPath();
-  ctx.moveTo(rx, ry + rh * 0.22);
-  ctx.lineTo(rx + rw, ry + rh * 0.22);
-  ctx.moveTo(rx, ry + rh * 0.62);
-  ctx.lineTo(rx + rw, ry + rh * 0.62);
+  ctx.strokeStyle = `rgba(0, 255, 214, ${0.92 * alpha})`;
+  ctx.lineWidth = baseW * 1.2;
   ctx.stroke();
 
   ctx.restore();
 }
+
 
 function synthesizePositiveSession({ prevSession, todayISO }) {
   const headline = prevSession ? "Progress update" : "Baseline locked ✅";
@@ -516,7 +429,7 @@ function synthesizePositiveSession({ prevSession, todayISO }) {
   };
 }
 
-async function scorePoseSessionWithAI({ poses, prevSession, todayISO, posePlan }) {
+async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
   // IMPORTANT: never block the results screen.
   // If AI is slow/fails, we fall back to a positive local session.
   const fallback = synthesizePositiveSession({ prevSession, todayISO });
@@ -549,11 +462,8 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO, posePlan }
         feature: "pose_session",
         poses: poses.map((p) => ({
           poseKey: p.pose_key,
-          title: p.title || "",
           image_data_url: p.ai_image_data_url || p.image_data_url,
         })),
-        track: posePlan?.planKey || "",
-        track_label: posePlan?.label || "",
         prev: prevSession || null,
         today_local_day: todayISO,
       }),
@@ -591,20 +501,13 @@ export default function PoseSession() {
   const prevHistory = useMemo(() => readPoseSessionHistory(userId), [userId]);
   const prevSession = prevHistory?.[0] || null;
 
-  const posePlan = useMemo(() => {
-    if (typeof window === "undefined") return { planKey: "male_bodybuilding", label: "Build", poses: DEFAULT_POSE_PLANS.male_bodybuilding };
-    return inferPosePlanFromLocalStorage();
-  }, []);
-
-  const POSES = posePlan?.poses || DEFAULT_POSE_PLANS.male_bodybuilding;
-
   const [cameraFacing, setCameraFacing] = useState("user");
   const [captureLayout] = useState("portrait");
   const [step, setStep] = useState(0);
   const [started, setStarted] = useState(false);
   const [autoSnap, setAutoSnap] = useState(true);
   const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Step into view");
+  const [lockHint, setLockHint] = useState("Step into frame");
   const [captures, setCaptures] = useState([]);
   const [scanBusy, setScanBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
@@ -615,12 +518,19 @@ export default function PoseSession() {
   const overlayRef = useRef(null);
   const rafRef = useRef(0);
 
-  const stableRef = useRef({ okFrames: 0, inFrameFrames: 0, prevLm: null, lastDetectAt: 0 });
+  const stableRef = useRef({ okFrames: 0, inFrameFrames: 0, prevLm: null, lastDetectAt: 0, prevShell: null, poseStartAt: 0, inFrameSince: 0, stableSince: 0 });
+  const stepChangedRef = useRef(false);
   const captureGuardRef = useRef({ busy: false, lastAt: 0 });
 
-  const pose = POSES[Math.min(step, Math.max(0, POSES.length - 1))];
+  const pose = POSES[Math.min(step, POSES.length - 1)];
   const isResults = step >= POSES.length;
 
+
+  // Mark step transitions so the capture loop can reset timers cleanly.
+  useEffect(() => {
+    if (!started) return;
+    stepChangedRef.current = true;
+  }, [step, started]);
   const stopStream = useCallback(() => {
     try {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -704,7 +614,7 @@ export default function PoseSession() {
 
       setCaptures((cur) => [
         ...cur,
-        { pose_key: pose.key, title: pose.title, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+        { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
       ]);
 
       setLocked(false);
@@ -720,197 +630,250 @@ export default function PoseSession() {
     }
   }, [pose.key, step, cameraFacing]);
 
+  // Keypoint loop: detect pose and update lock state + draw ghost
+  useEffect(() => {
+    if (!started) return;
+    if (isResults) return;
 
-// Capture loop (Patch C):
-// - Use MediaPipe Pose ONLY to detect nose + shoulders (person-in-frame + scale)
-// - Draw a single smooth upper-body outline (no skeleton / no boxes)
-// - Auto-capture on stability timer (no pose-match gating)
-useEffect(() => {
-  if (!started) return;
-  if (isResults) return;
+    let alive = true;
+    let landmarker = null;
 
-  let alive = true;
-  let landmarker = null;
+    const run = async () => {
+      landmarker = await getPoseLandmarker();
+      const v = videoRef.current;
+      const canvas = overlayRef.current;
+      if (!v || !canvas) return;
 
-  const run = async () => {
-    landmarker = await getPoseLandmarker();
-    const v = videoRef.current;
-    const canvas = overlayRef.current;
-    if (!v || !canvas) return;
+      const ctx = canvas.getContext("2d");
 
-    const ctx = canvas.getContext("2d");
+      const tick = async () => {
+        if (!alive) return;
 
-    const fr = stableRef.current;
-    fr.inFrameFrames = 0;
-    fr.prevCenter = null;
-    fr.stableMs = 0;
-    fr.lastFrameAt = 0;
-    fr.lastDetectAt = 0;
-    fr.detectErrStreak = 0;
+        const w = canvas.clientWidth || v.clientWidth || 360;
+        const h = canvas.clientHeight || v.clientHeight || 640;
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
 
-    const tick = async () => {
-      if (!alive) return;
+        const t = nowMs();
 
-      const w = canvas.clientWidth || v.clientWidth || 360;
-      const h = canvas.clientHeight || v.clientHeight || 640;
-      if (canvas.width !== w) canvas.width = w;
-      if (canvas.height !== h) canvas.height = h;
+        const isVideoReady =
+          !document.hidden &&
+          v.readyState >= 2 &&
+          (v.videoWidth || 0) > 0 &&
+          (v.videoHeight || 0) > 0 &&
+          Number.isFinite(v.currentTime);
 
-      const t = nowMs();
-      const dt = fr.lastFrameAt ? Math.max(0, t - fr.lastFrameAt) : 16;
-      fr.lastFrameAt = t;
+        const fr = stableRef.current;
+        const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
 
-      const isVideoReady =
-        !document.hidden &&
-        v.readyState >= 2 &&
-        (v.videoWidth || 0) > 0 &&
-        (v.videoHeight || 0) > 0 &&
-        Number.isFinite(v.currentTime);
+        let landmarks = null;
+        let anchors = null;
+        let bbox = null;
+        let match = 0;
+        let visCanvas = null;
+        let bboxLocal = null;
 
-      const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
-
-      let nose = null;
-      let ls = null;
-      let rs = null;
-      let hasCore = false;
-
-      if (shouldDetect) {
-        fr.lastDetectAt = t;
-        try {
-          const r = landmarker.detectForVideo(v, t);
-          const lm = r?.landmarks?.[0] || null;
-
-          if (lm && lm.length >= 13) {
-            const visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
-            const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
-
-            // MediaPipe pose indices
-            nose = lmCanvas?.[0] || null;
-            ls = lmCanvas?.[11] || null;
-            rs = lmCanvas?.[12] || null;
-
-            const vN = nose?.visibility ?? 1;
-            const vLS = ls?.visibility ?? 1;
-            const vRS = rs?.visibility ?? 1;
-
-            hasCore =
-              nose && ls && rs &&
-              Number.isFinite(nose.x) && Number.isFinite(nose.y) &&
-              Number.isFinite(ls.x) && Number.isFinite(ls.y) &&
-              Number.isFinite(rs.x) && Number.isFinite(rs.y) &&
-              vN > 0.35 && vLS > 0.35 && vRS > 0.35;
-          }
-
-          fr.detectErrStreak = 0;
-        } catch (e) {
-          fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
-          const msg = String(e?.message || e || "");
-          const poisoned =
-            msg.includes("roi->width") ||
-            msg.includes("ROI width") ||
-            msg.includes("texImage2D") ||
-            msg.includes("no video") ||
-            msg.includes("Framebuffer is incomplete") ||
-            msg.includes("Graph has errors");
-          if (poisoned && fr.detectErrStreak >= 2) {
+        if (shouldDetect) {
+          fr.lastDetectAt = t;
+          try {
+            const r = landmarker.detectForVideo(v, t);
+            const lm = r?.landmarks?.[0] || null;
+            if (lm && lm.length >= 33) {
+              visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
+              const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
+              // NOTE: Patch D: We avoid pose-matching + bbox gating for stability across devices.
+              // We only use nose + shoulders for framing and a smooth upper-body shell overlay.
+              landmarks = lmCanvas;
+              match = 0;
+              anchors = null;
+              bbox = null;
+              bboxLocal = null;
+            }
             fr.detectErrStreak = 0;
-            try { await resetPoseLandmarker(); } catch {}
-            try { stopStream(); } catch {}
-            await new Promise((r) => setTimeout(r, 180));
-            try { await startStream(); } catch {}
+          } catch (e) {
+            fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
+            const msg = String(e?.message || e || "");
+            const poisoned =
+              msg.includes("roi->width") ||
+              msg.includes("ROI width") ||
+              msg.includes("texImage2D") ||
+              msg.includes("no video") ||
+              msg.includes("Framebuffer is incomplete") ||
+              msg.includes("Graph has errors");
+            if (poisoned && fr.detectErrStreak >= 2) {
+              fr.detectErrStreak = 0;
+              try {
+                await resetPoseLandmarker();
+              } catch {}
+              try {
+                stopStream();
+              } catch {}
+              await new Promise((r) => setTimeout(r, 180));
+              try {
+                await startStream();
+              } catch {}
+            }
           }
+// ---- Framing gate (ultra-simple, stable) ----
+// We only require head + shoulders to be visible.
+// MediaPipe landmark indices: nose=0, left_shoulder=11, right_shoulder=12
+const getLm = (i) => {
+  const p = landmarks?.[i];
+  if (!p) return null;
+  const v = Number.isFinite(p.visibility) ? p.visibility : 1;
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  // Treat very low visibility as missing to avoid NaNs / flicker
+  if (v < 0.35) return null;
+  return p;
+};
+
+const nose = getLm(0);
+const ls = getLm(11);
+const rs = getLm(12);
+
+let inFrameRaw = false;
+let shell = null;
+
+if (nose && ls && rs) {
+  const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+  const shoulderDist = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+
+  // Basic on-screen margins (in pixels)
+  const marginX = w * 0.10;
+  const marginY = h * 0.10;
+
+  const within =
+    nose.x > marginX && nose.x < w - marginX &&
+    ls.x > marginX && ls.x < w - marginX &&
+    rs.x > marginX && rs.x < w - marginX &&
+    nose.y > marginY && nose.y < h - marginY &&
+    shoulderMid.y > marginY && shoulderMid.y < h - marginY;
+
+  // Reasonable distance: shoulders not tiny / not filling screen
+  const minShoulder = w * 0.12;
+  const maxShoulder = w * 0.75;
+
+  inFrameRaw = within && shoulderDist >= minShoulder && shoulderDist <= maxShoulder;
+
+  // Build a smooth "upper-body shell" that auto-scales with shoulder width.
+  // Width is proportional to shoulder distance; height follows width.
+  const targetW = clamp(shoulderDist * 2.55, w * 0.38, w * 0.86);
+  const targetH = clamp(targetW * 1.18, h * 0.40, h * 0.92);
+
+  // Center slightly above shoulder midpoint so the top wraps the head.
+  const cx = shoulderMid.x;
+  const cy = shoulderMid.y + targetH * 0.06;
+
+  shell = { cx, cy, shellW: targetW, shellH: targetH };
+}
+
+// Hysteresis to prevent flicker
+fr.inFrameFrames = fr.inFrameFrames || 0;
+fr.inFrameFrames = inFrameRaw
+  ? Math.min(24, fr.inFrameFrames + 1)
+  : Math.max(0, fr.inFrameFrames - 3);
+const inFrame = fr.inFrameFrames >= 8;
+
+// Stability from shoulder midpoint movement (much more reliable than all 33 points)
+let stable = false;
+const now = t;
+if (shell) {
+  const prev = fr.prevShell;
+  if (prev && Number.isFinite(prev.cx) && Number.isFinite(prev.cy)) {
+    const dx = shell.cx - prev.cx;
+    const dy = shell.cy - prev.cy;
+    const d = Math.hypot(dx, dy);
+    stable = d < Math.max(2.2, Math.min(w, h) * 0.006); // ~2-5px
+  }
+  fr.prevShell = shell;
+} else {
+  fr.prevShell = null;
+}
+
+// Track timers (so we don't instantly snap 3 times)
+fr.poseStartAt = fr.poseStartAt || now;
+if (stepChangedRef.current) {
+  fr.poseStartAt = now;
+  fr.inFrameSince = 0;
+  fr.stableSince = 0;
+  stepChangedRef.current = false;
+}
+if (inFrame) {
+  fr.inFrameSince = fr.inFrameSince || now;
+} else {
+  fr.inFrameSince = 0;
+}
+if (stable && inFrame) {
+  fr.stableSince = fr.stableSince || now;
+} else {
+  fr.stableSince = 0;
+}
+
+// Draw overlay: ONLY the smooth shell (no boxes, no skeleton).
+ctx.clearRect(0, 0, w, h);
+if (shell) {
+  drawUpperBodyShell(ctx, shell, { w, h, locked: locked || (inFrame && stable) });
+}
+
+// Lock hints (no pose matching; just framing + stillness)
+if (!shell) {
+  setLocked(false);
+  setLockHint("Step into frame");
+  fr.okFrames = 0;
+} else if (!inFrame) {
+  setLocked(false);
+  setLockHint("Center head + shoulders");
+  fr.okFrames = 0;
+} else if (!stable) {
+  setLocked(false);
+  setLockHint("Hold still…");
+  fr.okFrames = 0;
+} else {
+  fr.okFrames = Math.min(60, (fr.okFrames || 0) + 1);
+  setLocked(true);
+  setLockHint("LOCKED ✅");
+}
+
+// Auto-capture gating: require a minimum time in this pose screen + stable window.
+const minPoseMs = 1200;
+const needInFrameMs = 500;
+const needStableMs = 750;
+
+const canSnap =
+  inFrame &&
+  stable &&
+  fr.inFrameSince &&
+  fr.stableSince &&
+  (now - fr.poseStartAt) >= minPoseMs &&
+  (now - fr.inFrameSince) >= needInFrameMs &&
+  (now - fr.stableSince) >= needStableMs;
         }
-      }
 
-      // If we didn't detect this frame, keep the last outline for a short grace window
-      // to avoid flashing on mobile.
-      if (hasCore) {
-        fr.lastCore = { nose, ls, rs };
-        fr.lastCoreAt = t;
-      } else {
-        const grace = 450;
-        if (fr.lastCore && (t - (fr.lastCoreAt || 0)) < grace) {
-          ({ nose, ls, rs } = fr.lastCore);
-          hasCore = true;
-        }
-      }
-
-      let inFrameRaw = false;
-      let stable = false;
-
-      if (hasCore) {
-        const cx = (ls.x + rs.x) / 2;
-        const cy = (ls.y + rs.y) / 2;
-        const sw = Math.max(0.0001, Math.abs(rs.x - ls.x));
-
-        // In-frame gate: head + shoulders visible, reasonably centered and sized.
-        const centered = cx > 0.18 && cx < 0.82 && cy > 0.12 && cy < 0.78;
-        const headOk = nose.y > 0.03 && nose.y < 0.55;
-        const sizeOk = sw > 0.10 && sw < 0.60;
-
-        inFrameRaw = centered && headOk && sizeOk;
-
-        // Hysteresis to prevent flicker.
-        fr.inFrameFrames = inFrameRaw
-          ? Math.min(20, (fr.inFrameFrames || 0) + 1)
-          : Math.max(0, (fr.inFrameFrames || 0) - 2);
-        const inFrame = fr.inFrameFrames >= 6;
-
-        // Stability based on shoulder-center movement (normalized by shoulder width).
-        const prev = fr.prevCenter;
-        if (prev && Number.isFinite(prev.cx) && Number.isFinite(prev.cy) && Number.isFinite(prev.sw)) {
-          const dx = cx - prev.cx;
-          const dy = cy - prev.cy;
-          const norm = Math.max(0.0001, sw);
-          const motion = Math.sqrt(dx * dx + dy * dy) / norm;
-          stable = motion < 0.030;
-        }
-        fr.prevCenter = { cx, cy, sw };
-
-        if (inFrame && stable) fr.stableMs = (fr.stableMs || 0) + dt;
-        else fr.stableMs = 0;
-
-        const lockedNow = inFrame && (fr.stableMs || 0) >= 520;
-
-        setLocked(lockedNow);
-        if (!inFrame) setLockHint("Center head + shoulders in frame");
-        else if (!stable) setLockHint("Hold still…");
-        else if ((fr.stableMs || 0) < 520) setLockHint("Locking…");
-        else setLockHint("LOCKED ✅");
-
-        // Draw the smooth outline (no boxes, no skeleton).
-        drawUpperBodyOutline(ctx, { w, h, nose, ls, rs, locked: lockedNow });
-
-        // Auto-capture once fully locked for a short window.
-        if (autoSnap && lockedNow && (fr.stableMs || 0) >= 850) {
-          fr.stableMs = 0;
-          fr.inFrameFrames = 0;
+        // Auto-capture: hands-free. We ONLY snap after a minimum time on this pose screen
+        // and a stable in-frame window (prevents instant triple-snaps).
+        if (autoSnap && canSnap) {
+          fr.okFrames = 0;
+          fr.inFrameSince = 0;
+          fr.stableSince = 0;
           await onCapture();
+          // After a snap, reset pose start timer so the next pose can't snap instantly.
+          fr.poseStartAt = t;
         }
-      } else {
-        // No detection at all
-        setLocked(false);
-        setLockHint("Step into view");
-        fr.inFrameFrames = 0;
-        fr.stableMs = 0;
-        if (ctx) ctx.clearRect(0, 0, w, h);
-      }
+
+        rafRef.current = requestAnimationFrame(tick);
+      };
 
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
-  };
+    run();
 
-  run();
-
-  return () => {
-    alive = false;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = 0;
-  };
-}, [started, isResults, autoSnap, onCapture, startStream, stopStream]);
-
+    return () => {
+      alive = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+  }, [started, isResults, pose.key, autoSnap, onCapture, startStream, stopStream]);
 
   // Score session when finished capturing
   useEffect(() => {
@@ -929,7 +892,6 @@ useEffect(() => {
         poses: captures,
         prevSession,
         todayISO,
-        posePlan,
       });
 
       if (canceled) return;
@@ -956,7 +918,7 @@ useEffect(() => {
     return () => {
       canceled = true;
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId, posePlan]);
+  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
 
   const latestRecord = useMemo(() => {
     try {
@@ -1130,11 +1092,14 @@ useEffect(() => {
               </Box>
             </Box>
 
-            <Box sx={{ mt: 1.5 }}>
-              <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)", fontWeight: 750 }}>
-                Auto-captures when locked — hold your pose.
-              </Typography>
-            </Box>
+            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+              <Button fullWidth variant="outlined" onClick={() => onCapture()}>
+                Capture now
+              </Button>
+              <Button fullWidth variant="contained" onClick={() => setAutoSnap((a) => !a)}>
+                {autoSnap ? "Auto snap On" : "Auto snap Off"}
+              </Button>
+            </Stack>
           </CardContent>
         </Card>
       ) : (
@@ -1151,7 +1116,7 @@ useEffect(() => {
 
             {scanBusy ? (
               <Typography sx={{ fontWeight: 800, color: "rgba(220,255,245,0.9)" }}>
-                Generating your private AI analysis…
+                Finalizing your share card…
               </Typography>
             ) : (
               <>
@@ -1161,16 +1126,6 @@ useEffect(() => {
                       ? "Nice — your momentum is building. Keep showing up."
                       : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
-
-                {(aiSession?.breakdown || []).slice(0, 3).length ? (
-                  <Stack spacing={0.75} sx={{ mt: 1 }}>
-                    {(aiSession.breakdown || []).slice(0, 3).map((t, idx) => (
-                      <Typography key={idx} sx={{ fontSize: 13, color: "rgba(220,255,245,0.82)", fontWeight: 650 }}>
-                        {t}
-                      </Typography>
-                    ))}
-                  </Stack>
-                ) : null}
 
                 {deltas ? (
                   <Box sx={{ mt: 1.25 }}>

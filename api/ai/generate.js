@@ -224,9 +224,9 @@ async function resolveUserId(req, { user_id, email }) {
 // -------------------- FREE PASS --------------------
 const FREE_LIMITS = {
   default: 3,
-  frame_check: 1,
-  body_scan: 1,
-  pose_session: 1,
+  frame_check: 10,
+  body_scan: 3,
+  pose_session: 10,
 };
 
 function getFreeLimitForFeature(feature) {
@@ -1137,15 +1137,11 @@ export default async function handler(req, res) {
         bmi: clamp(parsed.bmi ?? fb.bmi, 14, 45),
         buildArcScore: Math.round(clamp(parsed.buildArcScore ?? fb.buildArcScore, 0, 100)),
         percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
-        hype: String(parsed.hype || parsed.hype_line || parsed.hypeLine || "").slice(0, 120),
         strengthTag: String(parsed.strengthTag || fb.strengthTag).slice(0, 48),
         horizon: String(parsed.horizon || fb.horizon).slice(0, 80),
         levers: Array.isArray(parsed.levers)
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
-        breakdown: Array.isArray(parsed.breakdown)
-          ? parsed.breakdown.map((s) => String(s).slice(0, 220)).slice(0, 4)
-          : [],
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 140),
       };
 
@@ -1194,30 +1190,17 @@ export default async function handler(req, res) {
       const sys =
         "You are SlimCal Pose Session Scanner (Beta). " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "You are an encouraging physique-analysis coach that gives detailed but POSITIVE/constructive feedback. " +
-        "This is NOT a medical device. " +
-        "Tone MUST be neutral or positive only. Never insult. Never shame. Avoid words like 'bad', 'weak', 'behind'. " +
-        "Output JSON keys: hype (string, short, punchy, ALL CAPS ok), build_arc (int 0-100), percentile (int 1-99), " +
-        "strength (string), horizon_days (int), " +
+        "This is NOT a medical device. You are estimating 'physique signals' and 'pose quality' from 3 bodybuilding poses. " +
+        "Tone MUST be neutral or positive only. Never insult. Never say 'bad', 'weak', 'behind', or shame language. " +
+        "Output JSON keys: build_arc (int 0-100), percentile (int 1-99), strength (string), horizon_days (int), " +
         "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
-        "poseQuality (object mapping poseKey to number 0..1), " +
-        "highlights (array 2-5 short strings), levers (array 2-4 short strings), " +
-        "breakdown (array 2-4 sentences, constructive), confidenceNote (string).";
-
-      const track = String(body?.track || body?.track_label || "").toLowerCase();
-      const isFemaleTrack = track.includes("female") || track.includes("tone") || track.includes("pilates");
+        "poseQuality (object mapping poseKey to number 0..1), highlights (array 2-5 short strings), levers (array 2-4 short strings), confidenceNote (string).";
 
       const userText =
-        (isFemaleTrack
-          ? "Analyze the following 3 upper-body poses for a female-focused, confidence-boosting progress check. " +
-            "Focus on posture, symmetry, shoulders/arms definition, and overall 'toned' look. "
-          : "Analyze the following 3 bodybuilding poses (or close variants) for a male-focused, hype, 'jacked' progress check. " +
-            "Focus on shoulders, chest, lats, arms, and taper. ") +
+        "Analyze the following pose images: Front Relaxed, Front Double Biceps, Back Double Biceps (or similar). " +
         "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
-        "hype should be a punchy one-liner like 'WHOA — CHEST IS POPPING' (always positive). " +
-        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency. " +
-        "breakdown should read like a helpful ChatGPT physique breakdown (2–4 short sentences), with at least one actionable next step.";
+        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
         { type: "text", text: userText },
@@ -1253,7 +1236,6 @@ export default async function handler(req, res) {
       const session = {
         build_arc: Math.round(clamp(parsed.build_arc ?? parsed.buildArcScore ?? fb.build_arc, 0, 100)),
         percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
-        hype: String(parsed.hype || parsed.hype_line || parsed.hypeLine || "").slice(0, 120),
         strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
         muscleSignals: {
@@ -1276,17 +1258,12 @@ export default async function handler(req, res) {
         levers: Array.isArray(parsed.levers)
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
-        breakdown: Array.isArray(parsed.breakdown)
-          ? parsed.breakdown.map((s) => String(s).slice(0, 220)).slice(0, 4)
-          : [],
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
 
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
-      if (!session.hype) session.hype = session.highlights?.[0] ? String(session.highlights[0]) : "NICE — IT SHOWS.";
-      if (!session.breakdown?.length) session.breakdown = [String(session.confidenceNote || fb.confidenceNote)];
 
       res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
       return;
