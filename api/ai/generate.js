@@ -1215,7 +1215,11 @@ const freeBypass =
         sys +=
           " Also include muscleBreakdown: an array of 6-10 items, each {group: string, note: string}. " +
           "Groups should be major muscle groups (Upper Chest, Mid Chest, Delts, Arms, Lats, Back, Waist/Taper, Quads/Hams/Glutes, Calves). " +
-          "Notes must be detailed, specific, and positive/neutral only. No negatives.";
+          "Notes must be detailed, specific, and positive/neutral only. No negatives." +
+          " Also include chatgptStyle: a single string with multiple sections and bullets separated by newlines. " +
+          "It should read like a high-quality physique coach breakdown: " +
+          "sections: 'Big Picture', 'Muscle Group Rankings (Right Now)', 'If Your Goal Is Alex Eubank Lean Aesthetic', and 'Pose-by-Pose'. " +
+          "Keep it supportive and honest, but frame weak areas as 'Next Up' or 'Will Pop With More Definition' (never insults).";
       }
 
 
@@ -1263,7 +1267,16 @@ const freeBypass =
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
         tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
         aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
-        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 220) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
+        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown)
+          ? (parsed.muscleBreakdown || parsed.muscle_breakdown)
+              .map((r) => ({
+                group: String(r.group || r.name || r.key || "").slice(0, 48),
+                note: String(r.note || r.text || "").slice(0, 520),
+              }))
+              .filter((r) => r.group && r.note)
+              .slice(0, 24)
+          : undefined,
+        chatgptStyle: String(parsed.chatgptStyle || parsed.chat_style || parsed.longform || "").slice(0, 2600) || undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),

@@ -577,7 +577,7 @@ export default function PoseSession() {
                     MUSCLE BREAKDOWN
                   </Typography>
                   <Stack spacing={1}>
-                    {result.muscleBreakdown.slice(0, 10).map((row, i) => (
+                    {result.muscleBreakdown.slice(0, 20).map((row, i) => (
                       <Box
                         key={i}
                         sx={{
@@ -590,11 +590,42 @@ export default function PoseSession() {
                         <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
                           {row.group}
                         </Typography>
-                        <Typography sx={{ color: bodyColor, mt: 0.3 }}>
+                        <Typography sx={{ color: bodyColor, mt: 0.3, whiteSpace: "pre-line" }}>
                           {row.note}
                         </Typography>
                       </Box>
                     ))}
+                  </Stack>
+                </>
+              ) : null}
+
+              {result?.chatgptStyle ? (
+                <>
+                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
+                    DETAILED BREAKDOWN
+                  </Typography>
+                  <Stack spacing={0.8}>
+                    {String(result.chatgptStyle)
+                      .split("\n")
+                      .slice(0, 200)
+                      .map((line, idx) => {
+                        const t = String(line || "").trimEnd();
+                        if (!t) return <Box key={idx} sx={{ height: 8 }} />;
+                        const isHeader = /^#+\s/.test(t) || /^(🔥|🎯|📊|🚀|💪|⭐|✅)\s/.test(t);
+                        return (
+                          <Typography
+                            key={idx}
+                            sx={{
+                              color: isHeader ? titleColor : bodyColor,
+                              fontWeight: isHeader ? 900 : 500,
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            {t}
+                          </Typography>
+                        );
+                      })}
                   </Stack>
                 </>
               ) : null}
