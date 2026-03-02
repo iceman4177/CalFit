@@ -44,6 +44,7 @@ export async function buildPoseSimpleSharePng({
   brand = 'Slimcal.ai',
   tier = 'BASELINE LOCKED',
   score10 = 8.0,
+  summary = "",
   bullets = [],
   poseImages = [],
 } = {}) {
@@ -157,8 +158,18 @@ export async function buildPoseSimpleSharePng({
     ctx.restore();
   }
 
+
+  // Short share summary (one line)
+  const shareSummary = String(summary || "").trim();
+  if (shareSummary) {
+    const line = shareSummary.length > 92 ? shareSummary.slice(0, 92) + "…" : shareSummary;
+    ctx.fillStyle = 'rgba(233,255,248,0.84)';
+    ctx.font = '800 26px system-ui, -apple-system, Segoe UI, Roboto';
+    ctx.fillText(line, cardX + 26, imgTop + imgH + 36);
+  }
+
   // Bullets
-  let y = imgTop + imgH + 56;
+  let y = imgTop + imgH + 72;
   ctx.fillStyle = 'rgba(233,255,248,0.92)';
   ctx.font = '900 34px system-ui, -apple-system, Segoe UI, Roboto';
   ctx.fillText("WHAT'S POPPING", cardX + 26, y);
