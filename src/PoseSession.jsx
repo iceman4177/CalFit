@@ -104,17 +104,85 @@ function normalizeRankings(rankings) {
 }
 
 function renderReportLines(report) {
-  const lines = String(report || "").split(/\r?\n/).map((l) => l.trimEnd());
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i].trim();
-    if (!l) {
-      if (out.length && out[out.length - 1] !== "") out.push("");
-      continue;
+  if (!report) return [];
+
+  // string
+  if (typeof report === "string") {
+    const lines = report.split(/\r?\n/).map((l) => l.trimEnd());
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i].trim();
+      if (!l) {
+        if (out.length && out[out.length - 1] !== "") out.push("");
+        continue;
+      }
+      out.push(l);
     }
-    out.push(l);
+    return out;
   }
-  return out;
+
+  // array of strings/sections
+  if (Array.isArray(report)) {
+    return renderReportLines(report.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join("\n"));
+  }
+
+  // object: flatten into readable sections
+  if (typeof report === "object") {
+    const prettyKey = (k) =>
+      String(k || "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase());
+
+    const out = [];
+    const entries = Object.entries(report);
+
+    // try to keep a sensible order if common keys exist
+    const order = [
+      "summary",
+      "bigPicture",
+      "big_picture",
+      "rankings",
+      "muscleRankings",
+      "poseByPose",
+      "pose_by_pose",
+      "recommendations",
+      "plan",
+      "notes",
+    ];
+    const keyRank = (k) => {
+      const i = order.indexOf(k);
+      return i === -1 ? 999 : i;
+    };
+
+    entries.sort((a, b) => keyRank(a[0]) - keyRank(b[0]));
+
+    for (const [k, v] of entries) {
+      out.push(`${prettyKey(k)}:`);
+
+      if (typeof v === "string") {
+        out.push(...renderReportLines(v));
+      } else if (Array.isArray(v)) {
+        for (const item of v) {
+          if (typeof item === "string") out.push(`• ${item}`);
+          else out.push(`• ${JSON.stringify(item)}`);
+        }
+      } else if (v && typeof v === "object") {
+        // one level deep
+        for (const [k2, v2] of Object.entries(v)) {
+          if (typeof v2 === "string") out.push(`• ${prettyKey(k2)}: ${v2}`);
+          else out.push(`• ${prettyKey(k2)}: ${JSON.stringify(v2)}`);
+        }
+      } else {
+        out.push(String(v));
+      }
+
+      out.push("");
+    }
+
+    return out;
+  }
+
+  return renderReportLines(String(report));
 }
 
 export default function PoseSession() {
@@ -701,7 +769,7 @@ export default function PoseSession() {
               })()}
 
               {/* Deep-dive report (ChatGPT-style) */}
-              {typeof result?.report === "string" && result.report.trim() ? (
+              {result?.report ? (
                 <>
                   <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
                   <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
