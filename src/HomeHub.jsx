@@ -13,6 +13,7 @@ import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import DinnerDiningIcon from "@mui/icons-material/DinnerDining";
 import CenterFocusStrongIcon from "@mui/icons-material/CenterFocusStrong";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import DonutLargeIcon from "@mui/icons-material/DonutLarge";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 
@@ -113,8 +114,14 @@ export default function HomeHub() {
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan")}
             />
+            
             <AppIcon
-              label="Daily Verdict"
+              label="Get Verdict"
+              icon={<AutoAwesomeIcon sx={{ fontSize: 44 }} />}
+              onClick={() => history.push("/get-verdict")}
+            />
+<AppIcon
+              label="Coach"
               icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/verdict")}
             />

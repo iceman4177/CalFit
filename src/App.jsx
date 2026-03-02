@@ -942,7 +942,15 @@ export default function App() {
             render={() => <DailyEvaluationHome view="checklist" />}
           />
 
-          {/* Daily Verdict (AI coach) */}
+          
+
+          {/* Get Verdict (CTA + output only) */}
+          <Route
+            exact
+            path="/get-verdict"
+            render={() => <DailyEvaluationHome view="coach" />}
+          />
+{/* Daily Verdict (AI coach) */}
           <Route
             exact
             path="/verdict"

@@ -1870,7 +1870,7 @@ Score: ${bundle.derived.score}/100
         )}
 
 
-{view === "full" && (
+{(view === "full" || view === "coach") && (
         <CardShell isSingleView={isSingleView} title="Coach" subtitle="Your daily verdict">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
