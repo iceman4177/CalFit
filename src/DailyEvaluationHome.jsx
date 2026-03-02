@@ -247,10 +247,8 @@ function computeWinState({ score, confidenceLabel, profileComplete, hasLogs }) {
 }
 
 // ----------------------------- UI primitives ---------------------------------
-function CardShell({ title, subtitle, children, right }) {
-    const isSingleView = view !== "full";
-
-return (
+function CardShell({ title, subtitle, children, right, isSingleView = false }) {
+  return (
     <Card
       elevation={0}
       sx={{
@@ -703,6 +701,9 @@ function SparkBurst({ tick = 0 }) {
 }
 
 export default function DailyEvaluationHome({ view = "full" } = {}) {
+  const isSingleView = view !== "full";
+  const showEval = view === "full" || view === "eval";
+  const showChecklist = view === "full" || view === "checklist";
   const history = useHistory();
 
   const pageTitle = view === "checklist" ? "Daily Checklist" : view === "scoreboard" ? "Daily Eval" : "Daily Evaluation";
@@ -1674,7 +1675,7 @@ Score: ${bundle.derived.score}/100
 
 
         {(view === "full" || view === "checklist") && (
-        <CardShell title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell isSingleView={isSingleView} title="Progress" subtitle="Your quests (5 at a time)">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1870,7 +1871,7 @@ Score: ${bundle.derived.score}/100
 
 
 {view === "full" && (
-        <CardShell title="Coach" subtitle="Your daily verdict">
+        <CardShell isSingleView={isSingleView} title="Coach" subtitle="Your daily verdict">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
@@ -1918,7 +1919,7 @@ Score: ${bundle.derived.score}/100
 
 
         {view === "full" && (
-<CardShell title="Pose Session" subtitle="Beta">
+<CardShell isSingleView={isSingleView} title="Pose Session" subtitle="Beta">
   <Stack spacing={1.1}>
     <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
       Do a 3‑pose <b>Pose Session</b> (front relaxed, double‑bi, back double‑bi). The scanner auto‑captures each pose and
