@@ -10,13 +10,15 @@ import RestaurantIcon from '@mui/icons-material/Restaurant';
 import HistoryIcon from '@mui/icons-material/History';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import HomeIcon from '@mui/icons-material/Home';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import ChatIcon from '@mui/icons-material/Chat';
 
 // Hide Recap Coach from bottom navigation (page remains accessible via direct URL).
 const SHOW_COACH_NAV = false;
 
 const tabs = [
-  { label: 'Evaluate', value: '/', icon: <HomeIcon /> },
+  { label: 'Home', value: '/', icon: <HomeIcon /> },
+  { label: 'Verdict', value: '/verdict', icon: <FactCheckIcon /> },
   ...(SHOW_COACH_NAV ? [{ label: 'Coach', value: '/coach', icon: <ChatIcon /> }] : []),
   { label: 'Workout', value: '/workout', icon: <FitnessCenterIcon /> },
   { label: 'Meals', value: '/meals', icon: <RestaurantIcon /> },
@@ -25,8 +27,10 @@ const tabs = [
 ];
 
 function pickActiveTab(pathname) {
-  // If user manually navigates to /coach, keep nav highlighted on Evaluate.
+  // If user manually navigates to /coach, keep nav highlighted on Home.
   if (pathname === '/coach' || pathname.startsWith('/coach/')) return '/';
+
+  if (pathname === '/verdict' || pathname.startsWith('/verdict/')) return '/verdict';
 
   // Prefer the longest matching route (avoids "/" matching everything).
   const exact = tabs.find(t => pathname === t.value);

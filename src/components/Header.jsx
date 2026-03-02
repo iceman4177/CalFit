@@ -232,7 +232,10 @@ const [authUser, setAuthUser] = useState(null);
           <Stack direction="row" spacing={0.5} alignItems="center">
             {/* ✅ Daily Eval is now the hero home */}
             <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-              Evaluate
+              Home
+            </NavLink>
+            <NavLink to="/verdict" style={linkStyle} activeStyle={activeStyle}>
+              Verdict
             </NavLink>
 
             {/* ✅ Coach removed from top-centered nav (moved to More menu in App.jsx) */}

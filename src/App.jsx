@@ -47,6 +47,7 @@ import CalorieHistory    from './CalorieHistory';
 import CalorieSummary    from './CalorieSummary';
 import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
+import HomeHub          from './HomeHub';
 import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
 import BodyScanBeta from './BodyScanBeta';
 import PoseSession from './PoseSession.jsx';
@@ -925,7 +926,8 @@ export default function App() {
           <Route path="/waitlist"     component={WaitlistSignup} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
-          <Route exact path="/" component={DailyEvaluationHome} />
+          <Route exact path="/" component={HomeHub} />
+          <Route exact path="/verdict" component={DailyEvaluationHome} />
 
           {/* ✅ Retention side: Recap Coach */}
           <Route
