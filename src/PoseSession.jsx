@@ -789,17 +789,19 @@ export default function PoseSession() {
           fr.prevLm = landmarks;
         }
 
-        // draw overlay
+        // draw overlay (NO boxes; smooth upper-body outline only)
         if (!bbox || !visCanvas) {
           ctx.clearRect(0, 0, w, h);
-        } else if (!inFrame) {
-          drawFramingGuide(ctx, visCanvas, { w, h });
         } else {
           const tpl = buildPoseTemplate(pose.key, anchors, bbox, {
             bboxLocal,
             upperBodyOnly: upperBodyOk,
           });
-          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+
+          // Always render the silhouette so users have guidance, even before lock.
+          // Dim it when not fully in-frame or when match is low.
+          const dim = !inFrame || match < 0.66;
+          drawNeonGhost(ctx, tpl, { w, h, glow: !dim, dim });
         }
 
         // lock gating (forgiving, matches earlier behavior)
@@ -1067,18 +1069,11 @@ export default function PoseSession() {
               </Box>
             </Box>
 
-            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Button fullWidth variant="contained" startIcon={<CameraAltIcon />} onClick={() => onCapture()}>
-                Capture now
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={() => setCameraFacing((f) => (f === "user" ? "environment" : "user"))}
-                startIcon={<FlipCameraAndroidIcon />}
-              >
-                Flip
-              </Button>
-            </Stack>
+            <Box sx={{ mt: 1.5 }}>
+              <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)", fontWeight: 750 }}>
+                Auto-captures when locked — hold your pose.
+              </Typography>
+            </Box>
           </CardContent>
         </Card>
       ) : (
