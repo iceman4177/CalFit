@@ -70,6 +70,7 @@ function AppIcon({ icon, label, onClick, grad }) {
           letterSpacing: 0.25,
           lineHeight: 1.1,
           textShadow: "0 6px 18px rgba(0,0,0,0.45)",
+          color: "rgba(255,255,255,0.98)",
         }}
       >
         {label}
@@ -85,21 +86,22 @@ export default function HomeHub() {
     <Box
       sx={{
         minHeight: "calc(100vh - 64px)",
-        py: 2,
+        py: { xs: 2.5, sm: 3 },
+        background: "radial-gradient(1200px 600px at 50% 0%, rgba(59,130,246,0.10), rgba(255,255,255,0) 55%), radial-gradient(1000px 520px at 50% 60%, rgba(16,185,129,0.08), rgba(255,255,255,0) 60%)",
       }}
     >
       <Container maxWidth="sm">
         <Stack spacing={2} sx={{ alignItems: "center" }}>
-          <Stack spacing={0.5} sx={{ width: "100%", textAlign: "left" }}>
+          <Stack spacing={0.6} sx={{ width: "100%", textAlign: "left", p: 2, borderRadius: 3, border: "1px solid rgba(148,163,184,0.35)", background: "rgba(255,255,255,0.72)", boxShadow: "0 10px 30px rgba(0,0,0,0.10)" }}>
             <Typography
               variant="h5"
-              sx={{ fontWeight: 1000, letterSpacing: -0.6, color: "rgba(255,255,255,0.95)" }}
+              sx={{ fontWeight: 1000, letterSpacing: -0.8, color: "rgba(15,23,42,0.96)" }}
             >
               What are we doing today?
             </Typography>
             <Typography
-              variant="body2"
-              sx={{ color: "rgba(255,255,255,0.72)" }}
+              variant="subtitle1"
+              sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 650 }}
             >
               Tap an icon to log, scan, or get coached.
             </Typography>
@@ -110,9 +112,9 @@ export default function HomeHub() {
               width: "100%",
               display: "grid",
               gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
-              gap: 2,
+              gap: { xs: 2, sm: 2.4 },
               justifyItems: "center",
-              pt: 1,
+              pt: 1.2,
             }}
           >
             <AppIcon

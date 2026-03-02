@@ -230,32 +230,13 @@ const [authUser, setAuthUser] = useState(null);
         {/* Primary nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
-            {/* ✅ Daily Eval is now the hero home */}
-            <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-              Home
-            </NavLink>
-            <NavLink to="/verdict" style={linkStyle} activeStyle={activeStyle}>
-              Verdict
-            </NavLink>
-
-            {/* ✅ Coach removed from top-centered nav (moved to More menu in App.jsx) */}
-
-            <NavLink to="/meals" style={linkStyle} activeStyle={activeStyle}>
-              Meals
-            </NavLink>
-            <NavLink to="/workout" style={linkStyle} activeStyle={activeStyle}>
-              Workout
-            </NavLink>
-            <NavLink to="/body-scan/session" style={linkStyle} activeStyle={activeStyle}>
-              Scan
-            </NavLink>
             <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
               History
             </NavLink>
             <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
               Dashboard
             </NavLink>
-          </Stack>
+</Stack>
         </Box>
 
         {/* Plan action + account */}
