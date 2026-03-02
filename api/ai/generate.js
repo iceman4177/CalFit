@@ -224,9 +224,9 @@ async function resolveUserId(req, { user_id, email }) {
 // -------------------- FREE PASS --------------------
 const FREE_LIMITS = {
   default: 3,
-  frame_check: 10,
-  body_scan: 3,
-  pose_session: 10,
+  frame_check: 1,
+  body_scan: 1,
+  pose_session: 1,
 };
 
 function getFreeLimitForFeature(feature) {
@@ -987,6 +987,16 @@ export default async function handler(req, res) {
   const body = await readJson(req);
   const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
 
+
+const freeBypass =
+  feature === "pose_session" ||
+  feature === "pose" ||
+  feature === "body_scan" ||
+  feature === "frame_check" ||
+  feature === "physique" ||
+  feature === "physique_scan";
+
+
   // Resolve user id robustly (headers OR body.user_id OR body.email)
   const email = (body?.email || "").trim().toLowerCase();
   const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
@@ -1010,7 +1020,7 @@ export default async function handler(req, res) {
   const pro = await isEntitled(resolvedUserId);
 
   // 2) If not Pro/Trial → per-feature free-pass
-  if (!pro) {
+  if (!pro && !freeBypass) {
     const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
       res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
