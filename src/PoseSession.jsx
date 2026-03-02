@@ -6,14 +6,12 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   Divider,
   Stack,
   Typography,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
-import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 
 import { useAuth } from "./context/AuthProvider";
@@ -25,24 +23,21 @@ import {
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, resetPoseLandmarker } from "./lib/poseLandmarker.js";
+
+/**
+ * GOALS (production-safe):
+ * - Auto-capture only (no manual capture button)
+ * - "LOCK-ON" progress driven by simple stability checks
+ * - Guide outline is STATIC SVG (never flashes / never fat)
+ * - AI analysis happens on 3 stills (ChatGPT-style). Send thumbnails to avoid 413.
+ * - Shareable PNG uses full-res locals (crisp export).
+ */
 
 const POSES = [
-  {
-    key: "front_relaxed",
-    title: "Front Relaxed",
-    subtitle: "Stand tall · arms relaxed · shoulders + hips in frame",
-  },
-  {
-    key: "front_double_bi",
-    title: "Double Bi",
-    subtitle: "Hands up · elbows out · squeeze arms",
-  },
-  {
-    key: "back_double_bi",
-    title: "Back Double Bi",
-    subtitle: "Turn around · elbows up · spread back",
-  },
+  { key: "double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral", guide: "double_bi" },
+  { key: "lat_spread", title: "Lat Spread", subtitle: "Elbows forward · widen lats · tall posture", guide: "lat_spread" },
+  { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back", guide: "back_double_bi" },
 ];
 
 function clamp(n, a, b) {
@@ -51,532 +46,229 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, x));
 }
 
-function uid() {
-  return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
 function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
+// --- Contain mapping helpers (safe + predictable) ---
 function getContainVisibleRect(videoW, videoH, canvasW, canvasH) {
-  if (!videoW || !videoH || !canvasW || !canvasH) return { minX: 0, minY: 0, w: 1, h: 1 };
-  const scale = Math.min(canvasW / videoW, canvasH / videoH);
-  const drawW = videoW * scale;
-  const drawH = videoH * scale;
-  const x0 = (canvasW - drawW) / 2;
-  const y0 = (canvasH - drawH) / 2;
-  return {
-    minX: x0 / canvasW,
-    minY: y0 / canvasH,
-    w: drawW / canvasW,
-    h: drawH / canvasH,
-  };
+  // objectFit: contain => visible rect is centered
+  const s = Math.min(canvasW / videoW, canvasH / videoH);
+  const w = videoW * s;
+  const h = videoH * s;
+  const x = (canvasW - w) / 2;
+  const y = (canvasH - h) / 2;
+  return { x, y, w, h, s };
 }
 
-function mapLandmarksVideoToCanvas(landmarks, visCanvas) {
-  if (!landmarks || !visCanvas) return landmarks;
-  const { minX, minY, w, h } = visCanvas;
-  return landmarks.map((p) => ({
-    ...p,
-    x: minX + p.x * w,
-    y: minY + p.y * h,
+function mapLandmarksVideoToCanvas(lm, visRect) {
+  // lm is normalized [0..1] in video space.
+  // convert to canvas pixels respecting contain rect
+  const { x, y, w, h } = visRect;
+  return lm.map((p) => ({
+    x: x + (p.x || 0) * w,
+    y: y + (p.y || 0) * h,
+    z: p.z,
+    visibility: p.visibility,
   }));
 }
 
-function bboxToLocal(bboxCanvas, visCanvas) {
-  if (!bboxCanvas || !visCanvas) return null;
-  const { minX, minY, w, h } = visCanvas;
-  const invW = w ? 1 / w : 1;
-  const invH = h ? 1 / h : 1;
-  return {
-    minX: (bboxCanvas.minX - minX) * invW,
-    minY: (bboxCanvas.minY - minY) * invH,
-    maxX: (bboxCanvas.maxX - minX) * invW,
-    maxY: (bboxCanvas.maxY - minY) * invH,
-  };
+function bboxFromLandmarks(points) {
+  if (!Array.isArray(points) || points.length < 5) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+  const w = Math.max(0, maxX - minX);
+  const h = Math.max(0, maxY - minY);
+  if (w < 10 || h < 10) return null;
+  return { x: minX, y: minY, w, h, cx: minX + w / 2, cy: minY + h / 2 };
 }
 
-async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
-  const sw = srcCanvas.width;
-  const sh = srcCanvas.height;
-  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
-  const tw = Math.max(1, Math.round(sw * scale));
-  const th = Math.max(1, Math.round(sh * scale));
+async function captureFullResDataUrl(videoEl, facing = "user") {
+  const vw = videoEl.videoWidth || 0;
+  const vh = videoEl.videoHeight || 0;
+  if (!vw || !vh) throw new Error("video_not_ready");
+
+  const c = document.createElement("canvas");
+  c.width = vw;
+  c.height = vh;
+  const ctx = c.getContext("2d");
+
+  // Mirror user-facing so preview == capture.
+  if (facing === "user") {
+    ctx.translate(vw, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(videoEl, 0, 0, vw, vh);
+
+  // PNG keeps text crisp for share card.
+  return c.toDataURL("image/png");
+}
+
+async function toThumbnailDataUrl(fullPngDataUrl, maxW = 512, jpegQ = 0.78) {
+  const img = new Image();
+  img.src = fullPngDataUrl;
+  await new Promise((res, rej) => {
+    img.onload = res;
+    img.onerror = rej;
+  });
+
+  const w = img.naturalWidth || img.width || 1;
+  const h = img.naturalHeight || img.height || 1;
+
+  const scale = Math.min(1, maxW / w);
+  const tw = Math.max(1, Math.round(w * scale));
+  const th = Math.max(1, Math.round(h * scale));
 
   const c = document.createElement("canvas");
   c.width = tw;
   c.height = th;
   const ctx = c.getContext("2d");
-  ctx.drawImage(srcCanvas, 0, 0, sw, sh, 0, 0, tw, th);
-  return c.toDataURL("image/jpeg", quality);
+  ctx.drawImage(img, 0, 0, tw, th);
+
+  return c.toDataURL("image/jpeg", clamp(jpegQ, 0.4, 0.9));
 }
 
-// ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
-function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
-  const bboxLocal = opts?.bboxLocal || null;
-  const isUpperBodyOnly = !!opts?.upperBodyOnly;
-
-  let a = anchors;
-  if (!a && bbox) {
-    const cx = (bbox.minX + bbox.maxX) / 2;
-    const h = bbox.maxY - bbox.minY;
-    const w = bbox.maxX - bbox.minX;
-    a = {
-      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * h) },
-      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * h) },
-      shoulderWidth: w * 0.60,
-    };
-  }
-  if (!a) return null;
-  const { midShoulder, midHip, shoulderWidth } = a;
-
-  const b = bboxLocal || bbox;
-  const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
-  const bboxH = b ? Math.max(0.12, Math.min(0.95, b.maxY - b.minY)) : null;
-  const swFromBbox = bboxW ? bboxW * 0.55 : null;
-  const swRaw = Number.isFinite(shoulderWidth) ? shoulderWidth : null;
-  const sw = clamp(swFromBbox || swRaw || 0.22, 0.10, 0.28);
-
-  const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
-  const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
-  const ls = { x: midShoulder.x - sw * 0.5, y: midShoulder.y };
-  const rs = { x: midShoulder.x + sw * 0.5, y: midShoulder.y };
-  const lh = { x: midHip.x - sw * 0.42, y: midHip.y };
-  const rh = { x: midHip.x + sw * 0.42, y: midHip.y };
-
-  let le, re, lw, rw;
-
-  if (poseKey === "front_double_bi" || poseKey === "back_double_bi") {
-    le = { x: midShoulder.x - sw * 1.05, y: midShoulder.y - sw * 0.45 };
-    re = { x: midShoulder.x + sw * 1.05, y: midShoulder.y - sw * 0.45 };
-    lw = { x: midShoulder.x - sw * 0.55, y: midShoulder.y - sw * 0.95 };
-    rw = { x: midShoulder.x + sw * 0.55, y: midShoulder.y - sw * 0.95 };
-  } else {
-    le = { x: midShoulder.x - sw * 0.65, y: midShoulder.y + sw * 0.62 };
-    re = { x: midShoulder.x + sw * 0.65, y: midShoulder.y + sw * 0.62 };
-    lw = { x: midHip.x - sw * 0.55, y: midHip.y + sw * 0.75 };
-    rw = { x: midHip.x + sw * 0.55, y: midHip.y + sw * 0.75 };
-  }
-
-  let lk = null,
-    rk = null,
-    la = null,
-    ra = null;
-  if (!isUpperBodyOnly) {
-    const kneeY = midHip.y + sw * 1.75;
-    const ankleY = midHip.y + sw * 2.65;
-    lk = { x: midHip.x - sw * 0.28, y: kneeY };
-    rk = { x: midHip.x + sw * 0.28, y: kneeY };
-    la = { x: midHip.x - sw * 0.22, y: ankleY };
-    ra = { x: midHip.x + sw * 0.22, y: ankleY };
-  }
-
-  const raw = {
-    head,
-    neck,
-    ls,
-    rs,
-    le,
-    re,
-    lw,
-    rw,
-    lh,
-    rh,
-    lk,
-    rk,
-    la,
-    ra,
-    midShoulder,
-    midHip,
-    shoulderWidth: sw,
+function GuideSvg({ variant = "double_bi" }) {
+  // STATIC, smooth outline. Never depends on detection => no flashing.
+  // Split into base + arms overlay.
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 10,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
   };
 
-  // Fit to bbox to prevent giant overlays when legs are missing / anchors jitter.
-  if (!b || !bboxW || !bboxH) return raw;
+  return (
+    <svg viewBox="0 0 300 500" width="100%" height="100%" aria-hidden="true">
+      <g {...common}>
+        {/* head */}
+        <path d="M150 65c28 0 50 22 50 50s-22 50-50 50-50-22-50-50 22-50 50-50z" />
+        {/* shoulders / upper torso */}
+        <path d="M110 165c10 35 25 55 40 65s30 10 40 0 30-30 40-65" />
+        {/* core */}
+        <path d="M120 230c0 75 10 140 30 190" />
+        <path d="M180 230c0 75-10 140-30 190" />
+        {/* legs */}
+        <path d="M150 420c-25 0-45 20-45 45" />
+        <path d="M150 420c25 0 45 20 45 45" />
+      </g>
 
-  const pts = Object.entries(raw)
-    .filter(
-      ([k, v]) =>
-        v &&
-        typeof v?.x === "number" &&
-        typeof v?.y === "number" &&
-        k !== "midShoulder" &&
-        k !== "midHip" &&
-        k !== "shoulderWidth"
-    )
-    .map(([, v]) => v);
-  if (!pts.length) return raw;
+      {/* pose arms overlay */}
+      {variant === "double_bi" ? (
+        <g {...common}>
+          <path d="M120 205c-35 10-60 35-70 70" />
+          <path d="M50 275c25 5 45-5 60-30" />
+          <path d="M180 205c35 10 60 35 70 70" />
+          <path d="M250 275c-25 5-45-5-60-30" />
+        </g>
+      ) : null}
 
-  let minX = 1e9,
-    minY = 1e9,
-    maxX = -1e9,
-    maxY = -1e9;
-  for (const p of pts) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-  const rawW = Math.max(1e-6, maxX - minX);
-  const rawH = Math.max(1e-6, maxY - minY);
+      {variant === "lat_spread" ? (
+        <g {...common}>
+          <path d="M115 215c-45 10-75 40-90 85" />
+          <path d="M185 215c45 10 75 40 90 85" />
+        </g>
+      ) : null}
 
-  const inset = 0.02;
-  const targetMinX = clamp(b.minX + inset, 0, 1);
-  const targetMaxX = clamp(b.maxX - inset, 0, 1);
-  const targetMinY = clamp(b.minY + inset, 0, 1);
-  const targetMaxY = clamp(b.maxY - inset, 0, 1);
-  const targetW = Math.max(1e-6, targetMaxX - targetMinX);
-  const targetH = Math.max(1e-6, targetMaxY - targetMinY);
+      {variant === "back_double_bi" ? (
+        <g {...common}>
+          <path d="M120 205c-40 15-65 40-75 80" />
+          <path d="M180 205c40 15 65 40 75 80" />
+          <path d="M75 305c15 0 30-10 40-25" />
+          <path d="M225 305c-15 0-30-10-40-25" />
+        </g>
+      ) : null}
+    </svg>
+  );
+}
 
-  const widen = poseKey === "front_double_bi" || poseKey === "back_double_bi" ? 1.1 : 1.0;
-  const s = Math.min((targetW * widen) / rawW, targetH / rawH);
+function buildTierFromArc(arc = 70) {
+  const a = clamp(arc, 0, 100);
+  if (a >= 90) return "ELITE ARC";
+  if (a >= 80) return "V-TAPER RISING";
+  if (a >= 70) return "AESTHETIC BUILDING";
+  if (a >= 60) return "FOUNDATION LOCKED";
+  return "BASELINE LOADING";
+}
 
-  const cxRaw = (minX + maxX) / 2;
-  const cyRaw = (minY + maxY) / 2;
-  const cxT = (targetMinX + targetMaxX) / 2;
-  const cyT = (targetMinY + targetMaxY) / 2;
-
-  const scalePoint = (p) => ({
-    x: clamp(cxT + (p.x - cxRaw) * s, 0, 1),
-    y: clamp(cyT + (p.y - cyRaw) * s, 0, 1),
+async function scorePoseSessionWithAI({ poses, clientId }) {
+  // Send THUMBNAILS to avoid 413; server returns positive-only JSON.
+  const res = await fetch("/api/ai/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client-Id": clientId || "pose_session_guest",
+    },
+    body: JSON.stringify({
+      feature: "pose_session",
+      poses: poses.map((p) => ({
+        poseKey: p.key,
+        title: p.title,
+        imageDataUrl: p.thumbDataUrl || p.dataUrl,
+      })),
+    }),
   });
 
-  const fitted = { ...raw };
-  for (const k of Object.keys(fitted)) {
-    if (
-      fitted[k] &&
-      typeof fitted[k]?.x === "number" &&
-      typeof fitted[k]?.y === "number" &&
-      k !== "midShoulder" &&
-      k !== "midHip"
-    ) {
-      fitted[k] = scalePoint(fitted[k]);
-    }
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(t || `ai_error_${res.status}`);
   }
-
-  if (fitted.ls && fitted.rs) {
-    const dx = fitted.rs.x - fitted.ls.x;
-    const dy = fitted.rs.y - fitted.ls.y;
-    fitted.shoulderWidth = clamp(Math.sqrt(dx * dx + dy * dy), 0.10, 0.32);
-  }
-
-  return fitted;
-}
-
-function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
-  if (!ctx || !tpl) return;
-
-  const P = (p) => ({ x: p.x * w, y: p.y * h });
-
-  const segs = [
-    ["head", "neck"],
-    ["neck", "ls"],
-    ["neck", "rs"],
-    ["ls", "le"],
-    ["le", "lw"],
-    ["rs", "re"],
-    ["re", "rw"],
-    ["ls", "rs"],
-    ["ls", "lh"],
-    ["rs", "rh"],
-    ["lh", "rh"],
-    ["lh", "lk"],
-    ["lk", "la"],
-    ["rh", "rk"],
-    ["rk", "ra"],
-  ];
-
-  ctx.save();
-  ctx.clearRect(0, 0, w, h);
-
-  const grd = ctx.createRadialGradient(w * 0.5, h * 0.55, h * 0.1, w * 0.5, h * 0.55, h * 0.7);
-  grd.addColorStop(0, "rgba(0,0,0,0)");
-  grd.addColorStop(1, "rgba(0,0,0,0.35)");
-  ctx.fillStyle = grd;
-  ctx.fillRect(0, 0, w, h);
-
-  const baseWidth = Math.max(4, Math.min(10, tpl.shoulderWidth * w * 0.06));
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  if (glow) {
-    ctx.strokeStyle = "rgba(0, 255, 170, 0.25)";
-    ctx.lineWidth = baseWidth * 3.0;
-    ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
-    ctx.shadowBlur = 18;
-    for (const [a, b] of segs) {
-      const A = P(tpl[a]);
-      const B = P(tpl[b]);
-      if (!A || !B) continue;
-      ctx.beginPath();
-      ctx.moveTo(A.x, A.y);
-      ctx.lineTo(B.x, B.y);
-      ctx.stroke();
-    }
-  }
-
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
-  ctx.lineWidth = baseWidth * 1.15;
-  for (const [a, b] of segs) {
-    const A = P(tpl[a]);
-    const B = P(tpl[b]);
-    if (!A || !B) continue;
-    ctx.beginPath();
-    ctx.moveTo(A.x, A.y);
-    ctx.lineTo(B.x, B.y);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
-function drawFramingGuide(ctx, visCanvas, { w, h }) {
-  if (!ctx || !visCanvas) return;
-
-  const vx = visCanvas.minX * w;
-  const vy = visCanvas.minY * h;
-  const vw = visCanvas.w * w;
-  const vh = visCanvas.h * h;
-
-  const padX = vw * 0.18;
-  const padTop = vh * 0.10;
-  const padBottom = vh * 0.10;
-
-  const rx = vx + padX;
-  const ry = vy + padTop;
-  const rw = vw - padX * 2;
-  const rh = vh - padTop - padBottom;
-
-  ctx.save();
-  ctx.lineWidth = Math.max(3, Math.round(Math.min(w, h) * 0.006));
-  ctx.strokeStyle = "rgba(0, 255, 214, 0.75)";
-  ctx.shadowColor = "rgba(0, 255, 214, 0.9)";
-  ctx.shadowBlur = 18;
-
-  const r = Math.min(rw, rh) * 0.06;
-  ctx.beginPath();
-  ctx.moveTo(rx + r, ry);
-  ctx.lineTo(rx + rw - r, ry);
-  ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r);
-  ctx.lineTo(rx + rw, ry + rh - r);
-  ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r, ry + rh);
-  ctx.lineTo(rx + r, ry + rh);
-  ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r);
-  ctx.lineTo(rx, ry + r);
-  ctx.quadraticCurveTo(rx, ry, rx + r, ry);
-  ctx.closePath();
-  ctx.stroke();
-
-  ctx.shadowBlur = 0;
-  ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.004));
-  ctx.strokeStyle = "rgba(0, 255, 214, 0.55)";
-  ctx.beginPath();
-  ctx.moveTo(rx, ry + rh * 0.22);
-  ctx.lineTo(rx + rw, ry + rh * 0.22);
-  ctx.moveTo(rx, ry + rh * 0.62);
-  ctx.lineTo(rx + rw, ry + rh * 0.62);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function synthesizePositiveSession({ prevSession, todayISO }) {
-  const headline = prevSession ? "Progress update" : "Baseline locked ✅";
-  const hype = prevSession
-    ? "Nice — your momentum is building. Keep showing up."
-    : "Strong starting frame. You’re set up to level up fast.";
-  const highlights = prevSession
-    ? ["Pose control improving", "Shoulders + arms look sharper"]
-    : ["Clean baseline captured", "Great posture + symmetry"];
-  const levers = ["Protein target today", "Train 2–3× this week"];
-
-  return {
-    local_day: todayISO,
-    build_arc: 78,
-    headline,
-    hype,
-    highlights,
-    levers,
-  };
-}
-
-async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
-  // IMPORTANT: never block the results screen.
-  // If AI is slow/fails, we fall back to a positive local session.
-  const fallback = synthesizePositiveSession({ prevSession, todayISO });
-
-  try {
-    const clientKey = "slimcal_client_id";
-    let clientId = "";
-    if (typeof window !== "undefined") {
-      clientId =
-        window.localStorage.getItem(clientKey) ||
-        window.localStorage.getItem("client_id") ||
-        "";
-      if (!clientId) {
-        clientId = uid();
-        window.localStorage.setItem(clientKey, clientId);
-      }
-    }
-
-    const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), 14000);
-
-    const res = await fetch("/api/ai/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(clientId ? { "x-client-id": clientId } : {}),
-      },
-      signal: ac.signal,
-      body: JSON.stringify({
-        feature: "pose_session",
-        poses: poses.map((p) => ({
-          poseKey: p.pose_key,
-          image_data_url: p.ai_image_data_url || p.image_data_url,
-        })),
-        prev: prevSession || null,
-        today_local_day: todayISO,
-      }),
-    });
-
-    clearTimeout(to);
-
-    const j = await res.json().catch(() => null);
-    if (!res.ok) return { ok: false, session: fallback, error: (j && j.error) || "AI failed" };
-    if (!j || !j.session) return { ok: false, session: fallback, error: "Bad AI response" };
-
-    // Guarantee positive-only fields.
-    const s = j.session || {};
-    const safe = {
-      ...fallback,
-      ...s,
-      build_arc: clamp(s?.build_arc ?? s?.buildArcScore ?? fallback.build_arc, 0, 100),
-      hype: String(s?.hype || fallback.hype),
-      highlights: Array.isArray(s?.highlights) ? s.highlights.slice(0, 3) : fallback.highlights,
-      levers: Array.isArray(s?.levers) ? s.levers.slice(0, 2) : fallback.levers,
-    };
-
-    return { ok: true, session: safe };
-  } catch (e) {
-    return { ok: false, session: fallback, error: String(e?.message || e) };
-  }
-}
-
-function drawUpperBodyShell(ctx, shell, opts = {}) {
-  const { cx, cy, w, h } = shell || {};
-  if (!ctx || !Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(w) || !Number.isFinite(h)) return;
-
-  const alpha = clamp(opts.alpha ?? 0.9, 0, 1);
-
-  const left = cx - w / 2;
-  const right = cx + w / 2;
-  const top = cy - h / 2;
-  const bottom = cy + h / 2;
-
-  // Rounded "capsule" with a slightly narrower neck and wider shoulders.
-  const r = Math.max(18, Math.min(w, h) * 0.16);
-  const neckInset = w * 0.12;
-  const shoulderY = top + h * 0.24;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.lineWidth = Math.max(4, Math.min(10, w * 0.012));
-  ctx.strokeStyle = "rgba(120, 255, 235, 0.95)";
-  ctx.shadowColor = "rgba(120, 255, 235, 0.95)";
-  ctx.shadowBlur = Math.max(10, ctx.lineWidth * 2.2);
-
-  ctx.beginPath();
-  // start at top center
-  ctx.moveTo(cx, top + r);
-
-  // top-left curve
-  ctx.quadraticCurveTo(cx - w * 0.18, top, left + r, top + r);
-
-  // left shoulder flare down to shoulderY
-  ctx.quadraticCurveTo(left, top + h * 0.18, left + neckInset, shoulderY);
-
-  // left side down
-  ctx.quadraticCurveTo(left + neckInset * 0.25, cy, left + r, bottom - r);
-
-  // bottom-left curve
-  ctx.quadraticCurveTo(left, bottom, left + r, bottom);
-
-  // bottom-right curve
-  ctx.quadraticCurveTo(right, bottom, right - r, bottom);
-
-  // right side up
-  ctx.quadraticCurveTo(right - neckInset * 0.25, cy, right - neckInset, shoulderY);
-
-  // right shoulder flare to top-right curve
-  ctx.quadraticCurveTo(right, top + h * 0.18, right - r, top + r);
-
-  // close back to top center
-  ctx.quadraticCurveTo(cx + w * 0.18, top, cx, top + r);
-
-  ctx.stroke();
-  ctx.restore();
+  const j = await res.json();
+  return j?.session || null;
 }
 
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
-
   const userId = user?.id || "guest";
+
   const todayISO = useMemo(() => localDayISO(), []);
   const prevHistory = useMemo(() => readPoseSessionHistory(userId), [userId]);
   const prevSession = prevHistory?.[0] || null;
 
-  const [cameraFacing, setCameraFacing] = useState("user");
-  const [captureLayout] = useState("portrait");
+  const [phase, setPhase] = useState("intro"); // intro | capture | results
   const [step, setStep] = useState(0);
-  const [started, setStarted] = useState(false);
-  const [autoSnap, setAutoSnap] = useState(true);
-  const [locked, setLocked] = useState(false);
-  const [lockHint, setLockHint] = useState("Step into frame");
-  const [captures, setCaptures] = useState([]);
-  const [scanBusy, setScanBusy] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState("user");
+
+  const [lockPct, setLockPct] = useState(0);
+  const [checks, setChecks] = useState({ centered: false, farEnough: false, still: false });
+
+  const [captures, setCaptures] = useState([]); // {key,title,dataUrl,thumbDataUrl}
+  const [busy, setBusy] = useState(false);
   const [aiSession, setAiSession] = useState(null);
   const [aiError, setAiError] = useState("");
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const overlayRef = useRef(null);
   const rafRef = useRef(0);
 
-  const stableRef = useRef({ okFrames: 0, inFrameFrames: 0, prevMid: null, prevShellW: null, stepStartedAt: 0, lastSnapAt: 0, lastDetectAt: 0, detectErrStreak: 0 });
-  const captureGuardRef = useRef({ busy: false, lastAt: 0 });
-
-  const pose = POSES[Math.min(step, POSES.length - 1)];
-  const isResults = step >= POSES.length;
-
-// Reset per-pose timers so auto-capture can't instantly fire across steps.
-useEffect(() => {
-  const fr = stableRef.current;
-  fr.okFrames = 0;
-  fr.inFrameFrames = 0;
-  fr.prevMid = null;
-  fr.prevShellW = null;
-  fr.stepStartedAt = nowMs();
-}, [step, started]);
-
-
+  const detectRef = useRef({
+    lastDetectAt: 0,
+    lastGoodAt: 0,
+    okFrames: 0,
+    prevCx: null,
+    prevCy: null,
+    prevT: 0,
+    lastSnapAt: 0,
+    errStreak: 0,
+  });
 
   const stopStream = useCallback(() => {
     try {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const s = streamRef.current;
+      if (s) {
+        for (const tr of s.getTracks()) tr.stop();
+      }
     } catch {}
-    rafRef.current = 0;
-
-    const s = streamRef.current;
     streamRef.current = null;
-    if (s) {
-      try {
-        s.getTracks().forEach((t) => t.stop());
-      } catch {}
-    }
   }, []);
 
   const startStream = useCallback(async () => {
@@ -584,279 +276,302 @@ useEffect(() => {
     const constraints = {
       audio: false,
       video: {
-        facingMode: cameraFacing,
+        facingMode: cameraFacing === "environment" ? { ideal: "environment" } : "user",
         width: { ideal: 1280 },
         height: { ideal: 720 },
       },
     };
 
-    const s = await navigator.mediaDevices.getUserMedia(constraints);
-    streamRef.current = s;
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    streamRef.current = stream;
 
     const v = videoRef.current;
     if (v) {
-      v.srcObject = s;
+      v.srcObject = stream;
       await v.play().catch(() => {});
     }
   }, [cameraFacing, stopStream]);
 
-  useEffect(() => {
-    if (!started) return;
-    startStream();
-    return () => stopStream();
-  }, [started, startStream, stopStream]);
+  const begin = useCallback(async () => {
+    setAiError("");
+    setAiSession(null);
+    setCaptures([]);
+    setStep(0);
+    setLockPct(0);
+    setChecks({ centered: false, farEnough: false, still: false });
+    setPhase("capture");
 
-  const onCapture = useCallback(async () => {
-    const v = videoRef.current;
-    if (!v) return;
+    // reset detector state
+    detectRef.current = {
+      lastDetectAt: 0,
+      lastGoodAt: 0,
+      okFrames: 0,
+      prevCx: null,
+      prevCy: null,
+      prevT: 0,
+      lastSnapAt: 0,
+      errStreak: 0,
+    };
 
-    // Prevent double-fires (autoSnap can trigger quickly).
-    const g = captureGuardRef.current;
-    const t = nowMs();
-    if (g.busy || t - g.lastAt < 800) return;
-    g.busy = true;
-    g.lastAt = t;
+    await startStream();
+  }, [startStream]);
 
+  const retake = useCallback(() => {
+    // Retake current pose: drop the last capture and resume capture phase
+    setCaptures((prev) => prev.slice(0, Math.max(0, step)));
+    setAiSession(null);
+    setAiError("");
+    setBusy(false);
+    setLockPct(0);
+    setChecks({ centered: false, farEnough: false, still: false });
+    setPhase("capture");
+    // reset snap cooldown so we don't instantly re-snap
+    detectRef.current.lastSnapAt = nowMs();
+  }, [step]);
+
+  const finishAndScore = useCallback(
+    async (finalCaptures) => {
+      setBusy(true);
+      setAiError("");
+      try {
+        const clientId = `pose_session:${userId}:${todayISO}`;
+        const session = await scorePoseSessionWithAI({ poses: finalCaptures, clientId });
+
+        const fallback = session || {
+          local_day: todayISO,
+          build_arc: 78,
+          hype: prevSession ? "Momentum is stacking. Keep showing up." : "Clean baseline captured. You’re set up to level up fast.",
+          highlights: prevSession
+            ? ["Pose control improving", "Shoulders + arms reading sharper", "Good consistency"]
+            : ["Clean baseline", "Solid posture + symmetry", "Good frame control"],
+          muscleSignals: {},
+        };
+
+        // Persist lightweight session record (no large images).
+        const record = {
+          id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          local_day: todayISO,
+          build_arc: clamp(fallback.build_arc || 70, 0, 100),
+          hype: String(fallback.hype || ""),
+          highlights: Array.isArray(fallback.highlights) ? fallback.highlights.slice(0, 5) : [],
+          muscleSignals: fallback.muscleSignals || fallback.signals || {},
+        };
+
+        appendPoseSession(userId, record, 30);
+        setAiSession(record);
+        setPhase("results");
+      } catch (e) {
+        setAiError(String(e?.message || e || "AI error"));
+        setPhase("results");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [prevSession, todayISO, userId]
+  );
+
+  const doShare = useCallback(async () => {
     try {
-      const vw = v.videoWidth || 720;
-      const vh = v.videoHeight || 1280;
+      // Use FULL-RES images for crisp export.
+      const png = await buildPoseSessionSharePng({
+        poses: captures.map((c) => ({
+          key: c.key,
+          title: c.title,
+          imageDataUrl: c.dataUrl,
+        })),
+        session: aiSession,
+      });
 
-      const outW = 1080;
-      const outH = 1920;
-
-      const tmp = document.createElement("canvas");
-      tmp.width = outW;
-      tmp.height = outH;
-      const ctx = tmp.getContext("2d");
-
-      const scale = Math.min(outW / vw, outH / vh);
-      const dw = vw * scale;
-      const dh = vh * scale;
-      const dx = (outW - dw) / 2;
-      const dy = (outH - dh) / 2;
-
-      if (cameraFacing === "user") {
-        ctx.translate(outW, 0);
-        ctx.scale(-1, 1);
-      }
-
-      ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
-
-      const dataUrl = tmp.toDataURL("image/png", 0.92);
-      const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
-
-      setCaptures((cur) => [
-        ...cur,
-        { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
-      ]);
-
-      setLocked(false);
-      stableRef.current.okFrames = 0;
-
-      if (step + 1 >= POSES.length) {
-        setStep(POSES.length);
-      } else {
-        setStep((s) => s + 1);
-      }
-    } finally {
-      g.busy = false;
+      await shareOrDownloadPng(png, {
+        filename: `slimcal_build_arc_${todayISO}.png`,
+        shareTitle: "Slimcal.ai • Build Arc",
+        shareText: "Drop your Build Arc — #SlimcalAI",
+      });
+    } catch (e) {
+      console.error("[PoseSession] share error:", e);
+      setAiError("Couldn’t generate share card. Try again.");
     }
-  }, [pose.key, step, cameraFacing]);
+  }, [aiSession, captures, todayISO]);
 
-  // Keypoint loop: detect pose and update lock state + draw ghost
+  // Detection loop: light, low-FPS, stability-only.
   useEffect(() => {
-    if (!started) return;
-    if (isResults) return;
+    if (phase !== "capture") return;
 
     let alive = true;
     let landmarker = null;
 
     const run = async () => {
-      landmarker = await getPoseLandmarker();
-      const v = videoRef.current;
-      const canvas = overlayRef.current;
-      if (!v || !canvas) return;
+      try {
+        landmarker = await getPoseLandmarker();
+      } catch (e) {
+        console.error("[PoseSession] landmarker init error:", e);
+        return;
+      }
 
-      const ctx = canvas.getContext("2d");
+      const v = videoRef.current;
+      if (!v) return;
 
       const tick = async () => {
         if (!alive) return;
-
-        const w = canvas.clientWidth || v.clientWidth || 360;
-        const h = canvas.clientHeight || v.clientHeight || 640;
-        if (canvas.width !== w) canvas.width = w;
-        if (canvas.height !== h) canvas.height = h;
+        rafRef.current = requestAnimationFrame(tick);
 
         const t = nowMs();
+        const st = detectRef.current;
 
-        const isVideoReady =
+        // Avoid inference when tab hidden / video not ready.
+        const ready =
           !document.hidden &&
           v.readyState >= 2 &&
           (v.videoWidth || 0) > 0 &&
           (v.videoHeight || 0) > 0 &&
           Number.isFinite(v.currentTime);
 
-        const fr = stableRef.current;
-        const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
-
-        let landmarks = null;
-        let anchors = null;
-        let bbox = null;
-        let match = 0;
-        let visCanvas = null;
-        let bboxLocal = null;
-
-        if (shouldDetect) {
-          fr.lastDetectAt = t;
-          try {
-            const r = landmarker.detectForVideo(v, t);
-            const lm = r?.landmarks?.[0] || null;
-            if (lm && lm.length >= 33) {
-              visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
-              const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
-              const scored = scorePoseMatch(pose.key, lmCanvas);
-              match = clamp(scored?.match || 0, 0, 1);
-              anchors = scored?.anchors || null;
-              bbox = scored?.bbox || null;
-              landmarks = lmCanvas;
-              if (bbox && visCanvas) bboxLocal = bboxToLocal(bbox, visCanvas);
-            }
-            fr.detectErrStreak = 0;
-          } catch (e) {
-            fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
-            const msg = String(e?.message || e || "");
-            const poisoned =
-              msg.includes("roi->width") ||
-              msg.includes("ROI width") ||
-              msg.includes("texImage2D") ||
-              msg.includes("no video") ||
-              msg.includes("Framebuffer is incomplete") ||
-              msg.includes("Graph has errors");
-            if (poisoned && fr.detectErrStreak >= 2) {
-              fr.detectErrStreak = 0;
-              try {
-                await resetPoseLandmarker();
-              } catch {}
-              try {
-                stopStream();
-              } catch {}
-              await new Promise((r) => setTimeout(r, 180));
-              try {
-                await startStream();
-              } catch {}
-            }
+        if (!ready) {
+          // keep last-good lock for a moment (no flashing UX)
+          const age = t - (st.lastGoodAt || 0);
+          if (age > 900) {
+            setChecks({ centered: false, farEnough: false, still: false });
+            setLockPct((p) => Math.max(0, p - 0.03));
           }
+          return;
         }
 
-// ---- Simple upper-body framing (nose + shoulders only) ----
-const nose = landmarks?.[0] || null;
-const ls = landmarks?.[11] || null;
-const rs = landmarks?.[12] || null;
+        // Low FPS detection for stability (8-10fps max)
+        if (t - (st.lastDetectAt || 0) < 120) return;
+        st.lastDetectAt = t;
 
-let inFrameRaw = false;
-let shell = null; // {cx, cy, w, h} in canvas pixels
+        // Use viewport to map landmarks into the *display* space (contain)
+        const canvasW = v.clientWidth || 360;
+        const canvasH = v.clientHeight || 640;
+        const vis = getContainVisibleRect(v.videoWidth, v.videoHeight, canvasW, canvasH);
 
-if (nose && ls && rs) {
-  const visN = nose.visibility ?? 1;
-  const visL = ls.visibility ?? 1;
-  const visR = rs.visibility ?? 1;
-  const visOk = Math.min(visN, visL, visR) >= 0.4;
+        let lmCanvas = null;
+        let bb = null;
 
-  const midX = (ls.x + rs.x) / 2;
-  const midY = (ls.y + rs.y) / 2;
-  const shoulderDist = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+        try {
+          const r = landmarker.detectForVideo(v, t);
+          const lm = r?.landmarks?.[0] || null;
+          if (lm && lm.length >= 20) {
+            lmCanvas = mapLandmarksVideoToCanvas(lm, vis);
+            bb = bboxFromLandmarks(lmCanvas);
+          }
+          st.errStreak = 0;
+        } catch (e) {
+          st.errStreak = (st.errStreak || 0) + 1;
+          const msg = String(e?.message || e || "");
+          const poisoned =
+            msg.includes("roi->width") ||
+            msg.includes("ROI width") ||
+            msg.includes("texImage2D") ||
+            msg.includes("no video") ||
+            msg.includes("Framebuffer is incomplete") ||
+            msg.includes("Graph has errors");
 
-  if (visOk && shoulderDist > 1) {
-    const shellW = clamp(shoulderDist * 2.75, w * 0.36, w * 0.92);
-    const shellH = clamp(shellW * 1.35, h * 0.44, h * 0.92);
-    const cx = clamp(midX, shellW * 0.20, w - shellW * 0.20);
-    // bias slightly up so head sits near top curve
-    const cy = clamp(midY + shellH * 0.06, shellH * 0.22, h - shellH * 0.22);
-    shell = { cx, cy, w: shellW, h: shellH };
+          if (poisoned && st.errStreak >= 2) {
+            st.errStreak = 0;
+            try {
+              await resetPoseLandmarker();
+            } catch {}
+          }
+          return;
+        }
 
-    const left = cx - shellW / 2;
-    const right = cx + shellW / 2;
-    const top = cy - shellH / 2;
-    const bottom = cy + shellH / 2;
+        if (!bb) {
+          // hold last good for a moment
+          const age = t - (st.lastGoodAt || 0);
+          if (age > 900) {
+            setChecks({ centered: false, farEnough: false, still: false });
+            setLockPct((p) => Math.max(0, p - 0.05));
+          }
+          return;
+        }
 
-    const mx = shellW * 0.08;
-    inFrameRaw =
-      nose.x > left + mx &&
-      nose.x < right - mx &&
-      nose.y > top + shellH * 0.02 &&
-      nose.y < top + shellH * 0.48 &&
-      ls.x > left + mx &&
-      rs.x < right - mx &&
-      midY > top + shellH * 0.20 &&
-      midY < bottom - shellH * 0.16;
-  }
-}
+        st.lastGoodAt = t;
 
-// hysteresis to prevent flicker
-fr.inFrameFrames = fr.inFrameFrames || 0;
-fr.inFrameFrames = inFrameRaw
-  ? Math.min(20, fr.inFrameFrames + 1)
-  : Math.max(0, fr.inFrameFrames - 2);
-const inFrame = fr.inFrameFrames >= 6;
+        // --- checks ---
+        const cx = bb.cx;
+        const cy = bb.cy;
+        const frameCx = canvasW / 2;
+        const frameCy = canvasH / 2;
 
-// stability: shoulder-mid movement + scale stability
-let stable = false;
-if (shell) {
-  const prev = fr.prevMid || null;
-  const prevW = fr.prevShellW || null;
-  const move = prev ? Math.hypot(shell.cx - prev.x, shell.cy - prev.y) : 999;
-  const scaleDelta = prevW ? Math.abs(shell.w - prevW) / Math.max(1, prevW) : 999;
+        const centered =
+          Math.abs(cx - frameCx) <= canvasW * 0.12 &&
+          Math.abs(cy - frameCy) <= canvasH * 0.14;
 
-  fr.prevMid = { x: shell.cx, y: shell.cy };
-  fr.prevShellW = shell.w;
+        const farEnough =
+          bb.w >= canvasW * 0.34 &&
+          bb.w <= canvasW * 0.86 &&
+          bb.h >= canvasH * 0.42 &&
+          bb.h <= canvasH * 0.93;
 
-  stable = move < 6 && scaleDelta < 0.06;
-}
+        // movement threshold: based on bbox size
+        const prevCx = st.prevCx;
+        const prevCy = st.prevCy;
+        const dt = Math.max(1, t - (st.prevT || t));
+        st.prevT = t;
+        st.prevCx = cx;
+        st.prevCy = cy;
 
-// draw overlay: smooth shell only (NO boxes, NO skeleton)
-ctx.clearRect(0, 0, w, h);
-if (shell) {
-  drawUpperBodyShell(ctx, shell, { alpha: inFrame ? 0.95 : 0.55 });
-} else {
-  // subtle centered shell hint
-  drawUpperBodyShell(ctx, { cx: w / 2, cy: h / 2, w: w * 0.74, h: h * 0.80 }, { alpha: 0.22 });
-}
+        let still = false;
+        if (prevCx != null && prevCy != null) {
+          const dx = cx - prevCx;
+          const dy = cy - prevCy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const thresh = Math.max(2, Math.min(canvasW, canvasH) * 0.012);
+          // require low movement for ~0.5s
+          still = dist <= thresh;
+        } else {
+          still = false;
+        }
 
-// lock gating (simple + reliable)
-const tSinceStep = t - (fr.stepStartedAt || t);
-const canSnap =
-  autoSnap &&
-  inFrame &&
-  stable &&
-  tSinceStep >= 1200 &&
-  t - (fr.lastSnapAt || 0) >= 1500;
+        const okNow = centered && farEnough && still;
 
-if (!shell) {
-  setLocked(false);
-  setLockHint("Step into frame");
-  fr.okFrames = 0;
-} else if (!inFrame) {
-  setLocked(false);
-  setLockHint("Center head + shoulders");
-  fr.okFrames = 0;
-} else if (!stable) {
-  setLocked(false);
-  setLockHint("Hold still…");
-  fr.okFrames = 0;
-} else {
-  fr.okFrames = Math.min(30, (fr.okFrames || 0) + 1);
-  setLocked(true);
-  setLockHint("LOCKED ✅");
-}
+        if (okNow) st.okFrames = (st.okFrames || 0) + 1;
+        else st.okFrames = Math.max(0, (st.okFrames || 0) - 2);
 
-// Auto-capture: hands-free only
-if (canSnap && (fr.okFrames || 0) >= 10) {
-  fr.lastSnapAt = t;
-  fr.okFrames = 0;
-  await onCapture();
-}
+        const pct = clamp((st.okFrames || 0) / 12, 0, 1);
+        setChecks({ centered, farEnough, still });
+        setLockPct(pct);
 
-        rafRef.current = requestAnimationFrame(tick);
+        // --- auto snap ---
+        const cooldownOk = t - (st.lastSnapAt || 0) > 900;
+        if (pct >= 1 && cooldownOk && !busy) {
+          st.lastSnapAt = t;
+
+          try {
+            const full = await captureFullResDataUrl(v, cameraFacing);
+            const thumb = await toThumbnailDataUrl(full, 512, 0.78);
+
+            const curPose = POSES[step] || POSES[0];
+            const nextCapture = {
+              key: curPose.key,
+              title: curPose.title,
+              dataUrl: full,
+              thumbDataUrl: thumb,
+            };
+
+            const nextList = [...captures.slice(0, step), nextCapture];
+            setCaptures(nextList);
+
+            // advance or finish
+            if (step >= POSES.length - 1) {
+              stopStream();
+              setPhase("results"); // show skeleton while AI runs
+              await finishAndScore(nextList);
+            } else {
+              setStep((s) => Math.min(POSES.length - 1, s + 1));
+              // reset lock so it feels intentional
+              st.okFrames = 0;
+              setLockPct(0);
+              setChecks({ centered: false, farEnough: false, still: false });
+            }
+          } catch (e) {
+            console.error("[PoseSession] capture error:", e);
+            // soften: just reduce lock and keep going
+            st.okFrames = 0;
+            setLockPct(0);
+          }
+        }
       };
 
       rafRef.current = requestAnimationFrame(tick);
@@ -866,164 +581,142 @@ if (canSnap && (fr.okFrames || 0) >= 10) {
 
     return () => {
       alive = false;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    };
-  }, [started, isResults, pose.key, autoSnap, onCapture, startStream, stopStream]);
-
-  // Score session when finished capturing
-  useEffect(() => {
-    if (!started) return;
-    if (!isResults) return;
-    if (captures.length < POSES.length) return;
-    if (scanBusy || aiSession) return;
-
-    let canceled = false;
-
-    const run = async () => {
-      setScanBusy(true);
-      setAiError("");
-
-      const r = await scorePoseSessionWithAI({
-        poses: captures,
-        prevSession,
-        todayISO,
-      });
-
-      if (canceled) return;
-
-      setAiSession(r.session || null);
-      if (!r.ok) setAiError(r.error || "AI unavailable (share card still ready)");
-
-      // Always save a small record so deltas can work.
       try {
-        const record = {
-          local_day: todayISO,
-          created_at: Date.now(),
-          build_arc: clamp(r.session?.build_arc ?? r.session?.buildArcScore ?? 78, 0, 100),
-          muscleSignals: r.session?.muscleSignals || {},
-          poseQuality: r.session?.poseQuality || {},
-        };
-        appendPoseSession(userId, record);
+        cancelAnimationFrame(rafRef.current);
       } catch {}
-
-      setScanBusy(false);
     };
+  }, [phase, step, cameraFacing, captures, busy, stopStream, finishAndScore]);
 
-    run();
+  useEffect(() => {
+    // cleanup on unmount
     return () => {
-      canceled = true;
+      try {
+        cancelAnimationFrame(rafRef.current);
+      } catch {}
+      stopStream();
     };
-  }, [started, isResults, captures, scanBusy, aiSession, prevSession, todayISO, userId]);
+  }, [stopStream]);
 
-  const latestRecord = useMemo(() => {
-    try {
-      const hist = readPoseSessionHistory(userId);
-      return hist?.[0] || null;
-    } catch {
-      return null;
-    }
-  }, [userId, aiSession, aiError]);
+  const curPose = POSES[step] || POSES[0];
+
+  const arc = clamp(aiSession?.build_arc ?? 78, 0, 100);
+  const tier = buildTierFromArc(arc);
 
   const deltas = useMemo(() => {
-    if (!latestRecord) return null;
-    const hist = readPoseSessionHistory(userId);
-    const prev = hist?.[1] || null;
-    return computeDeltasPositiveOnly(prev, latestRecord);
-  }, [latestRecord, userId]);
-
-  const share = useCallback(async () => {
-    const session = aiSession || synthesizePositiveSession({ prevSession, todayISO });
-
-    const buildArc = clamp(session?.build_arc ?? session?.buildArcScore ?? latestRecord?.build_arc ?? 78, 0, 100);
-    const hype = session?.hype || "Nice work — keep going.";
-    const wins = (session?.highlights || ["Clean baseline", "Solid pose control"]).slice(0, 3);
-    const levers = (session?.levers || ["Protein target today", "Train 2–3× this week"]).slice(0, 2);
-
-    const png = await buildPoseSessionSharePng({
-      buildArc,
-      headline: "POSE SESSION",
-      subhead: hype,
-      wins,
-      levers,
-      // Viral payload: embed the 3 pose images.
-      poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
-      // Neutral/positive only (no percentile / streak).
-      showMeta: false,
-      sincePoints: deltas?.since_points || 0,
-    });
-
-    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, "Pose Session ✅ #SlimcalAI");
-  }, [aiSession, captures, todayISO, deltas, prevSession, latestRecord]);
-
-  const start = () => {
-    setStarted(true);
-    setStep(0);
-    setCaptures([]);
-    setAiSession(null);
-    setAiError("");
-    setLocked(false);
-    stableRef.current.okFrames = 0;
-    stableRef.current.inFrameFrames = 0;
-    stableRef.current.prevLm = null;
-  };
-
-  const back = () => history.push("/");
+    if (!prevSession || !aiSession) return null;
+    return computeDeltasPositiveOnly(prevSession, aiSession);
+  }, [prevSession, aiSession]);
 
   return (
     <Box sx={{ p: 2, maxWidth: 720, mx: "auto" }}>
-            <Typography sx={{ mt: 1.5, fontSize: 13, color: "rgba(220,255,245,0.78)", textAlign: "center", fontWeight: 800 }}>
-              Auto-captures when locked — hold your pose.
+      {/* Top row */}
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => history.push("/evaluate")}
+          sx={{ color: "rgba(220,255,245,0.9)" }}
+        >
+          Back
+        </Button>
+
+        {phase === "capture" ? (
+          <Button
+            startIcon={<FlipCameraAndroidIcon />}
+            onClick={() => setCameraFacing((f) => (f === "user" ? "environment" : "user"))}
+            sx={{ color: "rgba(220,255,245,0.9)" }}
+          >
+            Flip
+          </Button>
+        ) : null}
+      </Stack>
+
+      {phase === "intro" ? (
+        <Card sx={{ borderRadius: 4, background: "#0b0f14", color: "#eafffb", overflow: "hidden" }}>
+          <CardContent>
+            <Typography variant="h4" sx={{ fontWeight: 950, letterSpacing: 0.3 }}>
+              AI Physique Tracker
+            </Typography>
+            <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.85)" }}>
+              3 poses · 15 seconds · shareable results
             </Typography>
 
-      {!started ? (
-        <Card sx={{ borderRadius: 3, background: "#0b0f14", color: "#eafffb" }}>
-          <CardContent>
-            <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: 0.5 }}>
-              Pose Session
-            </Typography>
-            <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.9)" }}>
-              3 poses · auto-lock · instant share card
-            </Typography>
             <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
-            <Stack spacing={1.25}>
+
+            <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
               {POSES.map((p) => (
                 <Box
                   key={p.key}
                   sx={{
-                    p: 1.25,
-                    borderRadius: 2,
-                    border: "1px solid rgba(0,255,190,0.15)",
+                    flex: 1,
+                    borderRadius: 3,
+                    border: "1px solid rgba(0,255,190,0.16)",
                     background: "rgba(0,255,190,0.04)",
+                    p: 1,
+                    textAlign: "center",
                   }}
                 >
-                  <Typography sx={{ fontWeight: 800 }}>{p.title}</Typography>
-                  <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
-                    {p.subtitle}
-                  </Typography>
+                  <Box sx={{ width: "100%", aspectRatio: "1 / 1.15", opacity: 0.7 }}>
+                    <GuideSvg variant={p.guide} />
+                  </Box>
+                  <Typography sx={{ mt: 0.5, fontWeight: 900, fontSize: 12 }}>{p.title}</Typography>
                 </Box>
               ))}
             </Stack>
-            <Button sx={{ mt: 2 }} fullWidth size="large" variant="contained" startIcon={<CameraAltIcon />} onClick={start}>
-              Start Pose Session
+
+            <Stack spacing={1} sx={{ color: "rgba(220,255,245,0.85)" }}>
+              <Typography sx={{ fontWeight: 800 }}>✅ Auto-captures when locked</Typography>
+              <Typography sx={{ fontWeight: 800 }}>✅ Private — you control sharing</Typography>
+            </Stack>
+
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={begin}
+              sx={{
+                mt: 2.2,
+                py: 1.35,
+                borderRadius: 999,
+                fontWeight: 950,
+                letterSpacing: 0.6,
+                background:
+                  "linear-gradient(90deg, rgba(0,255,190,0.85), rgba(80,210,255,0.9))",
+                color: "#041018",
+                boxShadow: "0 0 26px rgba(0,255,190,0.25)",
+                "&:hover": {
+                  background:
+                    "linear-gradient(90deg, rgba(0,255,190,0.92), rgba(80,210,255,0.98))",
+                },
+              }}
+            >
+              Start Scan
             </Button>
+
+            <Typography sx={{ mt: 1, fontSize: 12, color: "rgba(220,255,245,0.7)", textAlign: "center" }}>
+              Unlock your Build Arc Card
+            </Typography>
           </CardContent>
         </Card>
-      ) : !isResults ? (
-        <Card sx={{ borderRadius: 3, background: "#05070a", color: "#eafffb", overflow: "hidden" }}>
+      ) : null}
+
+      {phase === "capture" ? (
+        <Card sx={{ borderRadius: 4, background: "#0b0f14", color: "#eafffb", overflow: "hidden" }}>
           <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 900 }}>
-              {pose.title}
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.88)" }}>{pose.subtitle}</Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Typography sx={{ fontWeight: 950, fontSize: 18 }}>
+                Pose {step + 1} of {POSES.length}
+              </Typography>
+              <Button onClick={retake} sx={{ color: "rgba(220,255,245,0.85)" }}>
+                Retake
+              </Button>
+            </Stack>
 
             <Box
               sx={{
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: captureLayout === "landscape" ? "16 / 9" : "9 / 16",
-                borderRadius: 3,
+                aspectRatio: "9 / 16",
+                borderRadius: 4,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
                 background: "#000",
@@ -1042,19 +735,28 @@ if (canSnap && (fr.okFrames || 0) >= 10) {
                   background: "#000",
                 }}
               />
-              <canvas
-                ref={overlayRef}
-                style={{
+
+              {/* Static guide overlay */}
+              <Box
+                className="poseGuide"
+                sx={{
                   position: "absolute",
                   inset: 0,
-                  width: "100%",
-                  height: "100%",
+                  display: "grid",
+                  placeItems: "center",
                   pointerEvents: "none",
-                  mixBlendMode: "screen",
-                  transform: cameraFacing === "user" ? "scaleX(-1)" : "none",
+                  color: "rgba(120,255,220,0.95)",
+                  filter:
+                    "drop-shadow(0 0 10px rgba(120,255,220,0.55)) drop-shadow(0 0 22px rgba(120,255,220,0.35))",
+                  opacity: 0.95,
                 }}
-              />
+              >
+                <Box sx={{ width: "78%", height: "92%" }}>
+                  <GuideSvg variant={curPose.guide} />
+                </Box>
+              </Box>
 
+              {/* Lock-on HUD */}
               <Box
                 sx={{
                   position: "absolute",
@@ -1062,118 +764,198 @@ if (canSnap && (fr.okFrames || 0) >= 10) {
                   bottom: 10,
                   right: 10,
                   p: 1,
-                  borderRadius: 2,
+                  borderRadius: 3,
                   background: "rgba(0,0,0,0.55)",
-                  border: locked
-                    ? "1px solid rgba(0,255,190,0.55)"
-                    : "1px solid rgba(0,255,190,0.18)",
-                  boxShadow: locked ? "0 0 18px rgba(0,255,190,0.18)" : "none",
+                  border: lockPct >= 1 ? "1px solid rgba(0,255,190,0.55)" : "1px solid rgba(0,255,190,0.18)",
                 }}
               >
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#eafffb" }}>{lockHint}</Typography>
+                <Typography sx={{ fontWeight: 950, textAlign: "center", letterSpacing: 2 }}>
+                  LOCK-ON
+                </Typography>
+
+                <Box
+                  sx={{
+                    mt: 1,
+                    height: 10,
+                    borderRadius: 999,
+                    background: "rgba(0,255,190,0.14)",
+                    overflow: "hidden",
+                    border: "1px solid rgba(0,255,190,0.18)",
+                  }}
+                >
+                  <Box
+                    sx={{
+                      height: "100%",
+                      width: `${Math.round(lockPct * 100)}%`,
+                      background:
+                        "linear-gradient(90deg, rgba(0,255,190,0.85), rgba(80,210,255,0.9))",
+                      transition: "width 120ms linear",
+                    }}
+                  />
+                </Box>
+
+                <Stack direction="row" spacing={1.2} sx={{ mt: 1, justifyContent: "center", flexWrap: "wrap" }}>
+                  <Typography sx={{ fontSize: 12, opacity: checks.centered ? 1 : 0.6 }}>
+                    {checks.centered ? "✅" : "⬜"} Centered
+                  </Typography>
+                  <Typography sx={{ fontSize: 12, opacity: checks.farEnough ? 1 : 0.6 }}>
+                    {checks.farEnough ? "✅" : "⬜"} Far enough
+                  </Typography>
+                  <Typography sx={{ fontSize: 12, opacity: checks.still ? 1 : 0.6 }}>
+                    {checks.still ? "✅" : "⬜"} Hold still
+                  </Typography>
+                </Stack>
               </Box>
             </Box>
 
-            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Button fullWidth variant="outlined" onClick={() => onCapture()}>
-                Capture now
-              </Button>
-              <Button fullWidth variant="contained" onClick={() => setAutoSnap((a) => !a)}>
-                {autoSnap ? "Auto snap On" : "Auto snap Off"}
-              </Button>
-            </Stack>
+            <Typography sx={{ mt: 1.25, fontWeight: 950, fontSize: 22, textAlign: "center" }}>
+              {curPose.title}
+            </Typography>
+            <Typography sx={{ mt: 0.25, color: "rgba(220,255,245,0.8)", textAlign: "center" }}>
+              {curPose.subtitle}
+            </Typography>
+
+            <Typography sx={{ mt: 1.25, fontSize: 12, color: "rgba(220,255,245,0.7)", textAlign: "center" }}>
+              Auto-captures when locked — hold your pose.
+            </Typography>
           </CardContent>
         </Card>
-      ) : (
-        <Card sx={{ borderRadius: 3, background: "#070a0f", color: "#eafffb" }}>
+      ) : null}
+
+      {phase === "results" ? (
+        <Card sx={{ mt: 1, borderRadius: 4, background: "#0b0f14", color: "#eafffb", overflow: "hidden" }}>
           <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 900 }}>
-              Pose Session Results
+            <Typography variant="h5" sx={{ fontWeight: 950, textAlign: "center" }}>
+              Slimcal.ai
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.9)" }}>
-              {prevSession ? "Progress update" : "Baseline locked for future scans ✅"}
+            <Typography sx={{ mt: 0.25, textAlign: "center", color: "rgba(220,255,245,0.85)", fontWeight: 900 }}>
+              Build Arc
             </Typography>
+
+            <Box
+              sx={{
+                mt: 1.25,
+                p: 1.5,
+                borderRadius: 4,
+                border: "1px solid rgba(0,255,190,0.18)",
+                background: "rgba(0,255,190,0.05)",
+              }}
+            >
+              <Typography sx={{ fontWeight: 950, textAlign: "center", letterSpacing: 1.2 }}>
+                {tier}
+              </Typography>
+              <Box
+                sx={{
+                  mt: 1.1,
+                  px: 1.2,
+                  py: 0.9,
+                  borderRadius: 999,
+                  border: "1px solid rgba(0,255,190,0.22)",
+                  background: "rgba(0,0,0,0.35)",
+                }}
+              >
+                <Typography sx={{ textAlign: "center", fontWeight: 950 }}>
+                  AESTHETIC: {(arc / 10).toFixed(1)}/10
+                </Typography>
+              </Box>
+              {deltas ? (
+                <Typography sx={{ mt: 1, textAlign: "center", fontSize: 12, color: "rgba(220,255,245,0.78)" }}>
+                  Since last: <b>+{deltas.since_points || 0}</b>
+                </Typography>
+              ) : null}
+            </Box>
 
             <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
 
-            {scanBusy ? (
-              <Typography sx={{ fontWeight: 800, color: "rgba(220,255,245,0.9)" }}>
-                Finalizing your share card…
-              </Typography>
-            ) : (
-              <>
-                <Typography sx={{ mt: 0.25, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
-                  {aiSession?.hype ||
-                    (prevSession
-                      ? "Nice — your momentum is building. Keep showing up."
-                      : "Great starting frame. You’re going to level up fast.")}
-                </Typography>
-
-                {deltas ? (
-                  <Box sx={{ mt: 1.25 }}>
-                    <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
-                      Since last: <b>+{deltas.since_points || 0}</b>
-                    </Typography>
+            <Typography sx={{ fontWeight: 950 }}>WHAT’S POPPING</Typography>
+            <Stack spacing={0.9} sx={{ mt: 1 }}>
+              {(aiSession?.highlights || [
+                "Upper chest looks fuller",
+                "Lats widening — clean taper",
+                "Arms reading thicker from all angles",
+              ])
+                .slice(0, 3)
+                .map((t, idx) => (
+                  <Box
+                    key={idx}
+                    sx={{
+                      p: 1,
+                      borderRadius: 3,
+                      background: "rgba(0,255,190,0.05)",
+                      border: "1px solid rgba(0,255,190,0.14)",
+                    }}
+                  >
+                    <Typography sx={{ fontWeight: 850 }}>{t}</Typography>
                   </Box>
-                ) : null}
+                ))}
+            </Stack>
 
-                <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
-
-                <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>Wins</Typography>
-                <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.highlights || ["Clean baseline", "Solid pose control"]).slice(0, 3).map((t, idx) => (
-                    <Box
-                      key={idx}
-                      sx={{
-                        p: 1,
-                        borderRadius: 2,
-                        background: "rgba(0,255,190,0.05)",
-                        border: "1px solid rgba(0,255,190,0.14)",
-                      }}
-                    >
-                      <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
-                    </Box>
-                  ))}
-                </Stack>
-
-                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>Next</Typography>
-                <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.levers || ["Protein target today", "Train 2–3× this week"])
-                    .slice(0, 2)
-                    .map((t, idx) => (
-                      <Box
-                        key={idx}
-                        sx={{
-                          p: 1,
-                          borderRadius: 2,
-                          background: "rgba(0,255,255,0.04)",
-                          border: "1px solid rgba(0,255,255,0.14)",
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
-                      </Box>
-                    ))}
-                </Stack>
-
-                {aiError ? (
-                  <Typography sx={{ mt: 1.5, color: "rgba(220,255,245,0.75)", fontWeight: 700 }}>
-                    {aiError}
+            <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+              {captures.slice(0, 3).map((c) => (
+                <Box
+                  key={c.key}
+                  sx={{
+                    flex: 1,
+                    borderRadius: 3,
+                    overflow: "hidden",
+                    border: "1px solid rgba(0,255,190,0.18)",
+                    background: "#000",
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src={c.thumbDataUrl || c.dataUrl}
+                    alt={c.title}
+                    sx={{ width: "100%", height: 110, objectFit: "cover", display: "block" }}
+                  />
+                  <Typography sx={{ p: 0.8, fontWeight: 900, fontSize: 12, textAlign: "center" }}>
+                    {c.title}
                   </Typography>
-                ) : null}
+                </Box>
+              ))}
+            </Stack>
 
-                <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-                  <Button fullWidth variant="outlined" onClick={() => start()}>
-                    New Session
-                  </Button>
-                  <Button fullWidth variant="contained" startIcon={<IosShareIcon />} onClick={share}>
-                    Share
-                  </Button>
-                </Stack>
-              </>
-            )}
+            <Typography sx={{ mt: 1.4, textAlign: "center", fontSize: 12, color: "rgba(220,255,245,0.7)" }}>
+              Drop your Build Arc — <b>#SlimcalAI</b>
+            </Typography>
+
+            {aiError ? (
+              <Typography sx={{ mt: 1.2, color: "rgba(255,160,160,0.95)", fontSize: 12, textAlign: "center" }}>
+                {aiError}
+              </Typography>
+            ) : null}
+
+            <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+              <Button fullWidth variant="outlined" onClick={() => setPhase("intro")}>
+                New Session
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={<IosShareIcon />}
+                onClick={doShare}
+                disabled={busy || captures.length < 2}
+                sx={{
+                  fontWeight: 950,
+                  background:
+                    "linear-gradient(90deg, rgba(0,255,190,0.85), rgba(80,210,255,0.9))",
+                  color: "#041018",
+                  "&:hover": {
+                    background:
+                      "linear-gradient(90deg, rgba(0,255,190,0.92), rgba(80,210,255,0.98))",
+                  },
+                }}
+              >
+                Share
+              </Button>
+            </Stack>
+
+            <Typography sx={{ mt: 1.2, textAlign: "center", fontSize: 12, color: "rgba(220,255,245,0.7)" }}>
+              Tap Share to copy a caption + hashtags
+            </Typography>
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </Box>
   );
 }
