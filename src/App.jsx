@@ -820,7 +820,7 @@ export default function App() {
           <Route path="/pro-success" component={ProSuccess} />
                     <Route path="/body-scan/session" component={PoseSession} />
 
-          <Route path="/body-scan" component={BodyScanBeta} />
+          <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
