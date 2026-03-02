@@ -20,6 +20,7 @@ export const FREE_DAILY_LIMITS = {
   daily_eval_ai_verdict: 3,
   daily_eval_verdict: 3,
   frame_check: 1,
+  pose_session: 1,
 };
 
 function getTodayISO() {

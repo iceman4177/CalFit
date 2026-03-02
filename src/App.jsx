@@ -61,6 +61,7 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import { logPageView }   from './analytics';
 
 import { useEntitlements } from './context/EntitlementsContext.jsx';
+import { canUseDailyFeature, registerDailyFeatureUse } from './components/FeatureUseBadge.jsx';
 import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
@@ -818,7 +819,49 @@ export default function App() {
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
-                    <Route path="/body-scan/session" component={PoseSession} />
+                    <Route
+            exact
+            path="/body-scan/session"
+            render={() => {
+              const proNow = !!(proCheck.isPro || isProActive || localPro);
+              if (proNow) return <PoseSession />;
+
+              // Free users: 1 scan/day
+              const today = (() => {
+                try {
+                  const n = new Date();
+                  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).toISOString().slice(0, 10);
+                } catch {
+                  return new Date().toISOString().slice(0, 10);
+                }
+              })();
+
+              const spendKey = `pose_session_spent_${today}`;
+              const alreadySpent = (() => {
+                try {
+                  return sessionStorage.getItem(spendKey) === "1";
+                } catch {
+                  return false;
+                }
+              })();
+
+              // If already used today, block and upsell
+              if (!canUseDailyFeature("pose_session") && !alreadySpent) {
+                setUpgradeOpen(true);
+                return <Redirect to="/" />;
+              }
+
+              // Spend once per day per session (prevents refresh double-charges)
+              if (!alreadySpent) {
+                try {
+                  registerDailyFeatureUse("pose_session");
+                  sessionStorage.setItem(spendKey, "1");
+                } catch {}
+              }
+
+              return <PoseSession />;
+            }}
+          />
 
           <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
