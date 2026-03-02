@@ -386,6 +386,66 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true, dim = false } = {}) {
   ctx.restore();
 }
 
+
+function drawUpperBodyOutline(ctx, { w, h, nose, ls, rs, locked = false } = {}) {
+  if (!ctx || !w || !h || !nose || !ls || !rs) return;
+
+  // All coords are normalized (0..1) in canvas space.
+  const cx = (ls.x + rs.x) / 2;
+  const cy = (ls.y + rs.y) / 2;
+  const sw = Math.max(0.001, Math.abs(rs.x - ls.x));
+
+  // Build a smooth "upper-body shell" (no skeleton / no boxes).
+  const topY = Math.max(0.02, nose.y - sw * 1.15);
+  const neckY = cy - sw * 0.25;
+  const shoulderY = cy;
+  const midY = cy + sw * 0.65;
+  const botY = cy + sw * 2.10;
+
+  const leftShoulderX = cx - sw * 1.05;
+  const rightShoulderX = cx + sw * 1.05;
+
+  const leftArmX = cx - sw * 2.05;
+  const rightArmX = cx + sw * 2.05;
+
+  const leftBotX = cx - sw * 1.35;
+  const rightBotX = cx + sw * 1.35;
+
+  const px = (x) => x * w;
+  const py = (y) => y * h;
+
+  ctx.save();
+  ctx.clearRect(0, 0, w, h);
+
+  // Neon stroke
+  ctx.lineWidth = Math.max(3, Math.min(10, w * 0.008));
+  ctx.strokeStyle = locked ? "rgba(120,255,220,0.95)" : "rgba(120,255,220,0.45)";
+  ctx.shadowColor = locked ? "rgba(0,255,190,0.55)" : "rgba(0,255,190,0.28)";
+  ctx.shadowBlur = locked ? 22 : 14;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  // Start at top center
+  ctx.moveTo(px(cx), py(topY));
+  // Top right head curve
+  ctx.bezierCurveTo(px(cx + sw * 0.85), py(topY + sw * 0.10), px(rightShoulderX + sw * 0.55), py(neckY - sw * 0.10), px(rightShoulderX), py(neckY));
+  // Right shoulder to right arm bulge
+  ctx.bezierCurveTo(px(rightShoulderX + sw * 0.60), py(shoulderY + sw * 0.15), px(rightArmX), py(midY - sw * 0.10), px(rightArmX - sw * 0.10), py(midY + sw * 0.25));
+  // Down to bottom right
+  ctx.bezierCurveTo(px(rightArmX - sw * 0.10), py(midY + sw * 1.10), px(rightBotX + sw * 0.35), py(botY - sw * 0.20), px(rightBotX), py(botY));
+  // Bottom curve to left
+  ctx.bezierCurveTo(px(cx + sw * 0.35), py(botY + sw * 0.25), px(cx - sw * 0.35), py(botY + sw * 0.25), px(leftBotX), py(botY));
+  // Up left side
+  ctx.bezierCurveTo(px(leftBotX - sw * 0.35), py(botY - sw * 0.20), px(leftArmX + sw * 0.10), py(midY + sw * 1.10), px(leftArmX + sw * 0.10), py(midY + sw * 0.25));
+  // Left arm bulge to shoulder
+  ctx.bezierCurveTo(px(leftArmX), py(midY - sw * 0.10), px(leftShoulderX - sw * 0.60), py(shoulderY + sw * 0.15), px(leftShoulderX), py(neckY));
+  // Top left head curve back to start
+  ctx.bezierCurveTo(px(leftShoulderX - sw * 0.55), py(neckY - sw * 0.10), px(cx - sw * 0.85), py(topY + sw * 0.10), px(cx), py(topY));
+
+  ctx.stroke();
+  ctx.restore();
+}
 function drawFramingGuide(ctx, visCanvas, { w, h }) {
   if (!ctx || !visCanvas) return;
 
@@ -660,196 +720,197 @@ export default function PoseSession() {
     }
   }, [pose.key, step, cameraFacing]);
 
-  // Keypoint loop: detect pose and update lock state + draw ghost
-  useEffect(() => {
-    if (!started) return;
-    if (isResults) return;
 
-    let alive = true;
-    let landmarker = null;
+// Capture loop (Patch C):
+// - Use MediaPipe Pose ONLY to detect nose + shoulders (person-in-frame + scale)
+// - Draw a single smooth upper-body outline (no skeleton / no boxes)
+// - Auto-capture on stability timer (no pose-match gating)
+useEffect(() => {
+  if (!started) return;
+  if (isResults) return;
 
-    const run = async () => {
-      landmarker = await getPoseLandmarker();
-      const v = videoRef.current;
-      const canvas = overlayRef.current;
-      if (!v || !canvas) return;
+  let alive = true;
+  let landmarker = null;
 
-      const ctx = canvas.getContext("2d");
+  const run = async () => {
+    landmarker = await getPoseLandmarker();
+    const v = videoRef.current;
+    const canvas = overlayRef.current;
+    if (!v || !canvas) return;
 
-      const tick = async () => {
-        if (!alive) return;
+    const ctx = canvas.getContext("2d");
 
-        const w = canvas.clientWidth || v.clientWidth || 360;
-        const h = canvas.clientHeight || v.clientHeight || 640;
-        if (canvas.width !== w) canvas.width = w;
-        if (canvas.height !== h) canvas.height = h;
+    const fr = stableRef.current;
+    fr.inFrameFrames = 0;
+    fr.prevCenter = null;
+    fr.stableMs = 0;
+    fr.lastFrameAt = 0;
+    fr.lastDetectAt = 0;
+    fr.detectErrStreak = 0;
 
-        const t = nowMs();
+    const tick = async () => {
+      if (!alive) return;
 
-        const isVideoReady =
-          !document.hidden &&
-          v.readyState >= 2 &&
-          (v.videoWidth || 0) > 0 &&
-          (v.videoHeight || 0) > 0 &&
-          Number.isFinite(v.currentTime);
+      const w = canvas.clientWidth || v.clientWidth || 360;
+      const h = canvas.clientHeight || v.clientHeight || 640;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
 
-        const fr = stableRef.current;
-        const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
+      const t = nowMs();
+      const dt = fr.lastFrameAt ? Math.max(0, t - fr.lastFrameAt) : 16;
+      fr.lastFrameAt = t;
 
-        let landmarks = null;
-        let anchors = null;
-        let bbox = null;
-        let match = 0;
-        let visCanvas = null;
-        let bboxLocal = null;
+      const isVideoReady =
+        !document.hidden &&
+        v.readyState >= 2 &&
+        (v.videoWidth || 0) > 0 &&
+        (v.videoHeight || 0) > 0 &&
+        Number.isFinite(v.currentTime);
 
-        if (shouldDetect) {
-          fr.lastDetectAt = t;
-          try {
-            const r = landmarker.detectForVideo(v, t);
-            const lm = r?.landmarks?.[0] || null;
-            if (lm && lm.length >= 33) {
-              visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
-              const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
-              const scored = scorePoseMatch(pose.key, lmCanvas);
-              match = clamp(scored?.match || 0, 0, 1);
-              anchors = scored?.anchors || null;
-              bbox = scored?.bbox || null;
-              landmarks = lmCanvas;
-              if (bbox && visCanvas) bboxLocal = bboxToLocal(bbox, visCanvas);
-            }
+      const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
+
+      let nose = null;
+      let ls = null;
+      let rs = null;
+      let hasCore = false;
+
+      if (shouldDetect) {
+        fr.lastDetectAt = t;
+        try {
+          const r = landmarker.detectForVideo(v, t);
+          const lm = r?.landmarks?.[0] || null;
+
+          if (lm && lm.length >= 13) {
+            const visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
+            const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
+
+            // MediaPipe pose indices
+            nose = lmCanvas?.[0] || null;
+            ls = lmCanvas?.[11] || null;
+            rs = lmCanvas?.[12] || null;
+
+            const vN = nose?.visibility ?? 1;
+            const vLS = ls?.visibility ?? 1;
+            const vRS = rs?.visibility ?? 1;
+
+            hasCore =
+              nose && ls && rs &&
+              Number.isFinite(nose.x) && Number.isFinite(nose.y) &&
+              Number.isFinite(ls.x) && Number.isFinite(ls.y) &&
+              Number.isFinite(rs.x) && Number.isFinite(rs.y) &&
+              vN > 0.35 && vLS > 0.35 && vRS > 0.35;
+          }
+
+          fr.detectErrStreak = 0;
+        } catch (e) {
+          fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
+          const msg = String(e?.message || e || "");
+          const poisoned =
+            msg.includes("roi->width") ||
+            msg.includes("ROI width") ||
+            msg.includes("texImage2D") ||
+            msg.includes("no video") ||
+            msg.includes("Framebuffer is incomplete") ||
+            msg.includes("Graph has errors");
+          if (poisoned && fr.detectErrStreak >= 2) {
             fr.detectErrStreak = 0;
-          } catch (e) {
-            fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
-            const msg = String(e?.message || e || "");
-            const poisoned =
-              msg.includes("roi->width") ||
-              msg.includes("ROI width") ||
-              msg.includes("texImage2D") ||
-              msg.includes("no video") ||
-              msg.includes("Framebuffer is incomplete") ||
-              msg.includes("Graph has errors");
-            if (poisoned && fr.detectErrStreak >= 2) {
-              fr.detectErrStreak = 0;
-              try {
-                await resetPoseLandmarker();
-              } catch {}
-              try {
-                stopStream();
-              } catch {}
-              await new Promise((r) => setTimeout(r, 180));
-              try {
-                await startStream();
-              } catch {}
-            }
+            try { await resetPoseLandmarker(); } catch {}
+            try { stopStream(); } catch {}
+            await new Promise((r) => setTimeout(r, 180));
+            try { await startStream(); } catch {}
           }
         }
+      }
 
-        // ---- Framing gate (simple, forgiving) ----
-        // We only require HEAD + SHOULDERS (and ideally upper arms) visible.
-        // This avoids the hips/ROI flicker across devices and distances.
-        let inFrameRaw = false;
-        let upperBodyOk = false;
-
-        if (bbox) {
-          const b = bboxLocal || bbox;
-          const bboxH = b.maxY - b.minY;
-          const bboxW = b.maxX - b.minX;
-
-          const headOk = b.minY <= 0.36; // head not cut off
-          const shouldersOk = b.maxY >= 0.46; // includes shoulders + upper torso
-          const sizeOk = bboxH >= 0.22 && bboxW >= 0.18; // not too tiny
-          const notTooClose = bboxH <= 0.92 && bboxW <= 0.92;
-
-          upperBodyOk = headOk && shouldersOk && sizeOk && notTooClose;
-          inFrameRaw = upperBodyOk;
+      // If we didn't detect this frame, keep the last outline for a short grace window
+      // to avoid flashing on mobile.
+      if (hasCore) {
+        fr.lastCore = { nose, ls, rs };
+        fr.lastCoreAt = t;
+      } else {
+        const grace = 450;
+        if (fr.lastCore && (t - (fr.lastCoreAt || 0)) < grace) {
+          ({ nose, ls, rs } = fr.lastCore);
+          hasCore = true;
         }
+      }
 
-        // hysteresis (prevents flicker)
-        fr.inFrameFrames = fr.inFrameFrames || 0;
+      let inFrameRaw = false;
+      let stable = false;
+
+      if (hasCore) {
+        const cx = (ls.x + rs.x) / 2;
+        const cy = (ls.y + rs.y) / 2;
+        const sw = Math.max(0.0001, Math.abs(rs.x - ls.x));
+
+        // In-frame gate: head + shoulders visible, reasonably centered and sized.
+        const centered = cx > 0.18 && cx < 0.82 && cy > 0.12 && cy < 0.78;
+        const headOk = nose.y > 0.03 && nose.y < 0.55;
+        const sizeOk = sw > 0.10 && sw < 0.60;
+
+        inFrameRaw = centered && headOk && sizeOk;
+
+        // Hysteresis to prevent flicker.
         fr.inFrameFrames = inFrameRaw
-          ? Math.min(20, fr.inFrameFrames + 1)
-          : Math.max(0, fr.inFrameFrames - 2);
+          ? Math.min(20, (fr.inFrameFrames || 0) + 1)
+          : Math.max(0, (fr.inFrameFrames || 0) - 2);
         const inFrame = fr.inFrameFrames >= 6;
 
-        // stability from landmark movement
-        let stable = false;
-        if (landmarks && landmarks.length) {
-          const prevLm = fr.prevLm;
-          if (prevLm && prevLm.length === landmarks.length) {
-            let sum = 0;
-            for (let i = 0; i < landmarks.length; i++) {
-              const dx = landmarks[i].x - prevLm[i].x;
-              const dy = landmarks[i].y - prevLm[i].y;
-              sum += Math.sqrt(dx * dx + dy * dy);
-            }
-            const avg = sum / landmarks.length;
-            stable = avg < 0.0048;
-          }
-          fr.prevLm = landmarks;
+        // Stability based on shoulder-center movement (normalized by shoulder width).
+        const prev = fr.prevCenter;
+        if (prev && Number.isFinite(prev.cx) && Number.isFinite(prev.cy) && Number.isFinite(prev.sw)) {
+          const dx = cx - prev.cx;
+          const dy = cy - prev.cy;
+          const norm = Math.max(0.0001, sw);
+          const motion = Math.sqrt(dx * dx + dy * dy) / norm;
+          stable = motion < 0.030;
         }
+        fr.prevCenter = { cx, cy, sw };
 
-        // draw overlay (NO boxes; smooth upper-body outline only)
-        if (!bbox || !visCanvas) {
-          ctx.clearRect(0, 0, w, h);
-        } else {
-          const tpl = buildPoseTemplate(pose.key, anchors, bbox, {
-            bboxLocal,
-            upperBodyOnly: upperBodyOk,
-          });
+        if (inFrame && stable) fr.stableMs = (fr.stableMs || 0) + dt;
+        else fr.stableMs = 0;
 
-          // Always render the silhouette so users have guidance, even before lock.
-          // Dim it when not fully in-frame or when match is low.
-          const dim = !inFrame || match < 0.66;
-          drawNeonGhost(ctx, tpl, { w, h, glow: !dim, dim });
-        }
+        const lockedNow = inFrame && (fr.stableMs || 0) >= 520;
 
-        // lock gating (forgiving, matches earlier behavior)
-        const ok = inFrame && match >= 0.66;
+        setLocked(lockedNow);
+        if (!inFrame) setLockHint("Center head + shoulders in frame");
+        else if (!stable) setLockHint("Hold still…");
+        else if ((fr.stableMs || 0) < 520) setLockHint("Locking…");
+        else setLockHint("LOCKED ✅");
 
-        if (!bbox) {
-          setLocked(false);
-          setLockHint("Step into view");
-          fr.okFrames = 0;
-        } else if (!inFrame) {
-          setLocked(false);
-          setLockHint("Center head + shoulders in frame");
-          fr.okFrames = 0;
-        } else if (match < 0.66) {
-          setLocked(false);
-          setLockHint("Match the neon outline");
-          fr.okFrames = 0;
-        } else if (!stable) {
-          setLocked(false);
-          setLockHint("Hold still…");
-          fr.okFrames = 0;
-        } else {
-          fr.okFrames = Math.min(30, (fr.okFrames || 0) + 1);
-          setLocked(true);
-          setLockHint("LOCKED ✅");
-        }
+        // Draw the smooth outline (no boxes, no skeleton).
+        drawUpperBodyOutline(ctx, { w, h, nose, ls, rs, locked: lockedNow });
 
-        // Auto-capture: when locked and stable for a short window, snap immediately.
-        if (autoSnap && ok && stable && (fr.okFrames || 0) >= 8) {
-          // Avoid repeated snaps while staying still.
-          fr.okFrames = 0;
+        // Auto-capture once fully locked for a short window.
+        if (autoSnap && lockedNow && (fr.stableMs || 0) >= 850) {
+          fr.stableMs = 0;
+          fr.inFrameFrames = 0;
           await onCapture();
         }
-
-        rafRef.current = requestAnimationFrame(tick);
-      };
+      } else {
+        // No detection at all
+        setLocked(false);
+        setLockHint("Step into view");
+        fr.inFrameFrames = 0;
+        fr.stableMs = 0;
+        if (ctx) ctx.clearRect(0, 0, w, h);
+      }
 
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    run();
+    rafRef.current = requestAnimationFrame(tick);
+  };
 
-    return () => {
-      alive = false;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    };
-  }, [started, isResults, pose.key, autoSnap, onCapture, startStream, stopStream]);
+  run();
+
+  return () => {
+    alive = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  };
+}, [started, isResults, autoSnap, onCapture, startStream, stopStream]);
+
 
   // Score session when finished capturing
   useEffect(() => {
