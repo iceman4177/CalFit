@@ -71,6 +71,52 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
   });
 }
 
+
+function titleCaseKey(k) {
+  const s = String(k || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return s.trim();
+}
+
+function normalizeMuscleBreakdown(mb) {
+  if (!mb) return [];
+  if (Array.isArray(mb)) {
+    return mb
+      .map((r) => ({
+        group: r?.group || r?.name || r?.title || "",
+        note: r?.note || r?.text || r?.desc || "",
+      }))
+      .filter((r) => r.group && r.note);
+  }
+  if (typeof mb === "object") {
+    return Object.entries(mb)
+      .map(([k, v]) => ({ group: titleCaseKey(k), note: String(v || "").trim() }))
+      .filter((r) => r.group && r.note);
+  }
+  return [];
+}
+
+function normalizeRankings(rankings) {
+  const best = Array.isArray(rankings?.bestDeveloped) ? rankings.bestDeveloped : [];
+  const improve = Array.isArray(rankings?.canImprove) ? rankings.canImprove : [];
+  return { best, improve };
+}
+
+function renderReportLines(report) {
+  const lines = String(report || "").split(/\r?\n/).map((l) => l.trimEnd());
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (!l) {
+      if (out.length && out[out.length - 1] !== "") out.push("");
+      continue;
+    }
+    out.push(l);
+  }
+  return out;
+}
+
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
@@ -570,62 +616,121 @@ export default function PoseSession() {
               </Stack>
 
               {/* Detailed muscle-by-muscle breakdown */}
-              {Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    MUSCLE BREAKDOWN
-                  </Typography>
-                  <Stack spacing={1}>
-                    {result.muscleBreakdown.slice(0, 20).map((row, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          p: 1.4,
-                          borderRadius: 2,
-                          bgcolor: "rgba(255,255,255,0.04)",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                          {row.group}
-                        </Typography>
-                        <Typography sx={{ color: bodyColor, mt: 0.3, whiteSpace: "pre-line" }}>
-                          {row.note}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </>
-              ) : null}
-
-              {result?.chatgptStyle ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    DETAILED BREAKDOWN
-                  </Typography>
-                  <Stack spacing={0.8}>
-                    {String(result.chatgptStyle)
-                      .split("\n")
-                      .slice(0, 200)
-                      .map((line, idx) => {
-                        const t = String(line || "").trimEnd();
-                        if (!t) return <Box key={idx} sx={{ height: 8 }} />;
-                        const isHeader = /^#+\s/.test(t) || /^(🔥|🎯|📊|🚀|💪|⭐|✅)\s/.test(t);
-                        return (
-                          <Typography
-                            key={idx}
-                            sx={{
-                              color: isHeader ? titleColor : bodyColor,
-                              fontWeight: isHeader ? 900 : 500,
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            {t}
+              {(() => {
+                const rows = normalizeMuscleBreakdown(result?.muscleBreakdown);
+                if (!rows.length) return null;
+                return (
+                  <>
+                    <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+                    <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
+                      MUSCLE BREAKDOWN
+                    </Typography>
+                    <Stack spacing={1}>
+                      {rows.slice(0, 12).map((row, i) => (
+                        <Box
+                          key={i}
+                          sx={{
+                            p: 1.4,
+                            borderRadius: 2,
+                            bgcolor: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
+                            {row.group}
                           </Typography>
-                        );
-                      })}
+                          <Typography sx={{ color: bodyColor, mt: 0.3 }}>
+                            {row.note}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </>
+                );
+              })()}
+
+              {/* Rankings (best developed + next levers) */}
+              {(() => {
+                const { best, improve } = normalizeRankings(result?.rankings);
+                if (!best.length && !improve.length) return null;
+                return (
+                  <>
+                    <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+                    <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
+                      MUSCLE GROUP RANKINGS
+                    </Typography>
+                    <Stack spacing={1.1}>
+                      {best.length ? (
+                        <Box
+                          sx={{
+                            p: 1.4,
+                            borderRadius: 2,
+                            bgcolor: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
+                            Best Developed
+                          </Typography>
+                          <Typography sx={{ color: bodyColor, mt: 0.4, whiteSpace: "pre-line" }}>
+                            {best.slice(0, 7).map((x, i) => `${i + 1}. ${x}`).join("\n")}
+                          </Typography>
+                        </Box>
+                      ) : null}
+
+                      {improve.length ? (
+                        <Box
+                          sx={{
+                            p: 1.4,
+                            borderRadius: 2,
+                            bgcolor: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
+                            Next To Improve
+                          </Typography>
+                          <Typography sx={{ color: bodyColor, mt: 0.4, whiteSpace: "pre-line" }}>
+                            {improve.slice(0, 8).map((x, i) => `${i + 1}. ${x}`).join("\n")}
+                          </Typography>
+                        </Box>
+                      ) : null}
+                    </Stack>
+                  </>
+                );
+              })()}
+
+              {/* Deep-dive report (ChatGPT-style) */}
+              {typeof result?.report === "string" && result.report.trim() ? (
+                <>
+                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
+                    DEEP DIVE
+                  </Typography>
+
+                  <Stack spacing={0.9}>
+                    {renderReportLines(result.report).slice(0, 180).map((line, i) => {
+                      if (!line) return <Box key={i} sx={{ height: 6 }} />;
+                      const isHeader =
+                        /^[#*•-]?[\s]*[A-Z0-9].{0,40}:$/.test(line) ||
+                        /^[🔥💪📊🎯🚀✅⭐️✨]/.test(line) ||
+                        /^\*\*.+\*\*$/.test(line);
+
+                      return (
+                        <Typography
+                          key={i}
+                          sx={{
+                            color: isHeader ? titleColor : bodyColor,
+                            fontWeight: isHeader ? 900 : 500,
+                            letterSpacing: isHeader ? 0.3 : 0,
+                            lineHeight: 1.35,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {line.replace(/^[-•*]\s+/, "• ")}
+                        </Typography>
+                      );
+                    })}
                   </Stack>
                 </>
               ) : null}
