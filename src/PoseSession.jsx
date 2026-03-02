@@ -71,120 +71,6 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
   });
 }
 
-
-function titleCaseKey(k) {
-  const s = String(k || "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-  return s.trim();
-}
-
-function normalizeMuscleBreakdown(mb) {
-  if (!mb) return [];
-  if (Array.isArray(mb)) {
-    return mb
-      .map((r) => ({
-        group: r?.group || r?.name || r?.title || "",
-        note: r?.note || r?.text || r?.desc || "",
-      }))
-      .filter((r) => r.group && r.note);
-  }
-  if (typeof mb === "object") {
-    return Object.entries(mb)
-      .map(([k, v]) => ({ group: titleCaseKey(k), note: String(v || "").trim() }))
-      .filter((r) => r.group && r.note);
-  }
-  return [];
-}
-
-function normalizeRankings(rankings) {
-  const best = Array.isArray(rankings?.bestDeveloped) ? rankings.bestDeveloped : [];
-  const improve = Array.isArray(rankings?.canImprove) ? rankings.canImprove : [];
-  return { best, improve };
-}
-
-function renderReportLines(report) {
-  if (!report) return [];
-
-  // string
-  if (typeof report === "string") {
-    const lines = report.split(/\r?\n/).map((l) => l.trimEnd());
-    const out = [];
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i].trim();
-      if (!l) {
-        if (out.length && out[out.length - 1] !== "") out.push("");
-        continue;
-      }
-      out.push(l);
-    }
-    return out;
-  }
-
-  // array of strings/sections
-  if (Array.isArray(report)) {
-    return renderReportLines(report.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join("\n"));
-  }
-
-  // object: flatten into readable sections
-  if (typeof report === "object") {
-    const prettyKey = (k) =>
-      String(k || "")
-        .replace(/[_-]+/g, " ")
-        .replace(/\b\w/g, (m) => m.toUpperCase());
-
-    const out = [];
-    const entries = Object.entries(report);
-
-    // try to keep a sensible order if common keys exist
-    const order = [
-      "summary",
-      "bigPicture",
-      "big_picture",
-      "rankings",
-      "muscleRankings",
-      "poseByPose",
-      "pose_by_pose",
-      "recommendations",
-      "plan",
-      "notes",
-    ];
-    const keyRank = (k) => {
-      const i = order.indexOf(k);
-      return i === -1 ? 999 : i;
-    };
-
-    entries.sort((a, b) => keyRank(a[0]) - keyRank(b[0]));
-
-    for (const [k, v] of entries) {
-      out.push(`${prettyKey(k)}:`);
-
-      if (typeof v === "string") {
-        out.push(...renderReportLines(v));
-      } else if (Array.isArray(v)) {
-        for (const item of v) {
-          if (typeof item === "string") out.push(`• ${item}`);
-          else out.push(`• ${JSON.stringify(item)}`);
-        }
-      } else if (v && typeof v === "object") {
-        // one level deep
-        for (const [k2, v2] of Object.entries(v)) {
-          if (typeof v2 === "string") out.push(`• ${prettyKey(k2)}: ${v2}`);
-          else out.push(`• ${prettyKey(k2)}: ${JSON.stringify(v2)}`);
-        }
-      } else {
-        out.push(String(v));
-      }
-
-      out.push("");
-    }
-
-    return out;
-  }
-
-  return renderReportLines(String(report));
-}
-
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
@@ -392,11 +278,21 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
+      const rawScore = Number(result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 78);
+      const aesthetic10 = rawScore > 10 ? rawScore / 10 : rawScore;
+
+      // buildPoseSessionSharePng expects headline/subhead/wins/levers.
       const pngDataUrl = await buildPoseSessionSharePng({
-        tier: result?.tier || result?.tierLabel || result?.strength || "Build Arc",
-        score: result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 78,
-        highlights: result?.highlights || result?.levers || [],
+        headline: "Slimcal.ai",
+        subhead: `AESTHETIC: ${clamp(aesthetic10, 0, 10).toFixed(1)}/10`,
+        wins: Array.isArray(result?.highlights)
+          ? result.highlights
+          : (Array.isArray(result?.levers) ? result.levers : []),
+        levers: Array.isArray(result?.levers) ? result.levers : [],
         thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res
+        muscleSignals: result?.muscleSignals || null,
+        trackLabel: String(result?.strength || ""),
+        localDay: todayISO,
       });
       await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     } catch (e) {
@@ -409,6 +305,53 @@ export default function PoseSession() {
 
   const titleColor = "rgba(245,250,255,0.92)";
   const bodyColor = "rgba(220,235,245,0.86)";
+
+  const prettyKey = useCallback((k) => {
+    const key = String(k || "").trim();
+    if (!key) return "";
+    const map = {
+      delts: "Delts",
+      arms: "Arms",
+      chest: "Chest",
+      lats: "Lats",
+      back: "Back",
+      core: "Core / Midsection",
+      legs: "Legs (Quads/Hams/Glutes)",
+      calves: "Calves",
+      symmetry: "Symmetry",
+      waist_taper: "Waist / Taper",
+    };
+    if (map[key]) return map[key];
+    return key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (m) => m.toUpperCase());
+  }, []);
+
+  const reportLines = useMemo(() => {
+    const txt = String(result?.report || "").trim();
+    if (!txt) return [];
+    return txt
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, 260);
+  }, [result?.report]);
+
+  const muscleRows = useMemo(() => {
+    const mb = result?.muscleBreakdown;
+    if (!mb) return [];
+    if (Array.isArray(mb)) {
+      return mb
+        .map((row) => ({ group: row?.group, note: row?.note }))
+        .filter((r) => r.group && r.note);
+    }
+    if (typeof mb === "object") {
+      return Object.entries(mb)
+        .map(([k, v]) => ({ group: prettyKey(k), note: String(v || "").trim() }))
+        .filter((r) => r.group && r.note);
+    }
+    return [];
+  }, [result?.muscleBreakdown, prettyKey]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
@@ -659,15 +602,21 @@ export default function PoseSession() {
 
           {stage === "results" && (
             <Stack spacing={2}>
+              {(() => {
+                const raw = Number(result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 70);
+                const aesthetic10 = raw > 10 ? raw / 10 : raw;
+                return (
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900 }}>
                   {String(result?.tierLabel || result?.tier || "BASELINE LOCKED").toUpperCase()}
                 </Typography>
                 <Chip
-                  label={`AESTHETIC: ${clamp(result?.aesthetic_score ?? result?.aestheticScore ?? (result?.build_arc ?? 70), 0, 10).toFixed?.(1) || 7}/10`}
+                  label={`AESTHETIC: ${clamp(aesthetic10, 0, 10).toFixed(1)}/10`}
                   sx={{ bgcolor: "rgba(120,255,220,0.14)", color: titleColor, border: "1px solid rgba(120,255,220,0.22)" }}
                 />
               </Stack>
+                );
+              })()}
 
               <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
 
@@ -683,122 +632,63 @@ export default function PoseSession() {
                 ))}
               </Stack>
 
-              {/* Detailed muscle-by-muscle breakdown */}
-              {(() => {
-                const rows = normalizeMuscleBreakdown(result?.muscleBreakdown);
-                if (!rows.length) return null;
-                return (
-                  <>
-                    <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                    <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                      MUSCLE BREAKDOWN
-                    </Typography>
-                    <Stack spacing={1}>
-                      {rows.slice(0, 12).map((row, i) => (
-                        <Box
-                          key={i}
-                          sx={{
-                            p: 1.4,
-                            borderRadius: 2,
-                            bgcolor: "rgba(255,255,255,0.04)",
-                            border: "1px solid rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                            {row.group}
-                          </Typography>
-                          <Typography sx={{ color: bodyColor, mt: 0.3 }}>
-                            {row.note}
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </>
-                );
-              })()}
-
-              {/* Rankings (best developed + next levers) */}
-              {(() => {
-                const { best, improve } = normalizeRankings(result?.rankings);
-                if (!best.length && !improve.length) return null;
-                return (
-                  <>
-                    <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                    <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                      MUSCLE GROUP RANKINGS
-                    </Typography>
-                    <Stack spacing={1.1}>
-                      {best.length ? (
-                        <Box
-                          sx={{
-                            p: 1.4,
-                            borderRadius: 2,
-                            bgcolor: "rgba(255,255,255,0.04)",
-                            border: "1px solid rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                            Best Developed
-                          </Typography>
-                          <Typography sx={{ color: bodyColor, mt: 0.4, whiteSpace: "pre-line" }}>
-                            {best.slice(0, 7).map((x, i) => `${i + 1}. ${x}`).join("\n")}
-                          </Typography>
-                        </Box>
-                      ) : null}
-
-                      {improve.length ? (
-                        <Box
-                          sx={{
-                            p: 1.4,
-                            borderRadius: 2,
-                            bgcolor: "rgba(255,255,255,0.04)",
-                            border: "1px solid rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                            Next To Improve
-                          </Typography>
-                          <Typography sx={{ color: bodyColor, mt: 0.4, whiteSpace: "pre-line" }}>
-                            {improve.slice(0, 8).map((x, i) => `${i + 1}. ${x}`).join("\n")}
-                          </Typography>
-                        </Box>
-                      ) : null}
-                    </Stack>
-                  </>
-                );
-              })()}
-
-              {/* Deep-dive report (ChatGPT-style) */}
-              {result?.report ? (
+              {reportLines.length ? (
                 <>
                   <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
                   <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
                     DEEP DIVE
                   </Typography>
-
-                  <Stack spacing={0.9}>
-                    {renderReportLines(result.report).slice(0, 180).map((line, i) => {
-                      if (!line) return <Box key={i} sx={{ height: 6 }} />;
+                  <Stack spacing={0.7}>
+                    {reportLines.map((line, idx) => {
                       const isHeader =
-                        /^[#*•-]?[\s]*[A-Z0-9].{0,40}:$/.test(line) ||
-                        /^[🔥💪📊🎯🚀✅⭐️✨]/.test(line) ||
-                        /^\*\*.+\*\*$/.test(line);
-
+                        /^[\u{1F300}-\u{1FAFF}]/u.test(line) ||
+                        /:\s*$/.test(line) ||
+                        (line.length <= 44 && /^[A-Z0-9\s&/()'"\-]+$/.test(line));
                       return (
                         <Typography
-                          key={i}
+                          key={idx}
                           sx={{
                             color: isHeader ? titleColor : bodyColor,
                             fontWeight: isHeader ? 900 : 500,
-                            letterSpacing: isHeader ? 0.3 : 0,
-                            lineHeight: 1.35,
-                            whiteSpace: "pre-wrap",
+                            letterSpacing: isHeader ? 0.25 : 0,
+                            fontSize: isHeader ? 16 : 14,
+                            lineHeight: 1.5,
                           }}
                         >
-                          {line.replace(/^[-•*]\s+/, "• ")}
+                          {line}
                         </Typography>
                       );
                     })}
+                  </Stack>
+                </>
+              ) : null}
+
+              {/* Detailed muscle-by-muscle breakdown */}
+              {muscleRows.length ? (
+                <>
+                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
+                    MUSCLE BREAKDOWN
+                  </Typography>
+                  <Stack spacing={1}>
+                    {muscleRows.slice(0, 12).map((row, i) => (
+                      <Box
+                        key={i}
+                        sx={{
+                          p: 1.4,
+                          borderRadius: 2,
+                          bgcolor: "rgba(255,255,255,0.04)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
+                          {row.group}
+                        </Typography>
+                        <Typography sx={{ color: bodyColor, mt: 0.3 }}>
+                          {row.note}
+                        </Typography>
+                      </Box>
+                    ))}
                   </Stack>
                 </>
               ) : null}
