@@ -144,24 +144,6 @@ function fallbackPoseSession() {
     highlights: ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
     levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
     confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
-    report:
-      "Quick read: your scan is a solid baseline.\n\n" +
-      "What’s already strong: structure and consistency.\n\n" +
-      "Next to level up: keep training 3×/week, push protein, and re-scan in the same lighting to track changes clearly.",
-    muscleBreakdown: {
-      delts: "Shoulders read as a solid base — keep building roundness with lateral raises and rear-delt work for a cleaner cap.",
-      arms: "Arms look balanced — add a little more long-head triceps and biceps peak work to sharpen the silhouette.",
-      chest: "Chest base is there — prioritize upper-chest bias presses and controlled flyes to pop the clavicular line.",
-      lats: "Lat width can climb fast with pull-down variations and pull-ups; focus on elbow path to hit the outer sweep.",
-      back: "Back thickness improves with rows done full-range and paused; keep it tight and progressive.",
-      core: "Core is your frame control — train bracing and anti-rotation for a tighter midsection look in photos.",
-      legs: "Legs improve fastest with consistent squats/leg press + hamstring curls; aim for a weekly volume target.",
-      calves: "Calves respond to frequency — add 2–4 short sessions/week and pause the stretch.",
-      symmetry: "Overall balance reads good; your next gains come from bringing up 1–2 lagging areas while maintaining the rest.",
-    },
-    bestDeveloped: ["Structure", "Consistency"],
-    biggestOpportunity: ["Upper chest pop", "Lat width illusion"],
-    poseNotes: ["Keep camera level at mid-torso height", "Relax traps and flare lats slightly", "Stand tall and brace lightly"],
   };
 }
 
@@ -1145,7 +1127,7 @@ const freeBypass =
             ],
           },
         ],
-        temperature: 0.35,
+        temperature: 0.4,
         max_tokens: 650,
       });
 
@@ -1189,6 +1171,8 @@ const freeBypass =
 
   if (feature === "pose_session" || feature === "pose_session_beta") {
     try {
+
+      const style = String(body?.style || "").toLowerCase();
       const poses = Array.isArray(body?.poses) ? body.poses : [];
       if (!poses.length) {
         res.status(400).json({ error: "Missing poses" });
@@ -1215,28 +1199,31 @@ const freeBypass =
         return;
       }
 
-      const sys =
-        "You are Slimcal.ai Physique Analyst. " +
-        "You analyze 3 user-uploaded physique photos (front/side/back) and write a highly detailed, coach-like assessment. " +
+      const sysBase =
+        "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "Hard rules: neutral or positive tone ONLY. Do not insult. Do not shame. Do not use words like 'bad', 'weak', 'behind', 'skinny-fat', 'terrible'. " +
-        "Do not mention influencers or celebrities. Do not assume prior context. " +
-        "This is NOT medical advice or a diagnosis. " +
-        "Output JSON keys (all required): " +
-        "build_arc (int 55-96), percentile (int 1-99), strength (string <=48 chars), horizon_days (int 30-180), " +
-        "highlights (array 3-6 short bullets), levers (array 4-7 actionable bullets), confidenceNote (string <=180 chars), " +
-        "report (string: multi-paragraph, 700-1400 words, with \n\n between sections), " +
-        "muscleBreakdown (object with keys delts, arms, chest, lats, back, core, legs, calves, symmetry; each a 90-170 word paragraph), " +
-        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 3-6 short bullets).";
+        "You are NOT a medical device. You are estimating visual physique cues from uploaded bodybuilding poses. " +
+        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels. " +
+        "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
+        "Write as a fresh, careful analyst focusing on what is visible. " +
+        "Output JSON keys (required): " +
+        "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
+        "aesthetic_score (number 0-10), " +
+        "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
+        "poseQuality (object mapping poseKey to number 0..1), " +
+        "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
+        "report (string: 6-10 short paragraphs separated by \n\n), " +
+        "muscleBreakdown (array 8-12 items; each {group: string, note: string} where note is 2-5 sentences, specific, supportive), " +
+        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
+
+      const sys = sysBase;
+
 
       const userText =
-        "Analyze these 3 images (Front / Side / Back). " +
-        "Write a detailed physique report with a fresh perspective based ONLY on what is visible. " +
-        "Use supportive language: frame opportunities as 'next to level up'. " +
-        "Be specific: mention proportions, shoulder-to-waist illusion, upper chest vs mid chest, lat width vs thickness, arm shape, quad sweep, calf balance, posture/pose cues, symmetry. " +
-        "For 'muscleBreakdown', give paragraphs that feel like a real coach analyzing a real person (avoid generic filler). " +
-        "For 'levers', include practical training and nutrition moves (frequency, volume targets, key exercises, protein range, steps, sleep). " +
-        "build_arc should be 55..96 and should not be extreme. percentile should be 1..99 where lower is better (Top X%).";
+        "Analyze the following pose images: Front Double Biceps, Lat Spread, Back Double Biceps (or similar). " +
+        "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
+        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
+        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
         { type: "text", text: userText },
@@ -1252,7 +1239,7 @@ const freeBypass =
           { role: "system", content: sys },
           { role: "user", content },
         ],
-        temperature: 0.35,
+        temperature: 0.4,
         max_tokens: 1400,
       });
 
@@ -1268,36 +1255,19 @@ const freeBypass =
 
       const ms = parsed.muscleSignals || parsed.muscles || fb.muscleSignals;
       const pq = parsed.poseQuality || parsed.pose_quality || fb.poseQuality;
-const mbRaw = parsed.muscleBreakdown || parsed.muscle_breakdown || parsed.muscles_detail || {};
-const muscleBreakdown = {
-  delts: String(mbRaw.delts || "").slice(0, 1400),
-  arms: String(mbRaw.arms || "").slice(0, 1400),
-  chest: String(mbRaw.chest || "").slice(0, 1400),
-  lats: String(mbRaw.lats || "").slice(0, 1400),
-  back: String(mbRaw.back || "").slice(0, 1400),
-  core: String(mbRaw.core || "").slice(0, 1400),
-  legs: String(mbRaw.legs || "").slice(0, 1400),
-  calves: String(mbRaw.calves || "").slice(0, 1400),
-  symmetry: String(mbRaw.symmetry || mbRaw.proportions || "").slice(0, 1400),
-};
-
-const report = String(parsed.report || parsed.longReport || parsed.analysis || "").slice(0, 20000);
-const bestDeveloped = Array.isArray(parsed.bestDeveloped || parsed.best_developed)
-  ? (parsed.bestDeveloped || parsed.best_developed).map((s) => String(s).slice(0, 80)).slice(0, 4)
-  : [];
-const biggestOpportunity = Array.isArray(parsed.biggestOpportunity || parsed.biggest_opportunity)
-  ? (parsed.biggestOpportunity || parsed.biggest_opportunity).map((s) => String(s).slice(0, 80)).slice(0, 4)
-  : [];
-const poseNotes = Array.isArray(parsed.poseNotes || parsed.pose_notes)
-  ? (parsed.poseNotes || parsed.pose_notes).map((s) => String(s).slice(0, 120)).slice(0, 6)
-  : [];
-
 
       const session = {
         build_arc: Math.round(clamp(parsed.build_arc ?? parsed.buildArcScore ?? fb.build_arc, 0, 100)),
         percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
         strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
+        tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
+        aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
+        report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
+        bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
+        biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
+        poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
+        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 900) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
@@ -1319,11 +1289,6 @@ const poseNotes = Array.isArray(parsed.poseNotes || parsed.pose_notes)
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
-        report,
-        muscleBreakdown,
-        bestDeveloped,
-        biggestOpportunity,
-        poseNotes,
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
 
@@ -1394,7 +1359,7 @@ const poseNotes = Array.isArray(parsed.poseNotes || parsed.pose_notes)
           { role: "user", content: usr }
         ],
         temperature: 0.55,
-        max_tokens: 1400
+        max_tokens: 900
       });
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
