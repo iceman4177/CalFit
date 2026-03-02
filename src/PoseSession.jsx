@@ -22,27 +22,26 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
-  computeSessionStreak,
   computeDeltasPositiveOnly,
   localDayISO,
 } from "./lib/poseSessionStore.js";
-import { getPoseLandmarker, scorePoseMatch } from "./lib/poseLandmarker.js";
+import { getPoseLandmarker, scorePoseMatch, resetPoseLandmarker } from "./lib/poseLandmarker.js";
 
 const POSES = [
   {
     key: "front_relaxed",
     title: "Front Relaxed",
-    subtitle: "Stand tall - arms relaxed - full body in frame",
+    subtitle: "Stand tall · arms relaxed · shoulders + hips in frame",
   },
   {
     key: "front_double_bi",
     title: "Double Bi",
-    subtitle: "Hands up - elbows out - squeeze arms",
+    subtitle: "Hands up · elbows out · squeeze arms",
   },
   {
     key: "back_double_bi",
     title: "Back Double Bi",
-    subtitle: "Turn around - elbows up - spread back",
+    subtitle: "Turn around · elbows up · spread back",
   },
 ];
 
@@ -113,6 +112,7 @@ async function makeAiThumbFromCanvas(srcCanvas, maxEdge = 384, quality = 0.72) {
   return c.toDataURL("image/jpeg", quality);
 }
 
+// ---- Pose template (desired ghost) built from anchors (shoulders/hips) ----
 function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   const bboxLocal = opts?.bboxLocal || null;
   const isUpperBodyOnly = !!opts?.upperBodyOnly;
@@ -120,25 +120,23 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   let a = anchors;
   if (!a && bbox) {
     const cx = (bbox.minX + bbox.maxX) / 2;
-    const hh = bbox.maxY - bbox.minY;
-    const ww = bbox.maxX - bbox.minX;
+    const h = bbox.maxY - bbox.minY;
+    const w = bbox.maxX - bbox.minX;
     a = {
-      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * hh) },
-      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * hh) },
-      shoulderWidth: ww * 0.60,
+      midShoulder: { x: cx, y: bbox.minY + Math.min(0.24, 0.30 * h) },
+      midHip: { x: cx, y: bbox.minY + Math.min(0.64, 0.70 * h) },
+      shoulderWidth: w * 0.60,
     };
   }
   if (!a) return null;
   const { midShoulder, midHip, shoulderWidth } = a;
-
-  const clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   const b = bboxLocal || bbox;
   const bboxW = b ? Math.max(0.12, Math.min(0.90, b.maxX - b.minX)) : null;
   const bboxH = b ? Math.max(0.12, Math.min(0.95, b.maxY - b.minY)) : null;
   const swFromBbox = bboxW ? bboxW * 0.55 : null;
   const swRaw = Number.isFinite(shoulderWidth) ? shoulderWidth : null;
-  const sw = clamp2(swFromBbox || swRaw || 0.22, 0.10, 0.28);
+  const sw = clamp(swFromBbox || swRaw || 0.22, 0.10, 0.28);
 
   const head = { x: midShoulder.x, y: midShoulder.y - sw * 0.95 };
   const neck = { x: midShoulder.x, y: midShoulder.y - sw * 0.22 };
@@ -194,6 +192,7 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
     shoulderWidth: sw,
   };
 
+  // Fit to bbox to prevent giant overlays when legs are missing / anchors jitter.
   if (!b || !bboxW || !bboxH) return raw;
 
   const pts = Object.entries(raw)
@@ -223,10 +222,10 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   const rawH = Math.max(1e-6, maxY - minY);
 
   const inset = 0.02;
-  const targetMinX = clamp2(b.minX + inset, 0, 1);
-  const targetMaxX = clamp2(b.maxX - inset, 0, 1);
-  const targetMinY = clamp2(b.minY + inset, 0, 1);
-  const targetMaxY = clamp2(b.maxY - inset, 0, 1);
+  const targetMinX = clamp(b.minX + inset, 0, 1);
+  const targetMaxX = clamp(b.maxX - inset, 0, 1);
+  const targetMinY = clamp(b.minY + inset, 0, 1);
+  const targetMaxY = clamp(b.maxY - inset, 0, 1);
   const targetW = Math.max(1e-6, targetMaxX - targetMinX);
   const targetH = Math.max(1e-6, targetMaxY - targetMinY);
 
@@ -239,8 +238,8 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   const cyT = (targetMinY + targetMaxY) / 2;
 
   const scalePoint = (p) => ({
-    x: clamp2(cxT + (p.x - cxRaw) * s, 0, 1),
-    y: clamp2(cyT + (p.y - cyRaw) * s, 0, 1),
+    x: clamp(cxT + (p.x - cxRaw) * s, 0, 1),
+    y: clamp(cyT + (p.y - cyRaw) * s, 0, 1),
   });
 
   const fitted = { ...raw };
@@ -259,7 +258,7 @@ function buildPoseTemplate(poseKey, anchors, bbox, opts = {}) {
   if (fitted.ls && fitted.rs) {
     const dx = fitted.rs.x - fitted.ls.x;
     const dy = fitted.rs.y - fitted.ls.y;
-    fitted.shoulderWidth = clamp2(Math.sqrt(dx * dx + dy * dy), 0.10, 0.32);
+    fitted.shoulderWidth = clamp(Math.sqrt(dx * dx + dy * dy), 0.10, 0.32);
   }
 
   return fitted;
@@ -307,9 +306,9 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
     ctx.shadowColor = "rgba(0, 255, 170, 0.45)";
     ctx.shadowBlur = 18;
     for (const [a, b] of segs) {
-      if (!tpl[a] || !tpl[b]) continue;
       const A = P(tpl[a]);
       const B = P(tpl[b]);
+      if (!A || !B) continue;
       ctx.beginPath();
       ctx.moveTo(A.x, A.y);
       ctx.lineTo(B.x, B.y);
@@ -321,28 +320,14 @@ function drawNeonGhost(ctx, tpl, { w, h, glow = true }) {
   ctx.strokeStyle = "rgba(0, 255, 190, 0.92)";
   ctx.lineWidth = baseWidth * 1.15;
   for (const [a, b] of segs) {
-    if (!tpl[a] || !tpl[b]) continue;
     const A = P(tpl[a]);
     const B = P(tpl[b]);
+    if (!A || !B) continue;
     ctx.beginPath();
     ctx.moveTo(A.x, A.y);
     ctx.lineTo(B.x, B.y);
     ctx.stroke();
   }
-
-  const zoneAlpha = 0.14;
-  ctx.fillStyle = `rgba(0,255,190,${zoneAlpha})`;
-  const drawZone = (p, r) => {
-    if (!p) return;
-    const c = P(p);
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  drawZone(tpl.lw, baseWidth * 2.8);
-  drawZone(tpl.rw, baseWidth * 2.8);
-  drawZone(tpl.le, baseWidth * 2.8);
-  drawZone(tpl.re, baseWidth * 2.8);
 
   ctx.restore();
 }
@@ -397,7 +382,31 @@ function drawFramingGuide(ctx, visCanvas, { w, h }) {
   ctx.restore();
 }
 
+function synthesizePositiveSession({ prevSession, todayISO }) {
+  const headline = prevSession ? "Progress update" : "Baseline locked ✅";
+  const hype = prevSession
+    ? "Nice — your momentum is building. Keep showing up."
+    : "Strong starting frame. You’re set up to level up fast.";
+  const highlights = prevSession
+    ? ["Pose control improving", "Shoulders + arms look sharper"]
+    : ["Clean baseline captured", "Great posture + symmetry"];
+  const levers = ["Protein target today", "Train 2–3× this week"];
+
+  return {
+    local_day: todayISO,
+    build_arc: 78,
+    headline,
+    hype,
+    highlights,
+    levers,
+  };
+}
+
 async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
+  // IMPORTANT: never block the results screen.
+  // If AI is slow/fails, we fall back to a positive local session.
+  const fallback = synthesizePositiveSession({ prevSession, todayISO });
+
   try {
     const clientKey = "slimcal_client_id";
     let clientId = "";
@@ -412,12 +421,16 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }
     }
 
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), 14000);
+
     const res = await fetch("/api/ai/generate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(clientId ? { "x-client-id": clientId } : {}),
       },
+      signal: ac.signal,
       body: JSON.stringify({
         feature: "pose_session",
         poses: poses.map((p) => ({
@@ -429,12 +442,26 @@ async function scorePoseSessionWithAI({ poses, prevSession, todayISO }) {
       }),
     });
 
+    clearTimeout(to);
+
     const j = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((j && j.error) || "AI failed");
-    if (!j || !j.session) throw new Error("Bad AI response");
-    return { ok: true, session: j.session };
+    if (!res.ok) return { ok: false, session: fallback, error: (j && j.error) || "AI failed" };
+    if (!j || !j.session) return { ok: false, session: fallback, error: "Bad AI response" };
+
+    // Guarantee positive-only fields.
+    const s = j.session || {};
+    const safe = {
+      ...fallback,
+      ...s,
+      build_arc: clamp(s?.build_arc ?? s?.buildArcScore ?? fallback.build_arc, 0, 100),
+      hype: String(s?.hype || fallback.hype),
+      highlights: Array.isArray(s?.highlights) ? s.highlights.slice(0, 3) : fallback.highlights,
+      levers: Array.isArray(s?.levers) ? s.levers.slice(0, 2) : fallback.levers,
+    };
+
+    return { ok: true, session: safe };
   } catch (e) {
-    return { ok: false, error: String(e?.message || e) };
+    return { ok: false, session: fallback, error: String(e?.message || e) };
   }
 }
 
@@ -463,8 +490,9 @@ export default function PoseSession() {
   const streamRef = useRef(null);
   const overlayRef = useRef(null);
   const rafRef = useRef(0);
-  const stableRef = useRef({ t0: 0, okFrames: 0, inFrameFrames: 0, lastDetectAt: 0, justCapturedAt: 0, prevLm: null });
-  const onCaptureRef = useRef(null);
+
+  const stableRef = useRef({ okFrames: 0, inFrameFrames: 0, prevLm: null, lastDetectAt: 0 });
+  const captureGuardRef = useRef({ busy: false, lastAt: 0 });
 
   const pose = POSES[Math.min(step, POSES.length - 1)];
   const isResults = step >= POSES.length;
@@ -515,56 +543,60 @@ export default function PoseSession() {
     const v = videoRef.current;
     if (!v) return;
 
-    const vw = v.videoWidth || 720;
-    const vh = v.videoHeight || 1280;
+    // Prevent double-fires (autoSnap can trigger quickly).
+    const g = captureGuardRef.current;
+    const t = nowMs();
+    if (g.busy || t - g.lastAt < 800) return;
+    g.busy = true;
+    g.lastAt = t;
 
-    const outW = 1080;
-    const outH = 1920;
+    try {
+      const vw = v.videoWidth || 720;
+      const vh = v.videoHeight || 1280;
 
-    const tmp = document.createElement("canvas");
-    tmp.width = outW;
-    tmp.height = outH;
-    const ctx = tmp.getContext("2d");
+      const outW = 1080;
+      const outH = 1920;
 
-    const scale = Math.min(outW / vw, outH / vh);
-    const dw = vw * scale;
-    const dh = vh * scale;
-    const dx = (outW - dw) / 2;
-    const dy = (outH - dh) / 2;
+      const tmp = document.createElement("canvas");
+      tmp.width = outW;
+      tmp.height = outH;
+      const ctx = tmp.getContext("2d");
 
-    if (cameraFacing === "user") {
-      ctx.translate(outW, 0);
-      ctx.scale(-1, 1);
-    }
+      const scale = Math.min(outW / vw, outH / vh);
+      const dw = vw * scale;
+      const dh = vh * scale;
+      const dx = (outW - dw) / 2;
+      const dy = (outH - dh) / 2;
 
-    ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
+      if (cameraFacing === "user") {
+        ctx.translate(outW, 0);
+        ctx.scale(-1, 1);
+      }
 
-    const dataUrl = tmp.toDataURL("image/png", 0.92);
-    const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
+      ctx.drawImage(v, 0, 0, vw, vh, dx, dy, dw, dh);
 
-    setCaptures((cur) => [
-      ...cur,
-      { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
-    ]);
+      const dataUrl = tmp.toDataURL("image/png", 0.92);
+      const aiThumb = await makeAiThumbFromCanvas(tmp, 384, 0.72);
 
-    // reset gating
-    setLocked(false);
-    stableRef.current.okFrames = 0;
-    stableRef.current.inFrameFrames = 0;
-    stableRef.current.justCapturedAt = nowMs();
+      setCaptures((cur) => [
+        ...cur,
+        { pose_key: pose.key, image_data_url: dataUrl, ai_image_data_url: aiThumb },
+      ]);
 
-    if (step + 1 >= POSES.length) {
-      setStep(POSES.length);
-    } else {
-      setStep((s) => s + 1);
+      setLocked(false);
+      stableRef.current.okFrames = 0;
+
+      if (step + 1 >= POSES.length) {
+        setStep(POSES.length);
+      } else {
+        setStep((s) => s + 1);
+      }
+    } finally {
+      g.busy = false;
     }
   }, [pose.key, step, cameraFacing]);
 
-  useEffect(() => {
-    onCaptureRef.current = onCapture;
-  }, [onCapture]);
-
-  // Pose loop: detect pose, update lock, draw guide/ghost, auto-capture
+  // Keypoint loop: detect pose and update lock state + draw ghost
   useEffect(() => {
     if (!started) return;
     if (isResults) return;
@@ -589,7 +621,6 @@ export default function PoseSession() {
         if (canvas.height !== h) canvas.height = h;
 
         const t = nowMs();
-        let landmarks = null;
 
         const isVideoReady =
           !document.hidden &&
@@ -599,96 +630,85 @@ export default function PoseSession() {
           Number.isFinite(v.currentTime);
 
         const fr = stableRef.current;
-        if (!fr.lastDetectAt) fr.lastDetectAt = 0;
-        const shouldDetect = isVideoReady && t - fr.lastDetectAt >= 85;
+        const shouldDetect = isVideoReady && t - (fr.lastDetectAt || 0) >= 85;
+
+        let landmarks = null;
+        let anchors = null;
+        let bbox = null;
+        let match = 0;
+        let visCanvas = null;
+        let bboxLocal = null;
 
         if (shouldDetect) {
           fr.lastDetectAt = t;
           try {
             const r = landmarker.detectForVideo(v, t);
-            landmarks = r?.landmarks?.[0] || null;
+            const lm = r?.landmarks?.[0] || null;
+            if (lm && lm.length >= 33) {
+              visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
+              const lmCanvas = mapLandmarksVideoToCanvas(lm, visCanvas);
+              const scored = scorePoseMatch(pose.key, lmCanvas);
+              match = clamp(scored?.match || 0, 0, 1);
+              anchors = scored?.anchors || null;
+              bbox = scored?.bbox || null;
+              landmarks = lmCanvas;
+              if (bbox && visCanvas) bboxLocal = bboxToLocal(bbox, visCanvas);
+            }
             fr.detectErrStreak = 0;
           } catch (e) {
-            landmarks = null;
             fr.detectErrStreak = (fr.detectErrStreak || 0) + 1;
-
             const msg = String(e?.message || e || "");
-            const looksLikeGraphPoison =
+            const poisoned =
               msg.includes("roi->width") ||
-              msg.includes("ROI width and height") ||
-              msg.includes("Graph has errors") ||
+              msg.includes("ROI width") ||
               msg.includes("texImage2D") ||
               msg.includes("no video") ||
-              msg.includes("Framebuffer is incomplete");
-
-            if (looksLikeGraphPoison && fr.detectErrStreak >= 2) {
+              msg.includes("Framebuffer is incomplete") ||
+              msg.includes("Graph has errors");
+            if (poisoned && fr.detectErrStreak >= 2) {
               fr.detectErrStreak = 0;
-              try { stopStream(); } catch {}
-              await new Promise((r2) => setTimeout(r2, 180));
-              try { await startStream(); } catch {}
+              try {
+                await resetPoseLandmarker();
+              } catch {}
+              try {
+                stopStream();
+              } catch {}
+              await new Promise((r) => setTimeout(r, 180));
+              try {
+                await startStream();
+              } catch {}
             }
           }
         }
 
-        let match = 0;
-        let anchors = null;
-        let bbox = null;
-        let visCanvas = null;
-
-        if (landmarks && landmarks.length >= 33) {
-          visCanvas = getContainVisibleRect(v.videoWidth, v.videoHeight, w, h);
-          const lmCanvas = mapLandmarksVideoToCanvas(landmarks, visCanvas);
-          const scored = scorePoseMatch(pose.key, lmCanvas);
-          match = clamp(scored?.match || 0, 0, 1);
-          anchors = scored?.anchors || null;
-          bbox = scored?.bbox || null;
-        }
-
-        // --- framing gate ---
+        // ---- Framing gate (simple, forgiving) ----
+        // We only require shoulders + hips visible (full body is bonus).
         let inFrameRaw = false;
-        let framingBad = false;
-        let bboxLocal = null;
-        let bboxH = 0;
-        let bboxW = 0;
-        let bboxCX = 0.5;
-
         let upperBodyOk = false;
         let fullBodyOk = false;
 
         if (bbox) {
-          bboxLocal = bboxToLocal(bbox, visCanvas) || null;
           const b = bboxLocal || bbox;
+          const bboxH = b.maxY - b.minY;
+          const bboxW = b.maxX - b.minX;
 
-          bboxH = b.maxY - b.minY;
-          bboxW = b.maxX - b.minX;
-          bboxCX = (b.minX + b.maxX) / 2;
-
-          const headOk = b.minY <= 0.30;
-          const hipsOk = b.maxY >= 0.62;
-          const sizeOk = bboxH >= 0.38 && bboxW >= 0.22;
-          const notTooClose = bboxH <= 0.88 && bboxW <= 0.82;
+          const headOk = b.minY <= 0.34;
+          const hipsOk = b.maxY >= 0.58;
+          const sizeOk = bboxH >= 0.30 && bboxW >= 0.18;
+          const notTooClose = bboxH <= 0.92 && bboxW <= 0.90;
 
           upperBodyOk = headOk && hipsOk && sizeOk && notTooClose;
-          fullBodyOk = bboxH >= 0.72 && b.minY <= 0.14 && b.maxY >= 0.90 && bboxW >= 0.24 && bboxW <= 0.82;
+          fullBodyOk = bboxH >= 0.70 && b.minY <= 0.18 && b.maxY >= 0.92;
 
-          inFrameRaw = fullBodyOk || upperBodyOk;
-          framingBad = !inFrameRaw;
+          inFrameRaw = upperBodyOk || fullBodyOk;
         }
 
-        if (bbox && framingBad) {
-          drawFramingGuide(ctx, visCanvas, { w, h });
-        } else {
-          const upperBodyOnly = upperBodyOk && !fullBodyOk;
-          const tpl = buildPoseTemplate(pose.key, anchors, bbox, { bboxLocal, upperBodyOnly });
-          drawNeonGhost(ctx, tpl, { w, h, glow: true });
-        }
-
-        // hysteresis
+        // hysteresis (prevents flicker)
         fr.inFrameFrames = fr.inFrameFrames || 0;
-        fr.inFrameFrames = inFrameRaw ? Math.min(18, fr.inFrameFrames + 1) : Math.max(0, fr.inFrameFrames - 2);
+        fr.inFrameFrames = inFrameRaw
+          ? Math.min(20, fr.inFrameFrames + 1)
+          : Math.max(0, fr.inFrameFrames - 2);
         const inFrame = fr.inFrameFrames >= 6;
-
-        const ok = inFrame && match >= 0.72;
 
         // stability from landmark movement
         let stable = false;
@@ -702,18 +722,26 @@ export default function PoseSession() {
               sum += Math.sqrt(dx * dx + dy * dy);
             }
             const avg = sum / landmarks.length;
-            stable = avg < 0.0045;
+            stable = avg < 0.0048;
           }
           fr.prevLm = landmarks;
         }
 
-        // coaching
-        const tooClose = bboxH > 0.88 || bboxW > 0.82;
-        const tooFar = bboxH > 0 && bboxH < 0.34;
-        const offLeft = bboxCX < 0.44;
-        const offRight = bboxCX > 0.56;
-        const headCropped = bboxLocal ? bboxLocal.minY > 0.32 : (bbox ? bbox.minY > 0.32 : false);
-        const hipsMissing = bboxLocal ? bboxLocal.maxY < 0.62 : (bbox ? bbox.maxY < 0.62 : false);
+        // draw overlay
+        if (!bbox || !visCanvas) {
+          ctx.clearRect(0, 0, w, h);
+        } else if (!inFrame) {
+          drawFramingGuide(ctx, visCanvas, { w, h });
+        } else {
+          const tpl = buildPoseTemplate(pose.key, anchors, bbox, {
+            bboxLocal,
+            upperBodyOnly: upperBodyOk && !fullBodyOk,
+          });
+          drawNeonGhost(ctx, tpl, { w, h, glow: true });
+        }
+
+        // lock gating (forgiving, matches earlier behavior)
+        const ok = inFrame && match >= 0.66;
 
         if (!bbox) {
           setLocked(false);
@@ -721,15 +749,9 @@ export default function PoseSession() {
           fr.okFrames = 0;
         } else if (!inFrame) {
           setLocked(false);
-          if (tooClose) setLockHint("Move back (camera is too close)");
-          else if (tooFar) setLockHint("Move closer");
-          else if (offLeft) setLockHint("Move right");
-          else if (offRight) setLockHint("Move left");
-          else if (hipsMissing) setLockHint("Tilt down until shoulders + hips are visible");
-          else if (headCropped) setLockHint("Tilt up (your head is cropped)");
-          else setLockHint("Center yourself (shoulders + hips in view)");
+          setLockHint("Move back so shoulders + hips are visible");
           fr.okFrames = 0;
-        } else if (match < 0.72) {
+        } else if (match < 0.66) {
           setLocked(false);
           setLockHint("Match the neon outline");
           fr.okFrames = 0;
@@ -738,22 +760,16 @@ export default function PoseSession() {
           setLockHint("Hold still…");
           fr.okFrames = 0;
         } else {
-          fr.okFrames = (fr.okFrames || 0) + 1;
-          setLockHint(fr.okFrames >= 3 ? "LOCKED ✅" : "Hold…");
-          setLocked(fr.okFrames >= 3);
+          fr.okFrames = Math.min(30, (fr.okFrames || 0) + 1);
+          setLocked(true);
+          setLockHint("LOCKED ✅");
         }
 
-        // --- auto snap (no countdown): fire once when locked & stable for a few frames ---
-        const enough = ok && stable && (fr.okFrames || 0) >= 6;
-        const coolDownOk = !fr.justCapturedAt || t - fr.justCapturedAt > 1400;
-
-        if (autoSnap && enough && coolDownOk && typeof onCaptureRef.current === "function") {
-          fr.justCapturedAt = t;
+        // Auto-capture: when locked and stable for a short window, snap immediately.
+        if (autoSnap && ok && stable && (fr.okFrames || 0) >= 8) {
+          // Avoid repeated snaps while staying still.
           fr.okFrames = 0;
-          fr.inFrameFrames = 0;
-          try {
-            await onCaptureRef.current();
-          } catch {}
+          await onCapture();
         }
 
         rafRef.current = requestAnimationFrame(tick);
@@ -769,7 +785,7 @@ export default function PoseSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [started, isResults, pose.key, autoSnap, startStream, stopStream]);
+  }, [started, isResults, pose.key, autoSnap, onCapture, startStream, stopStream]);
 
   // Score session when finished capturing
   useEffect(() => {
@@ -792,35 +808,20 @@ export default function PoseSession() {
 
       if (canceled) return;
 
-      if (r.ok) {
-        setAiSession(r.session);
-        try {
-          const hist = readPoseSessionHistory(userId);
-          computeSessionStreak(hist, todayISO);
+      setAiSession(r.session || null);
+      if (!r.ok) setAiError(r.error || "AI unavailable (share card still ready)");
 
-          const record = {
-            local_day: todayISO,
-            created_at: Date.now(),
-            build_arc: clamp(r.session?.build_arc ?? r.session?.buildArcScore ?? 78, 0, 100),
-            muscleSignals: r.session?.muscleSignals || {},
-            poseQuality: r.session?.poseQuality || {},
-          };
-
-          appendPoseSession(userId, record);
-        } catch {}
-      } else {
-        setAiError(r.error || "Scan failed");
-        try {
-          const record = {
-            local_day: todayISO,
-            created_at: Date.now(),
-            build_arc: 78,
-            muscleSignals: {},
-            poseQuality: {},
-          };
-          appendPoseSession(userId, record);
-        } catch {}
-      }
+      // Always save a small record so deltas can work.
+      try {
+        const record = {
+          local_day: todayISO,
+          created_at: Date.now(),
+          build_arc: clamp(r.session?.build_arc ?? r.session?.buildArcScore ?? 78, 0, 100),
+          muscleSignals: r.session?.muscleSignals || {},
+          poseQuality: r.session?.poseQuality || {},
+        };
+        appendPoseSession(userId, record);
+      } catch {}
 
       setScanBusy(false);
     };
@@ -848,48 +849,39 @@ export default function PoseSession() {
   }, [latestRecord, userId]);
 
   const share = useCallback(async () => {
-    const session = aiSession || {};
+    const session = aiSession || synthesizePositiveSession({ prevSession, todayISO });
 
-    const hype =
-      session?.hype ||
-      (prevSession
-        ? "Momentum check ✅ You’re building something real."
-        : "Baseline locked ✅ Your first scan is in the books.");
-
-    const wins =
-      session?.highlights ||
-      (prevSession ? ["Clean pose control", "Strong symmetry"] : ["Strong starting frame", "Great pose control"]);
-
-    const levers =
-      session?.levers ||
-      (session?.nextPlan ? session.nextPlan : ["Protein +25g today", "Train 2-3× this week"]);
+    const buildArc = clamp(session?.build_arc ?? session?.buildArcScore ?? latestRecord?.build_arc ?? 78, 0, 100);
+    const hype = session?.hype || "Nice work — keep going.";
+    const wins = (session?.highlights || ["Clean baseline", "Solid pose control"]).slice(0, 3);
+    const levers = (session?.levers || ["Protein target today", "Train 2–3× this week"]).slice(0, 2);
 
     const png = await buildPoseSessionSharePng({
+      buildArc,
       headline: "POSE SESSION",
       subhead: hype,
       wins,
       levers,
-      sincePoints: deltas?.since_points || 0,
+      // Viral payload: embed the 3 pose images.
       poseImages: captures.map((c) => c.image_data_url).slice(0, 3),
-      localDay: todayISO,
+      // Neutral/positive only (no percentile / streak).
+      showMeta: false,
+      sincePoints: deltas?.since_points || 0,
     });
 
-    await shareOrDownloadPng(
-      png,
-      `slimcal-pose-session-${todayISO}.png`,
-      "Pose Session ✅ #SlimcalAI"
-    );
-  }, [aiSession, captures, todayISO, deltas, prevSession]);
+    await shareOrDownloadPng(png, `slimcal-pose-session-${todayISO}.png`, "Pose Session ✅ #SlimcalAI");
+  }, [aiSession, captures, todayISO, deltas, prevSession, latestRecord]);
 
   const start = () => {
-    stableRef.current = { t0: 0, okFrames: 0, inFrameFrames: 0, lastDetectAt: 0, justCapturedAt: 0, prevLm: null };
     setStarted(true);
     setStep(0);
     setCaptures([]);
     setAiSession(null);
     setAiError("");
     setLocked(false);
-    setLockHint("Step into frame");
+    stableRef.current.okFrames = 0;
+    stableRef.current.inFrameFrames = 0;
+    stableRef.current.prevLm = null;
   };
 
   const back = () => history.push("/");
@@ -921,7 +913,7 @@ export default function PoseSession() {
               Pose Session
             </Typography>
             <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.9)" }}>
-              3 poses • auto-lock • instant share card
+              3 poses · auto-lock · instant share card
             </Typography>
             <Divider sx={{ my: 2, borderColor: "rgba(0,255,190,0.18)" }} />
             <Stack spacing={1.25}>
@@ -953,16 +945,14 @@ export default function PoseSession() {
             <Typography variant="h6" sx={{ fontWeight: 900 }}>
               {pose.title}
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.88)" }}>
-              {pose.subtitle}
-            </Typography>
+            <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.88)" }}>{pose.subtitle}</Typography>
 
             <Box
               sx={{
                 mt: 1.5,
                 position: "relative",
                 width: "100%",
-                aspectRatio: "9 / 16",
+                aspectRatio: captureLayout === "landscape" ? "16 / 9" : "9 / 16",
                 borderRadius: 3,
                 overflow: "hidden",
                 border: "1px solid rgba(0,255,190,0.18)",
@@ -1004,7 +994,9 @@ export default function PoseSession() {
                   p: 1,
                   borderRadius: 2,
                   background: "rgba(0,0,0,0.55)",
-                  border: locked ? "1px solid rgba(0,255,190,0.55)" : "1px solid rgba(0,255,190,0.18)",
+                  border: locked
+                    ? "1px solid rgba(0,255,190,0.55)"
+                    : "1px solid rgba(0,255,190,0.18)",
                   boxShadow: locked ? "0 0 18px rgba(0,255,190,0.18)" : "none",
                 }}
               >
@@ -1036,21 +1028,21 @@ export default function PoseSession() {
 
             {scanBusy ? (
               <Typography sx={{ fontWeight: 800, color: "rgba(220,255,245,0.9)" }}>
-                Scanning your poses…
+                Finalizing your share card…
               </Typography>
             ) : (
               <>
-                <Typography sx={{ mt: 0.5, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
+                <Typography sx={{ mt: 0.25, color: "rgba(220,255,245,0.95)", fontWeight: 800 }}>
                   {aiSession?.hype ||
                     (prevSession
-                      ? "Momentum check ✅ You’re building something real."
+                      ? "Nice — your momentum is building. Keep showing up."
                       : "Great starting frame. You’re going to level up fast.")}
                 </Typography>
 
                 {deltas ? (
                   <Box sx={{ mt: 1.25 }}>
                     <Typography sx={{ fontSize: 13, color: "rgba(220,255,245,0.86)" }}>
-                      Since last: <b>+{deltas.since_points || 0} levels</b>
+                      Since last: <b>+{deltas.since_points || 0}</b>
                     </Typography>
                   </Box>
                 ) : null}
@@ -1059,7 +1051,7 @@ export default function PoseSession() {
 
                 <Typography sx={{ fontWeight: 900, color: "#eafffb" }}>Wins</Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.highlights || ["Clean pose control", "Strong symmetry"]).slice(0, 3).map((t, idx) => (
+                  {(aiSession?.highlights || ["Clean baseline", "Solid pose control"]).slice(0, 3).map((t, idx) => (
                     <Box
                       key={idx}
                       sx={{
@@ -1074,25 +1066,27 @@ export default function PoseSession() {
                   ))}
                 </Stack>
 
-                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>Next unlocks (pick 1)</Typography>
+                <Typography sx={{ mt: 2, fontWeight: 900, color: "#eafffb" }}>Next</Typography>
                 <Stack spacing={0.75} sx={{ mt: 1 }}>
-                  {(aiSession?.levers || ["Protein +25g today", "Train 2-3× this week"]).slice(0, 2).map((t, idx) => (
-                    <Box
-                      key={idx}
-                      sx={{
-                        p: 1,
-                        borderRadius: 2,
-                        background: "rgba(0,255,255,0.04)",
-                        border: "1px solid rgba(0,255,255,0.14)",
-                      }}
-                    >
-                      <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
-                    </Box>
-                  ))}
+                  {(aiSession?.levers || ["Protein target today", "Train 2–3× this week"])
+                    .slice(0, 2)
+                    .map((t, idx) => (
+                      <Box
+                        key={idx}
+                        sx={{
+                          p: 1,
+                          borderRadius: 2,
+                          background: "rgba(0,255,255,0.04)",
+                          border: "1px solid rgba(0,255,255,0.14)",
+                        }}
+                      >
+                        <Typography sx={{ fontWeight: 800 }}>{t}</Typography>
+                      </Box>
+                    ))}
                 </Stack>
 
                 {aiError ? (
-                  <Typography sx={{ mt: 1.5, color: "rgba(255,180,180,0.9)", fontWeight: 700 }}>
+                  <Typography sx={{ mt: 1.5, color: "rgba(220,255,245,0.75)", fontWeight: 700 }}>
                     {aiError}
                   </Typography>
                 ) : null}
