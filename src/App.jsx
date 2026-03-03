@@ -826,16 +826,58 @@ export default function App() {
               const proNow = !!(proCheck.isPro || isProActive);
               if (proNow) return <PoseSession />;
 
-              // Free users: 1 scan/day (hard gate)
+              // Free users: 1 Pose Session per day.
+              // Important: we must allow the user to stay in the flow after spending,
+              // otherwise App re-renders can instantly trigger the block.
+              const today = (() => {
+                try {
+                  const n = new Date();
+                  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).toISOString().slice(0, 10);
+                } catch {
+                  return new Date().toISOString().slice(0, 10);
+                }
+              })();
+
+              const allowKey = `pose_session_allow_${today}`;
+              const spentKey = `pose_session_spent_${today}`;
+
+              const alreadyAllowed = (() => {
+                try {
+                  return sessionStorage.getItem(allowKey) === "1";
+                } catch {
+                  return false;
+                }
+              })();
+
+              // If we already allowed this tab/session today, keep letting them in.
+              if (alreadyAllowed) return <PoseSession />;
+
+              // Hard gate if no daily remaining.
               if (!canUseDailyFeature("pose_session")) {
                 setUpgradeOpen(true);
                 return <Redirect to="/" />;
               }
 
-              // Spend the daily credit once when entering the scan flow
+              // Allow this tab/session to proceed today before we spend the credit.
+              // Then spend once. The allow flag prevents immediate kick-outs on re-render.
               try {
-                registerDailyFeatureUse("pose_session");
+                sessionStorage.setItem(allowKey, "1");
               } catch {}
+
+              const alreadySpent = (() => {
+                try {
+                  return sessionStorage.getItem(spentKey) === "1";
+                } catch {
+                  return false;
+                }
+              })();
+
+              if (!alreadySpent) {
+                try {
+                  registerDailyFeatureUse("pose_session");
+                  sessionStorage.setItem(spentKey, "1");
+                } catch {}
+              }
 
               return <PoseSession />;
             }}
