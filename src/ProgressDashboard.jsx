@@ -16,6 +16,7 @@ import DailyGoalTracker from './DailyGoalTracker';
 
 // ✅ Supabase auth + readers
 import { useAuth } from './context/AuthProvider.jsx';
+import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
 import { getWorkouts, getDailyMetricsRange } from './lib/db';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -67,7 +68,7 @@ function readWorkoutCaloriesFallback(workoutRow) {
     workoutRow.total_calories,
     workoutRow.calories,
     workoutRow.cals,
-    workoutRow.cals_burned,
+    workoutRow.calories_burned,
     workoutRow.calories_burned,
     workoutRow.kcal,
   ];
@@ -184,28 +185,33 @@ export default function ProgressDashboard() {
   const [burnedToday, setBurnedToday] = useState(0);
   const [consumedToday, setConsumedToday] = useState(0);
 
-  const local = useMemo(() => {
+    const local = useMemo(() => {
+    const todayISO = localDayISO(new Date());
     const todayUS = new Date().toLocaleDateString('en-US');
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
 
-    const burned = wh.filter(w => w.date === todayUS)
-      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
+    // Use user-scoped caches when available (prevents cross-account contamination + “0” bugs)
+    const uid = user?.id || null;
 
-    const mealsToday = mh.find(m => m.date === todayUS);
-    const consumed = mealsToday
-      ? (mealsToday.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)
-      : 0;
+    const wh = readScopedJSON(KEYS.workoutHistory, uid, []) || [];
+    const mh = readScopedJSON(KEYS.mealHistory, uid, []) || [];
 
-    const sessions = wh.map((w) => ({
-      dateLabel: w.date,
-      totalCalories: Number(w.totalCalories) || 0,
-      _src: 'local',
-      _dayISO: fromUSDateToISO(w.date) || null,
-    })).filter(x => x._dayISO);
+    const isToday = (item) => {
+      const d = item?.local_day || item?.dayISO || item?.day || null;
+      if (d && String(d) === todayISO) return true;
+      const us = item?.date || item?.dateLabel || null;
+      return us && String(us) === todayUS;
+    };
 
-    return { workouts: aggregateByDay(sessions), burnedToday: burned, consumedToday: consumed };
-  }, []);
+    const burned = wh
+      .filter(isToday)
+      .reduce((s, w) => s + (Number(w.total_calories ?? w.totalCalories ?? w.calories_burned ?? w.burned ?? 0) || 0), 0);
+
+    const consumed = mh
+      .filter(isToday)
+      .reduce((s, m) => s + (Number(m.calories ?? m.cals ?? m.total_calories ?? 0) || 0), 0);
+
+    return { burned, consumed };
+  }, [user]);
 
   const recomputeTodayFromLocal = useCallback(() => {
     const today = localDayISO();
@@ -275,8 +281,8 @@ export default function ProgressDashboard() {
 
         if (!ignore && row) {
           // ✅ FIX: support both new + legacy schemas
-          const burnedNew = Number(row.calories_burned ?? row.burned ?? row.cals_burned ?? 0);
-          const eatenNew = Number(row.calories_eaten ?? row.eaten ?? row.cals_eaten ?? 0);
+          const burnedNew = Number(row.calories_burned ?? row.burned ?? row.calories_burned ?? 0);
+          const eatenNew = Number(row.calories_eaten ?? row.eaten ?? row.calories_eaten ?? 0);
 
           setBurnedToday((prev) => (burnedNew > 0 ? burnedNew : prev));
           setConsumedToday((prev) => (eatenNew > 0 ? eatenNew : prev));

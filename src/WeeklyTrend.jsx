@@ -15,6 +15,7 @@ import {
 
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange, getWorkouts } from './lib/db';
+import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
 
@@ -71,24 +72,31 @@ function calcCaloriesFromSets(sets) {
 }
 
 /* ---------------- Local reads (meals + workoutHistory fallback) -------- */
-function readLocalMealsByISO() {
-  const meals = JSON.parse(localStorage.getItem('mealHistory') || '[]');
-  const map = new Map(); // iso -> eaten
-  for (const m of meals) {
-    const dayISO = fromUSDateToISO(m.date);
-    if (!dayISO) continue;
-    const eaten = (m.meals || []).reduce((s, x) => s + (Number(x.calories) || 0), 0);
-    map.set(dayISO, (map.get(dayISO) || 0) + eaten);
+function readLocalMealsByISO(userId = null) {
+  const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
+  const map = new Map(); // iso -> cals
+  for (const m of mh) {
+    const dayISO = String(m?.local_day || m?.dayISO || m?.day || "") || null;
+    const us = m?.date || m?.dateLabel || null;
+    const iso = dayISO || fromUSDateToISO(us) || null;
+    if (!iso) continue;
+    const cals = Number(m?.calories ?? m?.cals ?? m?.total_calories ?? 0) || 0;
+    if (cals <= 0) continue;
+    map.set(iso, (map.get(iso) || 0) + cals);
   }
   return map;
 }
-function readLocalWorkoutsByISO() {
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+function readLocalWorkoutsByISO(userId = null) {
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
   const map = new Map(); // iso -> burned
-  for (const w of workouts) {
-    const dayISO = fromUSDateToISO(w.date);
-    if (!dayISO) continue;
-    map.set(dayISO, (map.get(dayISO) || 0) + (Number(w.totalCalories) || 0));
+  for (const w of wh) {
+    const dayISO = String(w?.local_day || w?.dayISO || w?.day || "") || null;
+    const us = w?.date || w?.dateLabel || null;
+    const iso = dayISO || fromUSDateToISO(us) || null;
+    if (!iso) continue;
+    const kcal = Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
+    if (kcal <= 0) continue;
+    map.set(iso, (map.get(iso) || 0) + kcal);
   }
   return map;
 }
@@ -116,8 +124,8 @@ export default function WeeklyTrend() {
     const { from, to, days } = lastNDaysRange(7);
 
     // 1) Local always (instant)
-    const eatenLocal = readLocalMealsByISO();
-    const burnedLocal = readLocalWorkoutsByISO();
+    const eatenLocal = readLocalMealsByISO(user?.id || null);
+    const burnedLocal = readLocalWorkoutsByISO(user?.id || null);
     let baseRows = buildRowsForDays(days, eatenLocal, burnedLocal, 'local');
 
     // If not signed in, we’re done
@@ -131,10 +139,10 @@ export default function WeeklyTrend() {
     try {
       const dm = await getDailyMetricsRange(user.id, from, to);
       serverDaily = (dm || []).map((r) => ({
-        dayISO: r.day,
-        eaten: Number(r.cals_eaten || 0),
-        burned: Number(r.cals_burned || 0),
-        net: (r.net_cals != null ? Number(r.net_cals) : (Number(r.cals_eaten || 0) - Number(r.cals_burned || 0))),
+        dayISO: r.local_day,
+        eaten: Number(r.calories_eaten || 0),
+        burned: Number(r.calories_burned || 0),
+        net: (r.net_calories != null ? Number(r.net_calories) : (Number(r.calories_eaten || 0) - Number(r.calories_burned || 0))),
         _src: 'daily_metrics'
       }));
     } catch (e) {
@@ -150,17 +158,17 @@ export default function WeeklyTrend() {
 
       // Filter to last 7 days by local-day ISO
       const inWindow = (all || []).filter((w) => {
-        const started = w.started_at || w.date || w.created_at;
+        const started = w.local_day || w.started_at || w.date || w.created_at;
         if (!started) return false;
-        const dayISO = localDayISO(new Date(started));
+        const dayISO = String(w.local_day || '') || localDayISO(new Date(started));
         return dayISO >= from && dayISO <= to;
       });
 
       // Sum proxy calories by day
       await Promise.all(
         inWindow.map(async (w) => {
-          const started = w.started_at || w.date || w.created_at;
-          const dayISO = localDayISO(new Date(started));
+          const started = w.local_day || w.started_at || w.date || w.created_at;
+          const dayISO = String(w.local_day || '') || localDayISO(new Date(started));
           const kcal = Number(w?.total_calories) || 0;
           if (kcal > 0) {
             burnedFromSets.set(dayISO, (burnedFromSets.get(dayISO) || 0) + kcal);
@@ -174,14 +182,14 @@ export default function WeeklyTrend() {
     // 4) Merge priority per day:
     //    eaten: prefer daily_metrics if >0 else local
     //    burned: prefer daily_metrics if >0 else sets-proxy if >0 else local
-    const serverMap = new Map(serverDaily.map(r => [r.dayISO, r]));
+    const serverMap = new Map(serverDaily.map(r => [r.local_dayISO, r]));
     const merged = baseRows.map((r) => {
-      const s = serverMap.get(r.dayISO);
+      const s = serverMap.get(r.local_dayISO);
 
       const eaten =
         (s && Number(s.eaten) > 0) ? Number(s.eaten) : Number(r.eaten);
 
-      const burnedProxy = Number(burnedFromSets.get(r.dayISO) || 0);
+      const burnedProxy = Number(burnedFromSets.get(r.local_dayISO) || 0);
 
       const burned =
         (s && Number(s.burned) > 0)
@@ -189,7 +197,7 @@ export default function WeeklyTrend() {
           : (burnedProxy > 0 ? burnedProxy : Number(r.burned));
 
       return {
-        dayISO: r.dayISO,
+        dayISO: r.local_dayISO,
         eaten,
         burned,
         net: eaten - burned,
@@ -227,7 +235,7 @@ export default function WeeklyTrend() {
 
   const chartData = useMemo(() => {
     return {
-      labels: rows.map((r) => toLocalUSFromISO(r.dayISO)),
+      labels: rows.map((r) => toLocalUSFromISO(r.local_dayISO)),
       datasets: [
         {
           label: 'Net Calories',
