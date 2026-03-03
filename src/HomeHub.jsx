@@ -143,7 +143,7 @@ export default function HomeHub() {
               onClick={() => history.push("/daily-checklist")}
             />
             <AppIcon
-              label="Scan"
+              label="Pose Session"
               grad="linear-gradient(180deg, rgba(236,72,153,0.92) 0%, rgba(131,24,67,0.98) 100%)"
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan/session")}

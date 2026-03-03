@@ -49,7 +49,6 @@ import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
 import HomeHub          from './HomeHub';
 import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
-import BodyScanBeta from './BodyScanBeta';
 import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
