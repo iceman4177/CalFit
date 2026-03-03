@@ -182,14 +182,14 @@ export default function WeeklyTrend() {
     // 4) Merge priority per day:
     //    eaten: prefer daily_metrics if >0 else local
     //    burned: prefer daily_metrics if >0 else sets-proxy if >0 else local
-    const serverMap = new Map(serverDaily.map(r => [r.local_dayISO, r]));
+    const serverMap = new Map(serverDaily.map((r) => [r.dayISO, r]));
     const merged = baseRows.map((r) => {
-      const s = serverMap.get(r.local_dayISO);
+      const s = serverMap.get(r.dayISO);
 
       const eaten =
         (s && Number(s.eaten) > 0) ? Number(s.eaten) : Number(r.eaten);
 
-      const burnedProxy = Number(burnedFromSets.get(r.local_dayISO) || 0);
+      const burnedProxy = Number(burnedFromSets.get(r.dayISO) || 0);
 
       const burned =
         (s && Number(s.burned) > 0)
@@ -197,7 +197,7 @@ export default function WeeklyTrend() {
           : (burnedProxy > 0 ? burnedProxy : Number(r.burned));
 
       return {
-        dayISO: r.local_dayISO,
+        dayISO: r.dayISO,
         eaten,
         burned,
         net: eaten - burned,

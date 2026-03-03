@@ -80,36 +80,46 @@ function readWorkoutCaloriesFallback(workoutRow) {
 }
 
 // ---------------- Read local canonical stores -------------------------
-function readConsumedByDay() {
-      const mh = readScopedJSON(KEYS.mealHistory, user?.id || null, []);
-  const map = new Map();
+function readConsumedByDay(userId = null) {
+  const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
+  const map = new Map(); // dayISO -> calories eaten
   for (const day of mh) {
-    const iso = fromUSDateToISO(day.date);
-    if (!iso) continue;
-    const total = (day.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0);
-    map.set(iso, (map.get(iso) || 0) + total);
+    const dayISO = String(day?.local_day || day?.dayISO || day?.day || "") || fromUSDateToISO(day?.date || day?.dateLabel || "");
+    if (!dayISO) continue;
+
+    // Some shapes store meals inside day.meals/items; some store a day-level calories value.
+    const top = Number(day?.calories ?? day?.cals ?? day?.total_calories ?? day?.totalCalories ?? 0) || 0;
+    const arr = Array.isArray(day?.meals) ? day.meals : (Array.isArray(day?.items) ? day.items : []);
+    const inner = arr.reduce((s, m) => s + (Number(m?.calories ?? m?.cals ?? m?.total_calories ?? m?.kcal ?? 0) || 0), 0);
+
+    const total = top || inner;
+    if (!total) continue;
+    map.set(dayISO, (map.get(dayISO) || 0) + total);
   }
   return map;
 }
-function readBurnedByDay() {
-      const wh = readScopedJSON(KEYS.workoutHistory, user?.id || null, []);
-  const map = new Map();
+function readBurnedByDay(userId = null) {
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+  const map = new Map(); // dayISO -> calories burned
   for (const sess of wh) {
-    const iso = fromUSDateToISO(sess.date);
-    if (!iso) continue;
-    map.set(iso, (map.get(iso) || 0) + (Number(sess.totalCalories) || 0));
+    const dayISO = String(sess?.local_day || sess?.dayISO || sess?.day || "") || fromUSDateToISO(sess?.date || sess?.dateLabel || "");
+    if (!dayISO) continue;
+    const kcal = Number(sess?.total_calories ?? sess?.totalCalories ?? sess?.calories_burned ?? sess?.burned ?? 0) || 0;
+    if (!kcal) continue;
+    map.set(dayISO, (map.get(dayISO) || 0) + kcal);
   }
   return map;
 }
 
-function readLocalWorkoutSessions() {
-      const wh = readScopedJSON(KEYS.workoutHistory, user?.id || null, []);
+function readLocalWorkoutSessions(userId = null) {
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
   return wh
     .map((w) => {
-      const dayISO = fromUSDateToISO(w.date);
+      const dayISO = String(w?.local_day || w?.dayISO || w?.day || "") || fromUSDateToISO(w?.date || w?.dateLabel || "");
+      const dateLabel = String(w?.date || w?.dateLabel || "");
       return {
-        dateLabel: String(w.date || ''),
-        totalCalories: Number(w.totalCalories) || 0,
+        dateLabel,
+        totalCalories: Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.burned ?? 0) || 0,
         _src: 'local',
         _dayISO: dayISO,
       };
@@ -222,8 +232,8 @@ export default function ProgressDashboard() {
 
   const recomputeTodayFromLocal = useCallback(() => {
     const today = localDayISO();
-    const cBy = readConsumedByDay();
-    const bBy = readBurnedByDay();
+    const cBy = readConsumedByDay(user?.id || null);
+    const bBy = readBurnedByDay(user?.id || null);
 
     let eaten = Number(cBy.get(today) || 0);
     let burned = Number(bBy.get(today) || 0);
@@ -248,7 +258,7 @@ export default function ProgressDashboard() {
       recomputeTodayFromLocal();
 
       // Always start with local aggregated days
-      const localSessions = readLocalWorkoutSessions();
+      const localSessions = readLocalWorkoutSessions(user?.id || null);
       if (!ignore) setWorkouts(aggregateByDay(localSessions));
 
       if (!user) return;
@@ -307,7 +317,7 @@ export default function ProgressDashboard() {
     const refresh = () => {
       recomputeTodayFromLocal();
 
-      const localSessions = readLocalWorkoutSessions();
+      const localSessions = readLocalWorkoutSessions(user?.id || null);
       setWorkouts((prev) => {
         // If prev is already daily totals, convert back to sessions is not possible,
         // so simplest is to rebuild from local and keep prev as additional days.
