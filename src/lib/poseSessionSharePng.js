@@ -60,7 +60,21 @@ export async function buildPoseSessionSharePng({
   trackLabel = "",
   localDay = "",
 } = {}) {
-  const W = 1080;
+  
+  // Normalize older/newer payload shapes
+  const _wins = Array.isArray(wins) && wins.length
+    ? wins
+    : (Array.isArray(highlights) ? highlights : []);
+  const _levers = Array.isArray(levers) && levers.length
+    ? levers
+    : [];
+  const _headline = headline || "POSE SESSION";
+  const scoreNum = Number.isFinite(Number(score)) ? Number(score) : null;
+  const tierText = (tier && String(tier).trim()) ? String(tier).trim() : "";
+  const _subhead = subhead || (tierText ? `${tierText}${scoreNum !== null ? ` · ${scoreNum.toFixed?.(1) || scoreNum}/10` : ""}` : "Baseline locked ✅");
+  const _summary = (typeof summary === "string" && summary.trim()) ? summary.trim() : "";
+  const _hashtag = (hashtag && String(hashtag).trim()) ? String(hashtag).trim() : "#SlimCalAI";
+const W = 1080;
   const H = 1350;
 
   const c = document.createElement("canvas");
@@ -102,12 +116,31 @@ export async function buildPoseSessionSharePng({
 
   ctx.fillStyle = "#E9FFF8";
   ctx.font = "900 56px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(String(headline || "POSE SESSION"), cardX + 26, cardY + 98);
+  ctx.fillText(String(_headline), cardX + 26, cardY + 98);
 
   ctx.fillStyle = "rgba(233,255,248,0.90)";
   ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto";
-  const safeSub = String(subhead || "Baseline locked ✅").slice(0, 120);
+  const safeSub = String(_subhead).slice(0, 120);
   ctx.fillText(safeSub, cardX + 26, cardY + 142);
+
+  // hashtag pill
+  if (_hashtag) {
+    const tag = String(_hashtag).slice(0, 24);
+    ctx.save();
+    ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+    const tw = ctx.measureText(tag).width;
+    const px = cardX + cardW - 26 - (tw + 34);
+    const py = cardY + 110;
+    roundRectPath(ctx, px, py, tw + 34, 34, 17);
+    ctx.fillStyle = "rgba(0,255,190,0.16)";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0,255,190,0.22)";
+    ctx.stroke();
+    ctx.fillStyle = "rgba(233,255,248,0.95)";
+    ctx.fillText(tag, px + 17, py + 24);
+    ctx.restore();
+  }
 
   // optional streak delta
   if (sincePoints > 0) {
@@ -225,8 +258,18 @@ export async function buildPoseSessionSharePng({
     y += 26;
   };
 
-  drawSection("Wins", wins, "rgba(0,255,190,0.18)");
-  drawSection("Next unlocks", levers, "rgba(0,255,255,0.18)");
+  drawSection("Wins", _wins, "rgba(0,255,190,0.18)");
+
+  // Viral share summary (short + positive)
+  if (_summary) {
+    const summaryLines = _summary
+      .split(/\n|\r/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    drawSection("Glow-up", summaryLines, "rgba(255,210,120,0.20)");
+  }
+  drawSection("Next unlocks", _levers, "rgba(0,255,255,0.18)");
 
   // optional signals (simple bars, always positive framing)
   if (muscleSignals && typeof muscleSignals === "object") {
@@ -281,7 +324,7 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(233,255,248,0.55)";
   ctx.font = "700 22px system-ui, -apple-system, Segoe UI, Roboto";
   const footerLeft = "Slimcal.ai";
-  const footerRight = localDay ? String(localDay) : "";
+  const footerRight = localDay ? String(localDay) : String(_hashtag || "");
   ctx.fillText(footerLeft, cardX + 26, cardY + cardH - 26);
   if (footerRight) {
     const m = ctx.measureText(footerRight);

@@ -278,13 +278,24 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
+      const shareSummary = (() => {
+        const r = typeof result?.report === "string" ? result.report.trim() : "";
+        if (!r) return "";
+        // take first paragraph, keep it punchy for social sharing
+        const first = r.split(/\n\s*\n/)[0] || r;
+        return first.replace(/\s+/g, " ").trim().slice(0, 220);
+      })();
+
       const pngDataUrl = await buildPoseSessionSharePng({
         tier: result?.tier || result?.tierLabel || result?.strength || "Build Arc",
-        score: result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 78,
-        highlights: result?.highlights || result?.levers || [],
-        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res
+        score: result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 7.8,
+        wins: (result?.highlights || result?.levers || []).slice(0, 4),
+        levers: (result?.biggestOpportunity || result?.poseNotes || []).slice(0, 3).map((t) => String(t)),
+        summary: shareSummary,
+        hashtag: "#SlimCalAI",
+        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res for export
       });
-      await shareOrDownloadPng(pngDataUrl, "slimcalAI-posesession.png", "#SlimCalAI");
+await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     } catch (e) {
       console.error(e);
       setErrorMsg("Could not generate share card.");
