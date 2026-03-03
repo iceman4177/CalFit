@@ -85,18 +85,58 @@ function getUserIdFromHeaders(req) {
 function safeParseJsonFromText(text) {
   const t = String(text || "").trim();
   if (!t) return null;
+
+  // Fast path
   try {
     return JSON.parse(t);
-  } catch {
-    // Best-effort: extract the first JSON object from the response.
-    const m = t.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    try {
-      return JSON.parse(m[0]);
-    } catch {
-      return null;
+  } catch {}
+
+  // Extract the first balanced JSON object from the text.
+  const start = t.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < t.length; i++) {
+    const ch = t[i];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+      } else if (ch === "\\") {
+        esc = true;
+      } else if (ch === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+
+    if (depth === 0) {
+      const candidate = t.slice(start, i + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        break;
+      }
     }
   }
+
+  // Last resort: trim to last brace and try.
+  const last = t.lastIndexOf("}");
+  if (last !== -1) {
+    const candidate = t.slice(start, last + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+
+  return null;
 }
 
 function clamp(n, lo, hi) {
@@ -1240,7 +1280,8 @@ const freeBypass =
           { role: "user", content },
         ],
         temperature: 0.4,
-        max_tokens: 1400,
+        max_tokens: 2200,
+        response_format: { type: "json_object" },
       });
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
@@ -1264,6 +1305,8 @@ const freeBypass =
         tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
         aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
         report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
+        // If JSON parsing failed but the model returned text, keep a safe excerpt so the UI still renders a report.
+        __rawText: String(text || "").slice(0, 6000) || undefined,
         bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
         biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
         poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
@@ -1291,6 +1334,15 @@ const freeBypass =
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
+
+      if (!session.report && session.__rawText) {
+        // Remove any leading non-json preamble lines.
+        const raw = String(session.__rawText);
+        // If the model returned something like "Here is the JSON:" keep only the meaningful part.
+        const cleaned = raw.replace(/^.*?\n\n/, "").trim();
+        session.report = cleaned.length > 40 ? cleaned : raw;
+      }
+      delete session.__rawText;
 
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
