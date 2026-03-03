@@ -230,8 +230,11 @@ const [authUser, setAuthUser] = useState(null);
         {/* Primary nav */}
         <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
+            <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
+              Home
+            </NavLink>
             <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
-              History
+              Workout History
             </NavLink>
             <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
               Dashboard
