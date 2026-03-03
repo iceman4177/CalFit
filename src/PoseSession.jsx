@@ -245,8 +245,36 @@ export default function PoseSession() {
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
-      const session = json?.session || null;
+      const contentType = res.headers.get("content-type") || "";
+      let json = null;
+
+      if (!res.ok) {
+        // Try to extract server error body for debugging
+        const errText = await res.text().catch(() => "");
+        throw new Error(`AI request failed (${res.status}). ${errText || ""}`.trim());
+      }
+
+      if (contentType.includes("application/json")) {
+        json = await res.json();
+      } else {
+        const text = await res.text().catch(() => "");
+        // Sometimes a proxy returns HTML on error; surface it.
+        throw new Error(`AI response was not JSON. ${text?.slice(0, 120) || ""}`.trim());
+      }
+
+      // Be resilient to response-shape changes
+      const session =
+        json?.session ??
+        json?.data?.session ??
+        json?.result?.session ??
+        json?.output?.session ??
+        json?.payload?.session ??
+        (json?.sessionData ?? null) ??
+        null;
+
+      if (!session) {
+        throw new Error("AI response missing session payload.");
+      }
 
       // Persist a small record for deltas
       try {
