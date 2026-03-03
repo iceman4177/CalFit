@@ -1,6 +1,8 @@
 // src/PoseSession.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useHistory } from "react-router-dom";
+import { useEntitlements } from "./context/EntitlementsContext.jsx";
+import { getDailyRemaining, getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
 import {
   Box,
   Button,
@@ -72,6 +74,24 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
 }
 
 export default function PoseSession() {
+  const ent = useEntitlements();
+  const isPro = !!(ent?.isPro || ent?.isProActive);
+  const [quotaTick, setQuotaTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const bump = () => setQuotaTick((t) => t + 1);
+    window.addEventListener("focus", bump);
+    document.addEventListener("visibilitychange", bump);
+    return () => {
+      window.removeEventListener("focus", bump);
+      document.removeEventListener("visibilitychange", bump);
+    };
+  }, []);
+
+  const dailyLimit = React.useMemo(() => getFreeDailyLimit("pose_session"), [quotaTick]);
+  const dailyRemaining = React.useMemo(() => getDailyRemaining("pose_session"), [quotaTick]);
+
+
   const history = useHistory();
   const { user } = useAuth();
 
@@ -245,36 +265,8 @@ export default function PoseSession() {
         body: JSON.stringify(payload),
       });
 
-      const contentType = res.headers.get("content-type") || "";
-      let json = null;
-
-      if (!res.ok) {
-        // Try to extract server error body for debugging
-        const errText = await res.text().catch(() => "");
-        throw new Error(`AI request failed (${res.status}). ${errText || ""}`.trim());
-      }
-
-      if (contentType.includes("application/json")) {
-        json = await res.json();
-      } else {
-        const text = await res.text().catch(() => "");
-        // Sometimes a proxy returns HTML on error; surface it.
-        throw new Error(`AI response was not JSON. ${text?.slice(0, 120) || ""}`.trim());
-      }
-
-      // Be resilient to response-shape changes
-      const session =
-        json?.session ??
-        json?.data?.session ??
-        json?.result?.session ??
-        json?.output?.session ??
-        json?.payload?.session ??
-        (json?.sessionData ?? null) ??
-        null;
-
-      if (!session) {
-        throw new Error("AI response missing session payload.");
-      }
+      const json = await res.json();
+      const session = json?.session || null;
 
       // Persist a small record for deltas
       try {

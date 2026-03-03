@@ -1,8 +1,6 @@
 // src/HomeHub.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import { useHistory } from "react-router-dom";
-import { useEntitlements } from "./context/EntitlementsContext.jsx";
-import { getDailyRemaining, getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
 import {
   Box,
   Container,
@@ -19,7 +17,7 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import DonutLargeIcon from "@mui/icons-material/DonutLarge";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 
-function AppIcon({ icon, label, onClick, grad, badge }) {
+function AppIcon({ icon, label, onClick, grad }) {
   return (
     <ButtonBase
       onClick={onClick}
@@ -60,11 +58,6 @@ function AppIcon({ icon, label, onClick, grad, badge }) {
         "&:active": { transform: "translateY(0px) scale(0.99)" },
       }}
     >
-      {badge ? (
-        <Box sx={{ position: "absolute", top: 10, right: 10, zIndex: 2 }}>
-          {badge}
-        </Box>
-      ) : null}
       <Box sx={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {icon}
       </Box>
@@ -87,22 +80,6 @@ function AppIcon({ icon, label, onClick, grad, badge }) {
 }
 
 export default function HomeHub() {
-  const ent = useEntitlements();
-  const isPro = !!(ent?.isPro || ent?.isProActive);
-  const [usageTick, setUsageTick] = useState(0);
-
-  useEffect(() => {
-    const bump = () => setUsageTick((t) => t + 1);
-    window.addEventListener("focus", bump);
-    document.addEventListener("visibilitychange", bump);
-    return () => {
-      window.removeEventListener("focus", bump);
-      document.removeEventListener("visibilitychange", bump);
-    };
-  }, []);
-
-  const poseLimit = useMemo(() => getFreeDailyLimit("pose_session"), [usageTick]);
-  const poseRemaining = useMemo(() => getDailyRemaining("pose_session"), [usageTick]);
 
   const history = useHistory();
 
@@ -169,24 +146,6 @@ export default function HomeHub() {
             <AppIcon
               label="Pose Session"
               grad="linear-gradient(180deg, rgba(236,72,153,0.92) 0%, rgba(131,24,67,0.98) 100%)"
-              badge={!isPro ? (
-                <Box
-                  sx={{
-                    px: 1.1,
-                    py: 0.45,
-                    borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.2,
-                    bgcolor: "rgba(0,0,0,0.40)",
-                    color: "rgba(255,255,255,0.96)",
-                    border: "1px solid rgba(255,255,255,0.22)",
-                    backdropFilter: "blur(6px)",
-                  }}
-                >
-                  {Math.max(0, poseRemaining)}/{Math.max(0, poseLimit)}
-                </Box>
-              ) : null}
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan/session")}
             />
