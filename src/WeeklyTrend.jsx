@@ -181,6 +181,12 @@ export default function WeeklyTrend() {
           label: "Net Calories",
           data: rows.map((r) => Number(r.net) || 0),
           tension: 0.25,
+          borderColor: "rgba(99, 102, 241, 0.95)",
+          backgroundColor: "rgba(99, 102, 241, 0.18)",
+          pointBackgroundColor: "rgba(99, 102, 241, 0.95)",
+          pointBorderColor: "#ffffff",
+          pointRadius: 3,
+          fill: true,
         },
       ],
     };
@@ -191,7 +197,7 @@ export default function WeeklyTrend() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: false } },
+      scales: { y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.06)' } }, x: { grid: { display: false } } },
     }),
     []
   );

@@ -221,6 +221,10 @@ export default function ProgressDashboard() {
         {
           label: "Calories Burned (daily total)",
           data: burnedSeries.map((r) => Number(r.total) || 0),
+          backgroundColor: "rgba(45, 212, 191, 0.35)",
+          borderColor: "rgba(45, 212, 191, 0.95)",
+          borderWidth: 1,
+          borderRadius: 8,
         },
       ],
     };
@@ -231,7 +235,7 @@ export default function ProgressDashboard() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true } },
+      scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' } }, x: { grid: { display: false } } },
     }),
     []
   );
