@@ -17,6 +17,18 @@ import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange, getWorkouts } from './lib/db';
 import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
 
+
+function lastNDaysISO(n = 7, end = new Date()) {
+  const out = [];
+  const base = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(base);
+    d.setDate(base.getDate() - i);
+    out.push(localDayISO(d));
+  }
+  return out;
+}
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
 
 /* ---------------- Local-day helpers (stable, no UTC drift) ------------- */
@@ -116,143 +128,121 @@ function buildRowsForDays(daysISO, eatenMap, burnedMap, srcLabel = 'local') {
   });
 }
 
+
 export default function WeeklyTrend() {
   const { user } = useAuth();
-  const [rows, setRows] = useState([]);
+
+  const [series, setSeries] = useState([]); // [{ dayISO, net, consumed, burned }]
 
   const recompute = useCallback(async () => {
-    const { from, to, days } = lastNDaysRange(7);
+    const uid = user?.id || null;
+    const days = lastNDaysISO(7);
 
-    // 1) Local always (instant)
-    const eatenLocal = readLocalMealsByISO(user?.id || null);
-    const burnedLocal = readLocalWorkoutsByISO(user?.id || null);
-    let baseRows = buildRowsForDays(days, eatenLocal, burnedLocal, 'local');
+    // Local-first totals (canonical)
+    const consumedMap = readScopedJSON(KEYS.mealHistory, uid, []) || [];
+    const burnedMap = readScopedJSON(KEYS.workoutHistory, uid, []) || [];
 
-    // If not signed in, we’re done
-    if (!user) {
-      setRows(baseRows);
-      return;
-    }
+    const sumMealsForDay = (dayISO) => {
+      let total = 0;
+      for (const day of consumedMap) {
+        const d = String(day?.local_day || day?.dayISO || day?.day || "") || null;
+        if (d !== dayISO) continue;
+        const top = Number(day?.calories ?? day?.cals ?? day?.total_calories ?? day?.totalCalories ?? 0) || 0;
+        if (top) { total += top; continue; }
+        const arr = Array.isArray(day?.meals) ? day.meals : (Array.isArray(day?.items) ? day.items : []);
+        total += arr.reduce((s, m) => s + (Number(m?.calories ?? m?.cals ?? m?.total_calories ?? m?.kcal ?? 0) || 0), 0);
+      }
+      return total;
+    };
 
-    // 2) Server daily_metrics (if you populate it)
-    let serverDaily = [];
-    try {
-      const dm = await getDailyMetricsRange(user.id, from, to);
-      serverDaily = (dm || []).map((r) => ({
-        dayISO: r.local_day,
-        eaten: Number(r.calories_eaten || 0),
-        burned: Number(r.calories_burned || 0),
-        net: (r.net_calories != null ? Number(r.net_calories) : (Number(r.calories_eaten || 0) - Number(r.calories_burned || 0))),
-        _src: 'daily_metrics'
-      }));
-    } catch (e) {
-      // no-op
-      serverDaily = [];
-    }
+    const sumWorkoutsForDay = (dayISO) => {
+      let total = 0;
+      for (const w of burnedMap) {
+        const d = String(w?.local_day || w?.dayISO || w?.day || "") || null;
+        if (d !== dayISO) continue;
+        total += Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
+      }
+      return total;
+    };
 
-    // 3) Compute burned from Supabase workouts/sets for last 7 days (proxy),
-    //    so you don’t get a flat 0 trend even when daily_metrics isn’t written.
-    const burnedFromSets = new Map(); // iso -> burned
-    try {
-      const all = await getWorkouts(user.id, { limit: 300 });
-
-      // Filter to last 7 days by local-day ISO
-      const inWindow = (all || []).filter((w) => {
-        const started = w.local_day || w.started_at || w.date || w.created_at;
-        if (!started) return false;
-        const dayISO = String(w.local_day || '') || localDayISO(new Date(started));
-        return dayISO >= from && dayISO <= to;
-      });
-
-      // Sum proxy calories by day
-      await Promise.all(
-        inWindow.map(async (w) => {
-          const started = w.local_day || w.started_at || w.date || w.created_at;
-          const dayISO = String(w.local_day || '') || localDayISO(new Date(started));
-          const kcal = Number(w?.total_calories) || 0;
-          if (kcal > 0) {
-            burnedFromSets.set(dayISO, (burnedFromSets.get(dayISO) || 0) + kcal);
-          }
-})
-      );
-    } catch (e) {
-      // ignore
-    }
-
-    // 4) Merge priority per day:
-    //    eaten: prefer daily_metrics if >0 else local
-    //    burned: prefer daily_metrics if >0 else sets-proxy if >0 else local
-    const serverMap = new Map(serverDaily.map((r) => [r.dayISO, r]));
-    const merged = baseRows.map((r) => {
-      const s = serverMap.get(r.dayISO);
-
-      const eaten =
-        (s && Number(s.eaten) > 0) ? Number(s.eaten) : Number(r.eaten);
-
-      const burnedProxy = Number(burnedFromSets.get(r.dayISO) || 0);
-
-      const burned =
-        (s && Number(s.burned) > 0)
-          ? Number(s.burned)
-          : (burnedProxy > 0 ? burnedProxy : Number(r.burned));
-
-      return {
-        dayISO: r.dayISO,
-        eaten,
-        burned,
-        net: eaten - burned,
-        _src: (s ? 'server+local' : 'local') + (burnedProxy > 0 ? '+sets' : '')
-      };
+    let rows = days.map((dayISO) => {
+      const consumed = sumMealsForDay(dayISO);
+      const burned = sumWorkoutsForDay(dayISO);
+      return { dayISO, consumed, burned, net: consumed - burned, _src: "local" };
     });
 
-    setRows(merged);
+    // Server fallback ONLY when local has no signal for that day
+    try {
+      const { data: dmRows } = await getDailyMetricsRange(days[0], days[days.length - 1]);
+      const dm = Array.isArray(dmRows) ? dmRows : [];
+      const byDay = new Map();
+      for (const r of dm) {
+        const dayISO = String(r?.local_day || r?.dayISO || r?.day || "");
+        if (!dayISO) continue;
+        const eaten = Number(r?.calories_eaten ?? r?.caloriesConsumed ?? r?.consumed ?? r?.food ?? 0) || 0;
+        const burned = Number(r?.calories_burned ?? r?.caloriesBurned ?? r?.burned ?? r?.exercise ?? 0) || 0;
+        const net = Number(r?.net_calories ?? (eaten - burned) ?? 0) || (eaten - burned);
+        byDay.set(dayISO, { eaten, burned, net });
+      }
+
+      rows = rows.map((r) => {
+        if ((r.consumed || r.burned) !== 0) return r; // local wins
+        const s = byDay.get(r.dayISO);
+        if (!s) return r;
+        if ((s.eaten || s.burned) === 0) return r;
+        return { dayISO: r.dayISO, consumed: s.eaten, burned: s.burned, net: s.net, _src: "server" };
+      });
+    } catch (e) {
+      // ignore; local-only is fine
+    }
+
+    setSeries(rows);
   }, [user]);
 
-  // Initial compute + live update hooks
-  useEffect(() => {
-    recompute();
+  useEffect(() => { recompute(); }, [recompute]);
 
-    const onConsumed = () => recompute();
-    const onBurned = () => recompute();
-    const onVis = () => recompute();
-    const onFocus = () => recompute();
-    const onStorage = () => recompute();
+  const chart = useMemo(() => {
+    const labels = (series || []).map((r) => {
+      try {
+        const [y, m, d] = String(r.dayISO).split("-").map(Number);
+        return new Date(y, m - 1, d).toLocaleDateString("en-US");
+      } catch {
+        return r.dayISO;
+      }
+    });
+    const data = (series || []).map((r) => Number(r.net) || 0);
 
-    window.addEventListener('slimcal:consumed:update', onConsumed);
-    window.addEventListener('slimcal:burned:update', onBurned);
-    window.addEventListener('visibilitychange', onVis);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('storage', onStorage);
-
-    return () => {
-      window.removeEventListener('slimcal:consumed:update', onConsumed);
-      window.removeEventListener('slimcal:burned:update', onBurned);
-      window.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, [recompute]);
-
-  const chartData = useMemo(() => {
     return {
-      labels: rows.map((r) => toLocalUSFromISO(r.dayISO)),
+      labels,
       datasets: [
         {
-          label: 'Net Calories',
-          data: rows.map((r) => Number(r.net) || 0),
-          borderColor: 'rgba(75,192,192,1)',
-          fill: false
-        }
-      ]
+          label: "Net Calories",
+          data,
+          tension: 0.25,
+        },
+      ],
     };
-  }, [rows]);
+  }, [series]);
+
+  const options = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: true },
+      title: { display: false },
+    },
+    scales: {
+      y: { beginAtZero: false },
+    },
+  }), []);
 
   return (
-    <Paper elevation={3} sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>7-Day Net Calorie Trend</Typography>
-      <Box sx={{ maxWidth: 800, mx: 'auto' }}>
-        <Line data={chartData} />
+    <Paper elevation={3} sx={{ p: 3, borderRadius: 3, mt: 3 }}>
+      <Typography variant="h6" sx={{ mb: 2 }}>7-Day Net Calorie Trend</Typography>
+      <Box sx={{ height: 280 }}>
+        <Line data={chart} options={options} />
       </Box>
     </Paper>
   );
 }
+

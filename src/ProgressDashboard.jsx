@@ -195,7 +195,7 @@ export default function ProgressDashboard() {
   const [burnedToday, setBurnedToday] = useState(0);
   const [consumedToday, setConsumedToday] = useState(0);
 
-    const local = useMemo(() => {
+  const local = useMemo(() => {
     const todayISO = localDayISO(new Date());
     const todayUS = new Date().toLocaleDateString('en-US');
 
@@ -230,26 +230,22 @@ export default function ProgressDashboard() {
     return { burned, consumed };
   }, [user]);
 
-  const recomputeTodayFromLocal = useCallback(() => {
+    useEffect(() => {
+    setBurnedToday(Number(local.burned) || 0);
+    setConsumedToday(Number(local.consumed) || 0);
+  }, [local]);
+
+const recomputeTodayFromLocal = useCallback(() => {
     const today = localDayISO();
-    const cBy = readConsumedByDay(user?.id || null);
-    const bBy = readBurnedByDay(user?.id || null);
+    const uid = user?.id || null;
+    const cBy = readConsumedByDay(uid);
+    const bBy = readBurnedByDay(uid);
 
-    let eaten = Number(cBy.get(today) || 0);
-    let burned = Number(bBy.get(today) || 0);
-
-    // ✅ FIX: if this device has no local history yet, fall back to hydrated cloud totals
-    try {
-      const ct = localStorage.getItem('consumedToday');
-      const bt = localStorage.getItem('burnedToday');
-
-      if ((!eaten || eaten === 0) && ct != null) eaten = Number(ct) || eaten;
-      if ((!burned || burned === 0) && bt != null) burned = Number(bt) || burned;
-    } catch (e) {}
-
+    const eaten = Number(cBy.get(today) || 0);
+    const burned = Number(bBy.get(today) || 0);
     setConsumedToday(eaten);
     setBurnedToday(burned);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     let ignore = false;
