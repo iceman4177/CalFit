@@ -1,12 +1,14 @@
 // src/HomeHub.jsx
 import React from "react";
 import { useHistory } from "react-router-dom";
+import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
   Box,
   Container,
   Stack,
   Typography,
   ButtonBase,
+  Chip,
 } from "@mui/material";
 
 import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
@@ -17,7 +19,7 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import DonutLargeIcon from "@mui/icons-material/DonutLarge";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 
-function AppIcon({ icon, label, onClick, grad }) {
+function AppIcon({ icon, label, onClick, grad, badge }) {
   return (
     <ButtonBase
       onClick={onClick}
@@ -58,6 +60,11 @@ function AppIcon({ icon, label, onClick, grad }) {
         "&:active": { transform: "translateY(0px) scale(0.99)" },
       }}
     >
+      {badge ? (
+        <Box sx={{ position: "absolute", top: 10, right: 10, zIndex: 2 }}>
+          {badge}
+        </Box>
+      ) : null}
       <Box sx={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {icon}
       </Box>
@@ -80,6 +87,9 @@ function AppIcon({ icon, label, onClick, grad }) {
 }
 
 export default function HomeHub() {
+  const ent = useEntitlements();
+  const isPro = !!(ent?.isPro || ent?.isProActive);
+
   const history = useHistory();
 
   return (
@@ -145,6 +155,14 @@ export default function HomeHub() {
             <AppIcon
               label="Pose Session"
               grad="linear-gradient(180deg, rgba(236,72,153,0.92) 0%, rgba(131,24,67,0.98) 100%)"
+              badge={!isPro ? (
+                <Chip
+                  size="small"
+                  label="PRO"
+                  color="default"
+                  sx={{ fontWeight: 900, bgcolor: "rgba(0,0,0,0.45)", color: "rgba(255,255,255,0.95)", border: "1px solid rgba(255,255,255,0.25)" }}
+                />
+              ) : null}
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan/session")}
             />
