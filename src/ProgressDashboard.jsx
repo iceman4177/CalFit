@@ -36,6 +36,19 @@ function fromUSDateToISO(us) {
     return null;
   }
 }
+
+function dayISOFromAny(v) {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dt = new Date(s);
+  if (!Number.isNaN(dt.getTime())) {
+    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return d.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
 function toUSDate(isoLike) {
   try {
     if (typeof isoLike === 'string' && isoLike.includes('/') && isoLike.split('/').length === 3) {
@@ -83,17 +96,20 @@ function readWorkoutCaloriesFallback(workoutRow) {
 function readConsumedByDay(userId = null) {
   const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
   const map = new Map(); // dayISO -> calories eaten
-  for (const day of mh) {
-    const dayISO = String(day?.local_day || day?.dayISO || day?.day || "") || fromUSDateToISO(day?.date || day?.dateLabel || "");
+
+  for (const m of mh) {
+    const dayISO = dayISOFromAny(m?.local_day || m?.__local_day || m?.day || m?.date || m?.eaten_at || m?.created_at);
     if (!dayISO) continue;
 
-    // Some shapes store meals inside day.meals/items; some store a day-level calories value.
-    const top = Number(day?.calories ?? day?.cals ?? day?.total_calories ?? day?.totalCalories ?? 0) || 0;
-    const arr = Array.isArray(day?.meals) ? day.meals : (Array.isArray(day?.items) ? day.items : []);
-    const inner = arr.reduce((s, m) => s + (Number(m?.calories ?? m?.cals ?? m?.total_calories ?? m?.kcal ?? 0) || 0), 0);
+    // Support both "flat meal rows" and "day aggregates" (day.meals/items)
+    const top = Number(m?.totalCalories ?? m?.total_calories ?? m?.calories ?? m?.cals ?? 0) || 0;
+
+    const arr = Array.isArray(m?.meals) ? m.meals : (Array.isArray(m?.items) ? m.items : []);
+    const inner = arr.reduce((s, x) => s + (Number(x?.totalCalories ?? x?.total_calories ?? x?.calories ?? x?.cals ?? x?.kcal ?? 0) || 0), 0);
 
     const total = top || inner;
     if (!total) continue;
+
     map.set(dayISO, (map.get(dayISO) || 0) + total);
   }
   return map;
@@ -101,11 +117,16 @@ function readConsumedByDay(userId = null) {
 function readBurnedByDay(userId = null) {
   const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
   const map = new Map(); // dayISO -> calories burned
-  for (const sess of wh) {
-    const dayISO = String(sess?.local_day || sess?.dayISO || sess?.day || "") || fromUSDateToISO(sess?.date || sess?.dateLabel || "");
+
+  for (const w of wh) {
+    const dayISO = dayISOFromAny(
+      w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
+    );
     if (!dayISO) continue;
-    const kcal = Number(sess?.total_calories ?? sess?.totalCalories ?? sess?.calories_burned ?? sess?.burned ?? 0) || 0;
+
+    const kcal = Number(w?.totalCalories ?? w?.total_calories ?? w?.calories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
     if (!kcal) continue;
+
     map.set(dayISO, (map.get(dayISO) || 0) + kcal);
   }
   return map;

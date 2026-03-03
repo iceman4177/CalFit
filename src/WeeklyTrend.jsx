@@ -27,6 +27,18 @@ function lastNDaysISO(n = 7, end = new Date()) {
     out.push(localDayISO(d));
   }
   return out;
+function dayISOFromAny(v) {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dt = new Date(s);
+  if (!Number.isNaN(dt.getTime())) {
+    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return d.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
 }
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
@@ -144,13 +156,15 @@ export default function WeeklyTrend() {
 
     const sumMealsForDay = (dayISO) => {
       let total = 0;
-      for (const day of consumedMap) {
-        const d = String(day?.local_day || day?.dayISO || day?.day || "") || null;
+      for (const m of consumedMap) {
+        const d = dayISOFromAny(m?.local_day || m?.__local_day || m?.day || m?.date || m?.eaten_at || m?.created_at);
         if (d !== dayISO) continue;
-        const top = Number(day?.calories ?? day?.cals ?? day?.total_calories ?? day?.totalCalories ?? 0) || 0;
-        if (top) { total += top; continue; }
-        const arr = Array.isArray(day?.meals) ? day.meals : (Array.isArray(day?.items) ? day.items : []);
-        total += arr.reduce((s, m) => s + (Number(m?.calories ?? m?.cals ?? m?.total_calories ?? m?.kcal ?? 0) || 0), 0);
+
+        const top = Number(m?.totalCalories ?? m?.total_calories ?? m?.calories ?? m?.cals ?? 0) || 0;
+        const arr = Array.isArray(m?.meals) ? m.meals : (Array.isArray(m?.items) ? m.items : []);
+        const inner = arr.reduce((s, x) => s + (Number(x?.totalCalories ?? x?.total_calories ?? x?.calories ?? x?.cals ?? x?.kcal ?? 0) || 0), 0);
+
+        total += (top || inner);
       }
       return total;
     };
@@ -158,9 +172,11 @@ export default function WeeklyTrend() {
     const sumWorkoutsForDay = (dayISO) => {
       let total = 0;
       for (const w of burnedMap) {
-        const d = String(w?.local_day || w?.dayISO || w?.day || "") || null;
+        const d = dayISOFromAny(
+          w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
+        );
         if (d !== dayISO) continue;
-        total += Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
+        total += Number(w?.totalCalories ?? w?.total_calories ?? w?.calories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
       }
       return total;
     };
