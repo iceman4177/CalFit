@@ -74,22 +74,25 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
 }
 
 export default function PoseSession() {
+  // Pro + daily free quota indicator (read-only; gating is handled in App.jsx route)
   const ent = useEntitlements();
   const isPro = !!(ent?.isPro || ent?.isProActive);
-  const [quotaTick, setQuotaTick] = React.useState(0);
+  const [quotaTick, setQuotaTick] = useState(0);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const bump = () => setQuotaTick((t) => t + 1);
     window.addEventListener("focus", bump);
     document.addEventListener("visibilitychange", bump);
+    window.addEventListener("storage", bump);
     return () => {
       window.removeEventListener("focus", bump);
       document.removeEventListener("visibilitychange", bump);
+      window.removeEventListener("storage", bump);
     };
   }, []);
 
-  const dailyLimit = React.useMemo(() => getFreeDailyLimit("pose_session"), [quotaTick]);
-  const dailyRemaining = React.useMemo(() => getDailyRemaining("pose_session"), [quotaTick]);
+  const dailyLimit = useMemo(() => getFreeDailyLimit("pose_session"), [quotaTick]);
+  const dailyRemaining = useMemo(() => getDailyRemaining("pose_session"), [quotaTick]);
 
 
   const history = useHistory();
@@ -385,6 +388,30 @@ export default function PoseSession() {
               <Typography sx={{ color: bodyColor }}>
                 3 poses · 15 seconds · shareable results
               </Typography>
+
+              {!isPro ? (
+                <Box
+                  sx={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 1,
+                    px: 1.25,
+                    py: 0.55,
+                    borderRadius: 999,
+                    bgcolor: "rgba(0,0,0,0.22)",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    width: "fit-content",
+                  }}
+                >
+                  <Typography sx={{ fontSize: 13, color: "rgba(255,255,255,0.82)" }}>
+                    Free scans today:
+                  </Typography>
+                  <Typography sx={{ fontSize: 13, fontWeight: 900, color: "rgba(255,255,255,0.95)" }}>
+                    {Math.max(0, dailyRemaining)}/{Math.max(0, dailyLimit)}
+                  </Typography>
+                </Box>
+              ) : null}
+
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 {POSES.map((p) => (
