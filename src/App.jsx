@@ -823,47 +823,24 @@ export default function App() {
             exact
             path="/body-scan/session"
             render={() => {
-              const proNow = !!(proCheck.isPro || isProActive || localPro);
+              // Pro only: server/entitlements (ignore any stale local flags)
+              const proNow = !!(proCheck.isPro || isProActive);
               if (proNow) return <PoseSession />;
 
-              // Free users: 1 scan/day
-              const today = (() => {
-                try {
-                  const n = new Date();
-                  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).toISOString().slice(0, 10);
-                } catch {
-                  return new Date().toISOString().slice(0, 10);
-                }
-              })();
-
-              const spendKey = `pose_session_spent_${today}`;
-              const alreadySpent = (() => {
-                try {
-                  return sessionStorage.getItem(spendKey) === "1";
-                } catch {
-                  return false;
-                }
-              })();
-
-              // If already used today, block and upsell
-              if (!canUseDailyFeature("pose_session") && !alreadySpent) {
+              // Free users: 1 scan/day (hard gate)
+              if (!canUseDailyFeature("pose_session")) {
                 setUpgradeOpen(true);
                 return <Redirect to="/" />;
               }
 
-              // Spend once per day per session (prevents refresh double-charges)
-              if (!alreadySpent) {
-                try {
-                  registerDailyFeatureUse("pose_session");
-                  sessionStorage.setItem(spendKey, "1");
-                } catch {}
-              }
+              // Spend the daily credit once when entering the scan flow
+              try {
+                registerDailyFeatureUse("pose_session");
+              } catch {}
 
               return <PoseSession />;
             }}
-          />
-
-          <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
+          /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
