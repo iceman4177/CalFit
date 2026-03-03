@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useHistory } from "react-router-dom";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
-import { getDailyRemaining, getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
+import { getDailyRemaining, getFreeDailyLimit, registerDailyFeatureUse } from "./components/FeatureUseBadge.jsx";
 import {
   Box,
   Button,
@@ -239,11 +239,38 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const startScan = useCallback(() => {
+    const startScan = useCallback(() => {
+    setErrorMsg("");
+
+    // Daily scan quota (free users): consume 1 credit when starting a scan.
+    if (!isPro) {
+      const remainingNow = getDailyRemaining("pose_session");
+      if (remainingNow <= 0) {
+        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+        setErrorMsg("You’ve used today’s free scans. Upgrade to Pro for unlimited Pose Sessions.");
+        try { history.push("/"); } catch {}
+        return;
+      }
+      try {
+        registerDailyFeatureUse("pose_session");
+        setQuotaTick((t) => t + 1);
+      } catch {}
+    }
+
+    // Reset run state and begin capture flow
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
+  }, [isPro, history]);
+
+  const resetToIntro = useCallback(() => {
+    // Return to the instruction screen without consuming quota.
+    setErrorMsg("");
+    setCaptures([]);
+    setResult(null);
+    setPoseIdx(0);
+    setStage("intro");
   }, []);
 
   const callAI = useCallback(async () => {
@@ -360,7 +387,7 @@ export default function PoseSession() {
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={startScan}
+                  onClick={resetToIntro}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
