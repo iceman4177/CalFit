@@ -469,6 +469,17 @@ export default function App() {
   const [consumedCalories, setConsumedCalories] = useState(0);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // Allow PoseSession to request the Upgrade modal (used when user tries to start a scan with 0 remaining).
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("pose_session_force_upgrade") === "1") {
+        sessionStorage.removeItem("pose_session_force_upgrade");
+        setUpgradeOpen(true);
+      }
+    } catch {}
+  }, []);
+
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
   const [ambassadorOpen, setAmbassadorOpen] = useState(false);
@@ -822,13 +833,11 @@ export default function App() {
             exact
             path="/body-scan/session"
             render={() => {
-              // Pro only: server/entitlements (ignore any stale local flags)
               const proNow = !!(proCheck.isPro || isProActive);
               if (proNow) return <PoseSession />;
 
-              // Free users: 1 Pose Session per day.
-              // Important: we must allow the user to stay in the flow after spending,
-              // otherwise App re-renders can instantly trigger the block.
+              // Free users: allow entry only if they still have daily scans remaining.
+              // Spending a scan credit happens inside PoseSession when they tap Start Scan / New Scan.
               const today = (() => {
                 try {
                   const n = new Date();
@@ -839,7 +848,6 @@ export default function App() {
               })();
 
               const allowKey = `pose_session_allow_${today}`;
-              const spentKey = `pose_session_spent_${today}`;
 
               const alreadyAllowed = (() => {
                 try {
@@ -849,35 +857,17 @@ export default function App() {
                 }
               })();
 
-              // If we already allowed this tab/session today, keep letting them in.
+              // If already allowed this tab today, keep letting them view the intro/results UI.
               if (alreadyAllowed) return <PoseSession />;
 
-              // Hard gate if no daily remaining.
               if (!canUseDailyFeature("pose_session")) {
                 setUpgradeOpen(true);
                 return <Redirect to="/" />;
               }
 
-              // Allow this tab/session to proceed today before we spend the credit.
-              // Then spend once. The allow flag prevents immediate kick-outs on re-render.
               try {
                 sessionStorage.setItem(allowKey, "1");
               } catch {}
-
-              const alreadySpent = (() => {
-                try {
-                  return sessionStorage.getItem(spentKey) === "1";
-                } catch {
-                  return false;
-                }
-              })();
-
-              if (!alreadySpent) {
-                try {
-                  registerDailyFeatureUse("pose_session");
-                  sessionStorage.setItem(spentKey, "1");
-                } catch {}
-              }
 
               return <PoseSession />;
             }}
