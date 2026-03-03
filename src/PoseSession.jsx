@@ -264,14 +264,24 @@ export default function PoseSession() {
     setStage("capture");
   }, [isPro, history]);
 
-  const resetToIntro = useCallback(() => {
+    const resetToIntro = useCallback(() => {
+    // If they’re out of daily free scans, send them home and pop the upgrade modal.
+    if (!isPro) {
+      const remainingNow = getDailyRemaining("pose_session");
+      if (remainingNow <= 0) {
+        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+        try { history.push("/"); } catch {}
+        return;
+      }
+    }
+
     // Return to the instruction screen without consuming quota.
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
-  }, []);
+  }, [isPro, history]);
 
   const callAI = useCallback(async () => {
     if (captures.length < 3) return;
