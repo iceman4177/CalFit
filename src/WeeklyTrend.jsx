@@ -235,7 +235,7 @@ export default function WeeklyTrend() {
 
   const chartData = useMemo(() => {
     return {
-      labels: rows.map((r) => toLocalUSFromISO(r.local_dayISO)),
+      labels: rows.map((r) => toLocalUSFromISO(r.dayISO)),
       datasets: [
         {
           label: 'Net Calories',

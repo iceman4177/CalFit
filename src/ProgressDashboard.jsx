@@ -81,7 +81,7 @@ function readWorkoutCaloriesFallback(workoutRow) {
 
 // ---------------- Read local canonical stores -------------------------
 function readConsumedByDay() {
-  const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+      const mh = readScopedJSON(KEYS.mealHistory, user?.id || null, []);
   const map = new Map();
   for (const day of mh) {
     const iso = fromUSDateToISO(day.date);
@@ -92,7 +92,7 @@ function readConsumedByDay() {
   return map;
 }
 function readBurnedByDay() {
-  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      const wh = readScopedJSON(KEYS.workoutHistory, user?.id || null, []);
   const map = new Map();
   for (const sess of wh) {
     const iso = fromUSDateToISO(sess.date);
@@ -103,7 +103,7 @@ function readBurnedByDay() {
 }
 
 function readLocalWorkoutSessions() {
-  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+      const wh = readScopedJSON(KEYS.workoutHistory, user?.id || null, []);
   return wh
     .map((w) => {
       const dayISO = fromUSDateToISO(w.date);
@@ -208,7 +208,14 @@ export default function ProgressDashboard() {
 
     const consumed = mh
       .filter(isToday)
-      .reduce((s, m) => s + (Number(m.calories ?? m.cals ?? m.total_calories ?? 0) || 0), 0);
+      .reduce((s, m) => {
+        const top = Number(m.calories ?? m.cals ?? m.total_calories ?? m.totalCalories ?? 0) || 0;
+        if (top) return s + top;
+        const arr = Array.isArray(m.meals) ? m.meals : (Array.isArray(m.items) ? m.items : []);
+        if (!arr.length) return s;
+        const sum = arr.reduce((acc, it) => acc + (Number(it.calories ?? it.cals ?? it.total_calories ?? it.kcal ?? 0) || 0), 0);
+        return s + sum;
+      }, 0);
 
     return { burned, consumed };
   }, [user]);
