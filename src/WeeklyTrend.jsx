@@ -1,7 +1,7 @@
 // src/WeeklyTrend.jsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Paper, Typography, Box } from '@mui/material';
-import { Line } from 'react-chartjs-2';
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { Paper, Typography, Box } from "@mui/material";
+import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -10,14 +10,35 @@ import {
   LineElement,
   Tooltip,
   Legend,
-  Title
-} from 'chart.js';
+} from "chart.js";
 
-import { useAuth } from './context/AuthProvider.jsx';
-import { getDailyMetricsRange, getWorkouts } from './lib/db';
-import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { useAuth } from "./context/AuthProvider.jsx";
+import { readScopedJSON, KEYS } from "./lib/scopedStorage.js";
 
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
+/* ---------------- Local-day helpers (stable, no UTC drift) ------------- */
+function localDayISO(d = new Date()) {
+  const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return ld.toISOString().slice(0, 10);
+}
+function dayISOFromAny(v) {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dt = new Date(s);
+  if (!Number.isNaN(dt.getTime())) return localDayISO(dt);
+  return null;
+}
+function isoToUS(iso) {
+  try {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    if (!y || !m || !d) return String(iso);
+    return new Date(y, m - 1, d).toLocaleDateString("en-US");
+  } catch {
+    return String(iso);
+  }
+}
 function lastNDaysISO(n = 7, end = new Date()) {
   const out = [];
   const base = new Date(end.getFullYear(), end.getMonth(), end.getDate());
@@ -27,238 +48,162 @@ function lastNDaysISO(n = 7, end = new Date()) {
     out.push(localDayISO(d));
   }
   return out;
-function dayISOFromAny(v) {
-  if (!v) return null;
-  const s = String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const dt = new Date(s);
-  if (!Number.isNaN(dt.getTime())) {
-    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-    return d.toISOString().slice(0, 10);
-  }
-  return null;
 }
 
-}
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
-
-/* ---------------- Local-day helpers (stable, no UTC drift) ------------- */
-function localDayISO(d = new Date()) {
-  const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  return ld.toISOString().slice(0, 10);
-}
-function fromUSDateToISO(us) {
-  try {
-    const [m, d, y] = String(us).split('/').map(Number);
-    if (!m || !d || !y) return null;
-    return localDayISO(new Date(y, m - 1, d));
-  } catch (e) {
-    return null;
-  }
-}
-function toLocalUSFromISO(isoYYYYMMDD) {
-  try {
-    const [y, m, d] = String(isoYYYYMMDD).split('-').map(Number);
-    if (!y || !m || !d) return String(isoYYYYMMDD);
-    return new Date(y, m - 1, d).toLocaleDateString('en-US');
-  } catch (e) {
-    return String(isoYYYYMMDD);
-  }
-}
-function lastNDaysList(n = 7) {
-  const days = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    days.push(localDayISO(d));
-  }
-  return days;
-}
-function lastNDaysRange(n = 7) {
-  const days = lastNDaysList(n);
-  return { from: days[0], to: days[days.length - 1], days };
-}
-
-/* ---------------- Calories proxy from sets ---------------------------- */
-const SCALE = 0.1; // kcal per (lb * rep)
-function calcCaloriesFromSets(sets) {
-  if (!Array.isArray(sets) || sets.length === 0) return 0;
-  let vol = 0;
-  for (const s of sets) {
-    const w = Number(s.weight) || 0;
-    const r = Number(s.reps) || 0;
-    vol += w * r;
-  }
-  return Math.round(vol * SCALE);
-}
-
-/* ---------------- Local reads (meals + workoutHistory fallback) -------- */
-function readLocalMealsByISO(userId = null) {
+/* ---------------- Canonical local-first day totals --------------------- */
+function buildMealTotalsByDay(userId) {
   const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
-  const map = new Map(); // iso -> cals
-  for (const m of mh) {
-    const dayISO = String(m?.local_day || m?.dayISO || m?.day || "") || null;
-    const us = m?.date || m?.dateLabel || null;
-    const iso = dayISO || fromUSDateToISO(us) || null;
-    if (!iso) continue;
-    const cals = Number(m?.calories ?? m?.cals ?? m?.total_calories ?? 0) || 0;
-    if (cals <= 0) continue;
-    map.set(iso, (map.get(iso) || 0) + cals);
+  const byDay = new Map();
+
+  const put = (dayISO, key, calories) => {
+    if (!dayISO || !calories) return;
+    const m = byDay.get(dayISO) || new Map();
+    const prev = Number(m.get(key) || 0);
+    m.set(key, Math.max(prev, Number(calories) || 0));
+    byDay.set(dayISO, m);
+  };
+
+  for (let i = 0; i < mh.length; i++) {
+    const dayISO = dayISOFromAny(
+      mh[i]?.local_day ||
+        mh[i]?.__local_day ||
+        mh[i]?.day ||
+        mh[i]?.date ||
+        mh[i]?.eaten_at ||
+        mh[i]?.created_at
+    );
+    if (!dayISO) continue;
+
+    const arr = Array.isArray(mh[i]?.meals)
+      ? mh[i].meals
+      : Array.isArray(mh[i]?.items)
+        ? mh[i].items
+        : null;
+
+    if (arr && arr.length) {
+      for (let j = 0; j < arr.length; j++) {
+        const m = arr[j] || {};
+        const kcal =
+          Number(m?.calories ?? m?.cals ?? m?.total_calories ?? m?.totalCalories ?? m?.kcal ?? 0) || 0;
+        const key = String(m?.client_id || m?.id || `${i}:${j}`);
+        put(dayISO, key, kcal);
+      }
+      continue;
+    }
+
+    const kcal =
+      Number(
+        mh[i]?.calories ??
+          mh[i]?.cals ??
+          mh[i]?.total_calories ??
+          mh[i]?.totalCalories ??
+          mh[i]?.kcal ??
+          0
+      ) || 0;
+    const key = String(mh[i]?.client_id || mh[i]?.id || i);
+    put(dayISO, key, kcal);
   }
-  return map;
+
+  const totals = new Map();
+  for (const [dayISO, m] of byDay.entries()) {
+    let sum = 0;
+    for (const v of m.values()) sum += Number(v) || 0;
+    totals.set(dayISO, sum);
+  }
+  return totals;
 }
-function readLocalWorkoutsByISO(userId = null) {
+
+function buildWorkoutTotalsByDay(userId) {
   const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
-  const map = new Map(); // iso -> burned
-  for (const w of wh) {
-    const dayISO = String(w?.local_day || w?.dayISO || w?.day || "") || null;
-    const us = w?.date || w?.dateLabel || null;
-    const iso = dayISO || fromUSDateToISO(us) || null;
-    if (!iso) continue;
-    const kcal = Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
-    if (kcal <= 0) continue;
-    map.set(iso, (map.get(iso) || 0) + kcal);
+  const byDay = new Map();
+
+  const put = (dayISO, key, calories) => {
+    if (!dayISO || !calories) return;
+    const m = byDay.get(dayISO) || new Map();
+    const prev = Number(m.get(key) || 0);
+    m.set(key, Math.max(prev, Number(calories) || 0));
+    byDay.set(dayISO, m);
+  };
+
+  for (let i = 0; i < wh.length; i++) {
+    const w = wh[i] || {};
+    const dayISO = dayISOFromAny(
+      w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
+    );
+    if (!dayISO) continue;
+
+    if (w?.isDraft || w?.draft === true || w?.status === "draft") continue;
+
+    const kcal =
+      Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.calories ?? w?.burned ?? 0) || 0;
+
+    const key = String(w?.client_id || w?.id || i);
+    put(dayISO, key, kcal);
   }
-  return map;
-}
 
-/* ---------------- Build rows for the chart ---------------------------- */
-function buildRowsForDays(daysISO, eatenMap, burnedMap, srcLabel = 'local') {
-  return daysISO.map((dayISO) => {
-    const eaten = Number(eatenMap.get(dayISO) || 0);
-    const burned = Number(burnedMap.get(dayISO) || 0);
-    return {
-      dayISO,
-      eaten,
-      burned,
-      net: eaten - burned,
-      _src: srcLabel
-    };
-  });
+  const totals = new Map();
+  for (const [dayISO, m] of byDay.entries()) {
+    let sum = 0;
+    for (const v of m.values()) sum += Number(v) || 0;
+    totals.set(dayISO, sum);
+  }
+  return totals;
 }
-
 
 export default function WeeklyTrend() {
   const { user } = useAuth();
+  const uid = user?.id || null;
 
-  const [series, setSeries] = useState([]); // [{ dayISO, net, consumed, burned }]
+  const [rows, setRows] = useState([]); // [{dayISO, net}]
 
-  const recompute = useCallback(async () => {
-    const uid = user?.id || null;
+  const recompute = useCallback(() => {
     const days = lastNDaysISO(7);
+    const eatenByDay = buildMealTotalsByDay(uid);
+    const burnedByDay = buildWorkoutTotalsByDay(uid);
 
-    // Local-first totals (canonical)
-    const consumedMap = readScopedJSON(KEYS.mealHistory, uid, []) || [];
-    const burnedMap = readScopedJSON(KEYS.workoutHistory, uid, []) || [];
-
-    const sumMealsForDay = (dayISO) => {
-      let total = 0;
-      for (const m of consumedMap) {
-        const d = dayISOFromAny(m?.local_day || m?.__local_day || m?.day || m?.date || m?.eaten_at || m?.created_at);
-        if (d !== dayISO) continue;
-
-        const top = Number(m?.totalCalories ?? m?.total_calories ?? m?.calories ?? m?.cals ?? 0) || 0;
-        const arr = Array.isArray(m?.meals) ? m.meals : (Array.isArray(m?.items) ? m.items : []);
-        const inner = arr.reduce((s, x) => s + (Number(x?.totalCalories ?? x?.total_calories ?? x?.calories ?? x?.cals ?? x?.kcal ?? 0) || 0), 0);
-
-        total += (top || inner);
-      }
-      return total;
-    };
-
-    const sumWorkoutsForDay = (dayISO) => {
-      let total = 0;
-      for (const w of burnedMap) {
-        const d = dayISOFromAny(
-          w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
-        );
-        if (d !== dayISO) continue;
-        total += Number(w?.totalCalories ?? w?.total_calories ?? w?.calories ?? w?.calories_burned ?? w?.burned ?? 0) || 0;
-      }
-      return total;
-    };
-
-    let rows = days.map((dayISO) => {
-      const consumed = sumMealsForDay(dayISO);
-      const burned = sumWorkoutsForDay(dayISO);
-      return { dayISO, consumed, burned, net: consumed - burned, _src: "local" };
+    const out = days.map((dayISO) => {
+      const eaten = Number(eatenByDay.get(dayISO) || 0);
+      const burned = Number(burnedByDay.get(dayISO) || 0);
+      return { dayISO, net: eaten - burned };
     });
+    setRows(out);
+  }, [uid]);
 
-    // Server fallback ONLY when local has no signal for that day
-    try {
-      const { data: dmRows } = await getDailyMetricsRange(days[0], days[days.length - 1]);
-      const dm = Array.isArray(dmRows) ? dmRows : [];
-      const byDay = new Map();
-      for (const r of dm) {
-        const dayISO = String(r?.local_day || r?.dayISO || r?.day || "");
-        if (!dayISO) continue;
-        const eaten = Number(r?.calories_eaten ?? r?.caloriesConsumed ?? r?.consumed ?? r?.food ?? 0) || 0;
-        const burned = Number(r?.calories_burned ?? r?.caloriesBurned ?? r?.burned ?? r?.exercise ?? 0) || 0;
-        const net = Number(r?.net_calories ?? (eaten - burned) ?? 0) || (eaten - burned);
-        byDay.set(dayISO, { eaten, burned, net });
-      }
-
-      rows = rows.map((r) => {
-        if ((r.consumed || r.burned) !== 0) return r; // local wins
-        const s = byDay.get(r.dayISO);
-        if (!s) return r;
-        if ((s.eaten || s.burned) === 0) return r;
-        return { dayISO: r.dayISO, consumed: s.eaten, burned: s.burned, net: s.net, _src: "server" };
-      });
-    } catch (e) {
-      // ignore; local-only is fine
-    }
-
-    setSeries(rows);
-  }, [user]);
-
-  useEffect(() => { recompute(); }, [recompute]);
+  useEffect(() => {
+    recompute();
+  }, [recompute]);
 
   const chart = useMemo(() => {
-    const labels = (series || []).map((r) => {
-      try {
-        const [y, m, d] = String(r.dayISO).split("-").map(Number);
-        return new Date(y, m - 1, d).toLocaleDateString("en-US");
-      } catch {
-        return r.dayISO;
-      }
-    });
-    const data = (series || []).map((r) => Number(r.net) || 0);
-
     return {
-      labels,
+      labels: rows.map((r) => isoToUS(r.dayISO)),
       datasets: [
         {
           label: "Net Calories",
-          data,
+          data: rows.map((r) => Number(r.net) || 0),
           tension: 0.25,
         },
       ],
     };
-  }, [series]);
+  }, [rows]);
 
-  const options = useMemo(() => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: true },
-      title: { display: false },
-    },
-    scales: {
-      y: { beginAtZero: false },
-    },
-  }), []);
+  const options = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: false } },
+    }),
+    []
+  );
 
   return (
     <Paper elevation={3} sx={{ p: 3, borderRadius: 3, mt: 3 }}>
-      <Typography variant="h6" sx={{ mb: 2 }}>7-Day Net Calorie Trend</Typography>
-      <Box sx={{ height: 280 }}>
+      <Typography variant="h6" sx={{ mb: 2 }}>
+        7-Day Net Calorie Trend
+      </Typography>
+      <Box sx={{ height: 260 }}>
         <Line data={chart} options={options} />
       </Box>
     </Paper>
   );
 }
-
