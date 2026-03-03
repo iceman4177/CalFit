@@ -59,6 +59,12 @@ export async function buildPoseSessionSharePng({
   muscleSignals = null,
   trackLabel = "",
   localDay = "",
+  // viral fields
+  tier = "",
+  score = null,
+  highlights = [],
+  summary = "",
+  hashtag = "#SlimCalAI",
 } = {}) {
   
   // Normalize older/newer payload shapes
