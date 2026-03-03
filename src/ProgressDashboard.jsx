@@ -52,6 +52,24 @@ function lastNDaysISO(n = 7, end = new Date()) {
   return out;
 }
 
+
+function safeNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
+function readUserGoalCalories(fallback = 0) {
+  try {
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const obj = JSON.parse(raw);
+      const g = safeNum(obj?.dailyGoal, NaN);
+      if (Number.isFinite(g) && g > 0) return g;
+    }
+  } catch {}
+  return safeNum(fallback, 0);
+}
+
 /* ---------------- Canonical local-first day totals --------------------- */
 /**
  * Important: workoutHistory/mealHistory can contain duplicates (draft + final, or resync copies).
@@ -164,6 +182,8 @@ export default function ProgressDashboard() {
   const { user } = useAuth();
   const uid = user?.id || null;
 
+  const goalCalories = useMemo(() => readUserGoalCalories(0), []);
+
   const [burnedSeries, setBurnedSeries] = useState([]); // [{dayISO,label,total}]
   const [consumedToday, setConsumedToday] = useState(0);
   const [burnedToday, setBurnedToday] = useState(0);
@@ -240,7 +260,7 @@ export default function ProgressDashboard() {
       </Paper>
 
       <Box sx={{ mt: 3 }}>
-        <DailyGoalTracker consumedToday={consumedToday} burnedToday={burnedToday} />
+        <DailyGoalTracker burned={burnedToday} consumed={consumedToday} goal={goalCalories} />
       </Box>
 
       <WeeklyTrend />
