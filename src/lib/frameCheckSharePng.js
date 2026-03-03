@@ -193,14 +193,27 @@ export async function buildFrameCheckSharePng(data, opts = {}) {
   return blob;
 }
 
-export async function shareOrDownloadPng(blob, fileName = "slimcal-frame-check.png", text = "") {
-  if (!blob) return;
+export async function shareOrDownloadPng(input, fileName = "slimcal-share.png", text = "") {
+  if (!input) return;
 
-  const file = new File([blob], fileName, { type: "image/png" });
+  // Accept either a Blob OR a dataURL string
+  let blob = input;
+  try {
+    if (typeof input === "string" && input.startsWith("data:")) {
+      // fetch(dataURL) is the simplest/most robust conversion
+      blob = await (await fetch(input)).blob();
+    }
+  } catch {
+    // fall back; if conversion fails we'll try to download whatever we have
+    blob = input;
+  }
+
+  const isBlob = typeof Blob !== "undefined" && blob instanceof Blob;
+  const file = isBlob ? new File([blob], fileName, { type: "image/png" }) : null;
 
   // Native share sheet (best on mobile)
   try {
-    if (navigator?.canShare?.({ files: [file] }) && navigator?.share) {
+    if (file && navigator?.canShare?.({ files: [file] }) && navigator?.share) {
       await navigator.share({ files: [file], text });
       return;
     }
@@ -208,12 +221,18 @@ export async function shareOrDownloadPng(blob, fileName = "slimcal-frame-check.p
     // fall back to download
   }
 
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1200);
+  // Download fallback (desktop / unsupported share targets like IG web)
+  try {
+    const url = isBlob ? URL.createObjectURL(blob) : (typeof input === "string" ? input : null);
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (isBlob) setTimeout(() => URL.revokeObjectURL(url), 1200);
+  } catch (e) {
+    console.error(e);
+  }
 }

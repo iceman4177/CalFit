@@ -1,8 +1,6 @@
 // src/PoseSession.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useHistory } from "react-router-dom";
-import { useEntitlements } from "./context/EntitlementsContext.jsx";
-import { getDailyRemaining, getFreeDailyLimit, registerDailyFeatureUse } from "./components/FeatureUseBadge.jsx";
 import {
   Box,
   Button,
@@ -22,7 +20,6 @@ import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import UpgradeModal from "./components/UpgradeModal.jsx";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -75,27 +72,6 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
 }
 
 export default function PoseSession() {
-  // Pro + daily free quota indicator (read-only; gating is handled in App.jsx route)
-  const ent = useEntitlements();
-  const isPro = !!(ent?.isPro || ent?.isProActive);
-  const [quotaTick, setQuotaTick] = useState(0);
-
-  useEffect(() => {
-    const bump = () => setQuotaTick((t) => t + 1);
-    window.addEventListener("focus", bump);
-    document.addEventListener("visibilitychange", bump);
-    window.addEventListener("storage", bump);
-    return () => {
-      window.removeEventListener("focus", bump);
-      document.removeEventListener("visibilitychange", bump);
-      window.removeEventListener("storage", bump);
-    };
-  }, []);
-
-  const dailyLimit = useMemo(() => getFreeDailyLimit("pose_session"), [quotaTick]);
-  const dailyRemaining = useMemo(() => getDailyRemaining("pose_session"), [quotaTick]);
-
-
   const history = useHistory();
   const { user } = useAuth();
 
@@ -108,8 +84,6 @@ export default function PoseSession() {
   const [countdownMs, setCountdownMs] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
   const [result, setResult] = useState(null);
@@ -242,38 +216,11 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-    const startScan = useCallback(() => {
-    setErrorMsg("");
-
-    // Daily scan quota (free users): consume 1 credit when starting a scan.
-    if (!isPro) {
-      const remainingNow = getDailyRemaining("pose_session");
-      if (remainingNow <= 0) {
-        
-        setErrorMsg("You’ve used today’s free scans. Upgrade to Pro for unlimited Pose Sessions.");
-        setUpgradeOpen(true);
-        return;
-      }
-      try {
-        registerDailyFeatureUse("pose_session");
-        setQuotaTick((t) => t + 1);
-      } catch {}
-    }
-
-    // Reset run state and begin capture flow
+  const startScan = useCallback(() => {
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isPro, history]);
-
-  const resetToIntro = useCallback(() => {
-    // Return to the instruction screen without consuming quota.
-    setErrorMsg("");
-    setCaptures([]);
-    setResult(null);
-    setPoseIdx(0);
-    setStage("intro");
   }, []);
 
   const callAI = useCallback(async () => {
@@ -337,7 +284,7 @@ export default function PoseSession() {
         highlights: result?.highlights || result?.levers || [],
         thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res
       });
-      await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
+      await shareOrDownloadPng(pngDataUrl, "slimcalAI-posesession.png", "#SlimCalAI");
     } catch (e) {
       console.error(e);
       setErrorMsg("Could not generate share card.");
@@ -351,8 +298,6 @@ export default function PoseSession() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
-      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
-
       <Card
         sx={{
           width: "min(980px, 100%)",
@@ -392,7 +337,7 @@ export default function PoseSession() {
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={resetToIntro}
+                  onClick={startScan}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
@@ -420,30 +365,6 @@ export default function PoseSession() {
               <Typography sx={{ color: bodyColor }}>
                 3 poses · 15 seconds · shareable results
               </Typography>
-
-              {!isPro ? (
-                <Box
-                  sx={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 1,
-                    px: 1.25,
-                    py: 0.55,
-                    borderRadius: 999,
-                    bgcolor: "rgba(0,0,0,0.22)",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    width: "fit-content",
-                  }}
-                >
-                  <Typography sx={{ fontSize: 13, color: "rgba(255,255,255,0.82)" }}>
-                    Free scans today:
-                  </Typography>
-                  <Typography sx={{ fontSize: 13, fontWeight: 900, color: "rgba(255,255,255,0.95)" }}>
-                    {Math.max(0, dailyRemaining)}/{Math.max(0, dailyLimit)}
-                  </Typography>
-                </Box>
-              ) : null}
-
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 {POSES.map((p) => (
