@@ -22,6 +22,7 @@ import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
+import UpgradeModal from "./components/UpgradeModal.jsx";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -107,6 +108,8 @@ export default function PoseSession() {
   const [countdownMs, setCountdownMs] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
   const [result, setResult] = useState(null);
@@ -246,9 +249,9 @@ export default function PoseSession() {
     if (!isPro) {
       const remainingNow = getDailyRemaining("pose_session");
       if (remainingNow <= 0) {
-        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+        
         setErrorMsg("You’ve used today’s free scans. Upgrade to Pro for unlimited Pose Sessions.");
-        try { history.push("/"); } catch {}
+        setUpgradeOpen(true);
         return;
       }
       try {
@@ -264,24 +267,14 @@ export default function PoseSession() {
     setStage("capture");
   }, [isPro, history]);
 
-    const resetToIntro = useCallback(() => {
-    // If they’re out of daily free scans, send them home and pop the upgrade modal.
-    if (!isPro) {
-      const remainingNow = getDailyRemaining("pose_session");
-      if (remainingNow <= 0) {
-        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-        try { history.push("/"); } catch {}
-        return;
-      }
-    }
-
+  const resetToIntro = useCallback(() => {
     // Return to the instruction screen without consuming quota.
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
-  }, [isPro, history]);
+  }, []);
 
   const callAI = useCallback(async () => {
     if (captures.length < 3) return;
@@ -358,6 +351,8 @@ export default function PoseSession() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
+      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
+
       <Card
         sx={{
           width: "min(980px, 100%)",

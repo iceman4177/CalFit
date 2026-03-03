@@ -60,7 +60,6 @@ import AmbassadorModal   from './components/AmbassadorModal';
 import { logPageView }   from './analytics';
 
 import { useEntitlements } from './context/EntitlementsContext.jsx';
-import { canUseDailyFeature, registerDailyFeatureUse } from './components/FeatureUseBadge.jsx';
 import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
@@ -829,49 +828,7 @@ export default function App() {
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
-                    <Route
-            exact
-            path="/body-scan/session"
-            render={() => {
-              const proNow = !!(proCheck.isPro || isProActive);
-              if (proNow) return <PoseSession />;
-
-              // Free users: allow entry only if they still have daily scans remaining.
-              // Spending a scan credit happens inside PoseSession when they tap Start Scan / New Scan.
-              const today = (() => {
-                try {
-                  const n = new Date();
-                  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).toISOString().slice(0, 10);
-                } catch {
-                  return new Date().toISOString().slice(0, 10);
-                }
-              })();
-
-              const allowKey = `pose_session_allow_${today}`;
-
-              const alreadyAllowed = (() => {
-                try {
-                  return sessionStorage.getItem(allowKey) === "1";
-                } catch {
-                  return false;
-                }
-              })();
-
-              // If already allowed this tab today, keep letting them view the intro/results UI.
-              if (alreadyAllowed) return <PoseSession />;
-
-              if (!canUseDailyFeature("pose_session")) {
-                setUpgradeOpen(true);
-                return <Redirect to="/" />;
-              }
-
-              try {
-                sessionStorage.setItem(allowKey, "1");
-              } catch {}
-
-              return <PoseSession />;
-            }}
-          /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
+                    <Route exact path="/body-scan/session" component={PoseSession} /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
