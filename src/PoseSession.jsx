@@ -33,7 +33,7 @@ const POSES = [
   { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
 ];
 
-const CAPTURE_DELAY_MS = 3000; // selfie timer (simple + reliable)
+const CAPTURE_DELAY_MS = 5000; // 5-second selfie timer (simple + reliable)
 
 function clamp(n, a, b) {
   const x = Number(n);
