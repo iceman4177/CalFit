@@ -71,43 +71,6 @@ async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
   });
 }
 
-function synthesizePoseReport(result) {
-  const sections = [];
-  const highlights = Array.isArray(result?.highlights) ? result.highlights.filter(Boolean).slice(0, 3) : [];
-  const best = Array.isArray(result?.bestDeveloped) ? result.bestDeveloped.filter(Boolean).slice(0, 3) : [];
-  const opps = Array.isArray(result?.biggestOpportunity) ? result.biggestOpportunity.filter(Boolean).slice(0, 3) : [];
-  const notes = Array.isArray(result?.poseNotes) ? result.poseNotes.filter(Boolean).slice(0, 3) : [];
-
-  if (highlights.length) sections.push(`What stands out most right now: ${highlights.join(" ")}`);
-  if (best.length) sections.push(`Best developed: ${best.join(" ")}`);
-  if (opps.length) sections.push(`Biggest opportunity: ${opps.join(" ")}`);
-  if (notes.length) sections.push(`Pose notes: ${notes.join(" ")}`);
-
-  return sections.join("\n\n").trim();
-}
-
-function normalizePoseResultPayload(raw) {
-  const base = raw && typeof raw === "object" ? { ...raw } : {};
-  const report = typeof base.report === "string" ? base.report.trim() : "";
-  if (!report) {
-    const synthesized = synthesizePoseReport(base);
-    if (synthesized) base.report = synthesized;
-  }
-  if (!Array.isArray(base.highlights) || !base.highlights.length) {
-    base.highlights = [
-      ...(Array.isArray(base.bestDeveloped) ? base.bestDeveloped : []),
-      ...(Array.isArray(base.biggestOpportunity) ? base.biggestOpportunity : []),
-    ].filter(Boolean).slice(0, 6);
-  }
-  if (!Array.isArray(base.levers) || !base.levers.length) {
-    base.levers = [
-      ...(Array.isArray(base.poseNotes) ? base.poseNotes : []),
-      ...(Array.isArray(base.biggestOpportunity) ? base.biggestOpportunity : []),
-    ].filter(Boolean).slice(0, 6);
-  }
-  return base;
-}
-
 export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
@@ -283,7 +246,7 @@ export default function PoseSession() {
       });
 
       const json = await res.json();
-      const session = normalizePoseResultPayload(json?.session || null);
+      const session = json?.session || null;
 
       // Persist a small record for deltas
       try {
