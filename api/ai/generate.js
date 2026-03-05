@@ -1292,60 +1292,7 @@ const freeBypass =
 
       const text = ai?.choices?.[0]?.message?.content || "";
       const parsed = safeParseJsonFromText(text) || {};
-      const fb = fallbackPoseSession();
-
-      const ms = parsed.muscleSignals || parsed.muscles || fb.muscleSignals;
-      const pq = parsed.poseQuality || parsed.pose_quality || fb.poseQuality;
-
-      const session = {
-        build_arc: Math.round(clamp(parsed.build_arc ?? parsed.buildArcScore ?? fb.build_arc, 0, 100)),
-        percentile: Math.round(clamp(parsed.percentile ?? fb.percentile, 1, 99)),
-        strength: String(parsed.strength || parsed.strengthTag || fb.strength).slice(0, 48),
-        horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
-        tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
-        aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
-        report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
-        // If JSON parsing failed but the model returned text, keep a safe excerpt so the UI still renders a report.
-        __rawText: String(text || "").slice(0, 6000) || undefined,
-        bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
-        biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
-        poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
-        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 900) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
-        muscleSignals: {
-          delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
-          arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
-          lats: clamp(ms?.lats ?? fb.muscleSignals.lats, 0, 1),
-          chest: clamp(ms?.chest ?? fb.muscleSignals.chest, 0, 1),
-          back: clamp(ms?.back ?? fb.muscleSignals.back, 0, 1),
-          waist_taper: clamp(ms?.waist_taper ?? ms?.taper ?? fb.muscleSignals.waist_taper, 0, 1),
-          legs: clamp(ms?.legs ?? fb.muscleSignals.legs, 0, 1),
-        },
-        poseQuality: {
-          front_relaxed: clamp(pq?.front_relaxed ?? pq?.frontRelaxed ?? fb.poseQuality.front_relaxed, 0, 1),
-          front_double_bi: clamp(pq?.front_double_bi ?? pq?.frontDoubleBi ?? fb.poseQuality.front_double_bi, 0, 1),
-          back_double_bi: clamp(pq?.back_double_bi ?? pq?.backDoubleBi ?? fb.poseQuality.back_double_bi, 0, 1),
-        },
-        highlights: Array.isArray(parsed.highlights)
-          ? parsed.highlights.map((s) => String(s).slice(0, 90)).slice(0, 5)
-          : fb.highlights,
-        levers: Array.isArray(parsed.levers)
-          ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
-          : fb.levers,
-        confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
-        poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
-      };
-
-      if (!session.report && session.__rawText) {
-        // Remove any leading non-json preamble lines.
-        const raw = String(session.__rawText);
-        // If the model returned something like "Here is the JSON:" keep only the meaningful part.
-        const cleaned = raw.replace(/^.*?\n\n/, "").trim();
-        session.report = cleaned.length > 40 ? cleaned : raw;
-      }
-      delete session.__rawText;
-
-      if (!session.highlights?.length) session.highlights = fb.highlights;
-      if (!session.levers?.length) session.levers = fb.levers;
+      const session = normalizePoseSession(parsed, text, cleanPoses);
 
       res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
       return;
