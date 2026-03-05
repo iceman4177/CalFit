@@ -35,6 +35,148 @@ const POSES = [
 
 const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
 
+
+const OUTLINE_PULSE_MS = 1800;
+
+function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
+  const common = {
+    fill: "none",
+    stroke: "rgba(90, 255, 160, 0.95)",
+    strokeWidth: 4,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    vectorEffect: "non-scaling-stroke",
+  };
+
+  const glow = {
+    fill: "none",
+    stroke: "rgba(90, 255, 160, 0.26)",
+    strokeWidth: 12,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    vectorEffect: "non-scaling-stroke",
+  };
+
+  const outlines = {
+    front_double_bi: (
+      <>
+        <circle cx="150" cy="92" r="28" {...glow} />
+        <circle cx="150" cy="92" r="28" {...common} />
+        <path d="M150 122 L150 220" {...glow} />
+        <path d="M150 122 L150 220" {...common} />
+        <path d="M150 142 C126 146,112 155,100 172" {...glow} />
+        <path d="M150 142 C126 146,112 155,100 172" {...common} />
+        <path d="M100 172 C84 156,70 140,54 118" {...glow} />
+        <path d="M100 172 C84 156,70 140,54 118" {...common} />
+        <path d="M54 118 C44 104,48 88,63 84" {...glow} />
+        <path d="M54 118 C44 104,48 88,63 84" {...common} />
+        <path d="M150 142 C174 146,188 155,200 172" {...glow} />
+        <path d="M150 142 C174 146,188 155,200 172" {...common} />
+        <path d="M200 172 C216 156,230 140,246 118" {...glow} />
+        <path d="M200 172 C216 156,230 140,246 118" {...common} />
+        <path d="M246 118 C256 104,252 88,237 84" {...glow} />
+        <path d="M246 118 C256 104,252 88,237 84" {...common} />
+        <path d="M150 220 C132 236,122 258,118 292" {...glow} />
+        <path d="M150 220 C132 236,122 258,118 292" {...common} />
+        <path d="M150 220 C168 236,178 258,182 292" {...glow} />
+        <path d="M150 220 C168 236,178 258,182 292" {...common} />
+      </>
+    ),
+    lat_spread: (
+      <>
+        <circle cx="150" cy="88" r="28" {...glow} />
+        <circle cx="150" cy="88" r="28" {...common} />
+        <path d="M150 118 L150 220" {...glow} />
+        <path d="M150 118 L150 220" {...common} />
+        <path d="M150 134 C120 140,96 158,80 190" {...glow} />
+        <path d="M150 134 C120 140,96 158,80 190" {...common} />
+        <path d="M80 190 C96 206,112 214,126 220" {...glow} />
+        <path d="M80 190 C96 206,112 214,126 220" {...common} />
+        <path d="M150 134 C180 140,204 158,220 190" {...glow} />
+        <path d="M150 134 C180 140,204 158,220 190" {...common} />
+        <path d="M220 190 C204 206,188 214,174 220" {...glow} />
+        <path d="M220 190 C204 206,188 214,174 220" {...common} />
+        <path d="M110 150 C116 200,126 218,150 224" {...glow} />
+        <path d="M110 150 C116 200,126 218,150 224" {...common} />
+        <path d="M190 150 C184 200,174 218,150 224" {...glow} />
+        <path d="M190 150 C184 200,174 218,150 224" {...common} />
+        <path d="M150 220 C134 236,124 258,120 292" {...glow} />
+        <path d="M150 220 C134 236,124 258,120 292" {...common} />
+        <path d="M150 220 C166 236,176 258,180 292" {...glow} />
+        <path d="M150 220 C166 236,176 258,180 292" {...common} />
+      </>
+    ),
+    back_double_bi: (
+      <>
+        <circle cx="150" cy="96" r="26" {...glow} />
+        <circle cx="150" cy="96" r="26" {...common} />
+        <path d="M150 124 C126 132,114 150,108 174" {...glow} />
+        <path d="M150 124 C126 132,114 150,108 174" {...common} />
+        <path d="M108 174 C92 160,76 142,58 118" {...glow} />
+        <path d="M108 174 C92 160,76 142,58 118" {...common} />
+        <path d="M58 118 C48 104,50 88,64 84" {...glow} />
+        <path d="M58 118 C48 104,50 88,64 84" {...common} />
+        <path d="M150 124 C174 132,186 150,192 174" {...glow} />
+        <path d="M150 124 C174 132,186 150,192 174" {...common} />
+        <path d="M192 174 C208 160,224 142,242 118" {...glow} />
+        <path d="M192 174 C208 160,224 142,242 118" {...common} />
+        <path d="M242 118 C252 104,250 88,236 84" {...glow} />
+        <path d="M242 118 C252 104,250 88,236 84" {...common} />
+        <path d="M118 150 C126 206,136 226,150 232" {...glow} />
+        <path d="M118 150 C126 206,136 226,150 232" {...common} />
+        <path d="M182 150 C174 206,164 226,150 232" {...glow} />
+        <path d="M182 150 C174 206,164 226,150 232" {...common} />
+        <path d="M150 232 C136 246,128 266,124 292" {...glow} />
+        <path d="M150 232 C136 246,128 266,124 292" {...common} />
+        <path d="M150 232 C164 246,172 266,176 292" {...glow} />
+        <path d="M150 232 C164 246,172 266,176 292" {...common} />
+      </>
+    ),
+  };
+
+  return (
+    <Box
+      sx={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        opacity: active ? 1 : 0,
+        transition: "opacity 220ms ease",
+      }}
+    >
+      <Box
+        sx={{
+          width: "min(86%, 420px)",
+          maxWidth: "86%",
+          aspectRatio: "3 / 4",
+          borderRadius: "32px",
+          border: "1px solid rgba(90,255,160,0.22)",
+          bgcolor: "rgba(5, 20, 12, 0.08)",
+          boxShadow: active ? "0 0 40px rgba(90,255,160,0.16), inset 0 0 32px rgba(90,255,160,0.06)" : "none",
+          transform: mirrored ? "scaleX(-1)" : "none",
+          animation: active ? "matrixPulse 1.1s ease-in-out infinite" : "none",
+        }}
+      >
+        <svg viewBox="0 0 300 400" width="100%" height="100%" aria-hidden="true">
+          <defs>
+            <filter id="poseGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <g filter="url(#poseGlow)">{outlines[poseKey] || outlines.front_double_bi}</g>
+        </svg>
+      </Box>
+    </Box>
+  );
+}
+
 function clamp(n, a, b) {
   const x = Number(n);
   if (!Number.isFinite(x)) return a;
@@ -306,6 +448,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
 
   const titleColor = "rgba(245,250,255,0.92)";
   const bodyColor = "rgba(220,235,245,0.86)";
+  const outlinePulseActive = stage === "capture" && countdownMs > CAPTURE_DELAY_MS - OUTLINE_PULSE_MS;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
@@ -442,6 +585,16 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
             </Stack>
           )}
 
+          <Box
+            sx={{
+              "@keyframes matrixPulse": {
+                "0%": { opacity: 0.45, transform: "scale(0.985)" },
+                "50%": { opacity: 1, transform: "scale(1)" },
+                "100%": { opacity: 0.5, transform: "scale(0.99)" },
+              },
+            }}
+          />
+
           {stage === "capture" && (
             <Stack spacing={2}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
@@ -478,6 +631,13 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   }}
                 />
+                {/* Temporary matrix pose silhouette (no tracking) */}
+                <PoseGhostOverlay
+                  poseKey={pose.key}
+                  mirrored={facingMode === "user"}
+                  active={outlinePulseActive}
+                />
+
                 {/* Minimal “fancy” prompt overlay (no tracking) */}
                 <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                   <Box
@@ -497,7 +657,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                       {pose.title}
                     </Typography>
                     <Typography sx={{ color: bodyColor, fontSize: 13, mt: 0.5 }}>
-                      {pose.subtitle}
+                      {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
                     </Typography>
 
                     <Divider sx={{ my: 1.2, borderColor: "rgba(255,255,255,0.08)" }} />
