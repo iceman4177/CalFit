@@ -187,6 +187,36 @@ function fallbackPoseSession() {
   };
 }
 
+function normalizeVisibilityLabel(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (["not_visible", "not visible", "not in frame", "out_of_frame", "out of frame", "not assessable", "cannot assess", "can't assess", "unable to assess"].includes(raw)) return "not_visible";
+  if (["partial", "partially_visible", "partially visible", "limited", "limited_visibility", "limited visibility"].includes(raw)) return "partial";
+  if (["visible", "clear", "clearly_visible", "clearly visible", "in_frame", "in frame"].includes(raw)) return "visible";
+  return raw;
+}
+
+function groupVisibilityFallback(group) {
+  const g = String(group || "").toLowerCase();
+  if (/(leg|quad|ham|calf|glute|hip)/.test(g)) return "not_visible";
+  if (/(waist|midsection|core|abs|oblique|taper)/.test(g)) return "partial";
+  return "visible";
+}
+
+function visibilityNoteForGroup(group, visibility) {
+  const g = String(group || "").trim() || "This area";
+  const lower = g.toLowerCase();
+  if (visibility === "not_visible") {
+    if (/(leg|quad|ham|calf)/.test(lower)) return `${g} are not clearly in frame in these captures, so SlimCal AI cannot make a confident visual assessment yet.`;
+    if (/(glute|hip)/.test(lower)) return `${g} are not clearly in frame in these captures, so SlimCal AI cannot make a confident visual assessment yet.`;
+    return `${g} are not clearly visible enough in these captures for a confident visual assessment.`;
+  }
+  if (visibility === "partial") {
+    return `${g} are only partially visible here, so any read is limited and should be treated as a light estimate rather than a firm conclusion.`;
+  }
+  return "";
+}
+
 
 // -------------------- ENTITLEMENTS --------------------
 const ENTITLED = new Set(["active", "past_due", "trialing"]);
@@ -1262,6 +1292,8 @@ const freeBypass =
       const userText =
         "Analyze the following pose images: Front Double Biceps, Lat Spread, Back Double Biceps (or similar). " +
         "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
+        "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
+        "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
         "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
@@ -1310,7 +1342,23 @@ const freeBypass =
         bestDeveloped: Array.isArray(parsed.bestDeveloped) ? parsed.bestDeveloped.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
         biggestOpportunity: Array.isArray(parsed.biggestOpportunity) ? parsed.biggestOpportunity.map((s)=>String(s).slice(0,80)).filter(Boolean).slice(0,4) : undefined,
         poseNotes: Array.isArray(parsed.poseNotes) ? parsed.poseNotes.map((s)=>String(s).slice(0,120)).filter(Boolean).slice(0,4) : undefined,
-        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown) ? (parsed.muscleBreakdown || parsed.muscle_breakdown).map((r) => ({ group: String(r.group || r.name || r.key || "").slice(0, 48), note: String(r.note || r.text || "").slice(0, 900) })).filter((r) => r.group && r.note).slice(0, 12) : undefined,
+        muscleBreakdown: Array.isArray(parsed.muscleBreakdown || parsed.muscle_breakdown)
+          ? (parsed.muscleBreakdown || parsed.muscle_breakdown)
+              .map((r) => {
+                const group = String(r.group || r.name || r.key || "").slice(0, 48);
+                const visibility = normalizeVisibilityLabel(r.visibility || r.inFrame || r.visible || r.assessable || "");
+                let note = String(r.note || r.text || "").slice(0, 900);
+                const fallbackVisibility = visibility || groupVisibilityFallback(group);
+                const needsVisibilityOverride = !note || /(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)/i.test(group) && !/(not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess)/i.test(note);
+                if (needsVisibilityOverride) {
+                  const override = visibilityNoteForGroup(group, fallbackVisibility);
+                  if (override) note = override;
+                }
+                return { group, note, visibility: fallbackVisibility };
+              })
+              .filter((r) => r.group && r.note)
+              .slice(0, 12)
+          : undefined,
         muscleSignals: {
           delts: clamp(ms?.delts ?? fb.muscleSignals.delts, 0, 1),
           arms: clamp(ms?.arms ?? fb.muscleSignals.arms, 0, 1),
@@ -1343,6 +1391,18 @@ const freeBypass =
         session.report = cleaned.length > 40 ? cleaned : raw;
       }
       delete session.__rawText;
+
+      if (Array.isArray(session.muscleBreakdown) && session.muscleBreakdown.length) {
+        const lowerOutOfFrame = session.muscleBreakdown.some((row) => /(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)/i.test(String(row.group || "")) && /not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess/i.test(String(row.note || "")));
+        if (lowerOutOfFrame && typeof session.report === "string" && session.report.trim()) {
+          const note = "Lower body visibility note: your legs and hips are not clearly in frame in these captures, so any lower-body assessment should be treated as incomplete until you re-scan with more of your body visible.";
+          if (!session.report.includes(note)) {
+            session.report = `${session.report.trim()}
+
+${note}`;
+          }
+        }
+      }
 
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
