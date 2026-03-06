@@ -166,20 +166,17 @@ function getBottomAffirmation({ summary = "", wins = [] }) {
   const allText = [summary, ...(wins || [])].map(positiveClean).join(" ");
   const t = inferThemes(allText);
 
-  if (t.arms && t.shoulders && t.confidence) {
-    return "This set lands because the arms catch attention first, the shoulder line keeps the frame athletic, and the overall presence feels confident on camera";
+  if (t.arms && t.shoulders) {
+    return "Feeling the upper-body progress show up here: stronger arm engagement, better shoulder presence, and a cleaner overall look across the poses";
   }
-  if (t.arms && t.posture) {
-    return "The visual hook here is simple: engaged arms, cleaner posture, and a three-pose layout that makes the progress feel real and share-worthy";
-  }
-  if (t.back || t.shoulders) {
-    return "What makes this shareable is the structure in the upper frame: width through the shoulders, stronger shape through the torso, and clear momentum across the poses";
+  if (t.back && t.posture) {
+    return "Really liking how this set comes together — better posture, more shape through the upper frame, and progress that feels more dialed in";
   }
   if (t.confidence || t.momentum) {
-    return "This card works because it captures more than a pose, it shows confidence, consistency, and a physique direction people instantly understand";
+    return "This set feels like real momentum: more confidence in the posing, better presence on camera, and a physique direction that is starting to read clearly";
   }
 
-  return "This progress card is built to feel proud to post: clean pose energy, visible upper-body signal, and momentum that reads instantly on the timeline";
+  return "Feeling good about this one — stronger upper-body signal, more confidence in the poses, and progress that is starting to show more clearly";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
@@ -244,7 +241,7 @@ export async function buildPoseSessionSharePng({
   );
   const affirmation = getAffirmation({ summary, wins: viralWins });
   const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
-  const bottomTitle = "WHY THIS POPS";
+  const bottomTitle = "CAPTION";
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
   const subtitleRaw = cleanLine(subhead || "");
   const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
@@ -317,7 +314,7 @@ export async function buildPoseSessionSharePng({
   const affX = cardX + 26;
   const affY = cardY + 168;
   const affW = cardW - 52;
-  const affH = 168;
+  const affH = 212;
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -332,8 +329,8 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 31px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 3);
+  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, 32, 4);
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
@@ -451,7 +448,7 @@ export async function buildPoseSessionSharePng({
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
   ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 4);
+  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 5);
 
   const chipY = bottomY + bottomH - 62;
   const chips = ["Upper body", "Pose confidence", "Momentum"];
