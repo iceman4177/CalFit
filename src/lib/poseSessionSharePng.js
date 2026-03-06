@@ -166,20 +166,20 @@ function getBottomAffirmation({ summary = "", wins = [] }) {
   const allText = [summary, ...(wins || [])].map(positiveClean).join(" ");
   const t = inferThemes(allText);
 
-  if (t.arms && t.shoulders) {
-    return "Upper body is starting to show up more clearly here. Arms look more engaged, the shoulder line is reading stronger, and the overall set feels more dialed in.";
+  if (t.arms && t.shoulders && t.confidence) {
+    return "This set lands because the arms catch attention first, the shoulder line keeps the frame athletic, and the overall presence feels confident on camera";
   }
-  if (t.arms && t.back) {
-    return "Happy with how this set came out. The arms are showing good engagement, the frame looks stronger, and the poses are starting to carry more presence.";
+  if (t.arms && t.posture) {
+    return "The visual hook here is simple: engaged arms, cleaner posture, and a three-pose layout that makes the progress feel real and share-worthy";
   }
   if (t.back || t.shoulders) {
-    return "This is the kind of update I’d actually want to post. The upper frame looks stronger, the posing feels more intentional, and the progress is easy to see.";
+    return "What makes this shareable is the structure in the upper frame: width through the shoulders, stronger shape through the torso, and clear momentum across the poses";
   }
-  if (t.confidence || t.momentum || t.posture) {
-    return "Feeling good about this one. The posing looks more confident, the frame reads cleaner on camera, and the overall progress feels real.";
+  if (t.confidence || t.momentum) {
+    return "This card works because it captures more than a pose, it shows confidence, consistency, and a physique direction people instantly understand";
   }
 
-  return "Feeling proud of this update. The pose set looks cleaner, the upper-body signal is coming through better, and the progress is moving in the right direction.";
+  return "This progress card is built to feel proud to post: clean pose energy, visible upper-body signal, and momentum that reads instantly on the timeline";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
@@ -244,7 +244,7 @@ export async function buildPoseSessionSharePng({
   );
   const affirmation = getAffirmation({ summary, wins: viralWins });
   const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
-  const bottomTitle = "CAPTION READY";
+  const bottomTitle = "WHY THIS POPS";
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
   const subtitleRaw = cleanLine(subhead || "");
   const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
@@ -317,10 +317,7 @@ export async function buildPoseSessionSharePng({
   const affX = cardX + 26;
   const affY = cardY + 168;
   const affW = cardW - 52;
-
-  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  const affLines = wrapLines(ctx, affirmation, affW - 44, 4);
-  const affH = Math.max(168, 72 + affLines.length * 34 + 16);
+  const affH = 168;
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -335,8 +332,8 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  affLines.forEach((line, idx) => ctx.fillText(line, affX + 22, affY + 78 + idx * 34));
+  ctx.font = "800 31px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 3);
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
@@ -453,8 +450,8 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(bottomTitle, cardX + 48, bottomY + 38);
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
-  ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 68, 34, 5);
+  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 4);
 
   const chipY = bottomY + bottomH - 62;
   const chips = ["Upper body", "Pose confidence", "Momentum"];
