@@ -147,17 +147,45 @@ function pickViralWins(wins = [], summary = "", subhead = "") {
   return uniqueByMeaning(selected).slice(0, 3);
 }
 
-function getAffirmation({ summary = "", wins = [] }) {
-  const lead = sentenceCase(positiveClean(summary));
-  if (lead) {
-    const shortLead = lead.length > 135 ? sentenceCase(positiveClean(lead.slice(0, 135))) : lead;
-    return shortLead;
-  }
+function compressAffirmation(text = "") {
+  let s = sentenceCase(positiveClean(text));
+  if (!s) return "";
 
-  const topWin = sentenceCase(positiveClean((wins || [])[0]));
-  if (topWin) {
-    return topWin.length > 135 ? sentenceCase(positiveClean(topWin.slice(0, 135))) : topWin;
+  s = s
+    .replace(/the\s+front\s+double\s+biceps\s+pose/gi, "Front double biceps")
+    .replace(/the\s+back\s+double\s+biceps\s+pose/gi, "Back double biceps")
+    .replace(/the\s+lat\s+spread\s+pose/gi, "Lat spread")
+    .replace(/displays/gi, "shows")
+    .replace(/highlighting/gi, "showing")
+    .replace(/appearing/gi, "looking")
+    .replace(/contributing\s+positively\s+to\s+the\s+overall\s+aesthetic[s]?/gi, "adding to the overall look")
+    .replace(/with\s+the/gi, "with")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const firstSentence = s.split(/(?<=[.!?])\s+/)[0].trim();
+  s = firstSentence || s;
+
+  if (s.length <= 118) return trimTerminalPunctuation(s);
+
+  const clauses = s.split(/,|;|\sand\s/i).map(x => trimTerminalPunctuation(x)).filter(Boolean);
+  let out = "";
+  for (const clause of clauses) {
+    const next = out ? `${out}, ${clause}` : clause;
+    if (next.length > 118) break;
+    out = next;
   }
+  if (out) return trimTerminalPunctuation(out);
+
+  return trimTerminalPunctuation(s.slice(0, 112));
+}
+
+function getAffirmation({ summary = "", wins = [] }) {
+  const lead = compressAffirmation(summary);
+  if (lead) return lead;
+
+  const topWin = compressAffirmation((wins || [])[0]);
+  if (topWin) return topWin;
 
   return "Strong pose energy, confident upper-body presence, and clear momentum through the set";
 }
@@ -379,12 +407,7 @@ export async function buildPoseSessionSharePng({
   const affX = contentX;
   const affY = imgTop + imgH + 26;
   const affW = contentW;
-
-  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-  const previewAffLines = wrapLines(ctx, affirmation, affW - 44, 8);
-  const affLineCount = Math.max(4, Math.min(8, previewAffLines.length || 4));
-  const affLineHeight = 30;
-  const affH = 66 + affLineCount * affLineHeight + 18;
+  const affH = 176;
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -399,8 +422,8 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, affLineHeight, affLineCount);
+  ctx.font = "800 25px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 76, affW - 44, 29, 4);
 
   let y = affY + affH + 40;
   ctx.fillStyle = "#E9FFF8";
@@ -440,8 +463,7 @@ export async function buildPoseSessionSharePng({
   }
 
   const bottomY = y + 28;
-  const remainingSpace = cardY + cardH - 112 - bottomY;
-  const bottomH = Math.max(126, remainingSpace);
+  const bottomH = Math.max(150, cardY + cardH - 112 - bottomY);
   ctx.save();
   roundRectPath(ctx, contentX, bottomY, boxW, bottomH, 24);
   ctx.fillStyle = "rgba(255,255,255,0.035)";
@@ -456,8 +478,8 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(bottomTitle, contentX + 24, bottomY + 38);
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
-  ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 32, 4);
+  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 34, 5);
 
   const chipY = bottomY + bottomH - 62;
   const chips = ["Upper body", "Dialed in", "Momentum"];
