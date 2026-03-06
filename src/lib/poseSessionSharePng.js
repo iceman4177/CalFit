@@ -61,70 +61,129 @@ function cleanLine(text = "") {
   );
 }
 
+function positiveClean(text = "") {
+  let s = cleanLine(text);
+  if (!s) return "";
+
+  s = s
+    .replace(/\bmoderate\b/gi, "solid")
+    .replace(/\breasonable\b/gi, "strong")
+    .replace(/\bdecent\b/gi, "strong")
+    .replace(/\bsome\s+definition\b/gi, "visible definition")
+    .replace(/\bsome\s+potential\b/gi, "clear potential")
+    .replace(/\bpotential\b/gi, "upside")
+    .replace(/\bmay\s+obscure[^.]*\.?/gi, "")
+    .replace(/\bas\s+the\s+shirt[^.]*\.?/gi, "")
+    .replace(/\bpose\s+quality\s+is\s+solid[^.]*\.?/gi, "")
+    .replace(/\bpose\s+quality\s+is\s+moderate[^.]*\.?/gi, "")
+    .replace(/\bwith\s+some\s+/gi, "with ")
+    .replace(/\s+,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  s = s.replace(/^(the\s+poses?\s+(show|demonstrate|capture)\s+)/i, "");
+  s = s.replace(/^(this\s+set\s+shows\s+)/i, "");
+  return trimTerminalPunctuation(s);
+}
+
+function sentenceCase(text = "") {
+  const s = cleanLine(text);
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function uniqueByMeaning(items = []) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    const t = cleanLine(item);
+    if (!t) continue;
+    const k = t.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
+}
+
+function inferThemes(text = "") {
+  const s = ` ${String(text || "").toLowerCase()} `;
+  return {
+    arms: /\b(arm|bicep|tricep)\b/.test(s),
+    shoulders: /\b(shoulder|delt|deltoid)\b/.test(s),
+    chest: /\bchest|pec\b/.test(s),
+    back: /\bback|lat|v-taper|taper\b/.test(s),
+    posture: /\bposture|pose|frame|framing\b/.test(s),
+    confidence: /\bconfidence|confident|presence|command|poise\b/.test(s),
+    momentum: /\bmomentum|progress|consisten|signal\b/.test(s),
+  };
+}
+
 function pickViralWins(wins = [], summary = "", subhead = "") {
   const pool = [];
   for (const item of wins || []) {
-    const t = cleanLine(item);
-    if (t) pool.push(t);
+    const t = positiveClean(item);
+    if (t) pool.push(sentenceCase(t));
   }
 
-  const seen = new Set();
-  const deduped = pool.filter((t) => {
-    const k = t.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-
+  const deduped = uniqueByMeaning(pool);
   const selected = deduped.slice(0, 3);
 
-  if (!selected.length && cleanLine(summary)) {
-    selected.push(cleanLine(summary));
+  if (!selected.length && positiveClean(summary)) {
+    selected.push(sentenceCase(positiveClean(summary)));
   }
   if (selected.length < 2 && cleanLine(subhead) && !/baseline locked/i.test(subhead)) {
-    selected.push(cleanLine(subhead));
+    selected.push(sentenceCase(positiveClean(subhead)));
   }
   while (selected.length < 3) {
     const fallbacks = [
-      "Upper-body presence is coming through clearly",
-      "Your pose set is showing confidence and momentum",
+      "Upper-body presence is reading clearly on camera",
+      "The pose set is showing confidence and momentum",
       "Consistent effort is giving the scan a strong visual signal"
     ];
     const next = fallbacks[selected.length] || "Strong progress signal";
     if (!selected.includes(next)) selected.push(next);
   }
-  return selected.slice(0, 3);
+  return uniqueByMeaning(selected).slice(0, 3);
 }
 
 function getAffirmation({ summary = "", wins = [] }) {
-  const lead = cleanLine(summary);
+  const lead = sentenceCase(positiveClean(summary));
   if (lead) {
-    const shortLead = lead.length > 185 ? cleanLine(lead.slice(0, 185)) : lead;
+    const shortLead = lead.length > 135 ? sentenceCase(positiveClean(lead.slice(0, 135))) : lead;
     return shortLead;
   }
 
-  const topWin = cleanLine((wins || [])[0]);
+  const topWin = sentenceCase(positiveClean((wins || [])[0]));
   if (topWin) {
-    return topWin.length > 185 ? cleanLine(topWin.slice(0, 185)) : topWin;
+    return topWin.length > 135 ? sentenceCase(positiveClean(topWin.slice(0, 135))) : topWin;
   }
 
   return "Strong pose energy, confident upper-body presence, and clear momentum through the set";
 }
 
 function getBottomAffirmation({ summary = "", wins = [] }) {
-  const options = [
-    cleanLine(summary),
-    cleanLine((wins || [])[1]),
-    cleanLine((wins || [])[2]),
-    "A proud progress snapshot worth sharing",
-  ].filter(Boolean);
+  const allText = [summary, ...(wins || [])].map(positiveClean).join(" ");
+  const t = inferThemes(allText);
 
-  const chosen = options[0] || "A proud progress snapshot worth sharing";
-  return chosen.length > 150 ? cleanLine(chosen.slice(0, 150)) : chosen;
+  if (t.arms && t.shoulders && t.confidence) {
+    return "This set lands because the arms catch attention first, the shoulder line keeps the frame athletic, and the overall presence feels confident on camera";
+  }
+  if (t.arms && t.posture) {
+    return "The visual hook here is simple: engaged arms, cleaner posture, and a three-pose layout that makes the progress feel real and share-worthy";
+  }
+  if (t.back || t.shoulders) {
+    return "What makes this shareable is the structure in the upper frame: width through the shoulders, stronger shape through the torso, and clear momentum across the poses";
+  }
+  if (t.confidence || t.momentum) {
+    return "This card works because it captures more than a pose, it shows confidence, consistency, and a physique direction people instantly understand";
+  }
+
+  return "This progress card is built to feel proud to post: clean pose energy, visible upper-body signal, and momentum that reads instantly on the timeline";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
-  const source = cleanLine(text);
+  const source = sentenceCase(text);
   if (!source) return [];
   const words = source.split(" ");
   const lines = [];
@@ -185,6 +244,7 @@ export async function buildPoseSessionSharePng({
   );
   const affirmation = getAffirmation({ summary, wins: viralWins });
   const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
+  const bottomTitle = "WHY THIS POPS";
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
   const subtitleRaw = cleanLine(subhead || "");
   const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
@@ -257,7 +317,7 @@ export async function buildPoseSessionSharePng({
   const affX = cardX + 26;
   const affY = cardY + 168;
   const affW = cardW - 52;
-  const affH = 188;
+  const affH = 168;
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -273,7 +333,7 @@ export async function buildPoseSessionSharePng({
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
   ctx.font = "800 31px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 4);
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 3);
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
@@ -387,11 +447,11 @@ export async function buildPoseSessionSharePng({
 
   ctx.fillStyle = "rgba(0,255,190,0.92)";
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("PROUD SIGNAL", cardX + 48, bottomY + 38);
+  ctx.fillText(bottomTitle, cardX + 48, bottomY + 38);
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
   ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 3);
+  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 4);
 
   const chipY = bottomY + bottomH - 62;
   const chips = ["Upper body", "Pose confidence", "Momentum"];
