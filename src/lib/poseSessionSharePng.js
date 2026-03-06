@@ -379,7 +379,10 @@ export async function buildPoseSessionSharePng({
   const affX = contentX;
   const affY = imgTop + imgH + 26;
   const affW = contentW;
-  const affH = 184;
+  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
+  const affLines = wrapLines(ctx, affirmation, affW - 44, 6);
+  const affTextH = Math.max(1, affLines.length) * 30;
+  const affH = Math.max(184, 78 + affTextH + 24);
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -394,8 +397,10 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 27px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, 30, 5);
+  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
+  affLines.forEach((line, idx) => {
+    ctx.fillText(line, affX + 22, affY + 78 + idx * 30);
+  });
 
   let y = affY + affH + 40;
   ctx.fillStyle = "#E9FFF8";
@@ -435,7 +440,7 @@ export async function buildPoseSessionSharePng({
   }
 
   const bottomY = y + 28;
-  const bottomH = Math.max(150, cardY + cardH - 112 - bottomY);
+  const bottomH = Math.max(132, cardY + cardH - 112 - bottomY);
   ctx.save();
   roundRectPath(ctx, contentX, bottomY, boxW, bottomH, 24);
   ctx.fillStyle = "rgba(255,255,255,0.035)";
