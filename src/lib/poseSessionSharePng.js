@@ -44,11 +44,21 @@ function drawCover(ctx, img, x, y, w, h) {
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
-function cleanLine(text = "") {
+function trimTerminalPunctuation(text = "") {
   return String(text || "")
     .replace(/\s+/g, " ")
-    .replace(/^[-•\s]+/, "")
+    .replace(/[.…·•]+\s*$/g, "")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanLine(text = "") {
+  return trimTerminalPunctuation(
+    String(text || "")
+      .replace(/\s+/g, " ")
+      .replace(/^[-•\s]+/, "")
+      .trim()
+  );
 }
 
 function pickViralWins(wins = [], summary = "", subhead = "") {
@@ -71,16 +81,16 @@ function pickViralWins(wins = [], summary = "", subhead = "") {
   if (!selected.length && cleanLine(summary)) {
     selected.push(cleanLine(summary));
   }
-  if (selected.length < 2 && cleanLine(subhead)) {
+  if (selected.length < 2 && cleanLine(subhead) && !/baseline locked/i.test(subhead)) {
     selected.push(cleanLine(subhead));
   }
   while (selected.length < 3) {
     const fallbacks = [
-      "Baseline locked and momentum is building.",
-      "Strong visual presence across the pose set.",
-      "Consistent effort is showing in the scan."
+      "Upper-body presence is coming through clearly",
+      "Your pose set is showing confidence and momentum",
+      "Consistent effort is giving the scan a strong visual signal"
     ];
-    const next = fallbacks[selected.length] || "Solid progress signal.";
+    const next = fallbacks[selected.length] || "Strong progress signal";
     if (!selected.includes(next)) selected.push(next);
   }
   return selected.slice(0, 3);
@@ -89,16 +99,28 @@ function pickViralWins(wins = [], summary = "", subhead = "") {
 function getAffirmation({ summary = "", wins = [] }) {
   const lead = cleanLine(summary);
   if (lead) {
-    const shortLead = lead.length > 165 ? `${lead.slice(0, 162).trim()}…` : lead;
+    const shortLead = lead.length > 185 ? cleanLine(lead.slice(0, 185)) : lead;
     return shortLead;
   }
 
   const topWin = cleanLine((wins || [])[0]);
   if (topWin) {
-    return topWin.length > 165 ? `${topWin.slice(0, 162).trim()}…` : topWin;
+    return topWin.length > 185 ? cleanLine(topWin.slice(0, 185)) : topWin;
   }
 
-  return "Strong baseline locked. Your pose set is showing momentum and a confident visual presence.";
+  return "Strong pose energy, confident upper-body presence, and clear momentum through the set";
+}
+
+function getBottomAffirmation({ summary = "", wins = [] }) {
+  const options = [
+    cleanLine(summary),
+    cleanLine((wins || [])[1]),
+    cleanLine((wins || [])[2]),
+    "A proud progress snapshot worth sharing",
+  ].filter(Boolean);
+
+  const chosen = options[0] || "A proud progress snapshot worth sharing";
+  return chosen.length > 150 ? cleanLine(chosen.slice(0, 150)) : chosen;
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
@@ -126,13 +148,13 @@ function wrapLines(ctx, text, maxWidth, maxLines = 2) {
 
   if (remaining.length > 0 && lines.length) {
     let tail = lines[lines.length - 1];
-    while (ctx.measureText(`${tail}…`).width > maxWidth && tail.length > 3) {
+    while (ctx.measureText(tail).width > maxWidth && tail.length > 3) {
       tail = tail.slice(0, -1).trim();
     }
-    lines[lines.length - 1] = `${tail}…`;
+    lines[lines.length - 1] = cleanLine(tail);
   }
 
-  return lines.slice(0, maxLines);
+  return lines.slice(0, maxLines).map(cleanLine);
 }
 
 function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
@@ -162,8 +184,10 @@ export async function buildPoseSessionSharePng({
     subhead,
   );
   const affirmation = getAffirmation({ summary, wins: viralWins });
+  const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
-  const subtitle = cleanLine(subhead || "Baseline locked ✅") || "Baseline locked ✅";
+  const subtitleRaw = cleanLine(subhead || "");
+  const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
   const safeHashtag = cleanLine(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
   const W = 1080;
@@ -173,7 +197,6 @@ export async function buildPoseSessionSharePng({
   c.height = H;
   const ctx = c.getContext("2d");
 
-  // Background
   const bg = ctx.createLinearGradient(0, 0, W, H);
   bg.addColorStop(0, "#02060b");
   bg.addColorStop(0.4, "#051019");
@@ -206,16 +229,16 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(0,255,190,0.20)";
   ctx.fillRect(cardX + 26, cardY + 26, cardW - 52, 2);
 
-  // Header
   ctx.fillStyle = "#E9FFF8";
   ctx.font = "900 68px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(title.slice(0, 18), cardX + 26, cardY + 104);
 
-  ctx.fillStyle = "rgba(233,255,248,0.90)";
-  ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(subtitle.slice(0, 34), cardX + 26, cardY + 152);
+  if (subtitle) {
+    ctx.fillStyle = "rgba(233,255,248,0.90)";
+    ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText(subtitle.slice(0, 34), cardX + 26, cardY + 152);
+  }
 
-  // Hashtag pill
   ctx.save();
   ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
   const tagW = ctx.measureText(safeHashtag).width + 40;
@@ -231,13 +254,11 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(safeHashtag.slice(0, 16), tagX + 20, tagY + 29);
   ctx.restore();
 
-  // Intentionally no score/tier on share card — keep tone neutral/positive only.
-
-  // Affirmation card
   const affX = cardX + 26;
-  const affY = cardY + 188;
+  const affY = cardY + 168;
   const affW = cardW - 52;
-  const affH = 174;
+  const affH = 188;
+
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
   ctx.fillStyle = "rgba(255,255,255,0.04)";
@@ -251,10 +272,9 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 30px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 3);
+  ctx.font = "800 31px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 4);
 
-  // Thumbnails row
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
     : (Array.isArray(poseImages) ? poseImages : []).slice(0, 3).map((u, i) => ({
@@ -272,10 +292,10 @@ export async function buildPoseSessionSharePng({
     }
   }
 
-  const imgTop = affY + affH + 40;
+  const imgTop = affY + affH + 34;
   const imgGap = 18;
   const imgW = Math.floor((cardW - 52 - imgGap * 2) / 3);
-  const imgH = 420;
+  const imgH = 430;
   const imgX0 = cardX + 26;
 
   for (let i = 0; i < 3; i++) {
@@ -305,20 +325,19 @@ export async function buildPoseSessionSharePng({
 
     const lbl = cleanLine(normalizedThumbs?.[i]?.title || "").slice(0, 16);
     if (lbl) {
+      ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
       const labelW = Math.min(imgW - 26, Math.max(126, ctx.measureText(lbl).width + 28));
       ctx.save();
       roundRectPath(ctx, x + 12, y + imgH - 52, labelW, 38, 14);
       ctx.fillStyle = "rgba(0,0,0,0.50)";
       ctx.fill();
       ctx.fillStyle = "rgba(233,255,248,0.95)";
-      ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
       ctx.fillText(lbl, x + 26, y + imgH - 25);
       ctx.restore();
     }
   }
 
-  // Positive wins only — no negative/lever text on story card.
-  let y = imgTop + imgH + 46;
+  let y = imgTop + imgH + 42;
   ctx.fillStyle = "#E9FFF8";
   ctx.font = "900 38px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WINS", cardX + 26, y);
@@ -326,7 +345,7 @@ export async function buildPoseSessionSharePng({
 
   const boxW = cardW - 52;
   for (const item of viralWins.slice(0, 3)) {
-    y += 18;
+    y += 16;
     const lines = (() => {
       ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
       return wrapLines(ctx, item, boxW - 54, 2);
@@ -355,7 +374,44 @@ export async function buildPoseSessionSharePng({
     y += boxH;
   }
 
-  // Footer
+  const bottomY = y + 28;
+  const bottomH = Math.max(150, cardY + cardH - 112 - bottomY);
+  ctx.save();
+  roundRectPath(ctx, cardX + 26, bottomY, boxW, bottomH, 24);
+  ctx.fillStyle = "rgba(255,255,255,0.035)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0,255,190,0.12)";
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(0,255,190,0.92)";
+  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("PROUD SIGNAL", cardX + 48, bottomY + 38);
+
+  ctx.fillStyle = "rgba(233,255,248,0.92)";
+  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 3);
+
+  const chipY = bottomY + bottomH - 62;
+  const chips = ["Upper body", "Pose confidence", "Momentum"];
+  let chipX = cardX + 48;
+  ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+  for (const chip of chips) {
+    const chipW = ctx.measureText(chip).width + 32;
+    ctx.save();
+    roundRectPath(ctx, chipX, chipY, chipW, 34, 17);
+    ctx.fillStyle = "rgba(0,255,190,0.11)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,255,190,0.16)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(233,255,248,0.86)";
+    ctx.fillText(chip, chipX + 16, chipY + 23);
+    ctx.restore();
+    chipX += chipW + 12;
+  }
+
   const footY = cardY + cardH - 34;
   ctx.fillStyle = "rgba(233,255,248,0.58)";
   ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
