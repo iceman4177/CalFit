@@ -167,16 +167,16 @@ function getBottomAffirmation({ summary = "", wins = [] }) {
   const t = inferThemes(allText);
 
   if (t.arms && t.shoulders) {
-    return "Feeling the upper-body progress show up here: stronger arm engagement, better shoulder presence, and a cleaner overall look across the poses";
+    return "Really starting to see the upper-body work show up here — better arm pop, stronger shoulder presence, and cleaner pose execution across the set";
   }
   if (t.back && t.posture) {
-    return "Really liking how this set comes together — better posture, more shape through the upper frame, and progress that feels more dialed in";
+    return "This one feels sharp — stronger posture, more shape through the upper frame, and a back shot that gives the whole set a better look";
   }
   if (t.confidence || t.momentum) {
-    return "This set feels like real momentum: more confidence in the posing, better presence on camera, and a physique direction that is starting to read clearly";
+    return "Liking the direction here — more confidence in the poses, better presence on camera, and progress that is getting easier to see";
   }
 
-  return "Feeling good about this one — stronger upper-body signal, more confidence in the poses, and progress that is starting to show more clearly";
+  return "This set feels strong — better upper-body presence, cleaner posing, and the kind of progress that makes you want to keep stacking good days";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
@@ -241,7 +241,7 @@ export async function buildPoseSessionSharePng({
   );
   const affirmation = getAffirmation({ summary, wins: viralWins });
   const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
-  const bottomTitle = "CAPTION";
+  const bottomTitle = "PROGRESS NOTE";
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
   const subtitleRaw = cleanLine(subhead || "");
   const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
@@ -311,26 +311,8 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(safeHashtag.slice(0, 16), tagX + 20, tagY + 29);
   ctx.restore();
 
-  const affX = cardX + 26;
-  const affY = cardY + 168;
-  const affW = cardW - 52;
-  const affH = 212;
-
-  ctx.save();
-  roundRectPath(ctx, affX, affY, affW, affH, 26);
-  ctx.fillStyle = "rgba(255,255,255,0.04)";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255,210,120,0.20)";
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.fillStyle = "rgba(255,210,120,0.95)";
-  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("WHAT HITS", affX + 22, affY + 34);
-  ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, 32, 4);
+  const contentX = cardX + 26;
+  const contentW = cardW - 52;
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
@@ -349,11 +331,11 @@ export async function buildPoseSessionSharePng({
     }
   }
 
-  const imgTop = affY + affH + 34;
+  const imgTop = cardY + 168;
   const imgGap = 18;
   const imgW = Math.floor((cardW - 52 - imgGap * 2) / 3);
   const imgH = 430;
-  const imgX0 = cardX + 26;
+  const imgX0 = contentX;
 
   for (let i = 0; i < 3; i++) {
     const x = imgX0 + i * (imgW + imgGap);
@@ -394,13 +376,34 @@ export async function buildPoseSessionSharePng({
     }
   }
 
-  let y = imgTop + imgH + 42;
+  const affX = contentX;
+  const affY = imgTop + imgH + 26;
+  const affW = contentW;
+  const affH = 184;
+
+  ctx.save();
+  roundRectPath(ctx, affX, affY, affW, affH, 26);
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(255,210,120,0.20)";
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(255,210,120,0.95)";
+  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("WHAT HITS", affX + 22, affY + 34);
+  ctx.fillStyle = "rgba(233,255,248,0.94)";
+  ctx.font = "800 27px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, 30, 5);
+
+  let y = affY + affH + 40;
   ctx.fillStyle = "#E9FFF8";
   ctx.font = "900 38px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("WINS", cardX + 26, y);
+  ctx.fillText("WINS", contentX, y);
   y += 22;
 
-  const boxW = cardW - 52;
+  const boxW = contentW;
   for (const item of viralWins.slice(0, 3)) {
     y += 16;
     const lines = (() => {
@@ -410,7 +413,7 @@ export async function buildPoseSessionSharePng({
     const boxH = lines.length > 1 ? 94 : 72;
 
     ctx.save();
-    roundRectPath(ctx, cardX + 26, y, boxW, boxH, 20);
+    roundRectPath(ctx, contentX, y, boxW, boxH, 20);
     ctx.fillStyle = "rgba(0,0,0,0.34)";
     ctx.fill();
     ctx.lineWidth = 2;
@@ -421,12 +424,12 @@ export async function buildPoseSessionSharePng({
     ctx.fillStyle = "rgba(233,255,248,0.94)";
     ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
     lines.forEach((line, idx) => {
-      ctx.fillText(line, cardX + 50, y + 31 + idx * 32);
+      ctx.fillText(line, contentX + 24, y + 31 + idx * 32);
     });
 
     ctx.fillStyle = "rgba(0,255,190,0.92)";
     ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText("•", cardX + 34, y + 31);
+    ctx.fillText("•", contentX + 8, y + 31);
 
     y += boxH;
   }
@@ -434,7 +437,7 @@ export async function buildPoseSessionSharePng({
   const bottomY = y + 28;
   const bottomH = Math.max(150, cardY + cardH - 112 - bottomY);
   ctx.save();
-  roundRectPath(ctx, cardX + 26, bottomY, boxW, bottomH, 24);
+  roundRectPath(ctx, contentX, bottomY, boxW, bottomH, 24);
   ctx.fillStyle = "rgba(255,255,255,0.035)";
   ctx.fill();
   ctx.lineWidth = 2;
@@ -444,15 +447,15 @@ export async function buildPoseSessionSharePng({
 
   ctx.fillStyle = "rgba(0,255,190,0.92)";
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(bottomTitle, cardX + 48, bottomY + 38);
+  ctx.fillText(bottomTitle, contentX + 24, bottomY + 38);
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
   ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, cardX + 48, bottomY + 84, boxW - 44, 34, 5);
+  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 34, 5);
 
   const chipY = bottomY + bottomH - 62;
-  const chips = ["Upper body", "Pose confidence", "Momentum"];
-  let chipX = cardX + 48;
+  const chips = ["Upper body", "Dialed in", "Momentum"];
+  let chipX = contentX + 24;
   ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
   for (const chip of chips) {
     const chipW = ctx.measureText(chip).width + 32;
