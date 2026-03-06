@@ -379,10 +379,12 @@ export async function buildPoseSessionSharePng({
   const affX = contentX;
   const affY = imgTop + imgH + 26;
   const affW = contentW;
+
   ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-  const affLines = wrapLines(ctx, affirmation, affW - 44, 6);
-  const affTextH = Math.max(1, affLines.length) * 30;
-  const affH = Math.max(184, 78 + affTextH + 24);
+  const previewAffLines = wrapLines(ctx, affirmation, affW - 44, 8);
+  const affLineCount = Math.max(4, Math.min(8, previewAffLines.length || 4));
+  const affLineHeight = 30;
+  const affH = 66 + affLineCount * affLineHeight + 18;
 
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
@@ -398,9 +400,7 @@ export async function buildPoseSessionSharePng({
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
   ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-  affLines.forEach((line, idx) => {
-    ctx.fillText(line, affX + 22, affY + 78 + idx * 30);
-  });
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 78, affW - 44, affLineHeight, affLineCount);
 
   let y = affY + affH + 40;
   ctx.fillStyle = "#E9FFF8";
@@ -440,7 +440,8 @@ export async function buildPoseSessionSharePng({
   }
 
   const bottomY = y + 28;
-  const bottomH = Math.max(132, cardY + cardH - 112 - bottomY);
+  const remainingSpace = cardY + cardH - 112 - bottomY;
+  const bottomH = Math.max(126, remainingSpace);
   ctx.save();
   roundRectPath(ctx, contentX, bottomY, boxW, bottomH, 24);
   ctx.fillStyle = "rgba(255,255,255,0.035)";
@@ -455,8 +456,8 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(bottomTitle, contentX + 24, bottomY + 38);
 
   ctx.fillStyle = "rgba(233,255,248,0.92)";
-  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 34, 5);
+  ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 32, 4);
 
   const chipY = bottomY + bottomH - 62;
   const chips = ["Upper body", "Dialed in", "Momentum"];
