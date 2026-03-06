@@ -86,21 +86,19 @@ function pickViralWins(wins = [], summary = "", subhead = "") {
   return selected.slice(0, 3);
 }
 
-function getAffirmation({ summary = "", wins = [], tier = "", score = null }) {
+function getAffirmation({ summary = "", wins = [] }) {
   const lead = cleanLine(summary);
   if (lead) {
-    const shortLead = lead.length > 110 ? `${lead.slice(0, 107).trim()}…` : lead;
+    const shortLead = lead.length > 165 ? `${lead.slice(0, 162).trim()}…` : lead;
     return shortLead;
   }
 
   const topWin = cleanLine((wins || [])[0]);
-  if (topWin) return topWin;
+  if (topWin) {
+    return topWin.length > 165 ? `${topWin.slice(0, 162).trim()}…` : topWin;
+  }
 
-  const safeTier = cleanLine(tier);
-  const safeScore = Number.isFinite(Number(score)) ? Number(score).toFixed(1) : null;
-  if (safeTier && safeScore) return `${safeTier} energy • ${safeScore}/10 aesthetic.`;
-  if (safeTier) return `${safeTier} energy coming through in this scan.`;
-  return "Strong baseline. Stronger presence. Keep building.";
+  return "Strong baseline locked. Your pose set is showing momentum and a confident visual presence.";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
@@ -158,16 +156,14 @@ export async function buildPoseSessionSharePng({
   summary = "",
   hashtag = "#SlimCalAI",
 } = {}) {
-  const scoreNum = Number.isFinite(Number(score)) ? Number(score) : null;
   const viralWins = pickViralWins(
     Array.isArray(wins) && wins.length ? wins : highlights,
     summary,
     subhead,
   );
-  const affirmation = getAffirmation({ summary, wins: viralWins, tier, score: scoreNum });
+  const affirmation = getAffirmation({ summary, wins: viralWins });
   const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
   const subtitle = cleanLine(subhead || "Baseline locked ✅") || "Baseline locked ✅";
-  const safeTier = cleanLine(tier || "BUILD ARC") || "BUILD ARC";
   const safeHashtag = cleanLine(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
   const W = 1080;
@@ -235,43 +231,13 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(safeHashtag.slice(0, 16), tagX + 20, tagY + 29);
   ctx.restore();
 
-  // Tier and score row
-  const pillY = cardY + 188;
-  const tierW = 360;
-  ctx.save();
-  roundRectPath(ctx, cardX + 26, pillY, tierW, 66, 33);
-  ctx.fillStyle = "rgba(0,255,190,0.12)";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(0,255,190,0.18)";
-  ctx.stroke();
-  ctx.fillStyle = "rgba(233,255,248,0.95)";
-  ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(safeTier.slice(0, 18), cardX + 48, pillY + 43);
-  ctx.restore();
-
-  if (scoreNum !== null) {
-    const scoreText = `${scoreNum.toFixed(1)}/10`;
-    ctx.save();
-    ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
-    const scoreW = Math.max(200, ctx.measureText(scoreText).width + 54);
-    const scoreX = cardX + cardW - 26 - scoreW;
-    roundRectPath(ctx, scoreX, pillY, scoreW, 66, 33);
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.stroke();
-    ctx.fillStyle = "rgba(233,255,248,0.95)";
-    ctx.fillText(scoreText, scoreX + 27, pillY + 43);
-    ctx.restore();
-  }
+  // Intentionally no score/tier on share card — keep tone neutral/positive only.
 
   // Affirmation card
   const affX = cardX + 26;
-  const affY = cardY + 284;
+  const affY = cardY + 188;
   const affW = cardW - 52;
-  const affH = 138;
+  const affH = 174;
   ctx.save();
   roundRectPath(ctx, affX, affY, affW, affH, 26);
   ctx.fillStyle = "rgba(255,255,255,0.04)";
@@ -285,8 +251,8 @@ export async function buildPoseSessionSharePng({
   ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText("WHAT HITS", affX + 22, affY + 34);
   ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 82, affW - 44, 40, 2);
+  ctx.font = "800 30px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 80, affW - 44, 34, 3);
 
   // Thumbnails row
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
