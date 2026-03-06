@@ -1,7 +1,6 @@
 // src/lib/poseSessionSharePng.js
-// Produces a shareable PNG for Pose Session.
-// - Keeps tone neutral/positive.
-// - Supports embedding the 3 captured pose images.
+// Story-friendly Pose Session share card generator.
+// Designed for IG/FB story aspect ratio with short, proud, positive copy.
 
 function clamp(n, a, b) {
   const x = Number(n);
@@ -45,123 +44,251 @@ function drawCover(ctx, img, x, y, w, h) {
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
+function cleanLine(text = "") {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[-•\s]+/, "")
+    .trim();
+}
+
+function pickViralWins(wins = [], summary = "", subhead = "") {
+  const pool = [];
+  for (const item of wins || []) {
+    const t = cleanLine(item);
+    if (t) pool.push(t);
+  }
+
+  const seen = new Set();
+  const deduped = pool.filter((t) => {
+    const k = t.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  const selected = deduped.slice(0, 3);
+
+  if (!selected.length && cleanLine(summary)) {
+    selected.push(cleanLine(summary));
+  }
+  if (selected.length < 2 && cleanLine(subhead)) {
+    selected.push(cleanLine(subhead));
+  }
+  while (selected.length < 3) {
+    const fallbacks = [
+      "Baseline locked and momentum is building.",
+      "Strong visual presence across the pose set.",
+      "Consistent effort is showing in the scan."
+    ];
+    const next = fallbacks[selected.length] || "Solid progress signal.";
+    if (!selected.includes(next)) selected.push(next);
+  }
+  return selected.slice(0, 3);
+}
+
+function getAffirmation({ summary = "", wins = [], tier = "", score = null }) {
+  const lead = cleanLine(summary);
+  if (lead) {
+    const shortLead = lead.length > 110 ? `${lead.slice(0, 107).trim()}…` : lead;
+    return shortLead;
+  }
+
+  const topWin = cleanLine((wins || [])[0]);
+  if (topWin) return topWin;
+
+  const safeTier = cleanLine(tier);
+  const safeScore = Number.isFinite(Number(score)) ? Number(score).toFixed(1) : null;
+  if (safeTier && safeScore) return `${safeTier} energy • ${safeScore}/10 aesthetic.`;
+  if (safeTier) return `${safeTier} energy coming through in this scan.`;
+  return "Strong baseline. Stronger presence. Keep building.";
+}
+
+function wrapLines(ctx, text, maxWidth, maxLines = 2) {
+  const source = cleanLine(text);
+  if (!source) return [];
+  const words = source.split(" ");
+  const lines = [];
+  let line = "";
+
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      line = test;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = word;
+    if (lines.length === maxLines - 1) break;
+  }
+
+  const usedWords = lines.join(" ").split(" ").filter(Boolean).length;
+  const remaining = words.slice(usedWords);
+  const last = line || remaining.shift() || "";
+  if (last) lines.push(last);
+
+  if (remaining.length > 0 && lines.length) {
+    let tail = lines[lines.length - 1];
+    while (ctx.measureText(`${tail}…`).width > maxWidth && tail.length > 3) {
+      tail = tail.slice(0, -1).trim();
+    }
+    lines[lines.length - 1] = `${tail}…`;
+  }
+
+  return lines.slice(0, maxLines);
+}
+
+function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+  const lines = wrapLines(ctx, text, maxWidth, maxLines);
+  lines.forEach((line, idx) => ctx.fillText(line, x, y + idx * lineHeight));
+  return lines.length;
+}
+
 export async function buildPoseSessionSharePng({
   headline = "POSE SESSION",
   subhead = "Baseline locked ✅",
   wins = [],
-  levers = [],
-  sincePoints = 0,
-  // Back-compat: either pass poseImages (array of data URLs) + poseTitles,
-  // or pass thumbs = [{ title, dataUrl }].
   poseImages = [],
   poseTitles = [],
   thumbs = [],
-  muscleSignals = null,
   trackLabel = "",
   localDay = "",
-  // viral fields
   tier = "",
   score = null,
   highlights = [],
   summary = "",
   hashtag = "#SlimCalAI",
 } = {}) {
-  
-  // Normalize older/newer payload shapes
-  const _wins = Array.isArray(wins) && wins.length
-    ? wins
-    : (Array.isArray(highlights) ? highlights : []);
-  const _levers = Array.isArray(levers) && levers.length
-    ? levers
-    : [];
-  const _headline = headline || "POSE SESSION";
   const scoreNum = Number.isFinite(Number(score)) ? Number(score) : null;
-  const tierText = (tier && String(tier).trim()) ? String(tier).trim() : "";
-  const _subhead = subhead || (tierText ? `${tierText}${scoreNum !== null ? ` · ${scoreNum.toFixed?.(1) || scoreNum}/10` : ""}` : "Baseline locked ✅");
-  const _summary = (typeof summary === "string" && summary.trim()) ? summary.trim() : "";
-  const _hashtag = (hashtag && String(hashtag).trim()) ? String(hashtag).trim() : "#SlimCalAI";
-const W = 1080;
-  const H = 1350;
+  const viralWins = pickViralWins(
+    Array.isArray(wins) && wins.length ? wins : highlights,
+    summary,
+    subhead,
+  );
+  const affirmation = getAffirmation({ summary, wins: viralWins, tier, score: scoreNum });
+  const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
+  const subtitle = cleanLine(subhead || "Baseline locked ✅") || "Baseline locked ✅";
+  const safeTier = cleanLine(tier || "BUILD ARC") || "BUILD ARC";
+  const safeHashtag = cleanLine(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
+  const W = 1080;
+  const H = 1920;
   const c = document.createElement("canvas");
   c.width = W;
   c.height = H;
   const ctx = c.getContext("2d");
 
-  // background
-  ctx.fillStyle = "#04070b";
+  // Background
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, "#02060b");
+  bg.addColorStop(0.4, "#051019");
+  bg.addColorStop(1, "#03070d");
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // subtle neon gradient
-  const g = ctx.createRadialGradient(W * 0.5, H * 0.25, 40, W * 0.5, H * 0.25, H * 0.95);
-  g.addColorStop(0, "rgba(0,255,190,0.12)");
-  g.addColorStop(0.55, "rgba(0,255,190,0.03)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g;
+  const glow = ctx.createRadialGradient(W * 0.5, H * 0.18, 40, W * 0.5, H * 0.18, H * 0.9);
+  glow.addColorStop(0, "rgba(0,255,190,0.18)");
+  glow.addColorStop(0.5, "rgba(0,255,190,0.06)");
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
 
-  const pad = 60;
+  const pad = 54;
   const cardX = pad;
   const cardY = pad;
   const cardW = W - pad * 2;
   const cardH = H - pad * 2;
 
-  // outer card
   ctx.save();
   roundRectPath(ctx, cardX, cardY, cardW, cardH, 42);
-  ctx.fillStyle = "rgba(10,14,20,0.88)";
+  ctx.fillStyle = "rgba(8,13,18,0.90)";
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = "rgba(0,255,190,0.18)";
   ctx.stroke();
   ctx.restore();
 
-  // header
-  ctx.fillStyle = "rgba(0,255,190,0.18)";
+  ctx.fillStyle = "rgba(0,255,190,0.20)";
   ctx.fillRect(cardX + 26, cardY + 26, cardW - 52, 2);
 
+  // Header
   ctx.fillStyle = "#E9FFF8";
-  ctx.font = "900 56px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(String(_headline), cardX + 26, cardY + 98);
+  ctx.font = "900 68px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText(title.slice(0, 18), cardX + 26, cardY + 104);
 
   ctx.fillStyle = "rgba(233,255,248,0.90)";
-  ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto";
-  const safeSub = String(_subhead).slice(0, 120);
-  ctx.fillText(safeSub, cardX + 26, cardY + 142);
+  ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText(subtitle.slice(0, 34), cardX + 26, cardY + 152);
 
-  // hashtag pill
-  if (_hashtag) {
-    const tag = String(_hashtag).slice(0, 24);
+  // Hashtag pill
+  ctx.save();
+  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
+  const tagW = ctx.measureText(safeHashtag).width + 40;
+  const tagX = cardX + cardW - 26 - tagW;
+  const tagY = cardY + 110;
+  roundRectPath(ctx, tagX, tagY, tagW, 42, 21);
+  ctx.fillStyle = "rgba(0,255,190,0.14)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0,255,190,0.20)";
+  ctx.stroke();
+  ctx.fillStyle = "rgba(233,255,248,0.96)";
+  ctx.fillText(safeHashtag.slice(0, 16), tagX + 20, tagY + 29);
+  ctx.restore();
+
+  // Tier and score row
+  const pillY = cardY + 188;
+  const tierW = 360;
+  ctx.save();
+  roundRectPath(ctx, cardX + 26, pillY, tierW, 66, 33);
+  ctx.fillStyle = "rgba(0,255,190,0.12)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0,255,190,0.18)";
+  ctx.stroke();
+  ctx.fillStyle = "rgba(233,255,248,0.95)";
+  ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText(safeTier.slice(0, 18), cardX + 48, pillY + 43);
+  ctx.restore();
+
+  if (scoreNum !== null) {
+    const scoreText = `${scoreNum.toFixed(1)}/10`;
     ctx.save();
-    ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-    const tw = ctx.measureText(tag).width;
-    const px = cardX + cardW - 26 - (tw + 34);
-    const py = cardY + 110;
-    roundRectPath(ctx, px, py, tw + 34, 34, 17);
-    ctx.fillStyle = "rgba(0,255,190,0.16)";
+    ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
+    const scoreW = Math.max(200, ctx.measureText(scoreText).width + 54);
+    const scoreX = cardX + cardW - 26 - scoreW;
+    roundRectPath(ctx, scoreX, pillY, scoreW, 66, 33);
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0,255,190,0.22)";
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.stroke();
     ctx.fillStyle = "rgba(233,255,248,0.95)";
-    ctx.fillText(tag, px + 17, py + 24);
+    ctx.fillText(scoreText, scoreX + 27, pillY + 43);
     ctx.restore();
   }
 
-  // optional streak delta
-  if (sincePoints > 0) {
-    ctx.fillStyle = "rgba(0,255,190,0.92)";
-    ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(`+${sincePoints} levels since last`, cardX + 26, cardY + 184);
-  }
+  // Affirmation card
+  const affX = cardX + 26;
+  const affY = cardY + 284;
+  const affW = cardW - 52;
+  const affH = 138;
+  ctx.save();
+  roundRectPath(ctx, affX, affY, affW, affH, 26);
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(255,210,120,0.20)";
+  ctx.stroke();
+  ctx.restore();
 
-  // images row
-  const imgTop = cardY + 220;
-  const imgH = 360;
-  const gap = 18;
-  const imgW = Math.floor((cardW - 52 - gap * 2) / 3);
-  const imgX0 = cardX + 26;
+  ctx.fillStyle = "rgba(255,210,120,0.95)";
+  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("WHAT HITS", affX + 22, affY + 34);
+  ctx.fillStyle = "rgba(233,255,248,0.94)";
+  ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, affirmation, affX + 22, affY + 82, affW - 44, 40, 2);
 
+  // Thumbnails row
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
     : (Array.isArray(poseImages) ? poseImages : []).slice(0, 3).map((u, i) => ({
@@ -179,8 +306,14 @@ const W = 1080;
     }
   }
 
+  const imgTop = affY + affH + 40;
+  const imgGap = 18;
+  const imgW = Math.floor((cardW - 52 - imgGap * 2) / 3);
+  const imgH = 420;
+  const imgX0 = cardX + 26;
+
   for (let i = 0; i < 3; i++) {
-    const x = imgX0 + i * (imgW + gap);
+    const x = imgX0 + i * (imgW + imgGap);
     const y = imgTop;
 
     ctx.save();
@@ -192,17 +325,11 @@ const W = 1080;
     if (imgs[i]) {
       drawCover(ctx, imgs[i], x, y, imgW, imgH);
     } else {
-      // fallback placeholder
       ctx.fillStyle = "rgba(0,255,190,0.08)";
       ctx.fillRect(x, y, imgW, imgH);
-      ctx.fillStyle = "rgba(233,255,248,0.65)";
-      ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText("Pose", x + 18, y + 44);
     }
-
     ctx.restore();
 
-    // neon stroke
     ctx.save();
     roundRectPath(ctx, x, y, imgW, imgH, 28);
     ctx.lineWidth = 3;
@@ -210,131 +337,68 @@ const W = 1080;
     ctx.stroke();
     ctx.restore();
 
-    // label
-    const lbl = normalizedThumbs?.[i]?.title
-      ? String(normalizedThumbs[i].title).slice(0, 18)
-      : "";
+    const lbl = cleanLine(normalizedThumbs?.[i]?.title || "").slice(0, 16);
     if (lbl) {
+      const labelW = Math.min(imgW - 26, Math.max(126, ctx.measureText(lbl).width + 28));
       ctx.save();
+      roundRectPath(ctx, x + 12, y + imgH - 52, labelW, 38, 14);
       ctx.fillStyle = "rgba(0,0,0,0.50)";
-      roundRectPath(ctx, x + 14, y + imgH - 54, Math.min(imgW - 28, 240), 40, 14);
       ctx.fill();
-      ctx.fillStyle = "rgba(233,255,248,0.92)";
-      ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText(lbl, x + 28, y + imgH - 26);
+      ctx.fillStyle = "rgba(233,255,248,0.95)";
+      ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
+      ctx.fillText(lbl, x + 26, y + imgH - 25);
       ctx.restore();
     }
   }
 
-  // sections
-  const textX = cardX + 26;
-  let y = imgTop + imgH + 40;
+  // Positive wins only — no negative/lever text on story card.
+  let y = imgTop + imgH + 46;
+  ctx.fillStyle = "#E9FFF8";
+  ctx.font = "900 38px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("WINS", cardX + 26, y);
+  y += 22;
 
-  const drawSection = (title, items, accent = "rgba(0,255,190,0.22)") => {
-    ctx.fillStyle = "#E9FFF8";
-    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(title, textX, y);
+  const boxW = cardW - 52;
+  for (const item of viralWins.slice(0, 3)) {
     y += 18;
+    const lines = (() => {
+      ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
+      return wrapLines(ctx, item, boxW - 54, 2);
+    })();
+    const boxH = lines.length > 1 ? 94 : 72;
 
-    const shown = (items || []).filter(Boolean).slice(0, 3);
-    if (!shown.length) {
-      y += 18;
-      return;
-    }
+    ctx.save();
+    roundRectPath(ctx, cardX + 26, y, boxW, boxH, 20);
+    ctx.fillStyle = "rgba(0,0,0,0.34)";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0,255,190,0.16)";
+    ctx.stroke();
+    ctx.restore();
 
-    for (const t of shown) {
-      y += 22;
-      const boxH = 64;
-      ctx.save();
-      roundRectPath(ctx, textX, y, cardW - 52, boxH, 18);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = accent;
-      ctx.stroke();
-      ctx.restore();
+    ctx.fillStyle = "rgba(233,255,248,0.94)";
+    ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
+    lines.forEach((line, idx) => {
+      ctx.fillText(line, cardX + 50, y + 31 + idx * 32);
+    });
 
-      ctx.fillStyle = "rgba(233,255,248,0.92)";
-      ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-      const line = String(t).slice(0, 60);
-      ctx.fillText(line, textX + 18, y + 42);
-      y += boxH;
-    }
+    ctx.fillStyle = "rgba(0,255,190,0.92)";
+    ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText("•", cardX + 34, y + 31);
 
-    y += 26;
-  };
-
-  drawSection("Wins", _wins, "rgba(0,255,190,0.18)");
-
-  // Viral share summary (short + positive)
-  if (_summary) {
-    const summaryLines = _summary
-      .split(/\n|\r/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .slice(0, 3);
-    drawSection("Glow-up", summaryLines, "rgba(255,210,120,0.20)");
-  }
-  drawSection("Next unlocks", _levers, "rgba(0,255,255,0.18)");
-
-  // optional signals (simple bars, always positive framing)
-  if (muscleSignals && typeof muscleSignals === "object") {
-    const order = [
-      ["chest", "Chest"],
-      ["lats", "Lats"],
-      ["delts", "Delts"],
-      ["arms", "Arms"],
-      ["waist_taper", "Taper"],
-    ];
-    ctx.fillStyle = "#E9FFF8";
-    ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto";
-    const tl = String(trackLabel || "").trim();
-    ctx.fillText(tl ? `Signals · ${tl.slice(0, 14)}` : "Signals", textX, y);
-    y += 26;
-
-    const barW = cardW - 52;
-    const barH = 18;
-    const rowGap = 18;
-
-    for (const [k, label] of order) {
-      const v = clamp(muscleSignals?.[k] ?? 0.6, 0, 1);
-
-      ctx.fillStyle = "rgba(233,255,248,0.86)";
-      ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText(label, textX, y + 24);
-
-      const bx = textX + 180;
-      const by = y + 10;
-
-      // track
-      ctx.save();
-      roundRectPath(ctx, bx, by, barW - 180, barH, 10);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.fill();
-      ctx.restore();
-
-      // fill
-      ctx.save();
-      roundRectPath(ctx, bx, by, (barW - 180) * v, barH, 10);
-      ctx.fillStyle = "rgba(0,255,190,0.40)";
-      ctx.fill();
-      ctx.restore();
-
-      y += barH + rowGap;
-    }
-
-    y += 10;
+    y += boxH;
   }
 
-  // footer
-  ctx.fillStyle = "rgba(233,255,248,0.55)";
-  ctx.font = "700 22px system-ui, -apple-system, Segoe UI, Roboto";
-  const footerLeft = "Slimcal.ai";
-  const footerRight = localDay ? String(localDay) : String(_hashtag || "");
-  ctx.fillText(footerLeft, cardX + 26, cardY + cardH - 26);
-  if (footerRight) {
-    const m = ctx.measureText(footerRight);
-    ctx.fillText(footerRight, cardX + cardW - 26 - m.width, cardY + cardH - 26);
+  // Footer
+  const footY = cardY + cardH - 34;
+  ctx.fillStyle = "rgba(233,255,248,0.58)";
+  ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("Slimcal.ai", cardX + 26, footY);
+
+  const rightFoot = cleanLine(localDay || trackLabel || safeHashtag).slice(0, 20);
+  if (rightFoot) {
+    const m = ctx.measureText(rightFoot);
+    ctx.fillText(rightFoot, cardX + cardW - 26 - m.width, footY);
   }
 
   return c.toDataURL("image/png");
