@@ -161,11 +161,12 @@ function fallbackBodyScan() {
 }
 
 
-function fallbackPoseSession() {
+function fallbackPoseSession(gender = "male") {
+  const female = String(gender || "male").toLowerCase() === "female";
   return {
     build_arc: 81,
     percentile: 19,
-    strength: "Consistency",
+    strength: female ? "Presence" : "Consistency",
     horizon_days: 90,
     muscleSignals: {
       delts: 0.62,
@@ -177,11 +178,15 @@ function fallbackPoseSession() {
       legs: 0.55,
     },
     poseQuality: {
-      front_relaxed: 0.72,
+      front_relaxed: 0.74,
       front_double_bi: 0.74,
+      side_scan: 0.73,
       back_double_bi: 0.73,
+      back_scan: 0.73,
     },
-    highlights: ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
+    highlights: female
+      ? ["Strong presence in frame", "Clean posture carries well", "Consistent scan angles improve tracking"]
+      : ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
     levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
     confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
   };
@@ -1240,9 +1245,11 @@ const freeBypass =
 
 
   if (feature === "pose_session" || feature === "pose_session_beta") {
+    const requestedGender = String(body?.gender || body?.sex || "male").toLowerCase().trim();
+    const gender = requestedGender === "female" ? "female" : "male";
     try {
-
       const style = String(body?.style || "").toLowerCase();
+      const scanMode = String(body?.scanMode || "").toLowerCase();
       const poses = Array.isArray(body?.poses) ? body.poses : [];
       if (!poses.length) {
         res.status(400).json({ error: "Missing poses" });
@@ -1265,17 +1272,20 @@ const freeBypass =
       }
 
       if (!openai) {
-        res.status(200).json({ session: fallbackPoseSession(), warning: "ai_unavailable_fallback" });
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback" });
         return;
       }
 
-      const sysBase =
+      const poseTitles = cleanPoses.map((p) => p.title || p.poseKey).filter(Boolean).join(", ");
+      const subjectLabel = gender === "female" ? "female physique scan" : "male physique scan";
+      const sys =
         "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
-        "You are NOT a medical device. You are estimating visual physique cues from uploaded bodybuilding poses. " +
-        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels. " +
+        "You are NOT a medical device. You are estimating visual physique cues from uploaded pose scans. " +
+        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels, fear framing, or harsh comparisons. " +
         "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
-        "Write as a fresh, careful analyst focusing on what is visible. " +
+        "Write as a fresh, careful analyst focusing on what is visible, flattering, and genuinely supported by the images. " +
+        "For women, use female-specific language naturally and supportively. For men, use male-specific language naturally and supportively. " +
         "Output JSON keys (required): " +
         "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
         "aesthetic_score (number 0-10), " +
@@ -1283,18 +1293,18 @@ const freeBypass =
         "poseQuality (object mapping poseKey to number 0..1), " +
         "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
         "report (string: 6-10 short paragraphs separated by \n\n), " +
-        "muscleBreakdown (array 8-12 items; each {group: string, note: string} where note is 2-5 sentences, specific, supportive), " +
+        "muscleBreakdown (array 8-12 items; each {group: string, note: string, visibility?: string} where note is 2-5 sentences, specific, supportive), " +
         "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
 
-      const sys = sysBase;
-
-
       const userText =
-        "Analyze the following pose images: Front Double Biceps, Lat Spread, Back Double Biceps (or similar). " +
-        "Estimate supportive 'physique signals' per muscle group (0..1) and pose quality (0..1). " +
+        `Analyze this ${subjectLabel} using these captures: ${poseTitles || "pose scans"}. ` +
+        "Estimate supportive physique signals per muscle group (0..1) and pose quality (0..1). " +
         "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
         "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
-        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be 'Top X%' where X is 1..99 (lower is better). " +
+        "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
+        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, glute or leg shape only if clearly visible, symmetry, and overall presence without objectifying language. " +
+        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. " +
+        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
         "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
@@ -1318,13 +1328,13 @@ const freeBypass =
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
       if (!ai) {
-        res.status(200).json({ session: fallbackPoseSession(), warning: "ai_timeout_fallback" });
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback" });
         return;
       }
 
       const text = ai?.choices?.[0]?.message?.content || "";
       const parsed = safeParseJsonFromText(text) || {};
-      const fb = fallbackPoseSession();
+      const fb = fallbackPoseSession(gender);
 
       const ms = parsed.muscleSignals || parsed.muscles || fb.muscleSignals;
       const pq = parsed.poseQuality || parsed.pose_quality || fb.poseQuality;
@@ -1349,7 +1359,7 @@ const freeBypass =
                 const visibility = normalizeVisibilityLabel(r.visibility || r.inFrame || r.visible || r.assessable || "");
                 let note = String(r.note || r.text || "").slice(0, 900);
                 const fallbackVisibility = visibility || groupVisibilityFallback(group);
-                const needsVisibilityOverride = !note || /(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)/i.test(group) && !/(not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess)/i.test(note);
+                const needsVisibilityOverride = !note || /\b(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)\b/i.test(group) && !/(not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess)/i.test(note);
                 if (needsVisibilityOverride) {
                   const override = visibilityNoteForGroup(group, fallbackVisibility);
                   if (override) note = override;
@@ -1371,7 +1381,9 @@ const freeBypass =
         poseQuality: {
           front_relaxed: clamp(pq?.front_relaxed ?? pq?.frontRelaxed ?? fb.poseQuality.front_relaxed, 0, 1),
           front_double_bi: clamp(pq?.front_double_bi ?? pq?.frontDoubleBi ?? fb.poseQuality.front_double_bi, 0, 1),
+          side_scan: clamp(pq?.side_scan ?? pq?.sideScan ?? fb.poseQuality.side_scan, 0, 1),
           back_double_bi: clamp(pq?.back_double_bi ?? pq?.backDoubleBi ?? fb.poseQuality.back_double_bi, 0, 1),
+          back_scan: clamp(pq?.back_scan ?? pq?.backScan ?? fb.poseQuality.back_scan, 0, 1),
         },
         highlights: Array.isArray(parsed.highlights)
           ? parsed.highlights.map((s) => String(s).slice(0, 90)).slice(0, 5)
@@ -1380,6 +1392,8 @@ const freeBypass =
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
+        gender,
+        scanMode,
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),
       };
 
@@ -1393,7 +1407,7 @@ const freeBypass =
       delete session.__rawText;
 
       if (Array.isArray(session.muscleBreakdown) && session.muscleBreakdown.length) {
-        const lowerOutOfFrame = session.muscleBreakdown.some((row) => /(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)/i.test(String(row.group || "")) && /not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess/i.test(String(row.note || "")));
+        const lowerOutOfFrame = session.muscleBreakdown.some((row) => /\b(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)\b/i.test(String(row.group || "")) && /not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess/i.test(String(row.note || "")));
         if (lowerOutOfFrame && typeof session.report === "string" && session.report.trim()) {
           const note = "Lower body visibility note: your legs and hips are not clearly in frame in these captures, so any lower-body assessment should be treated as incomplete until you re-scan with more of your body visible.";
           if (!session.report.includes(note)) {
@@ -1411,7 +1425,7 @@ ${note}`;
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);
-      res.status(200).json({ session: fallbackPoseSession(), warning: "ai_error_fallback" });
+      res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_error_fallback" });
       return;
     }
   }

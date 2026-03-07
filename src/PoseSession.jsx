@@ -27,21 +27,41 @@ import {
   localDayISO,
 } from "./lib/poseSessionStore.js";
 
-const POSES = [
+const MALE_POSES = [
   { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
   { key: "lat_spread", title: "Lat Spread", subtitle: "Chest up · spread lats · stay tall" },
   { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
 ];
 
+const FEMALE_POSES = [
+  { key: "front_scan", title: "Front Scan", subtitle: "Face forward · stand tall · arms relaxed slightly away from sides" },
+  { key: "side_scan", title: "Side Scan", subtitle: "Turn sideways · stand tall · keep posture natural" },
+  { key: "back_scan", title: "Back Scan", subtitle: "Turn around · stand tall · keep shoulders relaxed" },
+];
+
 const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
-
-
 const OUTLINE_PULSE_MS = 1800;
 
-function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
+function readStoredGender() {
+  try {
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.gender || "").toLowerCase().trim();
+      if (g === "male" || g === "female") return g;
+    }
+  } catch {}
+  try {
+    const g = String(localStorage.getItem("gender") || "").toLowerCase().trim();
+    if (g === "male" || g === "female") return g;
+  } catch {}
+  return "male";
+}
+
+function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "rgba(90, 255, 160, 0.95)" }) {
   const common = {
     fill: "none",
-    stroke: "rgba(90, 255, 160, 0.95)",
+    stroke: color,
     strokeWidth: 4,
     strokeLinecap: "round",
     strokeLinejoin: "round",
@@ -50,7 +70,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
 
   const glow = {
     fill: "none",
-    stroke: "rgba(90, 255, 160, 0.26)",
+    stroke: color.replace("0.95", "0.26"),
     strokeWidth: 12,
     strokeLinecap: "round",
     strokeLinejoin: "round",
@@ -130,6 +150,68 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
         <path d="M150 232 C136 246,128 266,124 292" {...common} />
         <path d="M150 232 C164 246,172 266,176 292" {...glow} />
         <path d="M150 232 C164 246,172 266,176 292" {...common} />
+      </>
+    ),
+    front_scan: (
+      <>
+        <circle cx="150" cy="86" r="26" {...glow} />
+        <circle cx="150" cy="86" r="26" {...common} />
+        <path d="M150 112 C128 118,118 132,112 154" {...glow} />
+        <path d="M150 112 C128 118,118 132,112 154" {...common} />
+        <path d="M150 112 C172 118,182 132,188 154" {...glow} />
+        <path d="M150 112 C172 118,182 132,188 154" {...common} />
+        <path d="M112 154 C100 186,102 214,112 242" {...glow} />
+        <path d="M112 154 C100 186,102 214,112 242" {...common} />
+        <path d="M188 154 C200 186,198 214,188 242" {...glow} />
+        <path d="M188 154 C200 186,198 214,188 242" {...common} />
+        <path d="M112 156 C96 174,82 194,74 220" {...glow} />
+        <path d="M112 156 C96 174,82 194,74 220" {...common} />
+        <path d="M188 156 C204 174,218 194,226 220" {...glow} />
+        <path d="M188 156 C204 174,218 194,226 220" {...common} />
+        <path d="M132 242 C130 266,128 284,126 308" {...glow} />
+        <path d="M132 242 C130 266,128 284,126 308" {...common} />
+        <path d="M168 242 C170 266,172 284,174 308" {...glow} />
+        <path d="M168 242 C170 266,172 284,174 308" {...common} />
+      </>
+    ),
+    side_scan: (
+      <>
+        <circle cx="156" cy="86" r="26" {...glow} />
+        <circle cx="156" cy="86" r="26" {...common} />
+        <path d="M150 112 C170 122,182 140,186 164" {...glow} />
+        <path d="M150 112 C170 122,182 140,186 164" {...common} />
+        <path d="M186 164 C190 194,186 220,176 246" {...glow} />
+        <path d="M186 164 C190 194,186 220,176 246" {...common} />
+        <path d="M150 120 C138 142,136 170,142 198" {...glow} />
+        <path d="M150 120 C138 142,136 170,142 198" {...common} />
+        <path d="M142 198 C146 220,150 238,156 256" {...glow} />
+        <path d="M142 198 C146 220,150 238,156 256" {...common} />
+        <path d="M176 246 C172 270,168 290,164 312" {...glow} />
+        <path d="M176 246 C172 270,168 290,164 312" {...common} />
+        <path d="M156 256 C154 276,152 294,150 314" {...glow} />
+        <path d="M156 256 C154 276,152 294,150 314" {...common} />
+      </>
+    ),
+    back_scan: (
+      <>
+        <circle cx="150" cy="86" r="26" {...glow} />
+        <circle cx="150" cy="86" r="26" {...common} />
+        <path d="M150 112 C126 120,116 136,112 156" {...glow} />
+        <path d="M150 112 C126 120,116 136,112 156" {...common} />
+        <path d="M150 112 C174 120,184 136,188 156" {...glow} />
+        <path d="M150 112 C174 120,184 136,188 156" {...common} />
+        <path d="M112 156 C102 190,102 218,112 244" {...glow} />
+        <path d="M112 156 C102 190,102 218,112 244" {...common} />
+        <path d="M188 156 C198 190,198 218,188 244" {...glow} />
+        <path d="M188 156 C198 190,198 218,188 244" {...common} />
+        <path d="M112 160 C98 182,86 202,80 226" {...glow} />
+        <path d="M112 160 C98 182,86 202,80 226" {...common} />
+        <path d="M188 160 C202 182,214 202,220 226" {...glow} />
+        <path d="M188 160 C202 182,214 202,220 226" {...common} />
+        <path d="M132 244 C130 268,128 286,126 308" {...glow} />
+        <path d="M132 244 C130 268,128 286,126 308" {...common} />
+        <path d="M168 244 C170 268,172 286,174 308" {...glow} />
+        <path d="M168 244 C170 268,172 286,174 308" {...common} />
       </>
     ),
   };
@@ -218,6 +300,10 @@ export default function PoseSession() {
   const { user } = useAuth();
 
   const userId = user?.id || "anon";
+  const gender = useMemo(() => readStoredGender(), []);
+  const isFemale = gender === "female";
+  const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
+  const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(90, 255, 160, 0.95)";
 
   const [stage, setStage] = useState("intro"); // intro | capture | scanning | results
   const [poseIdx, setPoseIdx] = useState(0);
@@ -236,7 +322,7 @@ export default function PoseSession() {
   const timerRef = useRef(null);
   const countdownRef = useRef(null);
 
-  const pose = POSES[poseIdx] || POSES[0];
+  const pose = activePoses[poseIdx] || activePoses[0];
 
   const todayISO = useMemo(() => localDayISO(), []);
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
@@ -327,7 +413,7 @@ export default function PoseSession() {
       ]);
 
       // Advance pose
-      if (poseIdx < POSES.length - 1) {
+      if (poseIdx < activePoses.length - 1) {
         setPoseIdx((i) => i + 1);
       } else {
         setStage("scanning");
@@ -366,13 +452,15 @@ export default function PoseSession() {
   }, []);
 
   const callAI = useCallback(async () => {
-    if (captures.length < 3) return;
+    if (captures.length < activePoses.length) return;
     setErrorMsg("");
 
     try {
       const payload = {
         feature: "pose_session",
         style: "detailed_muscle_groups_v1",
+        gender,
+        scanMode: isFemale ? "female_pose_session" : "male_pose_session",
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
@@ -409,7 +497,7 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [captures, deltas, todayISO, userId]);
+  }, [activePoses.length, captures, deltas, gender, isFemale, todayISO, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -517,11 +605,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 AI Physique Tracker
               </Typography>
               <Typography sx={{ color: bodyColor }}>
-                3 poses · 15 seconds · shareable results
+                3 guided scans · 15 seconds · shareable results
               </Typography>
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                {POSES.map((p) => (
+                {activePoses.map((p) => (
                   <Box
                     key={p.key}
                     sx={{
@@ -580,7 +668,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 Start Scan
               </Button>
               <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: 12 }}>
-                Tip: step back so your full upper body is in frame.
+                Tip: step back so your full body shape is easy to read in frame.
               </Typography>
             </Stack>
           )}
@@ -599,7 +687,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
             <Stack spacing={2}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography sx={{ color: titleColor, fontWeight: 800 }}>
-                  Pose {poseIdx + 1} of {POSES.length}
+                  Pose {poseIdx + 1} of {activePoses.length}
                 </Typography>
                 <Button
                   onClick={retakePose}
@@ -636,6 +724,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   poseKey={pose.key}
                   mirrored={facingMode === "user"}
                   active={outlinePulseActive}
+                  color={outlineColor}
                 />
 
                 {/* Minimal “fancy” prompt overlay (no tracking) */}
