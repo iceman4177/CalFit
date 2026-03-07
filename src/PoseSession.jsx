@@ -60,6 +60,17 @@ function readStoredGender() {
 
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "rgba(90, 255, 160, 0.95)" }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
+  const outlineFrameWidth = isFemaleCue ? "min(72%, 340px)" : "min(86%, 420px)";
+  const outlineBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.18)" : "1px solid rgba(90,255,160,0.22)";
+  const outlineBg = isFemaleCue ? "rgba(36, 8, 22, 0.08)" : "rgba(5, 20, 12, 0.08)";
+  const outlineShadow = isFemaleCue
+    ? "0 0 28px rgba(255,105,180,0.12), inset 0 0 20px rgba(255,105,180,0.05)"
+    : "0 0 40px rgba(90,255,160,0.16), inset 0 0 32px rgba(90,255,160,0.06)";
+  const femalePoseTransform = {
+    front_scan: "translate(24 20) scale(0.74)",
+    side_scan: "translate(34 18) scale(0.72)",
+    back_scan: "translate(24 20) scale(0.74)",
+  };
 
   const common = {
     fill: "none",
@@ -233,13 +244,13 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
     >
       <Box
         sx={{
-          width: "min(86%, 420px)",
-          maxWidth: "86%",
+          width: outlineFrameWidth,
+          maxWidth: isFemaleCue ? "72%" : "86%",
           aspectRatio: "3 / 4",
           borderRadius: "32px",
-          border: "1px solid rgba(90,255,160,0.22)",
-          bgcolor: "rgba(5, 20, 12, 0.08)",
-          boxShadow: active ? "0 0 40px rgba(90,255,160,0.16), inset 0 0 32px rgba(90,255,160,0.06)" : "none",
+          border: outlineBorder,
+          bgcolor: outlineBg,
+          boxShadow: active ? outlineShadow : "none",
           transform: mirrored ? "scaleX(-1)" : "none",
           animation: active ? "matrixPulse 1.1s ease-in-out infinite" : "none",
         }}
@@ -254,7 +265,12 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
               </feMerge>
             </filter>
           </defs>
-          <g filter="url(#poseGlow)">{outlines[poseKey] || outlines.front_double_bi}</g>
+          <g
+            filter="url(#poseGlow)"
+            transform={isFemaleCue ? (femalePoseTransform[poseKey] || "translate(24 20) scale(0.74)") : undefined}
+          >
+            {outlines[poseKey] || outlines.front_double_bi}
+          </g>
         </svg>
       </Box>
     </Box>
