@@ -60,16 +60,16 @@ function readStoredGender() {
 
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "rgba(90, 255, 160, 0.95)" }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
-  const outlineFrameWidth = isFemaleCue ? "min(72%, 340px)" : "min(86%, 420px)";
+  const outlineFrameWidth = isFemaleCue ? "min(78%, 372px)" : "min(86%, 420px)";
   const outlineBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.18)" : "1px solid rgba(90,255,160,0.22)";
   const outlineBg = isFemaleCue ? "rgba(36, 8, 22, 0.08)" : "rgba(5, 20, 12, 0.08)";
   const outlineShadow = isFemaleCue
     ? "0 0 28px rgba(255,105,180,0.12), inset 0 0 20px rgba(255,105,180,0.05)"
     : "0 0 40px rgba(90,255,160,0.16), inset 0 0 32px rgba(90,255,160,0.06)";
   const femalePoseTransform = {
-    front_scan: "translate(38 36) scale(0.62)",
-    side_scan: "translate(48 36) scale(0.60)",
-    back_scan: "translate(38 36) scale(0.62)",
+    front_scan: "translate(22 20) scale(0.82)",
+    side_scan: "translate(22 20) scale(0.82)",
+    back_scan: "translate(22 20) scale(0.82)",
   };
 
   const common = {
@@ -169,48 +169,48 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
       <>
         <circle cx="150" cy="86" r="20" {...glow} />
         <circle cx="150" cy="86" r="20" {...common} />
-        <path d="M150 106 L150 222" {...glow} />
-        <path d="M150 106 L150 222" {...common} />
+        <path d="M150 106 L150 228" {...glow} />
+        <path d="M150 106 L150 228" {...common} />
         <path d="M150 132 L114 172" {...glow} />
         <path d="M150 132 L114 172" {...common} />
         <path d="M150 132 L186 172" {...glow} />
         <path d="M150 132 L186 172" {...common} />
-        <path d="M150 222 L128 294" {...glow} />
-        <path d="M150 222 L128 294" {...common} />
-        <path d="M150 222 L172 294" {...glow} />
-        <path d="M150 222 L172 294" {...common} />
+        <path d="M150 228 L126 304" {...glow} />
+        <path d="M150 228 L126 304" {...common} />
+        <path d="M150 228 L174 304" {...glow} />
+        <path d="M150 228 L174 304" {...common} />
       </>
     ),
     side_scan: (
       <>
-        <circle cx="156" cy="88" r="20" {...glow} />
-        <circle cx="156" cy="88" r="20" {...common} />
-        <path d="M150 108 L166 220" {...glow} />
-        <path d="M150 108 L166 220" {...common} />
-        <path d="M156 136 L188 174" {...glow} />
-        <path d="M156 136 L188 174" {...common} />
-        <path d="M154 136 L138 172" {...glow} />
-        <path d="M154 136 L138 172" {...common} />
-        <path d="M166 220 L154 294" {...glow} />
-        <path d="M166 220 L154 294" {...common} />
-        <path d="M166 220 L182 292" {...glow} />
-        <path d="M166 220 L182 292" {...common} />
+        <circle cx="150" cy="86" r="20" {...glow} />
+        <circle cx="150" cy="86" r="20" {...common} />
+        <path d="M150 106 L150 228" {...glow} />
+        <path d="M150 106 L150 228" {...common} />
+        <path d="M150 136 L182 170" {...glow} />
+        <path d="M150 136 L182 170" {...common} />
+        <path d="M150 136 L126 170" {...glow} />
+        <path d="M150 136 L126 170" {...common} />
+        <path d="M150 228 L138 304" {...glow} />
+        <path d="M150 228 L138 304" {...common} />
+        <path d="M150 228 L170 304" {...glow} />
+        <path d="M150 228 L170 304" {...common} />
       </>
     ),
     back_scan: (
       <>
         <circle cx="150" cy="86" r="20" {...glow} />
         <circle cx="150" cy="86" r="20" {...common} />
-        <path d="M150 106 L150 222" {...glow} />
-        <path d="M150 106 L150 222" {...common} />
+        <path d="M150 106 L150 228" {...glow} />
+        <path d="M150 106 L150 228" {...common} />
         <path d="M150 132 L112 170" {...glow} />
         <path d="M150 132 L112 170" {...common} />
         <path d="M150 132 L188 170" {...glow} />
         <path d="M150 132 L188 170" {...common} />
-        <path d="M150 222 L130 294" {...glow} />
-        <path d="M150 222 L130 294" {...common} />
-        <path d="M150 222 L170 294" {...glow} />
-        <path d="M150 222 L170 294" {...common} />
+        <path d="M150 228 L128 304" {...glow} />
+        <path d="M150 228 L128 304" {...common} />
+        <path d="M150 228 L172 304" {...glow} />
+        <path d="M150 228 L172 304" {...common} />
       </>
     ),
   };
