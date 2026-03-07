@@ -167,54 +167,50 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
     ),
     front_scan: (
       <>
-        <circle cx="150" cy="90" r="24" {...glow} />
-        <circle cx="150" cy="90" r="24" {...common} />
-        <path d="M150 114 L126 136 L118 170 L118 226 L128 254" {...glow} />
-        <path d="M150 114 L126 136 L118 170 L118 226 L128 254" {...common} />
-        <path d="M150 114 L174 136 L182 170 L182 226 L172 254" {...glow} />
-        <path d="M150 114 L174 136 L182 170 L182 226 L172 254" {...common} />
-        <path d="M126 140 L102 174 L90 210" {...glow} />
-        <path d="M126 140 L102 174 L90 210" {...common} />
-        <path d="M174 140 L198 174 L210 210" {...glow} />
-        <path d="M174 140 L198 174 L210 210" {...common} />
-        <path d="M128 254 L122 306" {...glow} />
-        <path d="M128 254 L122 306" {...common} />
-        <path d="M172 254 L178 306" {...glow} />
-        <path d="M172 254 L178 306" {...common} />
+        <circle cx="150" cy="86" r="20" {...glow} />
+        <circle cx="150" cy="86" r="20" {...common} />
+        <path d="M150 106 L150 222" {...glow} />
+        <path d="M150 106 L150 222" {...common} />
+        <path d="M150 132 L114 172" {...glow} />
+        <path d="M150 132 L114 172" {...common} />
+        <path d="M150 132 L186 172" {...glow} />
+        <path d="M150 132 L186 172" {...common} />
+        <path d="M150 222 L128 294" {...glow} />
+        <path d="M150 222 L128 294" {...common} />
+        <path d="M150 222 L172 294" {...glow} />
+        <path d="M150 222 L172 294" {...common} />
       </>
     ),
     side_scan: (
       <>
-        <circle cx="156" cy="92" r="24" {...glow} />
-        <circle cx="156" cy="92" r="24" {...common} />
-        <path d="M150 116 L168 136 L176 170 L174 222 L166 252" {...glow} />
-        <path d="M150 116 L168 136 L176 170 L174 222 L166 252" {...common} />
-        <path d="M150 122 L142 148 L140 190 L146 226 L152 254" {...glow} />
-        <path d="M150 122 L142 148 L140 190 L146 226 L152 254" {...common} />
-        <path d="M166 148 L188 178 L196 212" {...glow} />
-        <path d="M166 148 L188 178 L196 212" {...common} />
-        <path d="M166 252 L162 308" {...glow} />
-        <path d="M166 252 L162 308" {...common} />
-        <path d="M152 254 L148 312" {...glow} />
-        <path d="M152 254 L148 312" {...common} />
+        <circle cx="156" cy="88" r="20" {...glow} />
+        <circle cx="156" cy="88" r="20" {...common} />
+        <path d="M150 108 L166 220" {...glow} />
+        <path d="M150 108 L166 220" {...common} />
+        <path d="M156 136 L188 174" {...glow} />
+        <path d="M156 136 L188 174" {...common} />
+        <path d="M154 136 L138 172" {...glow} />
+        <path d="M154 136 L138 172" {...common} />
+        <path d="M166 220 L154 294" {...glow} />
+        <path d="M166 220 L154 294" {...common} />
+        <path d="M166 220 L182 292" {...glow} />
+        <path d="M166 220 L182 292" {...common} />
       </>
     ),
     back_scan: (
       <>
-        <circle cx="150" cy="90" r="24" {...glow} />
-        <circle cx="150" cy="90" r="24" {...common} />
-        <path d="M150 114 L126 136 L118 172 L118 228 L128 256" {...glow} />
-        <path d="M150 114 L126 136 L118 172 L118 228 L128 256" {...common} />
-        <path d="M150 114 L174 136 L182 172 L182 228 L172 256" {...glow} />
-        <path d="M150 114 L174 136 L182 172 L182 228 L172 256" {...common} />
-        <path d="M126 144 L98 178 L86 214" {...glow} />
-        <path d="M126 144 L98 178 L86 214" {...common} />
-        <path d="M174 144 L202 178 L214 214" {...glow} />
-        <path d="M174 144 L202 178 L214 214" {...common} />
-        <path d="M128 256 L122 308" {...glow} />
-        <path d="M128 256 L122 308" {...common} />
-        <path d="M172 256 L178 308" {...glow} />
-        <path d="M172 256 L178 308" {...common} />
+        <circle cx="150" cy="86" r="20" {...glow} />
+        <circle cx="150" cy="86" r="20" {...common} />
+        <path d="M150 106 L150 222" {...glow} />
+        <path d="M150 106 L150 222" {...common} />
+        <path d="M150 132 L112 170" {...glow} />
+        <path d="M150 132 L112 170" {...common} />
+        <path d="M150 132 L188 170" {...glow} />
+        <path d="M150 132 L188 170" {...common} />
+        <path d="M150 222 L130 294" {...glow} />
+        <path d="M150 222 L130 294" {...common} />
+        <path d="M150 222 L170 294" {...glow} />
+        <path d="M150 222 L170 294" {...common} />
       </>
     ),
   };
