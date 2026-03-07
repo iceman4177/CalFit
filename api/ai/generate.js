@@ -185,10 +185,12 @@ function fallbackPoseSession(gender = "male") {
       back_scan: 0.73,
     },
     highlights: female
-      ? ["Strong presence in frame", "Clean posture carries well", "Consistent scan angles improve tracking"]
+      ? ["Elegant presence in frame", "Posture reads polished and poised", "Consistent scan angles improve tracking"]
       : ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
     levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
-    confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
+    confidenceNote: female
+      ? "Beautiful starting point — consistent lighting and repeat scans will make your progress feel even clearer over time."
+      : "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
   };
 }
 
@@ -1285,7 +1287,7 @@ const freeBypass =
         "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels, fear framing, or harsh comparisons. " +
         "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
         "Write as a fresh, careful analyst focusing on what is visible, flattering, and genuinely supported by the images. " +
-        "For women, use female-specific language naturally and supportively. For men, use male-specific language naturally and supportively. " +
+        "For women, use female-specific language naturally and supportively with an uplifting best-friend energy that feels warm, affirming, and motivating. Emphasize beauty, elegance, poise, glow, feminine presence, and visible progress when supported by the images. Do not mention body weight, being thin, dieting, or body-size judgments. For men, use male-specific language naturally and supportively. " +
         "Output JSON keys (required): " +
         "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
         "aesthetic_score (number 0-10), " +
@@ -1302,7 +1304,7 @@ const freeBypass =
         "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
         "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
         "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
-        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, glute or leg shape only if clearly visible, symmetry, and overall presence without objectifying language. " +
+        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, softness, elegance, confidence, and overall presence without objectifying language. Make the experience feel like a supportive girls-best-friend coach: encouraging, beauty-affirming, and motivating, while staying grounded in what is actually visible. Highlight pretty, polished, graceful, radiant, or sculpted qualities only when the images support them. Never use weight-loss language or imply that being smaller is better. Only mention glute or leg shape if those areas are clearly visible. " +
         "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
         "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";

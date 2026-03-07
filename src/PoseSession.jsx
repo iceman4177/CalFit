@@ -59,10 +59,12 @@ function readStoredGender() {
 }
 
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "rgba(90, 255, 160, 0.95)" }) {
+  const isFemaleCue = /_scan$/.test(String(poseKey || ""));
+
   const common = {
     fill: "none",
     stroke: color,
-    strokeWidth: 4,
+    strokeWidth: isFemaleCue ? 2.4 : 4,
     strokeLinecap: "round",
     strokeLinejoin: "round",
     vectorEffect: "non-scaling-stroke",
@@ -70,8 +72,8 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
 
   const glow = {
     fill: "none",
-    stroke: color.replace("0.95", "0.26"),
-    strokeWidth: 12,
+    stroke: color.replace("0.95", "0.22"),
+    strokeWidth: isFemaleCue ? 7 : 12,
     strokeLinecap: "round",
     strokeLinejoin: "round",
     vectorEffect: "non-scaling-stroke",
