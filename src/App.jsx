@@ -18,7 +18,8 @@ import { Container,
   Snackbar,
   Alert,
   Badge,
-  Chip } from '@mui/material';
+  Chip,
+  CircularProgress } from '@mui/material';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon    from '@mui/icons-material/Restaurant';
 import MoreVertIcon      from '@mui/icons-material/MoreVert';
@@ -311,21 +312,29 @@ export default function App() {
 
   // Auth state
   const [authUser, setAuthUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
   useEffect(() => {
     let mounted = true;
 
     (async () => {
       try {
         const { data } = await supabase.auth.getUser();
-        if (mounted) setAuthUser(data?.user ?? null);
+        if (mounted) {
+          setAuthUser(data?.user ?? null);
+          setAuthResolved(true);
+        }
       } catch (e) {
-        if (mounted) setAuthUser(null);
+        if (mounted) {
+          setAuthUser(null);
+          setAuthResolved(true);
+        }
       }
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const user = session?.user ?? null;
       setAuthUser(user);
+      setAuthResolved(true);
 
       // Auto-open Upgrade after OAuth if we set the flag pre-login
       if (user && localStorage.getItem('slimcal:openUpgradeAfterLogin') === '1') {
@@ -430,6 +439,7 @@ export default function App() {
   }, [authUser?.id]);
 
   const [userData, setUserDataState] = useState(null);
+  const [profileResolved, setProfileResolved] = useState(false);
 
   const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
   const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')   || '[]')
@@ -471,11 +481,28 @@ export default function App() {
   const closeMore = () => setMoreAnchor(null);
 
   const minimumProfileStatus = React.useMemo(() => {
+    if (!profileResolved) return null;
     return getMinimumProfileStatusFromData(userData || {});
-  }, [userData]);
+  }, [profileResolved, userData]);
 
   const renderProfileGate = (title, body) => {
-    if (minimumProfileStatus.isComplete) return null;
+    const awaitingAuth = !authResolved;
+    const awaitingProfile = !!authUser && !profileResolved;
+
+    if (awaitingAuth || awaitingProfile) {
+      return (
+        <Box sx={{ minHeight: 'calc(100vh - 160px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
+            <CircularProgress size={32} />
+            <Typography variant="body2" color="text.secondary">
+              Loading your profile…
+            </Typography>
+          </Stack>
+        </Box>
+      );
+    }
+
+    if (minimumProfileStatus?.isComplete) return null;
     return <ProfileSetupGate title={title} body={body} />;
   };
 
@@ -487,12 +514,14 @@ export default function App() {
     if (authUser?.id) mirrorProfileToLegacy(authUser.id, next);
     else localStorage.setItem('userData', JSON.stringify(next));
     setUserDataState(next);
+    setProfileResolved(true);
   };
 
   const [streak, setStreak] = useState(() => getStreak());
 
   useEffect(() => {
     hydrateStreakOnStartup();
+    setProfileResolved(false);
 
     const userId = authUser?.id || null;
     const bundle = readProfileBundle(userId);
@@ -521,6 +550,7 @@ export default function App() {
       localStorage.setItem('userData', JSON.stringify(normalized));
     }
     setUserDataState(normalized);
+    setProfileResolved(true);
     refreshCalories();
 
     setStreak(getStreak());
