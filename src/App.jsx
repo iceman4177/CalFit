@@ -64,6 +64,8 @@ import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
+import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
+import ProfileSetupGate from './components/ProfileSetupGate';
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
@@ -299,37 +301,6 @@ function recomputeTodayBanners(setBurned, setConsumed, uid) {
 // -----------------------------------------------------------------------
 
 
-// ---- Health form "show once" helpers ----------------------------------
-function getHealthSeenKeyForUser(userId) {
-  return userId ? `slimcal:healthFormSeen:user:${userId}:v1` : 'slimcal:healthFormSeen:anon:v1';
-}
-function hasSeenHealthForm(userId) {
-  try {
-    const key = getHealthSeenKeyForUser(userId);
-    return localStorage.getItem(key) === 'true';
-  } catch (e) {
-    return false;
-  }
-}
-function markHealthFormSeen(userId) {
-  try {
-    const key = getHealthSeenKeyForUser(userId);
-    localStorage.setItem(key, 'true');
-  } catch (e) {}
-}
-function hasHealthDataLocal(saved, userId) {
-  try {
-    const hasCompleted = userId
-      ? localStorage.getItem(`hasCompletedHealthData:${userId}`) === 'true'
-      : localStorage.getItem('hasCompletedHealthData') === 'true';
-    if (hasCompleted) return true;
-    const age = saved?.age;
-    return !!age;
-  } catch (e) {
-    return !!saved?.age;
-  }
-}
-// -----------------------------------------------------------------------
 
 export default function App() {
   const history      = useHistory();
@@ -499,6 +470,15 @@ export default function App() {
   const openMore  = e => setMoreAnchor(e.currentTarget);
   const closeMore = () => setMoreAnchor(null);
 
+  const minimumProfileStatus = React.useMemo(() => {
+    return getMinimumProfileStatusFromData(userData || {});
+  }, [userData]);
+
+  const renderProfileGate = (title, body) => {
+    if (minimumProfileStatus.isComplete) return null;
+    return <ProfileSetupGate title={title} body={body} />;
+  };
+
   const setUserData = data => {
     const bundle = readProfileBundle(authUser?.id || null);
     const prev = bundle.userData || {};
@@ -542,16 +522,6 @@ export default function App() {
     }
     setUserDataState(normalized);
     refreshCalories();
-
-    // ---- Show Health form only once per anon device OR once per user ----
-    const hasHealth = hasHealthDataLocal(merged, userId);
-    const hasSeen = hasSeenHealthForm(userId);
-
-    // Only redirect from Acquisition Home (Daily Evaluation). Never loop.
-    if (location.pathname === '/' && !hasHealth && !hasSeen) {
-      markHealthFormSeen(userId);
-      history.replace('/edit-info');
-    }
 
     setStreak(getStreak());
   }, [isProActive, location.pathname, history, authUser?.id]);
@@ -848,7 +818,7 @@ export default function App() {
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
-                    <Route exact path="/body-scan/session" component={PoseSession} /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
+                    <Route exact path="/body-scan/session" render={() => renderProfileGate("Complete your profile before Pose Session", "Pose Session uses your body stats and goals so the scan feels personal and accurate.") || <PoseSession />} /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
@@ -963,14 +933,14 @@ export default function App() {
           <Route
             exact
             path="/daily-eval"
-            render={() => <DailyEvaluationHome view="scoreboard" />}
+            render={() => renderProfileGate("Complete your profile before Daily Eval", "Daily Eval uses your profile to judge your day against the right calorie and goal targets.") || <DailyEvaluationHome view="scoreboard" />}
           />
 
           {/* Daily Checklist (quests only) */}
           <Route
             exact
             path="/daily-checklist"
-            render={() => <DailyEvaluationHome view="checklist" />}
+            render={() => renderProfileGate("Complete your profile before Checklist", "Checklist needs your profile so your targets and progress cues are based on you.") || <DailyEvaluationHome view="checklist" />}
           />
 
           
@@ -979,13 +949,13 @@ export default function App() {
           <Route
             exact
             path="/get-verdict"
-            render={() => <DailyEvaluationHome view="coach" />}
+            render={() => renderProfileGate("Complete your profile before Get Verdict", "Get Verdict works best when SlimCal knows your body stats, activity level, and goal.") || <DailyEvaluationHome view="coach" />}
           />
 {/* Daily Verdict (AI coach) */}
           <Route
             exact
             path="/verdict"
-            render={() => (
+            render={() => renderProfileGate("Complete your profile before Coach", "Coach uses your profile to generate calorie-aware and goal-aware guidance.") || (
               <DailyRecapCoach
                 userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
               />

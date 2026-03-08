@@ -1,6 +1,8 @@
 // src/HomeHub.jsx
-import React from "react";
+import React, { useMemo } from "react";
 import { useHistory } from "react-router-dom";
+import { useAuth } from "./context/AuthProvider";
+import { getMinimumProfileStatus } from "./lib/profileCompletion";
 import {
   Box,
   Container,
@@ -82,6 +84,8 @@ function AppIcon({ icon, label, onClick, grad }) {
 export default function HomeHub() {
 
   const history = useHistory();
+  const { user } = useAuth();
+  const profileStatus = useMemo(() => getMinimumProfileStatus(user?.id || null), [user?.id]);
 
   return (
     <Box
@@ -108,6 +112,45 @@ export default function HomeHub() {
             </Typography>
           </Stack>
 
+
+          {user && !profileStatus.isComplete && (
+            <Stack
+              spacing={1.1}
+              sx={{
+                width: "100%",
+                p: 2,
+                borderRadius: 3,
+                border: "1px solid rgba(59,130,246,0.22)",
+                background: "linear-gradient(180deg, rgba(239,246,255,0.96) 0%, rgba(255,255,255,0.95) 100%)",
+                boxShadow: "0 10px 30px rgba(59,130,246,0.10)",
+              }}
+            >
+              <Typography sx={{ fontWeight: 1000, color: "rgba(15,23,42,0.96)" }}>
+                Personalize SlimCal in under 30 seconds
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 600 }}>
+                Complete your profile to unlock accurate AI calories, Daily Eval, Pose Session, and Verdict outputs.
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <Typography variant="caption" sx={{ fontWeight: 900, color: "primary.main" }}>
+                  {profileStatus.completedCount}/{profileStatus.totalCount} core fields complete
+                </Typography>
+                <ButtonBase
+                  onClick={() => history.push('/edit-info')}
+                  sx={{
+                    px: 1.5,
+                    py: 0.75,
+                    borderRadius: 999,
+                    bgcolor: "primary.main",
+                    color: "white",
+                    fontWeight: 900,
+                  }}
+                >
+                  Complete Profile
+                </ButtonBase>
+              </Stack>
+            </Stack>
+          )}
           <Box
             sx={{
               width: "100%",
