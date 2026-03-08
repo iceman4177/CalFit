@@ -42,10 +42,12 @@ import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import FeatureUseBadge, {
-  canUseDailyFeature
+  canUseDailyFeature,
+  setDailyRemaining
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
+import { getAIQuotaStatus } from './lib/ai';
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
@@ -1281,6 +1283,25 @@ setNewExercise({
     }
     setShowSuggestCard(false);
   };
+
+
+  useEffect(() => {
+    let active = true;
+    const syncWorkoutQuota = async () => {
+      if (isProUser() || !user?.id) return;
+      try {
+        const q = await getAIQuotaStatus('workout');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
+      } catch {}
+    };
+    syncWorkoutQuota();
+    window.addEventListener('focus', syncWorkoutQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncWorkoutQuota);
+    };
+  }, [user?.id]);
 
   // ---- derived UI stats for a compact strip ----
   const sessionTotals = useMemo(() => {

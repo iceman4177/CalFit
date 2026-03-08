@@ -1,5 +1,5 @@
 // src/components/FeatureUseBadge.jsx
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Chip } from '@mui/material';
 
 // -----------------------------------------------------------------------------
@@ -58,10 +58,15 @@ function readState() {
   return st;
 }
 
+function notifyUsageChanged() {
+  try { window.dispatchEvent(new Event("slimcal:usage-updated")); } catch {}
+}
+
 function writeState(st) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   } catch {}
+  notifyUsageChanged();
 }
 
 export function getFreeDailyLimit(featureKey) {
@@ -115,6 +120,24 @@ export function setDailyRemaining(featureKey, remaining) {
 // UI Badge
 // -----------------------------------------------------------------------------
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
+  const [, forceRender] = useState(0);
+
+  useEffect(() => {
+    const bump = () => forceRender((n) => n + 1);
+    try {
+      window.addEventListener("storage", bump);
+      window.addEventListener("focus", bump);
+      window.addEventListener("slimcal:usage-updated", bump);
+    } catch {}
+    return () => {
+      try {
+        window.removeEventListener("storage", bump);
+        window.removeEventListener("focus", bump);
+        window.removeEventListener("slimcal:usage-updated", bump);
+      } catch {}
+    };
+  }, []);
+
   if (isPro) {
     return (
       

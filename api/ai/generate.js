@@ -588,19 +588,59 @@ async function dbConsume(clientId, feature, userId) {
     const status = await dbQuotaStatus(clientId, feature, userId);
     if (status.used >= limit) return { allowed: false, remaining: 0, used: status.used, limit };
 
-    if (userId) {
-      const { error } = await supabaseAdmin
-        .from('ai_free_passes')
-        .upsert([{ user_id: userId, client_id: clientId || null, feature, day_key: today, uses: status.used + 1 }], { onConflict: 'user_id,feature,day_key' });
-      if (error) return memConsume({ clientId, userId, feature });
-    } else {
-      const { error } = await supabaseAdmin
-        .from('ai_free_passes')
-        .upsert([{ client_id: clientId, user_id: null, feature, day_key: today, uses: status.used + 1 }], { onConflict: 'client_id,feature,day_key' });
-      if (error) return memConsume({ clientId, userId, feature });
+    const nextUsed = status.used + 1;
+    const baseFilter = userId
+      ? { col: 'user_id', val: userId }
+      : { col: 'client_id', val: clientId };
+
+    const { data: existing, error: readError } = await supabaseAdmin
+      .from('ai_free_passes')
+      .select('id,uses')
+      .eq(baseFilter.col, baseFilter.val)
+      .eq('feature', feature)
+      .eq('day_key', today)
+      .maybeSingle();
+
+    if (readError && readError.code !== 'PGRST116') {
+      return memConsume({ clientId, userId, feature });
     }
 
-    const nextUsed = status.used + 1;
+    if (existing?.id) {
+      const { error: updateError } = await supabaseAdmin
+        .from('ai_free_passes')
+        .update({ uses: nextUsed, client_id: clientId || null, user_id: userId || null })
+        .eq('id', existing.id);
+      if (updateError) return memConsume({ clientId, userId, feature });
+    } else {
+      const row = {
+        client_id: clientId || null,
+        user_id: userId || null,
+        feature,
+        day_key: today,
+        uses: nextUsed,
+      };
+      const { error: insertError } = await supabaseAdmin.from('ai_free_passes').insert([row]);
+      if (insertError) {
+        const { data: retryExisting } = await supabaseAdmin
+          .from('ai_free_passes')
+          .select('id,uses')
+          .eq(baseFilter.col, baseFilter.val)
+          .eq('feature', feature)
+          .eq('day_key', today)
+          .maybeSingle();
+        if (retryExisting?.id) {
+          const retryNextUsed = Math.max(nextUsed, Number(retryExisting.uses || 0) + 1);
+          const { error: retryUpdateError } = await supabaseAdmin
+            .from('ai_free_passes')
+            .update({ uses: retryNextUsed, client_id: clientId || null, user_id: userId || null })
+            .eq('id', retryExisting.id);
+          if (retryUpdateError) return memConsume({ clientId, userId, feature });
+          return { allowed: true, remaining: Math.max(0, limit - retryNextUsed), used: retryNextUsed, limit };
+        }
+        return memConsume({ clientId, userId, feature });
+      }
+    }
+
     return { allowed: true, remaining: Math.max(0, limit - nextUsed), used: nextUsed, limit };
   } catch {
     return memConsume({ clientId, userId, feature });
