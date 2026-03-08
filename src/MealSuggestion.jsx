@@ -13,9 +13,10 @@ import {
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
-import { registerDailyFeatureUse, setDailyRemaining } from './components/FeatureUseBadge';
+import { postAI } from './lib/ai';
+import { canUseDailyFeature, registerDailyFeatureUse, setDailyRemaining } from './components/FeatureUseBadge.jsx';
 
-// ---- entitlement helpers for refresh button ----
+// ---- entitlement helpers ----
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -25,38 +26,6 @@ const isProUser = () => {
 const isTrialActive = () => {
   const ts = parseInt(localStorage.getItem('trialEndTs') || '0', 10);
   return ts && Date.now() < ts;
-};
-
-// stable per-device id to count free uses
-function getClientId() {
-  try {
-    let cid = localStorage.getItem('clientId');
-    if (!cid) {
-      cid = (crypto?.randomUUID?.() || String(Date.now())).slice(0, 36);
-      localStorage.setItem('clientId', cid);
-    }
-    return cid;
-  } catch {
-    return 'anon';
-  }
-}
-
-const getMealAIRefreshCount = () => {
-  const today = new Date().toLocaleDateString('en-US');
-  const savedDate = localStorage.getItem('aiMealRefreshDate');
-  if (savedDate !== today) {
-    localStorage.setItem('aiMealRefreshDate', today);
-    localStorage.setItem('aiMealRefreshCount', '0');
-    return 0;
-  }
-  return parseInt(localStorage.getItem('aiMealRefreshCount') || '0', 10);
-};
-
-const incMealAIRefreshCount = () => {
-  const today = new Date().toLocaleDateString('en-US');
-  localStorage.setItem('aiMealRefreshDate', today);
-  const newCount = getMealAIRefreshCount() + 1;
-  localStorage.setItem('aiMealRefreshCount', String(newCount));
 };
 
 // macro balance helper
@@ -71,24 +40,6 @@ function withinSoftMacroRanges({ kcal, p, c, f }) {
   return carbPct >= 35 && carbPct <= 70 && fatPct >= 15 && fatPct <= 40;
 }
 
-// POST helper
-async function postJSON(url, payload) {
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Client-Id': getClientId()
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const text = await resp.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {}
-  return { resp, json, raw: text };
-}
 
 // normalize meal objects returned by server
 function coerceMeals(data) {
@@ -199,21 +150,14 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // computed: entitlement to interact (Pro or active trial). We still allow initial fetch (to tease),
-  // but we will blur/disable actions if not entitled and free refreshes are exhausted.
   const proOrTrial = isProUser() || isTrialActive();
-  const freeRefreshesUsed = getMealAIRefreshCount();
-  const freeRefreshesLeft = Math.max(0, 3 - freeRefreshesUsed);
-  const lockInteractions = useMemo(
-    () => !proOrTrial && freeRefreshesLeft <= 0,
-    [proOrTrial, freeRefreshesLeft]
-  );
+  const lockInteractions = useMemo(() => !proOrTrial && !canUseDailyFeature('ai_meal'), [proOrTrial]);
 
   // time-of-day label
   const hour = new Date().getHours();
   const period = hour < 10 ? 'Breakfast' : hour < 14 ? 'Lunch' : hour < 17 ? 'Snack' : 'Dinner';
 
-  // fetch from server
+  // fetch from server — this is the single consume point, mirroring workout/pose
   const fetchSuggestions = useCallback(async () => {
     setLoading(true);
     setErrMsg(null);
@@ -224,12 +168,10 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
       const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
       const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      // meal budget snapshot (based on calories already eaten when panel opened)
-      const remaining = Math.max(0, (dailyGoal || 0) + (calorieBias || 0) - (baseConsumed || 0));
-      const mealBudget = Math.max(250, Math.round(remaining / 3));
+      const remainingCalories = Math.max(0, (dailyGoal || 0) + (calorieBias || 0) - (baseConsumed || 0));
+      const mealBudget = Math.max(250, Math.round(remainingCalories / 3));
 
-      const basePayload = {
-        feature: 'meal',
+      const data = await postAI('meal', {
         type: 'meal',
         mode: 'meal',
         user_id: user?.id || null,
@@ -242,39 +184,9 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
           meal_budget_kcal: mealBudget
         },
         count: 5
-      };
+      });
 
-      // try main endpoint
-      let { resp, json, raw } = await postJSON('/api/ai/generate', basePayload);
-
-      if (resp.status === 402) {
-        // Gated immediately at fetch
-        setShowUpgrade(true);
-        setSuggestions([]);
-        setLoading(false);
-        return;
-      }
-
-      // try legacy if needed
-      if (!resp.ok && (resp.status === 404 || resp.status === 400)) {
-        const fallback = await postJSON('/api/ai/meal-suggestion', basePayload);
-        resp = fallback.resp;
-        json = fallback.json;
-        raw = fallback.raw;
-      }
-
-      if (!resp.ok) {
-        throw new Error(`Server responded ${resp.status}${raw ? ' - ' + raw : ''}`);
-      }
-
-      if (!isProUser() && !isTrialActive()) {
-        if (typeof json?.remaining === 'number') setDailyRemaining('ai_meal', json.remaining);
-        else registerDailyFeatureUse('ai_meal');
-      }
-
-      let meals = coerceMeals(json);
-
-      // enrich each suggestion with "why"
+      let meals = coerceMeals(data);
       meals = meals.map(m => {
         const p = m.macros?.p ?? 0;
         const c = m.macros?.c ?? 0;
@@ -296,34 +208,37 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
         return { ...m, _why: why };
       });
 
-      if (!meals.length) {
-        throw new Error('No meal suggestions found');
-      }
+      if (!meals.length) throw new Error('No meal suggestions found');
 
       setSuggestions(meals);
+
+      if (!proOrTrial) {
+        if (typeof data?.remaining === 'number') setDailyRemaining('ai_meal', data.remaining);
+        else registerDailyFeatureUse('ai_meal');
+      }
     } catch (err) {
       console.error('[MealSuggestion] fetch error', err);
-      setErrMsg('Couldn’t fetch meal suggestions. Please try again.');
-      setSuggestions([]);
+      if (err?.code === 402) {
+        setShowUpgrade(true);
+        setSuggestions([]);
+      } else {
+        setErrMsg('Couldn’t fetch meal suggestions. Please try again.');
+        setSuggestions([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [user?.id, goalType, dailyGoal, baseConsumed]);
+  }, [user?.id, goalType, dailyGoal, baseConsumed, proOrTrial]);
 
   // initial + when user taps Refresh
   useEffect(() => {
     fetchSuggestions();
   }, [fetchSuggestions, refreshKey]);
 
-  // refresh button logic with 3 free/day
   const handleRefreshClick = () => {
-    if (!isProUser() && !isTrialActive()) {
-      const used = getMealAIRefreshCount();
-      if (used >= 3) {
-        setShowUpgrade(true);
-        return;
-      }
-      incMealAIRefreshCount();
+    if (!proOrTrial && !canUseDailyFeature('ai_meal')) {
+      setShowUpgrade(true);
+      return;
     }
     setRefreshKey(k => k + 1);
   };

@@ -46,13 +46,13 @@ import UpgradeModal from './components/UpgradeModal';
 import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 import FeatureUseBadge, {
   canUseDailyFeature,
-  registerDailyFeatureUse
+  setDailyRemaining
 } from './components/FeatureUseBadge.jsx';
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMealLocalFirst, deleteMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
-import { callAIGenerate } from './lib/ai';
+import { getAIQuotaStatus } from './lib/ai';
 
 // ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
 import { supabase } from './lib/supabaseClient';
@@ -886,32 +886,33 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  // toggle meal ideas panel — check quota without consuming a use
-  const handleToggleMealIdeas = useCallback(async () => {
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (isProUser()) return;
+      try {
+        const q = await getAIQuotaStatus('meal');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_meal', q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [user?.id]);
+
+  const handleToggleMealIdeas = useCallback(() => {
     if (showSuggest) {
       setShowSuggest(false);
       return;
     }
 
-    // Local free-limit gate (server-side quota_status still acts as backup)
     if (!isProUser() && !canUseDailyFeature('ai_meal')) {
       setShowUpgrade(true);
       return;
-    }
-
-    if (!isProUser() && user?.id) {
-      try {
-        const q = await getAIQuotaStatus('meal');
-        if (typeof q?.remaining === 'number') {
-          setDailyRemaining('ai_meal', q.remaining);
-          if (q.remaining <= 0) {
-            setShowUpgrade(true);
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('[MealTracker] quota check failed', e);
-      }
     }
 
     setShowSuggest(true);
@@ -921,7 +922,7 @@ export default function MealTracker({ onMealUpdate }) {
         suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } catch {}
     }, 50);
-  }, [showSuggest, user?.id]);
+  }, [showSuggest]);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
 
