@@ -48,6 +48,15 @@ const FEMALE_POSES = [
 const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
 const OUTLINE_PULSE_MS = 1800;
 
+const ALL_OUTLINE_ASSETS = [
+  maleFrontOutline,
+  maleSideOutline,
+  maleBackOutline,
+  femaleFrontOutline,
+  femaleSideOutline,
+  femaleBackOutline,
+];
+
 function readStoredGender() {
   try {
     const raw = localStorage.getItem("userData");
@@ -203,6 +212,17 @@ export default function PoseSession() {
   const todayISO = useMemo(() => localDayISO(), []);
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
+
+  useEffect(() => {
+    ALL_OUTLINE_ASSETS.forEach((src) => {
+      try {
+        const img = new Image();
+        img.decoding = "sync";
+        img.loading = "eager";
+        img.src = src;
+      } catch {}
+    });
+  }, []);
 
   const stopCamera = useCallback(() => {
     try {
@@ -415,7 +435,13 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
   const outlinePulseActive = stage === "capture" && countdownMs > CAPTURE_DELAY_MS - OUTLINE_PULSE_MS;
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
+    <>
+      <Box sx={{ display: "none" }} aria-hidden="true">
+        {ALL_OUTLINE_ASSETS.map((src) => (
+          <Box key={src} component="img" src={src} alt="" sx={{ width: 1, height: 1 }} />
+        ))}
+      </Box>
+      <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
       <Card
         sx={{
           width: "min(980px, 100%)",
@@ -871,6 +897,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           )}
         </CardContent>
       </Card>
-    </Box>
+      </Box>
+    </>
   );
 }
