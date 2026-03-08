@@ -168,49 +168,8 @@ function fallbackPoseSession(gender = "male") {
     percentile: 19,
     strength: female ? "Presence" : "Consistency",
     horizon_days: 90,
-    toneMode: "balanced",
-    tierLabel: female ? "POLISHED BASELINE" : "BASELINE LOCKED",
-    aesthetic_score: female ? 8.2 : 8.1,
     momentumNote: female ? "Baseline beauty check locked in — future scans can track a prettier, more polished trend over time." : "Baseline jacked check locked in — future scans can track a stronger, more built trend over time.",
     baselineComparison: female ? "First physique memory saved — future scans can compare your silhouette and presentation against today." : "First physique memory saved — future scans can compare your muscularity and presence against today.",
-    highlights: female
-      ? ["Your frame reads balanced and athletic", "Posture carries a more confident look", "This scan gives a polished progress baseline"]
-      : ["Your upper frame reads stronger on camera", "Shoulders and arms create solid presence", "This scan gives a clean progress baseline"],
-    levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
-    confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
-    shortHeadline: female ? "This is a confident, polished look." : "You’ve got a stronger look here than you probably realize.",
-    quickSummary: female ? "Your frame reads balanced and athletic here, and the posture gives the whole look more confidence." : "Your shoulders and upper frame are reading stronger here, which gives the whole pose more presence.",
-    shareCardSummary: female ? "Confident, polished, and trending up." : "Stronger, sharper, and trending up.",
-    detailedExpansion: female ? "More detail: your overall silhouette reads clean and composed here, with posture and presentation doing a lot of the work. This feels like the kind of progress that becomes obvious fast when you stay consistent." : "More detail: your upper-body presence is coming through better here, especially in the way the frame reads broader and more athletic. This feels like real momentum, not just a flattering angle.",
-    report: female ? `This is a confident, polished look.
-
-Your frame reads balanced and athletic here, and the posture gives the whole shot more presence.
-
-This feels like the kind of progress that becomes easier to notice once you keep stacking consistent weeks.
-
-Stay with the basics and re-scan in similar lighting to make the trend even clearer.` : `You’ve got a stronger look here than you probably realize.
-
-Your shoulders and upper frame are reading broader in these captures, which gives the whole pose set more presence.
-
-This feels like real momentum, not just a lucky angle.
-
-Keep showing up, keep the lighting consistent, and the trend should get easier to see.`,
-    muscleBreakdown: female ? [
-      { group: "Shoulder line", note: "Your shoulder line reads clean and balanced here. It helps the whole frame look more athletic and composed.", visibility: "visible" },
-      { group: "Arms", note: "Your arms are visible enough to show shape and poise in the frame. The overall look feels neat, healthy, and put together.", visibility: "visible" },
-      { group: "Upper-body shape", note: "The upper frame reads smooth and supportive here. That gives the scan a polished, confident feel.", visibility: "visible" },
-      { group: "Silhouette flow", note: "Your silhouette is partially visible here, so this is more of a light estimate than a hard conclusion. Even so, the frame reads balanced and flattering.", visibility: "partial" },
-      { group: "Lower body", note: "Your lower body is not clearly in frame in these captures, so SlimCal AI cannot make a confident visual assessment yet.", visibility: "not_visible" }
-    ] : [
-      { group: "Shoulders", note: "Your shoulders read clearly in these captures and give the frame stronger presence. They help the whole look come off more athletic.", visibility: "visible" },
-      { group: "Arms", note: "Your arms are visible enough here to create some real upper-body pop. That adds to the stronger look of the pose set overall.", visibility: "visible" },
-      { group: "Chest", note: "Your chest is visible enough to support a fuller upper-frame read here. It helps the front view feel more built and confident.", visibility: "visible" },
-      { group: "Taper", note: "Your midsection is only partially visible here, so this read is lighter than the upper-body read. The frame still suggests a cleaner athletic silhouette.", visibility: "partial" },
-      { group: "Lower body", note: "Your lower body is not clearly in frame in these captures, so SlimCal AI cannot make a confident visual assessment yet.", visibility: "not_visible" }
-    ],
-    bestDeveloped: female ? ["Balanced frame", "Confident posture"] : ["Shoulder presence", "Arm presence"],
-    biggestOpportunity: female ? ["Keep consistent lighting for clearer trend reads"] : ["Keep consistent lighting for clearer trend reads"],
-    poseNotes: ["Consistent framing improves comparison quality", "A little more full-body visibility would strengthen future reads"],
     muscleSignals: {
       delts: 0.62,
       arms: 0.64,
@@ -227,6 +186,11 @@ Keep showing up, keep the lighting consistent, and the trend should get easier t
       back_double_bi: 0.73,
       back_scan: 0.73,
     },
+    highlights: female
+      ? ["Strong presence in frame", "Clean posture carries well", "Consistent scan angles improve tracking"]
+      : ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
+    levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
+    confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
   };
 }
 
@@ -338,59 +302,6 @@ function goalToneHint(goalType, gender = "male") {
   if (goal === "cutting") return "He wants a sharper, leaner, more defined look that still feels muscular and jacked.";
   if (goal === "bulking") return "He wants a bigger, fuller, thicker, more muscular look.";
   return "He wants a strong, aesthetic, jacked look with obvious upper-body presence.";
-}
-
-
-function normalizePoseToneMode(mode) {
-  const raw = String(mode || "balanced").toLowerCase().trim();
-  if (["hype", "balanced", "coach"].includes(raw)) return raw;
-  return "balanced";
-}
-
-function poseToneInstruction(mode = "balanced", gender = "male") {
-  const base = [
-    "Make the user feel seen, confident, motivated, and excited to keep going.",
-    "Use specific uplifting truth instead of generic hype.",
-    "Start with one short positive hook.",
-    "Name 2-4 visible strengths that are genuinely supported by the images.",
-    "Translate those strengths into confidence, athletic presence, balance, polish, health, or momentum.",
-    "Frame the result as progress and trajectory, not final worth.",
-    "End with one motivating next lever.",
-    "Never shame, objectify, oversexualize, or imply the user's value depends on appearance.",
-    "Avoid fake superlatives like perfect, flawless, ideal, alpha, mog, superior genetics, or finally attractive.",
-    "Use short punchy sentences more than long dense paragraphs.",
-  ];
-
-  if (gender === "female") {
-    base.push(
-      "For female scans, prefer language like confident, polished, athletic, balanced, pretty, graceful, sculpted, healthy-looking, and put together when supported by the images.",
-      "Avoid fixation on thinness, tiny waist language, or objectifying attention-seeking phrasing."
-    );
-  } else {
-    base.push(
-      "For male scans, prefer language like stronger, sharper, athletic, broader, filled out, built, muscular, disciplined, and confident when supported by the images.",
-      "Avoid dominance/status language or insecurity bait."
-    );
-  }
-
-  if (mode === "hype") {
-    base.push(
-      "Mode is HYPE: creator-native, exciting, rewarding, and sticky, but still believable.",
-      "Use more punch and emotional lift. Keep it sincere, not cringe."
-    );
-  } else if (mode === "coach") {
-    base.push(
-      "Mode is COACH: slightly more analytical, focused on progress signals, structure, and one clear next step.",
-      "Still warm and encouraging, but less slangy and less hype-driven."
-    );
-  } else {
-    base.push(
-      "Mode is BALANCED: premium coach plus authentic gym-friend energy.",
-      "This is the default voice and should feel broadly safe, motivating, and believable."
-    );
-  }
-
-  return base.join(" ");
 }
 
 function summarizeRecentPoseContext(scans, gender = "male") {
@@ -623,8 +534,13 @@ function getFreeLimitForFeature(feature) {
 }
 const freeMem = new Map();
 
-function memAllow(clientId, feature) {
-  const key = `m:${clientId}:${feature}`;
+function quotaIdentity(req, userId) {
+  if (userId) return `user:${userId}`;
+  return getClientId(req);
+}
+
+function memAllow(identityKey, feature) {
+  const key = `m:${identityKey}:${feature}`;
   const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
   const rec = freeMem.get(key);
@@ -639,8 +555,8 @@ function memAllow(clientId, feature) {
   return { allowed: false, remaining: 0 };
 }
 
-async function dbAllow(clientId, feature, userId) {
-  if (!supabaseAdmin) return memAllow(clientId, feature);
+async function dbAllow(identityKey, feature, userId) {
+  if (!supabaseAdmin) return memAllow(identityKey, feature);
   try {
     const today = dayKeyUTC();
     const limit = getFreeLimitForFeature(feature);
@@ -648,7 +564,7 @@ async function dbAllow(clientId, feature, userId) {
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
-      .eq("client_id", clientId)
+      .eq("client_id", identityKey)
       .eq("feature", feature)
       .eq("day_key", today)
       .maybeSingle();
@@ -658,11 +574,11 @@ async function dbAllow(clientId, feature, userId) {
     if (!data) {
       const ins = await supabaseAdmin
         .from("ai_free_passes")
-        .insert([{ client_id: clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
+        .insert([{ client_id: identityKey, user_id: userId || null, feature, day_key: today, uses: 1 }])
         .select("uses")
         .single();
 
-      if (ins.error) return memAllow(clientId, feature);
+      if (ins.error) return memAllow(identityKey, feature);
       return { allowed: true, remaining: limit - 1 };
     }
 
@@ -672,17 +588,17 @@ async function dbAllow(clientId, feature, userId) {
     const upd = await supabaseAdmin
       .from("ai_free_passes")
       .update({ uses: currentUses + 1, user_id: userId || null })
-      .eq("client_id", clientId)
+      .eq("client_id", identityKey)
       .eq("feature", feature)
       .eq("day_key", today)
       .select("uses")
       .single();
 
-    if (upd.error) return memAllow(clientId, feature);
+    if (upd.error) return memAllow(identityKey, feature);
     const newUses = upd.data?.uses ?? currentUses + 1;
     return { allowed: true, remaining: Math.max(0, limit - newUses) };
   } catch {
-    return memAllow(clientId, feature);
+    return memAllow(identityKey, feature);
   }
 }
 
@@ -1407,11 +1323,25 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
+  if (feature === "quota_status") {
+    const targetFeature = String(body?.targetFeature || body?.featureKey || body?.target || "").trim() || "pose_session";
+    const limit = getFreeLimitForFeature(targetFeature);
+    if (pro) {
+      res.status(200).json({ feature: targetFeature, remaining: limit, limit, isPro: true });
+      return;
+    }
+    const quota = await getFreeFeatureRemaining({ req, feature: targetFeature, userId: resolvedUserId });
+    res.status(200).json({ feature: targetFeature, remaining: quota.remaining, limit: quota.limit, isPro: false });
+    return;
+  }
+
+  let pass = null;
+
   // 2) If not Pro/Trial → per-feature free-pass
   if (!pro && !freeBypass) {
-    const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
-      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", quota: { feature, remaining: 0, limit: getFreeLimitForFeature(feature) } });
       return;
     }
   }
@@ -1563,7 +1493,6 @@ const freeBypass =
     try {
       const style = String(body?.style || "").toLowerCase();
       const scanMode = String(body?.scanMode || "").toLowerCase();
-      const toneMode = normalizePoseToneMode(body?.toneMode || body?.mode || "balanced");
       const goalType = normalizeGoalType(body?.goalType, gender);
       const localDay = String(body?.localDay || body?.local_day || dayKeyUTC()).slice(0, 24);
       const recentScans = sanitizeRecentPoseScans(body?.recentScans);
@@ -1601,35 +1530,32 @@ const freeBypass =
         "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
         "You are NOT a medical device. You are estimating visual physique cues from uploaded pose scans. " +
-        poseToneInstruction(toneMode, gender) + " " +
+        "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels, fear framing, or harsh comparisons. " +
         "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
         "Write as a fresh, careful analyst focusing on what is visible, flattering, and genuinely supported by the images. " +
+        "For women, use female-specific language naturally and supportively. For men, use male-specific language naturally and supportively. " +
         "Output JSON keys (required): " +
         "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
-        "aesthetic_score (number 0-10), toneMode (string), shortHeadline (string 1 sentence), quickSummary (string 2-3 sentences), shareCardSummary (string under 120 chars), detailedExpansion (string 2-4 sentences), " +
+        "aesthetic_score (number 0-10), " +
         "muscleSignals (object with keys delts, arms, lats, chest, back, waist_taper, legs each number 0..1), " +
         "poseQuality (object mapping poseKey to number 0..1), " +
-        "highlights (array 4-7 short strings), levers (array 3-5 short strings), confidenceNote (string), " +
-        "report (string: 5-7 short paragraphs separated by \n\n), " +
-        "muscleBreakdown (array 6-10 items; each {group: string, note: string, visibility?: string} where note is 2-5 supportive sentences), " +
+        "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
+        "report (string: 6-10 short paragraphs separated by \n\n), " +
+        "muscleBreakdown (array 8-12 items; each {group: string, note: string, visibility?: string} where note is 2-5 sentences, specific, supportive), " +
         "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
 
       const userText =
         `Analyze this ${subjectLabel} using these captures: ${poseTitles || "pose scans"}. ` +
         `Goal context: ${goalTone} ` +
         `Recent physique memory: ${recentContextSummary} ` +
-        `Tone mode: ${toneMode}. ` +
         "Estimate supportive physique signals per muscle group (0..1) and pose quality (0..1). " +
         "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
         "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
         "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
-        "The emotional order should feel like: seen, confident, improving, excited. " +
-        "Use specific uplifting truth instead of empty hype. " +
-        "The shortHeadline should be a punchy rewarding one-liner. " +
-        "The quickSummary should be the default on-screen summary and should feel creator-native, sincere, and motivating. " +
-        "The shareCardSummary must be short, clean, positive, and social-share friendly. " +
-        "The detailedExpansion should feel like a 'more detail' section with extra nuance and emotional payoff. " +
-        "The report should read like a premium full breakdown with short paragraphs, not one long wall of text. " +
+        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, polished silhouette, beauty, elegance, and confidence without objectifying language. Use words like pretty, polished, graceful, sculpted, beautiful, athletic, and motivating when genuinely supported by the scan. " +
+        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. Use words like jacked, fuller, broader, more built, more muscular, and sharper when genuinely supported by the scan. " +
+        "If recent physique memory is provided, compare today's look against that recent baseline in a believable, positive-only way. Favor trend language like stronger than your recent baseline, more polished than your recent baseline, or more consistent than your recent baseline when the structured numbers support it. " +
+        "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
         "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
@@ -1671,11 +1597,6 @@ const freeBypass =
         horizon_days: Math.round(clamp(parsed.horizon_days ?? parsed.horizonDays ?? fb.horizon_days, 7, 365)),
         tierLabel: String(parsed.tierLabel || parsed.tier || "").slice(0, 48) || undefined,
         aesthetic_score: clamp(parsed.aesthetic_score ?? parsed.aestheticScore, 0, 10),
-        toneMode,
-        shortHeadline: String(parsed.shortHeadline || parsed.headline || "").slice(0, 180) || undefined,
-        quickSummary: String(parsed.quickSummary || parsed.summaryShort || "").slice(0, 500) || undefined,
-        shareCardSummary: String(parsed.shareCardSummary || parsed.shareSummary || "").slice(0, 160) || undefined,
-        detailedExpansion: String(parsed.detailedExpansion || parsed.moreDetail || parsed.more_detail || "").slice(0, 1200) || undefined,
         report: String(parsed.report || parsed.detailedReport || parsed.summary || "").slice(0, 6000) || undefined,
         // If JSON parsing failed but the model returned text, keep a safe excerpt so the UI still renders a report.
         __rawText: String(text || "").slice(0, 6000) || undefined,
@@ -1746,26 +1667,6 @@ const freeBypass =
       session.baselineComparison = trend.baselineComparison;
       session.physiqueSnapshot = physiqueSnapshot;
 
-      if (!session.shortHeadline) {
-        session.shortHeadline = gender === "female"
-          ? "This is a confident, polished look."
-          : "You’ve got a stronger look here than you probably realize.";
-      }
-      if (!session.quickSummary) {
-        const strongest = physiqueSnapshot?.summary_seed?.strongest_feature || session.bestDeveloped?.[0] || (gender === "female" ? "overall frame" : "upper frame");
-        session.quickSummary = gender === "female"
-          ? `Your ${strongest} reads especially clean here, and the overall frame comes off more balanced and athletic. This feels like progress that is starting to show in a really flattering way.`
-          : `Your ${strongest} is reading stronger here, and the overall frame comes off more athletic and confident. This feels like real momentum, not just a lucky angle.`;
-      }
-      if (!session.shareCardSummary) {
-        session.shareCardSummary = gender === "female" ? "Confident, polished, and trending up." : "Stronger, sharper, and trending up.";
-      }
-      if (!session.detailedExpansion) {
-        session.detailedExpansion = gender === "female"
-          ? "More detail: the frame reads more composed and polished here, with posture and silhouette doing a lot of the work. It gives off the kind of progress that feels healthy, athletic, and increasingly obvious when you stay consistent."
-          : "More detail: the frame reads stronger and more built here, especially where the upper body creates more presence on camera. It gives off the kind of progress that looks earned and gets easier to notice when consistency stays high.";
-      }
-
       if (trend.momentumNote) {
         const baseReport = String(session.report || "").trim();
         session.report = baseReport
@@ -1800,7 +1701,7 @@ ${note}`;
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
 
-      res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
+      res.status(200).json({ session, quota: pro ? { feature, remaining: null, limit: null, isPro: true } : { feature, remaining: pass?.remaining ?? null, limit: getFreeLimitForFeature(feature), isPro: false }, ...(body?.debug ? { raw: text } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);

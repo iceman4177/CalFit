@@ -24,13 +24,14 @@ import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
 import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 
 import { useAuth } from "./context/AuthProvider";
-import { readProfileBundle } from "./lib/profileStorage";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
   getDailyRemaining,
+  fetchServerDailyRemaining,
+  notifyQuotaChanged,
 } from "./components/FeatureUseBadge.jsx";
 import {
   readPoseSessionHistory,
@@ -64,22 +65,36 @@ const ALL_OUTLINE_ASSETS = [
   femaleBackOutline,
 ];
 
-function readStoredGoalType(userId) {
+function readStoredGoalType() {
   try {
-    const bundle = readProfileBundle(userId || null);
-    const parsedGoal = String(bundle?.userData?.goalType || bundle?.userData?.goal || bundle?.fitnessGoal || '').toLowerCase().trim();
-    if (parsedGoal) return parsedGoal;
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.goalType || parsed?.goal || "").toLowerCase().trim();
+      if (g) return g;
+    }
   } catch {}
-  return 'maintenance';
+  try {
+    const g = String(localStorage.getItem("fitness_goal") || "").toLowerCase().trim();
+    if (g) return g;
+  } catch {}
+  return "maintenance";
 }
 
-function readStoredGender(userId) {
+function readStoredGender() {
   try {
-    const bundle = readProfileBundle(userId || null);
-    const g = String(bundle?.userData?.gender || bundle?.gender || '').toLowerCase().trim();
-    if (g === 'male' || g === 'female') return g;
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.gender || "").toLowerCase().trim();
+      if (g === "male" || g === "female") return g;
+    }
   } catch {}
-  return 'male';
+  try {
+    const g = String(localStorage.getItem("gender") || "").toLowerCase().trim();
+    if (g === "male" || g === "female") return g;
+  } catch {}
+  return "male";
 }
 
 function readStoredIsPro() {
@@ -252,9 +267,9 @@ export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
 
-  const userId = user?.id || null;
-  const gender = useMemo(() => readStoredGender(userId), [userId]);
-  const goalType = useMemo(() => readStoredGoalType(userId), [userId]);
+  const userId = user?.id || "anon";
+  const gender = useMemo(() => readStoredGender(), []);
+  const goalType = useMemo(() => readStoredGoalType(), []);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
   const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
@@ -270,6 +285,7 @@ export default function PoseSession() {
 
   const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
   const [result, setResult] = useState(null);
+  const [serverPoseRemaining, setServerPoseRemaining] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
 
@@ -281,6 +297,34 @@ export default function PoseSession() {
   const pose = activePoses[poseIdx] || activePoses[0];
 
   const todayISO = useMemo(() => localDayISO(), []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function refreshPoseQuota() {
+      if (isPro || !user?.id) {
+        if (alive) setServerPoseRemaining(null);
+        return;
+      }
+      const next = await fetchServerDailyRemaining("pose_session", user.id);
+      if (alive) setServerPoseRemaining(next);
+    }
+
+    refreshPoseQuota();
+
+    const onRefresh = (e) => {
+      const changed = e?.detail?.featureKey;
+      if (!changed || changed === "pose_session") refreshPoseQuota();
+    };
+
+    window.addEventListener("focus", refreshPoseQuota);
+    window.addEventListener("slimcal:quota-changed", onRefresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", refreshPoseQuota);
+      window.removeEventListener("slimcal:quota-changed", onRefresh);
+    };
+  }, [isPro, user?.id]);
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
   const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
@@ -424,7 +468,17 @@ export default function PoseSession() {
   }, [pose.key]);
 
   const startScan = useCallback(() => {
-    if (!isPro && !canUseDailyFeature("pose_session")) {
+    const localRemaining = getDailyRemaining("pose_session");
+    const effectiveRemaining = user?.id ? serverPoseRemaining : localRemaining;
+
+    if (!isPro && effectiveRemaining !== null && effectiveRemaining <= 0) {
+      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+      return;
+    }
+
+    if (!isPro && !user?.id && !canUseDailyFeature("pose_session")) {
       setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
       try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
       try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
@@ -435,7 +489,7 @@ export default function PoseSession() {
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isPro]);
+  }, [isPro, serverPoseRemaining, user?.id]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -472,6 +526,8 @@ export default function PoseSession() {
       if (!res.ok) {
         if (res.status === 402 || json?.reason === "limit_reached") {
           setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+          setServerPoseRemaining(0);
+          notifyQuotaChanged("pose_session");
           setStage("intro");
           try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
           try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
@@ -481,7 +537,14 @@ export default function PoseSession() {
       }
 
       const session = json?.session || null;
-      if (!isPro) registerDailyFeatureUse("pose_session");
+      if (!isPro) {
+        registerDailyFeatureUse("pose_session");
+        if (user?.id) {
+          const nextRemaining = Number(json?.quota?.remaining);
+          setServerPoseRemaining(Number.isFinite(nextRemaining) ? nextRemaining : null);
+        }
+        notifyQuotaChanged("pose_session");
+      }
 
       // Persist a small record for deltas
       try {
