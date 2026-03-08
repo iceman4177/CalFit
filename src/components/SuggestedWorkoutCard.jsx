@@ -91,7 +91,7 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-export default function SuggestedWorkoutCard({ userData, onAccept }) {
+export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -113,6 +113,13 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
+
+  useEffect(() => {
+    if (typeof onLoadingChange === 'function') onLoadingChange(loading);
+    return () => {
+      if (typeof onLoadingChange === 'function') onLoadingChange(false);
+    };
+  }, [loading, onLoadingChange]);
 
   useEffect(() => {
     if (!loading) return;
@@ -294,13 +301,23 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
     return (
       <Card
         ref={loadingCardRef}
-        sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}
+        sx={{
+          mb: 1,
+          overflow: 'visible',
+          borderRadius: 4,
+          boxShadow: '0 18px 40px rgba(15,23,42,0.07)',
+          minHeight: { xs: 180, md: 220 },
+          display: 'flex',
+          alignItems: 'center'
+        }}
       >
-        <CardContent sx={{ overflow: 'visible' }}>
-          <Typography variant="h6">Generating a plan…</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Personalizing based on your goal, intent, equipment, and split.
-          </Typography>
+        <CardContent sx={{ overflow: 'visible', width: '100%', py: { xs: 4, md: 5 } }}>
+          <Stack spacing={1.25} alignItems="center" textAlign="center">
+            <Typography variant="h5" sx={{ fontWeight: 800 }}>Generating a plan…</Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 520 }}>
+              Personalizing for your goal, equipment, and today’s split.
+            </Typography>
+          </Stack>
         </CardContent>
       </Card>
     );
@@ -376,6 +393,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
               <Chip size="small" label={(split || 'upper').replace('_', ' ')} sx={{ flexShrink: 0, borderRadius: 999 }} />
             </Box>
           </Box>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mt: -0.5 }}>
+            Pick today’s focus
+          </Typography>
 
           <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 

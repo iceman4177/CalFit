@@ -288,6 +288,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ "Meals-style": show today's logged workouts at the bottom (no need to leave page)
   const [todaySessions, setTodaySessions] = useState([]);
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -1458,6 +1459,8 @@ setNewExercise({
     );
   }
 
+  const simplifiedGenerationMode = showSuggestCard && aiSuggestLoading;
+
   // --- main UI ---
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: { xs: 12, md: 4 } }}>
@@ -1498,48 +1501,64 @@ setNewExercise({
             >
               {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
             </Button>
-            <Button
-              variant="text"
-              onClick={() => setShowTemplate(true)}
-              sx={{
-                fontWeight: 700,
-                alignSelf: { xs: 'flex-start', sm: 'center' },
-                px: { xs: 0.5, sm: 1.5 }
-              }}
-            >
-              Load Past Workout
-            </Button>
+            {!simplifiedGenerationMode && (
+              <Button
+                variant="text"
+                onClick={() => setShowTemplate(true)}
+                sx={{
+                  fontWeight: 700,
+                  alignSelf: { xs: 'flex-start', sm: 'center' },
+                  px: { xs: 0.5, sm: 1.5 }
+                }}
+              >
+                Load Past Workout
+              </Button>
+            )}
           </Stack>
         </Box>
 
-        {!isProUser() && (
+        {!simplifiedGenerationMode && !isProUser() && (
           <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={1}
-          useFlexGap
-          sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}
-        >
-          <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700, borderRadius: 999, height: 40 }} />
-          <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} sx={{ borderRadius: 999, height: 40 }} />
-          <Chip variant="outlined" label={`${sessionTotals.sets} sets`} sx={{ borderRadius: 999, height: 40 }} />
-          <Chip
-            variant="outlined"
-            label={`Profile: ${userData?.age || '—'} yrs • ${userData?.weight || '—'} lb`}
-            sx={{ borderRadius: 999, height: 40 }}
-          />
-        </Stack>
+        {!simplifiedGenerationMode && (
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            useFlexGap
+            sx={{ alignItems: { xs: 'stretch', md: 'center' }, flexWrap: 'wrap' }}
+          >
+            <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700, borderRadius: 999, height: 40 }} />
+            <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} sx={{ borderRadius: 999, height: 40 }} />
+            <Chip variant="outlined" label={`${sessionTotals.sets} sets`} sx={{ borderRadius: 999, height: 40 }} />
+            <Chip
+              variant="outlined"
+              label={`Profile: ${userData?.age || '—'} yrs • ${userData?.weight || '—'} lb`}
+              sx={{ borderRadius: 999, height: 40 }}
+            />
+          </Stack>
+        )}
 
         {showSuggestCard && (
-          <Box ref={suggestRef}>
-            <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
+          <Box
+            ref={suggestRef}
+            sx={{
+              maxWidth: simplifiedGenerationMode ? 720 : 'none',
+              mx: simplifiedGenerationMode ? 'auto' : 0,
+              width: '100%'
+            }}
+          >
+            <SuggestedWorkoutCard
+              userData={userData}
+              onAccept={handleAcceptSuggested}
+              onLoadingChange={setAiSuggestLoading}
+            />
           </Box>
         )}
 
+        {!simplifiedGenerationMode && (
         <Grid container spacing={{ xs: 2.5, md: 3 }}>
           <Grid item xs={12} md={showSuggestCard ? 7 : 8}>
             <Stack spacing={2.5}>
@@ -1671,7 +1690,9 @@ setNewExercise({
             </Stack>
           </Grid>
         </Grid>
+        )}
 
+        {cumulativeExercises.length > 0 && !simplifiedGenerationMode && (
         <Box sx={{ display: { xs: 'none', md: 'block' }, pt: 1 }}>
           <Button
             variant="contained"
@@ -1683,8 +1704,10 @@ setNewExercise({
             Submit Workout
           </Button>
         </Box>
+        )}
       </Stack>
 
+      {cumulativeExercises.length > 0 && !simplifiedGenerationMode && (
       <Paper
         elevation={0}
         sx={{
@@ -1712,6 +1735,7 @@ setNewExercise({
           Submit Workout
         </Button>
       </Paper>
+      )}
 
       <TemplateSelector
         open={showTemplate}
