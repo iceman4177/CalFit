@@ -471,12 +471,21 @@ export default function App() {
 
   // Allow PoseSession to request the Upgrade modal (used when user tries to start a scan with 0 remaining).
   useEffect(() => {
+    const openFromPoseSession = () => {
+      try {
+        sessionStorage.removeItem("pose_session_force_upgrade");
+      } catch {}
+      setUpgradeOpen(true);
+    };
+
     try {
       if (sessionStorage.getItem("pose_session_force_upgrade") === "1") {
-        sessionStorage.removeItem("pose_session_force_upgrade");
-        setUpgradeOpen(true);
+        openFromPoseSession();
       }
     } catch {}
+
+    window.addEventListener("slimcal:pose-session-upgrade", openFromPoseSession);
+    return () => window.removeEventListener("slimcal:pose-session-upgrade", openFromPoseSession);
   }, []);
 
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });

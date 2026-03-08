@@ -26,6 +26,11 @@ import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  registerDailyFeatureUse,
+  getDailyRemaining,
+} from "./components/FeatureUseBadge.jsx";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -88,6 +93,65 @@ function readStoredGender() {
     if (g === "male" || g === "female") return g;
   } catch {}
   return "male";
+}
+
+function readStoredIsPro() {
+  try {
+    return localStorage.getItem("isPro") === "true";
+  } catch {}
+  return false;
+}
+
+function getOrCreateClientId() {
+  try {
+    let id = localStorage.getItem("slimcal_client_id");
+    if (id) return id;
+    id = (globalThis.crypto?.randomUUID?.() || `slimcal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    localStorage.setItem("slimcal_client_id", id);
+    return id;
+  } catch {}
+  return `slimcal-${Date.now()}`;
+}
+
+function firstNonEmpty(...vals) {
+  for (const v of vals) {
+    const s = String(v || "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function buildMemoryAwareShareSummary(result, isFemale = false) {
+  const strongest = firstNonEmpty(
+    result?.physiqueSnapshot?.summary_seed?.strongest_feature,
+    Array.isArray(result?.bestDeveloped) ? result.bestDeveloped[0] : "",
+    Array.isArray(result?.highlights) ? result.highlights[0] : ""
+  );
+
+  const momentum = String(result?.momentumNote || "").trim();
+  const baseline = String(result?.baselineComparison || "").trim();
+  const summary = String(result?.report || "").split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean)[0] || "";
+
+  const softStrongest = strongest
+    ? (isFemale ? `Today your ${strongest} reads especially polished.` : `Today your ${strongest} reads especially strong.`)
+    : (isFemale ? "Today your overall look reads polished and athletic." : "Today your overall look reads muscular and athletic.");
+
+  const lead = firstNonEmpty(momentum, baseline, summary, softStrongest)
+    .replace(/\s+/g, " ")
+    .replace(/Compared with \d+ recent checks?,?/i, "Compared with your recent baseline,")
+    .trim();
+
+  const closer = firstNonEmpty(baseline, softStrongest)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const joined = [lead, closer]
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i)
+    .join(" ")
+    .trim();
+
+  return joined.slice(0, 240);
 }
 
 
@@ -219,6 +283,7 @@ export default function PoseSession() {
   const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
+  const [isPro, setIsPro] = useState(() => readStoredIsPro());
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -241,6 +306,17 @@ export default function PoseSession() {
         img.src = src;
       } catch {}
     });
+  }, []);
+
+  useEffect(() => {
+    const refreshPro = () => setIsPro(readStoredIsPro());
+    refreshPro();
+    window.addEventListener("focus", refreshPro);
+    window.addEventListener("slimcal:pro:refresh", refreshPro);
+    return () => {
+      window.removeEventListener("focus", refreshPro);
+      window.removeEventListener("slimcal:pro:refresh", refreshPro);
+    };
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -360,11 +436,18 @@ export default function PoseSession() {
   }, [pose.key]);
 
   const startScan = useCallback(() => {
+    if (!isPro && !canUseDailyFeature("pose_session")) {
+      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+      return;
+    }
+    setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, []);
+  }, [isPro]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -389,12 +472,28 @@ export default function PoseSession() {
 
       const res = await fetch("/api/ai/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Client-Id": getOrCreateClientId(),
+          ...(user?.id ? { "X-User-Id": user.id } : {}),
+        },
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 402 || json?.reason === "limit_reached") {
+          setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+          setStage("intro");
+          try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+          try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+          return;
+        }
+        throw new Error(json?.error || "Pose Session failed");
+      }
+
       const session = json?.session || null;
+      if (!isPro) registerDailyFeatureUse("pose_session");
 
       // Persist a small record for deltas
       try {
@@ -423,7 +522,7 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, recentScanContext, todayISO, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -434,19 +533,22 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
-      const shareSummary = (() => {
-        const r = typeof result?.report === "string" ? result.report.trim() : "";
-        if (!r) return "";
-        // take first paragraph, keep it punchy for social sharing
-        const first = r.split(/\n\s*\n/)[0] || r;
-        return first.replace(/\s+/g, " ").trim().slice(0, 220);
-      })();
+      const shareSummary = buildMemoryAwareShareSummary(result, isFemale);
+      const topWins = (Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length
+        ? result.bestDeveloped
+        : (result?.highlights || result?.levers || [])
+      ).slice(0, 3);
+      const progressNotes = [result?.baselineComparison, result?.momentumNote]
+        .map((t) => String(t || "").trim())
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i)
+        .slice(0, 2);
 
       const pngDataUrl = await buildPoseSessionSharePng({
-        tier: result?.tier || result?.tierLabel || result?.strength || "Build Arc",
-        score: result?.aesthetic_score ?? result?.aestheticScore ?? result?.build_arc ?? 7.8,
-        wins: (result?.highlights || result?.levers || []).slice(0, 4),
-        levers: (result?.biggestOpportunity || result?.poseNotes || []).slice(0, 3).map((t) => String(t)),
+        headline: isFemale ? "PHYSIQUE CHECK" : "PHYSIQUE CHECK",
+        subhead: isFemale ? "Pretty, polished, and trending up" : "Built, sharp, and trending up",
+        wins: topWins,
+        levers: progressNotes,
         summary: shareSummary,
         hashtag: "#SlimCalAI",
         thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res for export
@@ -458,7 +560,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     } finally {
       setShareBusy(false);
     }
-  }, [captures, result]);
+  }, [captures, isFemale, result]);
 
   const titleColor = "rgba(245,250,255,0.92)";
   const bodyColor = "rgba(220,235,245,0.86)";
@@ -536,9 +638,12 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
                 AI Physique Tracker
               </Typography>
-              <Typography sx={{ color: bodyColor }}>
-                3 guided scans · 15 seconds · shareable results
-              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <Typography sx={{ color: bodyColor }}>
+                  3 guided scans · 15 seconds · shareable results
+                </Typography>
+                <FeatureUseBadge featureKey="pose_session" isPro={isPro} labelPrefix="Free" />
+              </Stack>
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 {activePoses.map((p) => (
@@ -748,6 +853,31 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               </Stack>
 
               <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+
+              {(result?.momentumNote || result?.baselineComparison) ? (
+                <Box
+                  sx={{
+                    p: 1.6,
+                    borderRadius: 3,
+                    bgcolor: "rgba(120,255,220,0.08)",
+                    border: "1px solid rgba(120,255,220,0.18)",
+                  }}
+                >
+                  <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.4, mb: 0.5 }}>
+                    MOMENTUM
+                  </Typography>
+                  {result?.momentumNote ? (
+                    <Typography sx={{ color: bodyColor, lineHeight: 1.5 }}>
+                      {String(result.momentumNote)}
+                    </Typography>
+                  ) : null}
+                  {result?.baselineComparison ? (
+                    <Typography sx={{ color: "rgba(220,235,245,0.72)", lineHeight: 1.45, mt: result?.momentumNote ? 0.9 : 0 }}>
+                      {String(result.baselineComparison)}
+                    </Typography>
+                  ) : null}
+                </Box>
+              ) : null}
 
               <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
                 WHAT’S POPPING

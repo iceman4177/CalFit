@@ -526,7 +526,7 @@ const FREE_LIMITS = {
   default: 3,
   frame_check: 1,
   body_scan: 1,
-  pose_session: 1,
+  pose_session: 3,
 };
 
 function getFreeLimitForFeature(feature) {
@@ -1289,7 +1289,6 @@ export default async function handler(req, res) {
 
 
 const freeBypass =
-  feature === "pose_session" ||
   feature === "pose" ||
   feature === "body_scan" ||
   feature === "frame_check" ||
