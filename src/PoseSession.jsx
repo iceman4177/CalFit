@@ -29,10 +29,9 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
   setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
-import { postAI, getAuthHeaders } from "./lib/ai";
+import { postAI, getAIQuotaStatus } from "./lib/ai.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -102,17 +101,6 @@ function readStoredIsPro() {
     return localStorage.getItem("isPro") === "true";
   } catch {}
   return false;
-}
-
-function getOrCreateClientId() {
-  try {
-    let id = localStorage.getItem("slimcal_client_id");
-    if (id) return id;
-    id = (globalThis.crypto?.randomUUID?.() || `slimcal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-    localStorage.setItem("slimcal_client_id", id);
-    return id;
-  } catch {}
-  return `slimcal-${Date.now()}`;
 }
 
 function firstNonEmpty(...vals) {
@@ -287,7 +275,6 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
-  const [serverRemaining, setServerRemaining] = useState(() => getDailyRemaining("pose_session"));
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -312,35 +299,6 @@ export default function PoseSession() {
     });
   }, []);
 
-  const refreshPoseQuota = useCallback(async () => {
-    if (isPro) {
-      setServerRemaining(getDailyRemaining("pose_session"));
-      return;
-    }
-    if (!user?.id) {
-      const remaining = getDailyRemaining("pose_session");
-      setServerRemaining(remaining);
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ feature: "pose_session", quota_status: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && Number.isFinite(Number(json?.remaining))) {
-        const remaining = Math.max(0, Number(json.remaining));
-        setDailyRemaining("pose_session", remaining);
-        setServerRemaining(remaining);
-        return;
-      }
-    } catch {}
-
-    setServerRemaining(getDailyRemaining("pose_session"));
-  }, [isPro, user?.id]);
-
   useEffect(() => {
     const refreshPro = () => setIsPro(readStoredIsPro());
     refreshPro();
@@ -351,20 +309,6 @@ export default function PoseSession() {
       window.removeEventListener("slimcal:pro:refresh", refreshPro);
     };
   }, []);
-
-  useEffect(() => {
-    refreshPoseQuota();
-    const onFocus = () => { refreshPoseQuota(); };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") refreshPoseQuota();
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refreshPoseQuota]);
 
   const stopCamera = useCallback(() => {
     try {
@@ -488,8 +432,7 @@ export default function PoseSession() {
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
-    refreshPoseQuota();
-  }, [refreshPoseQuota]);
+  }, []);
 
   const startScan = useCallback(() => {
     if (!isPro && !canUseDailyFeature("pose_session")) {
@@ -511,6 +454,7 @@ export default function PoseSession() {
 
     try {
       const payload = {
+        feature: "pose_session",
         style: "detailed_muscle_groups_v1",
         gender,
         goalType,
@@ -519,36 +463,19 @@ export default function PoseSession() {
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
-          imageDataUrl: c.thumbDataUrl,
+          imageDataUrl: c.thumbDataUrl, // keep payload small
         })),
-        deltas,
+        deltas, // optional; app uses positive-only deltas
         recentScans: recentScanContext,
       };
 
-      let json;
-      try {
-        json = await postAI("pose_session", payload);
-      } catch (err) {
-        if (err?.code === 402) {
-          setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-          setStage("intro");
-          try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-          try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-          return;
-        }
-        throw err;
-      }
-
+      const json = await postAI("pose_session", { ...payload, user_id: user?.id || null });
+      const res = { ok: true, status: 200 };
       const session = json?.session || null;
       if (!isPro) {
-        if (user?.id && Number.isFinite(Number(json?.remaining))) {
-          const remaining = Math.max(0, Number(json.remaining));
-          setDailyRemaining("pose_session", remaining);
-          setServerRemaining(remaining);
-        } else {
-          registerDailyFeatureUse("pose_session");
-          setServerRemaining(getDailyRemaining("pose_session"));
-        }
+        if (typeof json?.remaining === 'number') setDailyRemaining('pose_session', json.remaining);
+        else registerDailyFeatureUse("pose_session");
+        try { window.dispatchEvent(new Event('storage')); } catch {}
       }
 
       // Persist a small record for deltas
@@ -574,6 +501,13 @@ export default function PoseSession() {
       setStage("results");
     } catch (e) {
       console.error(e);
+      if (e?.code === 402) {
+        setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+        setStage("intro");
+        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+        try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+        return;
+      }
       setErrorMsg("AI analysis failed. Please try again.");
       setStage("results");
       setResult(null);
@@ -584,6 +518,28 @@ export default function PoseSession() {
     if (stage !== "scanning") return;
     callAI();
   }, [stage, callAI]);
+
+  useEffect(() => {
+    if (isPro || !user?.id) return;
+    let alive = true;
+    const syncPoseQuota = async () => {
+      try {
+        const data = await getAIQuotaStatus('pose_session', { user_id: user.id });
+        if (!alive || typeof data?.remaining !== 'number') return;
+        setDailyRemaining('pose_session', data.remaining);
+        try { window.dispatchEvent(new Event('storage')); } catch {}
+      } catch {}
+    };
+    syncPoseQuota();
+    const onFocus = () => syncPoseQuota();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [isPro, user?.id]);
 
   const onShare = useCallback(async () => {
     if (!captures.length) return;
@@ -717,7 +673,6 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     featureKey="pose_session"
                     isPro={isPro}
                     labelPrefix="Free"
-                    forceRemaining={user?.id && !isPro ? serverRemaining : undefined}
                     sx={{
                       color: "rgba(220,235,245,0.92)",
                       borderColor: "rgba(120,255,220,0.28)",

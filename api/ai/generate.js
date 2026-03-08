@@ -534,118 +534,102 @@ function getFreeLimitForFeature(feature) {
 }
 const freeMem = new Map();
 
-function memScopeKey(clientId, feature, userId) {
-  return `m:${userId ? `uid:${userId}` : clientId}:${feature}`;
-}
-
-function memRemaining(clientId, feature, userId) {
-  const key = memScopeKey(clientId, feature, userId);
-  const today = dayKeyUTC();
-  const limit = getFreeLimitForFeature(feature);
-  const rec = freeMem.get(key);
-  if (!rec || rec.day !== today) return { remaining: limit, limit, used: 0 };
-  const used = Math.max(0, Number(rec.used || 0));
-  return { remaining: Math.max(0, limit - used), limit, used };
-}
-
-function memAllow(clientId, feature, userId) {
-  const key = memScopeKey(clientId, feature, userId);
+function memAllow(clientId, feature) {
+  const key = `m:${clientId}:${feature}`;
   const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
   const rec = freeMem.get(key);
   if (!rec || rec.day !== today) {
     freeMem.set(key, { used: 1, day: today });
-    return { allowed: true, remaining: limit - 1, limit, used: 1 };
+    return { allowed: true, remaining: limit - 1, used: 1, limit };
   }
   if (rec.used < limit) {
     rec.used += 1;
-    return { allowed: true, remaining: limit - rec.used, limit, used: rec.used };
+    return { allowed: true, remaining: limit - rec.used, used: rec.used, limit };
   }
-  return { allowed: false, remaining: 0, limit, used: rec.used };
+  return { allowed: false, remaining: 0, used: rec.used || limit, limit };
 }
 
-async function findFreePassRow({ feature, userId, clientId, today }) {
-  if (!supabaseAdmin) return null;
-
-  const fetchOne = async (column, value) => {
-    if (!value) return null;
-    const { data, error } = await supabaseAdmin
-      .from("ai_free_passes")
-      .select("id,uses,user_id,client_id")
-      .eq(column, value)
-      .eq("feature", feature)
-      .eq("day_key", today)
-      .order("uses", { ascending: false })
-      .limit(1);
-    if (error) throw error;
-    return Array.isArray(data) && data[0] ? data[0] : null;
-  };
-
-  if (userId) {
-    return (
-      (await fetchOne("user_id", userId)) ||
-      (await fetchOne("client_id", `uid:${userId}`))
-    );
-  }
-
-  return fetchOne("client_id", clientId);
-}
-
-async function getFreeFeatureRemaining({ req, feature, userId }) {
+function memStatus(clientId, feature) {
+  const key = `m:${clientId}:${feature}`;
+  const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
-  const clientId = headerClientId(req);
-  if (!supabaseAdmin) return memRemaining(clientId, feature, userId);
+  const rec = freeMem.get(key);
+  const used = !rec || rec.day !== today ? 0 : Math.max(0, Number(rec.used || 0));
+  return { allowed: used < limit, remaining: Math.max(0, limit - used), used, limit };
+}
 
+async function dbGetRemaining(clientId, feature, userId) {
+  if (!supabaseAdmin) return memStatus(clientId, feature);
   try {
     const today = dayKeyUTC();
-    const row = await findFreePassRow({ feature, userId, clientId, today });
-    const used = Math.max(0, Number(row?.uses || 0));
-    return { remaining: Math.max(0, limit - used), limit, used };
+    const limit = getFreeLimitForFeature(feature);
+    let query = supabaseAdmin.from("ai_free_passes").select("uses").eq("feature", feature).eq("day_key", today);
+    if (userId) query = query.eq("user_id", userId);
+    else query = query.eq("client_id", clientId);
+    const { data, error } = await query.maybeSingle();
+    if (error && error.code !== "PGRST116") return memStatus(clientId, feature);
+    const used = Math.max(0, Number(data?.uses || 0));
+    return { allowed: used < limit, remaining: Math.max(0, limit - used), used, limit };
   } catch {
-    return memRemaining(clientId, feature, userId);
+    return memStatus(clientId, feature);
   }
 }
 
 async function dbAllow(clientId, feature, userId) {
-  if (!supabaseAdmin) return memAllow(clientId, feature, userId);
+  if (!supabaseAdmin) return memAllow(clientId, feature);
   try {
     const today = dayKeyUTC();
     const limit = getFreeLimitForFeature(feature);
-    const row = await findFreePassRow({ feature, userId, clientId, today });
 
-    if (!row) {
+    let selectQ = supabaseAdmin.from("ai_free_passes").select("uses").eq("feature", feature).eq("day_key", today);
+    if (userId) selectQ = selectQ.eq("user_id", userId);
+    else selectQ = selectQ.eq("client_id", clientId);
+    const { data, error } = await selectQ.maybeSingle();
+
+    if (error && error.code !== "PGRST116") return memAllow(clientId, feature);
+
+    if (!data) {
       const ins = await supabaseAdmin
         .from("ai_free_passes")
-        .insert([{ client_id: userId ? `uid:${userId}` : clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
+        .insert([{ client_id: userId ? null : clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
         .select("uses")
         .single();
 
-      if (ins.error) return memAllow(clientId, feature, userId);
-      return { allowed: true, remaining: limit - 1, limit, used: 1 };
+      if (ins.error) return memAllow(clientId, feature);
+      return { allowed: true, remaining: limit - 1, used: 1, limit };
     }
 
-    const currentUses = Math.max(0, Number(row.uses || 0));
-    if (currentUses >= limit) return { allowed: false, remaining: 0, limit, used: currentUses };
+    const currentUses = data.uses || 0;
+    if (currentUses >= limit) return { allowed: false, remaining: 0, used: currentUses, limit };
 
-    const upd = await supabaseAdmin
+    let updateQ = supabaseAdmin
       .from("ai_free_passes")
-      .update({ uses: currentUses + 1, user_id: userId || row.user_id || null, client_id: userId ? `uid:${userId}` : (row.client_id || clientId) })
-      .eq("id", row.id)
-      .select("uses")
-      .single();
+      .update({ uses: currentUses + 1, user_id: userId || null, client_id: userId ? null : clientId })
+      .eq("feature", feature)
+      .eq("day_key", today);
+    if (userId) updateQ = updateQ.eq("user_id", userId);
+    else updateQ = updateQ.eq("client_id", clientId);
+    const upd = await updateQ.select("uses").single();
 
-    if (upd.error) return memAllow(clientId, feature, userId);
-    const newUses = Math.max(0, Number(upd.data?.uses ?? (currentUses + 1)));
-    return { allowed: true, remaining: Math.max(0, limit - newUses), limit, used: newUses };
+    if (upd.error) return memAllow(clientId, feature);
+    const newUses = upd.data?.uses ?? currentUses + 1;
+    return { allowed: true, remaining: Math.max(0, limit - newUses), used: newUses, limit };
   } catch {
-    return memAllow(clientId, feature, userId);
+    return memAllow(clientId, feature);
   }
 }
 
 async function allowFreeFeature({ req, feature, userId }) {
-  const clientId = headerClientId(req);
+  const clientId = idKey(req, userId);
   return dbAllow(clientId, feature, userId);
 }
+
+async function getFreeFeatureRemaining({ req, feature, userId }) {
+  const clientId = idKey(req, userId);
+  return dbGetRemaining(clientId, feature, userId);
+}
+
 
 // -------------------- VERDICT FALLBACK --------------------
 
@@ -1361,23 +1345,22 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
-  if (body?.quota_status === true) {
-    const limit = getFreeLimitForFeature(feature);
+  if (body?.quota_status) {
     if (pro) {
-      res.status(200).json({ allowed: true, remaining: limit, limit, used: 0, pro: true });
+      res.status(200).json({ remaining: Infinity, limit: getFreeLimitForFeature(feature), used: 0, pro: true });
       return;
     }
     const status = await getFreeFeatureRemaining({ req, feature, userId: resolvedUserId });
-    res.status(200).json({ allowed: status.remaining > 0, remaining: status.remaining, limit: status.limit || limit, used: status.used || 0, pro: false });
+    res.status(200).json({ remaining: status.remaining, limit: status.limit, used: status.used, pro: false });
     return;
   }
 
   // 2) If not Pro/Trial → per-feature free-pass
-  let freePass = null;
+  let pass = { remaining: Infinity, limit: getFreeLimitForFeature(feature), used: 0 };
   if (!pro && !freeBypass) {
-    freePass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
-    if (!freePass.allowed) {
-      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0, limit: freePass.limit || getFreeLimitForFeature(feature) });
+    pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    if (!pass.allowed) {
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0, limit: pass.limit });
       return;
     }
   }
@@ -1390,7 +1373,7 @@ const freeBypass =
         { focus, goal, intent, equipment },
         Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
       );
-      res.status(200).json({ suggestions, remaining: freePass?.remaining });
+      res.status(200).json({ suggestions, remaining: pass.remaining, limit: pass.limit });
       return;
     } catch (e) {
       console.error("[ai/generate] workout error:", e);
@@ -1398,7 +1381,7 @@ const freeBypass =
         { focus, goal, intent: normalizeIntent(constraints?.training_intent || "general") },
         Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
       );
-      res.status(200).json({ suggestions: fallback, remaining: freePass?.remaining });
+      res.status(200).json({ suggestions: fallback, remaining: pass.remaining, limit: pass.limit });
       return;
     }
   }
@@ -1410,7 +1393,7 @@ const freeBypass =
         { diet, intent, proteinTargetG, calorieBias },
         Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
       );
-      res.status(200).json({ suggestions });
+      res.status(200).json({ suggestions, remaining: pass.remaining, limit: pass.limit });
       return;
     } catch (e) {
       console.error("[ai/generate] meal error:", e);
@@ -1420,7 +1403,7 @@ const freeBypass =
           Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
         )
       );
-      res.status(200).json({ suggestions: fallback });
+      res.status(200).json({ suggestions: fallback, remaining: pass.remaining, limit: pass.limit });
       return;
     }
   }
@@ -1554,7 +1537,7 @@ const freeBypass =
       }
 
       if (!openai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback", remaining: freePass?.remaining });
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback" });
         return;
       }
 
@@ -1615,7 +1598,7 @@ const freeBypass =
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
       if (!ai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback", remaining: freePass?.remaining });
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback" });
         return;
       }
 
@@ -1737,11 +1720,11 @@ ${note}`;
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
 
-      res.status(200).json({ session, remaining: freePass?.remaining, ...(body?.debug ? { raw: text } : {}) });
+      res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);
-      res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_error_fallback", remaining: freePass?.remaining });
+      res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_error_fallback" });
       return;
     }
   }
