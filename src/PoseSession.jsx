@@ -502,6 +502,16 @@ export default function PoseSession() {
     setStage("capture");
   }, [isPro, refreshPoseQuota, user?.id]);
 
+  const resetToIntro = useCallback(() => {
+    setErrorMsg("");
+    setCaptures([]);
+    setResult(null);
+    setPoseIdx(0);
+    setCountdownMs(0);
+    setStage("intro");
+    refreshPoseQuota();
+  }, [refreshPoseQuota]);
+
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
     setErrorMsg("");
@@ -677,7 +687,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={startScan}
+                  onClick={resetToIntro}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
@@ -726,7 +736,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     <Chip
                       size="small"
                       variant="outlined"
-                      label={`Free: ${serverQuotaLoading ? "…" : (Number.isFinite(serverRemaining) ? serverRemaining : getDailyRemaining("pose_session"))}/3`}
+                      label={`Free: ${serverQuotaLoading ? "…" : (user?.id ? (Number.isFinite(serverRemaining) ? serverRemaining : "…") : getDailyRemaining("pose_session"))}/3`}
                       sx={{
                         fontWeight: 800,
                         borderRadius: 999,
