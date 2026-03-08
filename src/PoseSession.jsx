@@ -321,6 +321,43 @@ export default function PoseSession() {
     };
   }, []);
 
+  const refreshPoseQuota = useCallback(async () => {
+    if (isPro || !user?.id) {
+      const localRemaining = getDailyRemaining("pose_session");
+      setPoseRemaining(localRemaining);
+      return localRemaining;
+    }
+
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Client-Id": getOrCreateClientId(),
+          ...(user?.id ? { "X-User-Id": user.id } : {}),
+        },
+        body: JSON.stringify({
+          feature: "pose_session",
+          action: "quota_status",
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      const next = Math.max(0, Number(json?.remaining ?? getDailyRemaining("pose_session")));
+      setPoseRemaining(next);
+      return next;
+    } catch (e) {
+      console.error(e);
+      const fallback = getDailyRemaining("pose_session");
+      setPoseRemaining(fallback);
+      return fallback;
+    }
+  }, [isPro, user?.id]);
+
+  useEffect(() => {
+    refreshPoseQuota();
+  }, [refreshPoseQuota]);
+
   const stopCamera = useCallback(() => {
     try {
       if (timerRef.current) clearTimeout(timerRef.current);
