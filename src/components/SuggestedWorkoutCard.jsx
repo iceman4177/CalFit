@@ -91,23 +91,14 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-function scrollElementToViewportTop(el, { behavior = 'smooth', topPadding = 16 } = {}) {
-  try {
-    if (!el || typeof window === 'undefined') return;
-    const rect = el.getBoundingClientRect();
-    const absoluteTop = window.scrollY + rect.top;
-    const targetTop = Math.max(0, absoluteTop - topPadding);
-    window.scrollTo({ top: targetTop, behavior });
-  } catch {}
-}
-
-export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange }) {
+export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange, onGeneratedReady }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const loadingCardRef = useRef(null);
+  const cardRootRef = useRef(null);
   const actionRowRef = useRef(null);
   const workoutListRef = useRef(null);
 
@@ -173,23 +164,28 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   useEffect(() => {
     if (loading || !current) return;
 
-    const scrollGeneratedWorkoutIntoView = () => {
-      try {
-        const primary = workoutListRef.current || actionRowRef.current;
-        if (!primary) return;
-        const topPadding = window.innerWidth < 700 ? 18 : 28;
-        scrollElementToViewportTop(primary, { behavior: 'smooth', topPadding });
-      } catch {}
-    };
-
     const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(scrollGeneratedWorkoutIntoView));
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (typeof onGeneratedReady === 'function') {
+          onGeneratedReady();
+          return;
+        }
+        try {
+          const primary = workoutListRef.current || cardRootRef.current || actionRowRef.current;
+          if (!primary) return;
+          const offset = window.innerWidth < 700 ? 86 : 96;
+          const rect = primary.getBoundingClientRect();
+          const absoluteTop = window.scrollY + rect.top;
+          const targetTop = Math.max(0, absoluteTop - offset);
+          window.scrollTo({ top: targetTop, behavior: 'smooth' });
+        } catch {}
+      }));
     };
 
-    const t1 = setTimeout(run, 80);
-    const t2 = setTimeout(run, 260);
-    const t3 = setTimeout(run, 520);
-    const t4 = setTimeout(run, 820);
+    const t1 = setTimeout(run, 120);
+    const t2 = setTimeout(run, 300);
+    const t3 = setTimeout(run, 560);
+    const t4 = setTimeout(run, 860);
 
     return () => {
       clearTimeout(t1);
@@ -197,7 +193,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
       clearTimeout(t3);
       clearTimeout(t4);
     };
-  }, [loading, current?.title, split]);
+  }, [loading, current?.title, split, onGeneratedReady]);
 
   useEffect(() => {
     let active = true;
@@ -335,7 +331,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
   if (err) {
     return (
-      <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+      <Card ref={cardRootRef} data-suggested-workout-card="true" sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6" color="error">
             {err}
@@ -368,7 +364,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   const localWorkout = toLocalWorkout(current);
 
   return (
-    <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+    <Card ref={cardRootRef} data-suggested-workout-card="true" sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
       <CardContent sx={{ overflow: 'visible', p: { xs: 2, md: 3 } }}>
         <Stack spacing={2}>
           <Box
@@ -412,6 +408,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
           <Box
             ref={workoutListRef}
+            data-generated-exercise-list="true"
             sx={{
               p: { xs: 1.5, md: 2 },
               borderRadius: 3,
