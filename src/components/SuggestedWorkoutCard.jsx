@@ -163,36 +163,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
   useEffect(() => {
     if (loading || !current) return;
-
-    const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (typeof onGeneratedReady === 'function') {
-          onGeneratedReady();
-          return;
-        }
-        try {
-          const primary = workoutListRef.current || cardRootRef.current || actionRowRef.current;
-          if (!primary) return;
-          const offset = window.innerWidth < 700 ? 86 : 96;
-          const rect = primary.getBoundingClientRect();
-          const absoluteTop = window.scrollY + rect.top;
-          const targetTop = Math.max(0, absoluteTop - offset);
-          window.scrollTo({ top: targetTop, behavior: 'smooth' });
-        } catch {}
-      }));
-    };
-
-    const t1 = setTimeout(run, 120);
-    const t2 = setTimeout(run, 300);
-    const t3 = setTimeout(run, 560);
-    const t4 = setTimeout(run, 860);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-    };
+    const t = setTimeout(() => {
+      if (typeof onGeneratedReady === 'function') onGeneratedReady();
+    }, 60);
+    return () => clearTimeout(t);
   }, [loading, current?.title, split, onGeneratedReady]);
 
   useEffect(() => {
@@ -441,11 +415,8 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
               display: 'flex',
               gap: 1.25,
               flexWrap: 'wrap',
-              position: { xs: 'sticky', md: 'static' },
-              bottom: { xs: 0, md: 'auto' },
               pt: 0.5,
-              pb: { xs: 0.5, md: 0 },
-              backgroundColor: { xs: 'rgba(255,255,255,0.96)', md: 'transparent' }
+              pb: 0
             }}
           >
             <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 3, fontWeight: 700 }}>

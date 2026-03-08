@@ -320,6 +320,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
+  const [pendingGeneratedSnap, setPendingGeneratedSnap] = useState(false);
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -1274,42 +1275,56 @@ setNewExercise({
   const handleShareWorkout = () => setShareModalOpen(true);
 
   const handleGeneratedReady = () => {
+    setPendingGeneratedSnap(true);
+  };
+
+
+  useEffect(() => {
+    if (!pendingGeneratedSnap || aiSuggestLoading || !showSuggestCard) return;
+
     let cancelled = false;
     let raf1 = 0;
     let raf2 = 0;
     let timer = 0;
+    let doneTimer = 0;
     let attempts = 0;
 
-    const scrollToGeneratedWorkout = () => {
+    const snapToSuggestedWorkout = () => {
       if (cancelled) return;
       const wrapper = suggestRef.current;
-      const target = wrapper?.querySelector('[data-generated-exercise-list="true"]') || wrapper;
-      if (target) {
-        const topOffset = window.innerWidth < 700 ? 86 : 96;
-        const bottomOffset = window.innerWidth < 700 ? 96 : 110;
-        scrollContainerIntoFullView(target, { behavior: 'smooth', topOffset, bottomOffset });
+      const card = wrapper?.querySelector('[data-suggested-workout-card="true"]') || wrapper;
+      if (card) {
+        const topOffset = window.innerWidth < 700 ? 84 : 96;
+        const bottomOffset = window.innerWidth < 700 ? 18 : 32;
+        scrollContainerIntoFullView(card, { behavior: 'smooth', topOffset, bottomOffset });
       }
+
       attempts += 1;
-      if (attempts < 10) {
+      if (attempts < 9) {
         timer = window.setTimeout(() => {
           raf1 = window.requestAnimationFrame(() => {
-            raf2 = window.requestAnimationFrame(scrollToGeneratedWorkout);
+            raf2 = window.requestAnimationFrame(snapToSuggestedWorkout);
           });
         }, attempts < 4 ? 140 : 220);
+      } else {
+        doneTimer = window.setTimeout(() => {
+          if (!cancelled) setPendingGeneratedSnap(false);
+        }, 180);
       }
     };
 
     raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(scrollToGeneratedWorkout);
+      raf2 = window.requestAnimationFrame(snapToSuggestedWorkout);
     });
 
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
+      if (doneTimer) window.clearTimeout(doneTimer);
       if (raf1) window.cancelAnimationFrame(raf1);
       if (raf2) window.cancelAnimationFrame(raf2);
     };
-  };
+  }, [pendingGeneratedSnap, aiSuggestLoading, showSuggestCard]);
 
   const handleAcceptSuggested = workout => {
     const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
@@ -1345,21 +1360,22 @@ setNewExercise({
 
 
   useEffect(() => {
-    if (!pendingAcceptedScroll || cumulativeExercises.length === 0) return;
+    if (!pendingAcceptedScroll || cumulativeExercises.length === 0 || showSuggestCard) return;
 
     let cancelled = false;
     let raf1 = 0;
     let raf2 = 0;
     let timer = 0;
+    let doneTimer = 0;
     let attempts = 0;
 
     const scrollToAcceptedSession = () => {
       if (cancelled) return;
-      const card = sessionLogRef.current;
-      if (card) {
-        const topOffset = window.innerWidth < 700 ? 86 : 96;
-        const bottomOffset = window.innerWidth < 700 ? 98 : 110;
-        scrollContainerIntoFullView(card, { behavior: 'smooth', topOffset, bottomOffset });
+      const target = sessionLogRef.current || firstSessionExerciseRef.current;
+      if (target) {
+        const topOffset = window.innerWidth < 700 ? 84 : 96;
+        const bottomOffset = window.innerWidth < 700 ? 22 : 34;
+        scrollContainerIntoFullView(target, { behavior: 'smooth', topOffset, bottomOffset });
       }
 
       attempts += 1;
@@ -1370,7 +1386,9 @@ setNewExercise({
           });
         }, attempts < 4 ? 140 : 220);
       } else {
-        setPendingAcceptedScroll(false);
+        doneTimer = window.setTimeout(() => {
+          if (!cancelled) setPendingAcceptedScroll(false);
+        }, 260);
       }
     };
 
@@ -1381,10 +1399,11 @@ setNewExercise({
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
+      if (doneTimer) window.clearTimeout(doneTimer);
       if (raf1) window.cancelAnimationFrame(raf1);
       if (raf2) window.cancelAnimationFrame(raf2);
     };
-  }, [pendingAcceptedScroll, cumulativeExercises.length]);
+  }, [pendingAcceptedScroll, cumulativeExercises.length, showSuggestCard]);
 
   useEffect(() => {
     let active = true;
@@ -1571,7 +1590,7 @@ setNewExercise({
   }
 
   const simplifiedGenerationMode = showSuggestCard && aiSuggestLoading;
-  const suppressSubmitCTA = simplifiedGenerationMode || showSuggestCard || pendingAcceptedScroll;
+  const suppressSubmitCTA = simplifiedGenerationMode || showSuggestCard || pendingAcceptedScroll || pendingGeneratedSnap;
 
   // --- main UI ---
   return (
