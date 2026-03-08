@@ -9,7 +9,8 @@ import {
   ListItem,
   Divider,
   Box,
-  Chip
+  Chip,
+  Stack
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
@@ -239,7 +240,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (loading) {
     return (
-      <Card sx={{ mb: 4, overflow: 'visible' }}>
+      <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6">Generating a plan…</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -252,7 +253,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (err) {
     return (
-      <Card sx={{ mb: 4, overflow: 'visible' }}>
+      <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6" color="error">
             {err}
@@ -285,82 +286,98 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const localWorkout = toLocalWorkout(current);
 
   return (
-    <Card sx={{ mb: 4, overflow: 'visible' }}>
-      <CardContent sx={{ overflow: 'visible' }}>
-        {/* Header */}
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 1,
-            flexWrap: 'wrap',
-          }}
-        >
-          <Typography variant="h5" sx={{ lineHeight: 1.2 }}>
-            Suggested Workout
-          </Typography>
-
-          {/* Badges/Chips row */}
+    <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+      <CardContent sx={{ overflow: 'visible', p: { xs: 2, md: 3 } }}>
+        <Stack spacing={2}>
           <Box
             sx={{
               display: 'flex',
-              gap: 1,
+              alignItems: { xs: 'flex-start', md: 'center' },
+              justifyContent: 'space-between',
+              gap: 1.5,
               flexWrap: 'wrap',
-              justifyContent: { xs: 'flex-start', sm: 'flex-end' },
-              alignItems: 'center',
-              // give a little room so top-right chips don't feel cramped
-              mt: { xs: 0.5, sm: 0 },
             }}
           >
-            <FeatureUseBadge featureKey="ai_workout" isPro={pro} sx={{ flexShrink: 0 }} />
-            <Chip
-              size="small"
-              label={(trainingIntent || 'general').replace('_', ' ')}
-              sx={{ flexShrink: 0 }}
-            />
-            <Chip
-              size="small"
-              label={(split || 'upper').replace('_', ' ')}
-              sx={{ flexShrink: 0 }}
-            />
+            <Box>
+              <Typography variant="h5" sx={{ lineHeight: 1.15, fontWeight: 800 }}>
+                Suggested Workout
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                Built for today so you can start fast.
+              </Typography>
+            </Box>
+
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 1,
+                flexWrap: 'wrap',
+                justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+                alignItems: 'center',
+              }}
+            >
+              <FeatureUseBadge featureKey="ai_workout" isPro={pro} sx={{ flexShrink: 0 }} />
+              <Chip size="small" label={(trainingIntent || 'general').replace('_', ' ')} sx={{ flexShrink: 0, borderRadius: 999 }} />
+              <Chip size="small" label={(split || 'upper').replace('_', ' ')} sx={{ flexShrink: 0, borderRadius: 999 }} />
+            </Box>
           </Box>
-        </Box>
 
-        <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
+          <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 
-        <Typography variant="subtitle1" gutterBottom sx={{ mt: 1 }}>
-          {localWorkout.name}
-        </Typography>
-
-        <List dense>
-          {localWorkout.exercises.map((ex, i) => (
-            <ListItem key={i} sx={{ pl: 0 }}>
-              • {ex.exerciseName} — {ex.sets}×{ex.reps}
-            </ListItem>
-          ))}
-        </List>
-
-        <Divider sx={{ my: 2 }} />
-
-        <Box ref={actionRowRef} sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="outlined" onClick={handleRefresh}>
-            Refresh
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              if (typeof onAccept === 'function') onAccept(localWorkout);
+          <Box
+            sx={{
+              p: { xs: 1.5, md: 2 },
+              borderRadius: 3,
+              backgroundColor: 'rgba(248,250,252,0.85)',
+              border: '1px solid rgba(15,23,42,0.06)'
             }}
           >
-            Accept Workout
-          </Button>
-        </Box>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
+              {localWorkout.name}
+            </Typography>
 
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          💡 Your plan is tuned by goal (<strong>{(trainingIntent || 'general').replace('_', ' ')}</strong>)
-          and today’s split (<strong>{(split || 'upper').replace('_', ' ')}</strong>).
-        </Typography>
+            <List dense sx={{ py: 0 }}>
+              {localWorkout.exercises.map((ex, i) => (
+                <ListItem key={i} sx={{ pl: 0, pr: 0, alignItems: 'flex-start' }}>
+                  • {ex.exerciseName} — {ex.sets}×{ex.reps}
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+
+          <Typography variant="body2" color="text.secondary">
+            Tuned for <strong>{(trainingIntent || 'general').replace('_', ' ')}</strong> • <strong>{(split || 'upper').replace('_', ' ')}</strong>
+          </Typography>
+
+          <Divider />
+
+          <Box
+            ref={actionRowRef}
+            sx={{
+              display: 'flex',
+              gap: 1.25,
+              flexWrap: 'wrap',
+              position: { xs: 'sticky', md: 'static' },
+              bottom: { xs: 0, md: 'auto' },
+              pt: 0.5,
+              pb: { xs: 0.5, md: 0 },
+              backgroundColor: { xs: 'rgba(255,255,255,0.96)', md: 'transparent' }
+            }}
+          >
+            <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 3, fontWeight: 700 }}>
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              onClick={() => {
+                if (typeof onAccept === 'function') onAccept(localWorkout);
+              }}
+              sx={{ borderRadius: 3, fontWeight: 800, minWidth: { sm: 220 } }}
+            >
+              Accept Workout
+            </Button>
+          </Box>
+        </Stack>
       </CardContent>
 
       <UpgradeModal
