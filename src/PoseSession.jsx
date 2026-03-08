@@ -29,8 +29,6 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
-  setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
 import {
   readPoseSessionHistory,
@@ -39,7 +37,7 @@ import {
   localDayISO,
   buildRecentPoseContext,
 } from "./lib/poseSessionStore.js";
-import { postAI, getAIQuotaStatus } from "./lib/ai";
+import { postAI } from "./lib/ai";
 
 const MALE_POSES = [
   { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
@@ -299,24 +297,6 @@ export default function PoseSession() {
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
   const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
-
-  useEffect(() => {
-    let active = true;
-    const syncQuota = async () => {
-      if (isPro || !user?.id) return;
-      try {
-        const q = await getAIQuotaStatus("pose_session");
-        if (!active) return;
-        if (typeof q?.remaining === "number") setDailyRemaining("pose_session", q.remaining);
-      } catch {}
-    };
-    syncQuota();
-    window.addEventListener("focus", syncQuota);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", syncQuota);
-    };
-  }, [isPro, user?.id]);
 
   useEffect(() => {
     ALL_OUTLINE_ASSETS.forEach((src) => {
