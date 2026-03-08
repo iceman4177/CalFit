@@ -279,6 +279,7 @@ export default function PoseSession() {
   const [countdownMs, setCountdownMs] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const pageTopRef = useRef(null);
 
   const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
   const [result, setResult] = useState(null);
@@ -562,6 +563,19 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     }
   }, [captures, isFemale, result]);
 
+  useEffect(() => {
+    const run = () => {
+      try {
+        window.scrollTo({ top: 0, behavior: "auto" });
+      } catch {}
+      try {
+        pageTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+      } catch {}
+    };
+    const id = window.setTimeout(run, 0);
+    return () => window.clearTimeout(id);
+  }, [stage, poseIdx]);
+
   const titleColor = "rgba(245,250,255,0.92)";
   const bodyColor = "rgba(220,235,245,0.86)";
   const outlinePulseActive = stage === "capture" && countdownMs > CAPTURE_DELAY_MS - OUTLINE_PULSE_MS;
@@ -573,7 +587,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           <Box key={src} component="img" src={src} alt="" sx={{ width: 1, height: 1 }} />
         ))}
       </Box>
-      <Box sx={{ minHeight: "100vh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 2, md: 4 } }}>
+      <Box ref={pageTopRef} sx={{ minHeight: "100svh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 1, md: 4 } }}>
       <Card
         sx={{
           width: "min(980px, 100%)",
@@ -582,9 +596,10 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           border: "1px solid rgba(120,255,220,0.18)",
           boxShadow: "0 0 24px rgba(0,0,0,0.45)",
           overflow: "hidden",
+          minHeight: { xs: "calc(100svh - 8px)", md: "auto" },
         }}
       >
-        <CardContent sx={{ p: { xs: 2.2, md: 3 } }}>
+        <CardContent sx={{ p: { xs: 1.5, md: 3 }, minHeight: { xs: "calc(100svh - 10px)", md: "auto" }, display: "flex", flexDirection: "column" }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
             <Button
               startIcon={<ArrowBackIcon />}
@@ -634,7 +649,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           ) : null}
 
           {stage === "intro" && (
-            <Stack spacing={2.2}>
+            <Stack spacing={{ xs: 1.35, md: 2.2 }} sx={{ flex: 1, minHeight: 0 }}>
               <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
                 AI Physique Tracker
               </Typography>
@@ -669,13 +684,13 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                       borderRadius: 3,
                       border: "1px solid rgba(120,255,220,0.18)",
                       bgcolor: "rgba(0,0,0,0.22)",
-                      p: 2,
+                      p: { xs: 1.25, md: 2 },
                       textAlign: "center",
                     }}
                   >
                     <Box
                       sx={{
-                        height: 120,
+                        height: { xs: 68, md: 120 },
                         borderRadius: 3,
                         bgcolor: "rgba(255,255,255,0.03)",
                         border: "1px solid rgba(255,255,255,0.06)",
@@ -694,7 +709,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 ))}
               </Stack>
 
-              <Stack spacing={1}>
+              <Stack spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip label="Auto-captures after a short timer" size="small" sx={{ bgcolor: "rgba(120,255,220,0.12)", color: bodyColor, border: "1px solid rgba(120,255,220,0.18)" }} />
                   <Chip label="Private — you control sharing" size="small" sx={{ bgcolor: "rgba(255,255,255,0.06)", color: bodyColor, border: "1px solid rgba(255,255,255,0.10)" }} />
@@ -706,7 +721,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 onClick={startScan}
                 startIcon={<CameraAltIcon />}
                 sx={{
-                  mt: 1,
+                  mt: { xs: "auto", md: 1 },
                   borderRadius: 999,
                   py: 1.4,
                   fontWeight: 800,
@@ -736,7 +751,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           />
 
           {stage === "capture" && (
-            <Stack spacing={2}>
+            <Stack spacing={{ xs: 1.2, md: 2 }} sx={{ flex: 1, minHeight: 0 }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography sx={{ color: titleColor, fontWeight: 800 }}>
                   Pose {poseIdx + 1} of {activePoses.length}
@@ -752,12 +767,15 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: "100%",
+                  width: { xs: "min(100%, 340px)", md: "100%" },
+                  mx: "auto",
                   aspectRatio: "3/4",
+                  maxHeight: { xs: "46svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
                   bgcolor: "#000",
+                  flexShrink: 1,
                 }}
               >
                 <video
@@ -816,8 +834,8 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
 
               <Box
                 sx={{
-                  px: 2,
-                  py: 1.4,
+                  px: { xs: 1.4, md: 2 },
+                  py: { xs: 1, md: 1.4 },
                   borderRadius: 999,
                   border: "1px solid rgba(120,255,220,0.18)",
                   bgcolor: "rgba(0,0,0,0.22)",
@@ -837,9 +855,9 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   />
                 </Box>
                 <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 1 }}>
-                  <Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
-                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
-                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }} />
+<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
+                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
+                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
                 </Stack>
               </Box>
             </Stack>
