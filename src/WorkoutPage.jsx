@@ -12,7 +12,7 @@ function uuidv4Fallback() {
     return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, () => '0');
   }
 }
-import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Container,
   Typography,
@@ -94,7 +94,7 @@ function formatExerciseLine(ex) {
 
   const wt = hasWeight ? ` @ ${weight} lb` : '';
   const name = ex.exerciseName || ex.name || 'Exercise';
-  const kcals = ((+ex.calories) || 0).toFixed(2);
+  const kcals = Math.round((+ex.calories) || 0);
 
   if (!vol && !hasWeight) return `${name} — ${kcals} cals`;
   return `${name} — ${vol}${wt} — ${kcals} cals`;
@@ -287,8 +287,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
   const sessionLogRef = useRef(null);
-  const firstExerciseRowRef = useRef(null);
-  const [pendingAcceptScroll, setPendingAcceptScroll] = useState(false);
 
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
@@ -1258,59 +1256,14 @@ setNewExercise({
         )
       };
     });
-    setPendingAcceptScroll(true);
-    setShowSuggestCard(false);
     setCumulativeExercises(enriched);
-  };
 
-
-  useLayoutEffect(() => {
-    if (!pendingAcceptScroll || showSuggestCard || cumulativeExercises.length === 0) return;
-
-    let raf1 = 0;
-    let raf2 = 0;
-    let timeoutId = 0;
-
-    const scrollToAcceptedList = () => {
+    setTimeout(() => {
       try {
-        const target = firstExerciseRowRef.current || sessionLogRef.current;
-        if (!target) return false;
-        const rect = target.getBoundingClientRect();
-        const absoluteTop = window.scrollY + rect.top;
-        const viewport = window.innerHeight || 800;
-        const mobile = window.innerWidth < 700;
-        const stickyBottomAllowance = mobile ? 120 : 32;
-        const targetTop = Math.max(
-          0,
-          absoluteTop - Math.max(84, (viewport - rect.height) / 2) - stickyBottomAllowance / 2
-        );
-        window.scrollTo({ top: targetTop, behavior: 'smooth' });
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    timeoutId = window.setTimeout(() => {
-      raf1 = window.requestAnimationFrame(() => {
-        raf2 = window.requestAnimationFrame(() => {
-          const ok = scrollToAcceptedList();
-          if (ok) {
-            window.setTimeout(scrollToAcceptedList, 180);
-            window.setTimeout(() => setPendingAcceptScroll(false), 260);
-          } else {
-            window.setTimeout(() => setPendingAcceptScroll(false), 260);
-          }
-        });
-      });
-    }, 40);
-
-    return () => {
-      try { window.clearTimeout(timeoutId); } catch {}
-      try { window.cancelAnimationFrame(raf1); } catch {}
-      try { window.cancelAnimationFrame(raf2); } catch {}
-    };
-  }, [pendingAcceptScroll, showSuggestCard, cumulativeExercises]);
+        sessionLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }, 80);
+  };
 
   useEffect(() => {
     let active = true;
@@ -1339,6 +1292,11 @@ setNewExercise({
       }
       setShowSuggestCard(true);
 
+      setTimeout(() => {
+        try {
+          suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch {}
+      }, 50);
       return;
     }
     setShowSuggestCard(false);
@@ -1360,7 +1318,7 @@ setNewExercise({
     const total = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
       'en-US'
-    )} with Slimcal.ai: ${cumulativeExercises.length} items, ${total.toFixed(2)} cals! #SlimcalAI`;
+    )} with Slimcal.ai: ${cumulativeExercises.length} items, ${Math.round(total)} cals! #SlimcalAI`;
 
     return (
       <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
@@ -1608,7 +1566,6 @@ setNewExercise({
                 </Typography>
                 {cumulativeExercises.map((ex, idx) => (
                   <Box
-                    ref={idx === 0 ? firstExerciseRowRef : null}
                     key={idx}
                     sx={{
                       mb: 1,
@@ -1716,7 +1673,7 @@ setNewExercise({
           'en-US'
         )} with Slimcal.ai: ${cumulativeExercises.length} items, ${cumulativeExercises
           .reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0)
-          .toFixed(2)} cals! #SlimcalAI`}
+          .toFixed(0)} cals! #SlimcalAI`}
         shareUrl={window.location.href}
       />
 

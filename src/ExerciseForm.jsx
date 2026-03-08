@@ -177,7 +177,7 @@ export default function ExerciseForm({
     >
       <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center" flexWrap="wrap">
         <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
-          Calories: <b>{Number.isFinite(currentCalories) ? currentCalories.toFixed(2) : '0.00'}</b>
+          Calories: <b>{Number.isFinite(currentCalories) ? Math.round(currentCalories) : '0'}</b>
         </Typography>
         <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {isStrength && (

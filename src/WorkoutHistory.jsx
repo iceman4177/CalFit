@@ -303,7 +303,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     const date = formatDateTime(row.started_at);
     const total = Number(row.total_calories) || 0;
 
-    const header = `I just logged a workout on ${date} with Slimcal.ai — ${total.toFixed(2)} calories burned! #SlimcalAI`;
+    const header = `I just logged a workout on ${date} with Slimcal.ai — ${Math.round(total)} calories burned! #SlimcalAI`;
 
     const body = (row.shareLines || []).join('\n');
     setShareText(`${header}\n\n${body}`);
@@ -583,7 +583,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Typography variant="body2" color="text.secondary">
-                            {(Number(w.total_calories) || 0).toFixed(2)} cals
+                            {(Number(w.total_calories) || 0).toFixed(0)} cals
                           </Typography>
 
                           <span><IconButton
