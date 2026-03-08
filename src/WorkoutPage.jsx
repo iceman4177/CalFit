@@ -1284,6 +1284,41 @@ setNewExercise({
   }, [user?.id]);
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
+  const scrollSuggestCardToCenter = useCallback(() => {
+    try {
+      const el = suggestRef.current;
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const absoluteTop = rect.top + window.scrollY;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const targetTop = Math.max(0, absoluteTop - ((viewportHeight - rect.height) / 2));
+
+      window.scrollTo({ top: targetTop, behavior: 'smooth' });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!showSuggestCard) return;
+
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        scrollSuggestCardToCenter();
+      });
+    });
+
+    const timer = setTimeout(() => {
+      scrollSuggestCardToCenter();
+    }, 180);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      clearTimeout(timer);
+    };
+  }, [showSuggestCard, scrollSuggestCardToCenter]);
+
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
       if (!isProUser() && !canUseDailyFeature('ai_workout')) {
@@ -1291,12 +1326,6 @@ setNewExercise({
         return;
       }
       setShowSuggestCard(true);
-
-      setTimeout(() => {
-        try {
-          suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } catch {}
-      }, 50);
       return;
     }
     setShowSuggestCard(false);
