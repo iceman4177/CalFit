@@ -587,7 +587,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           <Box key={src} component="img" src={src} alt="" sx={{ width: 1, height: 1 }} />
         ))}
       </Box>
-      <Box ref={pageTopRef} sx={{ minHeight: "100svh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 1, md: 4 } }}>
+      <Box ref={pageTopRef} sx={{ minHeight: "100svh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 0.5, md: 4 } }}>
       <Card
         sx={{
           width: "min(980px, 100%)",
@@ -596,11 +596,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           border: "1px solid rgba(120,255,220,0.18)",
           boxShadow: "0 0 24px rgba(0,0,0,0.45)",
           overflow: "hidden",
-          minHeight: { xs: "calc(100svh - 8px)", md: "auto" },
+          minHeight: { xs: "100svh", md: "auto" },
         }}
       >
-        <CardContent sx={{ p: { xs: 1.5, md: 3 }, minHeight: { xs: "calc(100svh - 10px)", md: "auto" }, display: "flex", flexDirection: "column" }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+        <CardContent sx={{ p: { xs: 1, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: { xs: 1, md: 2 } }}>
             <Button
               startIcon={<ArrowBackIcon />}
               onClick={() => history.goBack()}
@@ -649,7 +649,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           ) : null}
 
           {stage === "intro" && (
-            <Stack spacing={{ xs: 1.35, md: 2.2 }} sx={{ flex: 1, minHeight: 0 }}>
+            <Stack spacing={{ xs: 0.9, md: 2.2 }} sx={{ flex: 1, minHeight: 0 }}>
               <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
                 AI Physique Tracker
               </Typography>
@@ -690,7 +690,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   >
                     <Box
                       sx={{
-                        height: { xs: 68, md: 120 },
+                        height: { xs: 52, md: 120 },
                         borderRadius: 3,
                         bgcolor: "rgba(255,255,255,0.03)",
                         border: "1px solid rgba(255,255,255,0.06)",
@@ -704,7 +704,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                         {p.title}
                       </Typography>
                     </Box>
-                    <Typography sx={{ color: bodyColor, fontSize: 13 }}>{p.subtitle}</Typography>
+                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, lineHeight: 1.35 }}>{p.subtitle}</Typography>
                   </Box>
                 ))}
               </Stack>
@@ -721,7 +721,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 onClick={startScan}
                 startIcon={<CameraAltIcon />}
                 sx={{
-                  mt: { xs: "auto", md: 1 },
+                  mt: { xs: 0.5, md: 1 },
                   borderRadius: 999,
                   py: 1.4,
                   fontWeight: 800,
@@ -734,7 +734,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               >
                 Start Scan
               </Button>
-              <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: 12 }}>
+              <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: { xs: 11, md: 12 } }}>
                 Tip: step back so your full body shape is easy to read in frame.
               </Typography>
             </Stack>
@@ -751,7 +751,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           />
 
           {stage === "capture" && (
-            <Stack spacing={{ xs: 1.2, md: 2 }} sx={{ flex: 1, minHeight: 0 }}>
+            <Stack spacing={{ xs: 0.75, md: 2 }} sx={{ flex: 1, minHeight: 0 }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography sx={{ color: titleColor, fontWeight: 800 }}>
                   Pose {poseIdx + 1} of {activePoses.length}
@@ -767,10 +767,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: { xs: "min(100%, 340px)", md: "100%" },
+                  width: { xs: "min(100%, 320px)", md: "100%" },
                   mx: "auto",
                   aspectRatio: "3/4",
-                  maxHeight: { xs: "46svh", md: "none" },
+                  height: { xs: "min(54svh, 440px)", md: "auto" },
+                  maxHeight: { xs: "54svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
@@ -785,7 +786,8 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: "cover",
+                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "contain" : "cover",
+                    background: "#000",
                     transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   }}
                 />
@@ -802,10 +804,10 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   <Box
                     sx={{
                       position: "absolute",
-                      left: 14,
-                      right: 14,
-                      bottom: 14,
-                      p: 2,
+                      left: 10,
+                      right: 10,
+                      bottom: 10,
+                      p: { xs: 1.35, md: 2 },
                       borderRadius: 3,
                       bgcolor: "rgba(0,0,0,0.55)",
                       border: "1px solid rgba(120,255,220,0.20)",
@@ -815,13 +817,13 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>
                       {pose.title}
                     </Typography>
-                    <Typography sx={{ color: bodyColor, fontSize: 13, mt: 0.5 }}>
+                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, mt: 0.4, lineHeight: 1.35 }}>
                       {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
                     </Typography>
 
-                    <Divider sx={{ my: 1.2, borderColor: "rgba(255,255,255,0.08)" }} />
+                    <Divider sx={{ my: { xs: 0.9, md: 1.2 }, borderColor: "rgba(255,255,255,0.08)" }} />
 
-                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: 12 }}>
+                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 11, md: 12 } }}>
                       Auto-capturing in{" "}
                       <b style={{ color: "rgba(120,255,220,0.95)" }}>
                         {Math.max(0, Math.ceil(countdownMs / 1000))}
@@ -834,17 +836,17 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
 
               <Box
                 sx={{
-                  px: { xs: 1.4, md: 2 },
-                  py: { xs: 1, md: 1.4 },
+                  px: { xs: 1.1, md: 2 },
+                  py: { xs: 0.8, md: 1.4 },
                   borderRadius: 999,
                   border: "1px solid rgba(120,255,220,0.18)",
                   bgcolor: "rgba(0,0,0,0.22)",
                 }}
               >
-                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: 12 }}>
+                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
                   LOCK-ON
                 </Typography>
-                <Box sx={{ mt: 1, height: 8, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
                   <Box
                     sx={{
                       height: "100%",
@@ -854,10 +856,10 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     }}
                   />
                 </Box>
-                <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 1 }}>
-<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
-                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
-                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 24, md: 32 } }} />
+                <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
+<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
                 </Stack>
               </Box>
             </Stack>
