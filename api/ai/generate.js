@@ -534,13 +534,8 @@ function getFreeLimitForFeature(feature) {
 }
 const freeMem = new Map();
 
-function quotaIdentity(req, userId) {
-  if (userId) return `user:${userId}`;
-  return getClientId(req);
-}
-
-function memAllow(identityKey, feature) {
-  const key = `m:${identityKey}:${feature}`;
+function memAllow(clientId, feature) {
+  const key = `m:${clientId}:${feature}`;
   const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
   const rec = freeMem.get(key);
@@ -555,8 +550,8 @@ function memAllow(identityKey, feature) {
   return { allowed: false, remaining: 0 };
 }
 
-async function dbAllow(identityKey, feature, userId) {
-  if (!supabaseAdmin) return memAllow(identityKey, feature);
+async function dbAllow(clientId, feature, userId) {
+  if (!supabaseAdmin) return memAllow(clientId, feature);
   try {
     const today = dayKeyUTC();
     const limit = getFreeLimitForFeature(feature);
@@ -564,7 +559,7 @@ async function dbAllow(identityKey, feature, userId) {
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
-      .eq("client_id", identityKey)
+      .eq("client_id", clientId)
       .eq("feature", feature)
       .eq("day_key", today)
       .maybeSingle();
@@ -574,11 +569,11 @@ async function dbAllow(identityKey, feature, userId) {
     if (!data) {
       const ins = await supabaseAdmin
         .from("ai_free_passes")
-        .insert([{ client_id: identityKey, user_id: userId || null, feature, day_key: today, uses: 1 }])
+        .insert([{ client_id: clientId, user_id: userId || null, feature, day_key: today, uses: 1 }])
         .select("uses")
         .single();
 
-      if (ins.error) return memAllow(identityKey, feature);
+      if (ins.error) return memAllow(clientId, feature);
       return { allowed: true, remaining: limit - 1 };
     }
 
@@ -588,17 +583,17 @@ async function dbAllow(identityKey, feature, userId) {
     const upd = await supabaseAdmin
       .from("ai_free_passes")
       .update({ uses: currentUses + 1, user_id: userId || null })
-      .eq("client_id", identityKey)
+      .eq("client_id", clientId)
       .eq("feature", feature)
       .eq("day_key", today)
       .select("uses")
       .single();
 
-    if (upd.error) return memAllow(identityKey, feature);
+    if (upd.error) return memAllow(clientId, feature);
     const newUses = upd.data?.uses ?? currentUses + 1;
     return { allowed: true, remaining: Math.max(0, limit - newUses) };
   } catch {
-    return memAllow(identityKey, feature);
+    return memAllow(clientId, feature);
   }
 }
 
@@ -608,31 +603,44 @@ async function allowFreeFeature({ req, feature, userId }) {
 }
 
 async function getFreeFeatureRemaining({ req, feature, userId }) {
+  const clientId = idKey(req, userId);
   const limit = getFreeLimitForFeature(feature);
-  const identityKey = idKey(req, userId);
-  const today = dayKeyUTC();
+
+  if (!limit) return { remaining: 0, limit: 0, used: 0 };
 
   if (!supabaseAdmin) {
-    const rec = freeMem.get(`m:${identityKey}:${feature}`);
-    if (!rec || rec.day !== today) return { remaining: limit, limit };
-    return { remaining: Math.max(0, limit - (rec.used || 0)), limit };
+    const key = `m:${clientId}:${feature}`;
+    const today = dayKeyUTC();
+    const rec = freeMem.get(key);
+    const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
+    return { remaining: Math.max(0, limit - used), limit, used };
   }
 
   try {
+    const today = dayKeyUTC();
     const { data, error } = await supabaseAdmin
-      .from('ai_free_passes')
-      .select('uses')
-      .eq('client_id', identityKey)
-      .eq('feature', feature)
-      .eq('day_key', today)
+      .from("ai_free_passes")
+      .select("uses")
+      .eq("client_id", clientId)
+      .eq("feature", feature)
+      .eq("day_key", today)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') return { remaining: limit, limit };
+    if (error && error.code !== "PGRST116") {
+      const key = `m:${clientId}:${feature}`;
+      const rec = freeMem.get(key);
+      const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
+      return { remaining: Math.max(0, limit - used), limit, used };
+    }
 
     const used = Math.max(0, Number(data?.uses || 0));
-    return { remaining: Math.max(0, limit - used), limit };
+    return { remaining: Math.max(0, limit - used), limit, used };
   } catch {
-    return { remaining: limit, limit };
+    const key = `m:${clientId}:${feature}`;
+    const today = dayKeyUTC();
+    const rec = freeMem.get(key);
+    const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
+    return { remaining: Math.max(0, limit - used), limit, used };
   }
 }
 
@@ -1352,25 +1360,28 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
-  if (feature === "quota_status") {
-    const targetFeature = String(body?.targetFeature || body?.featureKey || body?.target || "").trim() || "pose_session";
-    const limit = getFreeLimitForFeature(targetFeature);
-    if (pro) {
-      res.status(200).json({ feature: targetFeature, remaining: limit, limit, isPro: true });
-      return;
-    }
-    const quota = await getFreeFeatureRemaining({ req, feature: targetFeature, userId: resolvedUserId });
-    res.status(200).json({ feature: targetFeature, remaining: quota.remaining, limit: quota.limit, isPro: false });
+  if (body?.mode === "quota_status") {
+    const status = !pro && !freeBypass
+      ? await getFreeFeatureRemaining({ req, feature, userId: resolvedUserId })
+      : { remaining: null, limit: getFreeLimitForFeature(feature), used: 0 };
+
+    res.status(200).json({
+      ok: true,
+      feature,
+      isPro: !!pro,
+      remaining: pro || freeBypass ? null : status.remaining,
+      limit: status.limit,
+      used: status.used,
+      keyed_by: resolvedUserId ? "user" : "device",
+    });
     return;
   }
 
-  let pass = null;
-
   // 2) If not Pro/Trial → per-feature free-pass
   if (!pro && !freeBypass) {
-    pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
-      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", quota: { feature, remaining: 0, limit: getFreeLimitForFeature(feature) } });
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
       return;
     }
   }
@@ -1730,7 +1741,7 @@ ${note}`;
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
 
-      res.status(200).json({ session, quota: pro ? { feature, remaining: null, limit: null, isPro: true } : { feature, remaining: pass?.remaining ?? null, limit: getFreeLimitForFeature(feature), isPro: false }, ...(body?.debug ? { raw: text } : {}) });
+      res.status(200).json({ session, ...(body?.debug ? { raw: text } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);
