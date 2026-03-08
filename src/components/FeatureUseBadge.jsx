@@ -1,7 +1,6 @@
 // src/components/FeatureUseBadge.jsx
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Chip } from '@mui/material';
-import { useAuth } from "../context/AuthProvider";
 
 // -----------------------------------------------------------------------------
 // Daily Free-tier usage tracking (client-side)
@@ -65,47 +64,6 @@ function writeState(st) {
   } catch {}
 }
 
-function getOrCreateClientId() {
-  try {
-    let id = localStorage.getItem("slimcal_client_id");
-    if (id) return id;
-    id = (globalThis.crypto?.randomUUID?.() || `slimcal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-    localStorage.setItem("slimcal_client_id", id);
-    return id;
-  } catch {}
-  return `slimcal-${Date.now()}`;
-}
-
-export function notifyQuotaChanged(featureKey) {
-  try {
-    window.dispatchEvent(new CustomEvent("slimcal:quota-changed", { detail: { featureKey } }));
-  } catch {}
-}
-
-export async function fetchServerDailyRemaining(featureKey, userId) {
-  if (!userId || !featureKey) return null;
-  try {
-    const res = await fetch("/api/ai/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": userId,
-        "X-Client-Id": getOrCreateClientId(),
-      },
-      body: JSON.stringify({
-        feature: "quota_status",
-        targetFeature: featureKey,
-      }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) return null;
-    const remaining = Number(json?.remaining);
-    return Number.isFinite(remaining) ? remaining : null;
-  } catch {
-    return null;
-  }
-}
-
 export function getFreeDailyLimit(featureKey) {
   return FREE_DAILY_LIMITS?.[featureKey] ?? 0;
 }
@@ -136,7 +94,6 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts[featureKey] = nextUsed;
 
   writeState(st);
-  notifyQuotaChanged(featureKey);
 
   return nextUsed;
 }
@@ -145,49 +102,23 @@ export function registerDailyFeatureUse(featureKey) {
 // UI Badge
 // -----------------------------------------------------------------------------
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
-  const { user } = useAuth();
-  const [serverRemaining, setServerRemaining] = useState(null);
-
-  useEffect(() => {
-    let alive = true;
-
-    async function refresh() {
-      if (isPro || !user?.id) {
-        if (alive) setServerRemaining(null);
-        return;
-      }
-      const next = await fetchServerDailyRemaining(featureKey, user.id);
-      if (alive) setServerRemaining(next);
-    }
-
-    refresh();
-
-    const onRefresh = (e) => {
-      const changed = e?.detail?.featureKey;
-      if (!changed || changed === featureKey) refresh();
-    };
-
-    window.addEventListener("focus", refresh);
-    window.addEventListener("slimcal:quota-changed", onRefresh);
-    return () => {
-      alive = false;
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("slimcal:quota-changed", onRefresh);
-    };
-  }, [featureKey, isPro, user?.id]);
-
   if (isPro) {
-    return <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />;
+    return (
+      
+        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+      
+    );
   }
 
   const limit = getFreeDailyLimit(featureKey);
-  const usingServerQuota = !!user?.id;
-  const remaining = usingServerQuota ? serverRemaining : getDailyRemaining(featureKey);
+  const remaining = getDailyRemaining(featureKey);
 
   const freePrefix = labelPrefix || "Free";
-  const label = usingServerQuota && remaining === null
-    ? `${freePrefix}: …/${limit}`
-    : `${freePrefix}: ${remaining}/${limit}`;
+  const label = `${freePrefix}: ${remaining}/${limit}`;
 
-  return <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />;
+  return (
+    
+      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+    
+  );
 }

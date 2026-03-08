@@ -602,22 +602,21 @@ async function allowFreeFeature({ req, feature, userId }) {
   return dbAllow(clientId, feature, userId);
 }
 
+
+
+
 async function getFreeFeatureRemaining({ req, feature, userId }) {
   const clientId = idKey(req, userId);
   const limit = getFreeLimitForFeature(feature);
-
-  if (!limit) return { remaining: 0, limit: 0, used: 0 };
+  const today = dayKeyUTC();
 
   if (!supabaseAdmin) {
-    const key = `m:${clientId}:${feature}`;
-    const today = dayKeyUTC();
-    const rec = freeMem.get(key);
-    const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
-    return { remaining: Math.max(0, limit - used), limit, used };
+    const rec = freeMem.get(`m:${clientId}:${feature}`);
+    const used = (!rec || rec.day !== today) ? 0 : Math.max(0, Number(rec.used || 0));
+    return { remaining: Math.max(0, limit - used), limit };
   }
 
   try {
-    const today = dayKeyUTC();
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
@@ -627,24 +626,19 @@ async function getFreeFeatureRemaining({ req, feature, userId }) {
       .maybeSingle();
 
     if (error && error.code !== "PGRST116") {
-      const key = `m:${clientId}:${feature}`;
-      const rec = freeMem.get(key);
-      const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
-      return { remaining: Math.max(0, limit - used), limit, used };
+      const rec = freeMem.get(`m:${clientId}:${feature}`);
+      const used = (!rec || rec.day !== today) ? 0 : Math.max(0, Number(rec.used || 0));
+      return { remaining: Math.max(0, limit - used), limit };
     }
 
     const used = Math.max(0, Number(data?.uses || 0));
-    return { remaining: Math.max(0, limit - used), limit, used };
+    return { remaining: Math.max(0, limit - used), limit };
   } catch {
-    const key = `m:${clientId}:${feature}`;
-    const today = dayKeyUTC();
-    const rec = freeMem.get(key);
-    const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
-    return { remaining: Math.max(0, limit - used), limit, used };
+    const rec = freeMem.get(`m:${clientId}:${feature}`);
+    const used = (!rec || rec.day !== today) ? 0 : Math.max(0, Number(rec.used || 0));
+    return { remaining: Math.max(0, limit - used), limit };
   }
 }
-
-
 
 // -------------------- VERDICT FALLBACK --------------------
 
@@ -1360,28 +1354,24 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
-  if (body?.mode === "quota_status") {
-    const status = !pro && !freeBypass
-      ? await getFreeFeatureRemaining({ req, feature, userId: resolvedUserId })
-      : { remaining: null, limit: getFreeLimitForFeature(feature), used: 0 };
-
-    res.status(200).json({
-      ok: true,
-      feature,
-      isPro: !!pro,
-      remaining: pro || freeBypass ? null : status.remaining,
-      limit: status.limit,
-      used: status.used,
-      keyed_by: resolvedUserId ? "user" : "device",
-    });
+  if (feature === "quota_status") {
+    const targetFeature = String(body?.targetFeature || body?.checkFeature || body?.forFeature || "pose_session").toLowerCase();
+    const limit = getFreeLimitForFeature(targetFeature);
+    if (pro) {
+      res.status(200).json({ ok: true, feature: targetFeature, remaining: limit, limit, pro: true });
+      return;
+    }
+    const status = await getFreeFeatureRemaining({ req, feature: targetFeature, userId: resolvedUserId });
+    res.status(200).json({ ok: true, feature: targetFeature, remaining: status.remaining, limit: status.limit, pro: false });
     return;
   }
 
   // 2) If not Pro/Trial → per-feature free-pass
+  let freePass = null;
   if (!pro && !freeBypass) {
-    const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
-    if (!pass.allowed) {
-      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
+    freePass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    if (!freePass.allowed) {
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0 });
       return;
     }
   }
