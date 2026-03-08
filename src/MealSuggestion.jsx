@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import UpgradeModal from './components/UpgradeModal';
 import { useAuth } from './context/AuthProvider.jsx';
+import { registerDailyFeatureUse, setDailyRemaining } from './components/FeatureUseBadge';
 
 // ---- entitlement helpers for refresh button ----
 const isProUser = () => {
@@ -264,6 +265,11 @@ export default function MealSuggestion({ consumedCalories, onAddMeal }) {
 
       if (!resp.ok) {
         throw new Error(`Server responded ${resp.status}${raw ? ' - ' + raw : ''}`);
+      }
+
+      if (!isProUser() && !isTrialActive()) {
+        if (typeof json?.remaining === 'number') setDailyRemaining('ai_meal', json.remaining);
+        else registerDailyFeatureUse('ai_meal');
       }
 
       let meals = coerceMeals(json);
