@@ -194,6 +194,17 @@ function clearActiveWorkoutSessionId() {
   } catch (e) { }
 }
 
+function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } = {}) {
+  try {
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const absoluteTop = window.scrollY + rect.top;
+    const targetTop = Math.max(0, absoluteTop - ((viewportH - rect.height) / 2) - offset);
+    window.scrollTo({ top: targetTop, behavior });
+  } catch {}
+}
+
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
@@ -1259,9 +1270,7 @@ setNewExercise({
     setCumulativeExercises(enriched);
 
     setTimeout(() => {
-      try {
-        sessionLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } catch {}
+      scrollElementToViewportCenter(sessionLogRef.current, { offset: 10 });
     }, 80);
   };
 
@@ -1284,41 +1293,6 @@ setNewExercise({
   }, [user?.id]);
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
-  const scrollSuggestCardToCenter = useCallback(() => {
-    try {
-      const el = suggestRef.current;
-      if (!el) return;
-
-      const rect = el.getBoundingClientRect();
-      const absoluteTop = rect.top + window.scrollY;
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-      const targetTop = Math.max(0, absoluteTop - ((viewportHeight - rect.height) / 2));
-
-      window.scrollTo({ top: targetTop, behavior: 'smooth' });
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (!showSuggestCard) return;
-
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        scrollSuggestCardToCenter();
-      });
-    });
-
-    const timer = setTimeout(() => {
-      scrollSuggestCardToCenter();
-    }, 180);
-
-    return () => {
-      cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-      clearTimeout(timer);
-    };
-  }, [showSuggestCard, scrollSuggestCardToCenter]);
-
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
       if (!isProUser() && !canUseDailyFeature('ai_workout')) {
@@ -1326,6 +1300,10 @@ setNewExercise({
         return;
       }
       setShowSuggestCard(true);
+
+      setTimeout(() => {
+        scrollElementToViewportCenter(suggestRef.current, { offset: 10 });
+      }, 50);
       return;
     }
     setShowSuggestCard(false);
@@ -1555,29 +1533,7 @@ setNewExercise({
 </Box>
 
 <Grid container spacing={{ xs: 3, md: 4 }}>
-        <Grid item xs={12} md={4}>
-          <Stack spacing={2}>
-            <Card
-              variant="outlined"
-              sx={{
-                borderRadius: 2,
-                border: '1px solid rgba(0,0,0,0.06)',
-                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
-              }}
-            >
-              <CardContent>
-                <Button fullWidth variant="outlined" onClick={() => setShowTemplate(true)}>
-                  Load Past Workout
-                </Button>
-                <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1.25 }}>
-                  Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
-                </Typography>
-              </CardContent>
-            </Card>
-          </Stack>
-        </Grid>
-
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12}>
           <Stack spacing={3}>
             {cumulativeExercises.length > 0 && (
               <Paper
@@ -1624,6 +1580,20 @@ setNewExercise({
                 boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
               }}
             >
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1.25}
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                justifyContent="space-between"
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                  Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
+                </Typography>
+                <Button variant="outlined" onClick={() => setShowTemplate(true)} sx={{ alignSelf: { xs: 'stretch', sm: 'auto' } }}>
+                  Load Past Workout
+                </Button>
+              </Stack>
               <ExerciseForm
                 newExercise={newExercise}
                 setNewExercise={setNewExercise}
