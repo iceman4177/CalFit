@@ -46,7 +46,7 @@ const FEMALE_POSES = [
 ];
 
 const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
-const OUTLINE_PULSE_MS = 1800;
+const OUTLINE_PULSE_MS = 2000;
 
 const ALL_OUTLINE_ASSETS = [
   maleFrontOutline,
@@ -87,11 +87,11 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
 
   const src = imageMap[poseKey] || maleFrontOutline;
   const frameWidth = isFemaleCue ? "min(74%, 360px)" : "min(82%, 400px)";
-  const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(90,255,160,0.20)";
+  const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(57,255,20,0.24)";
   const frameBg = isFemaleCue ? "rgba(36, 8, 22, 0.04)" : "rgba(5, 20, 12, 0.04)";
   const frameShadow = isFemaleCue
     ? "0 0 28px rgba(255,105,180,0.10), inset 0 0 18px rgba(255,105,180,0.04)"
-    : "0 0 36px rgba(90,255,160,0.12), inset 0 0 22px rgba(90,255,160,0.05)";
+    : "0 0 36px rgba(57,255,20,0.16), inset 0 0 22px rgba(57,255,20,0.07)";
 
   return (
     <Box
@@ -134,7 +134,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
             opacity: isFemaleCue ? 0.96 : 0.92,
             filter: isFemaleCue
               ? "drop-shadow(0 0 12px rgba(255,105,180,0.45)) drop-shadow(0 0 24px rgba(255,105,180,0.22))"
-              : "drop-shadow(0 0 12px rgba(90,255,160,0.40)) drop-shadow(0 0 24px rgba(90,255,160,0.20))",
+              : "hue-rotate(-18deg) saturate(2.1) brightness(0.9) drop-shadow(0 0 12px rgba(57,255,20,0.50)) drop-shadow(0 0 24px rgba(57,255,20,0.24))",
             userSelect: "none",
             WebkitUserDrag: "none",
           }}
@@ -188,7 +188,7 @@ export default function PoseSession() {
   const gender = useMemo(() => readStoredGender(), []);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
-  const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(90, 255, 160, 0.95)";
+  const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
 
   const [stage, setStage] = useState("intro"); // intro | capture | scanning | results
   const [poseIdx, setPoseIdx] = useState(0);
