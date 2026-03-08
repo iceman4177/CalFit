@@ -168,6 +168,8 @@ function fallbackPoseSession(gender = "male") {
     percentile: 19,
     strength: female ? "Presence" : "Consistency",
     horizon_days: 90,
+    momentumNote: female ? "Baseline beauty check locked in — future scans can track a prettier, more polished trend over time." : "Baseline jacked check locked in — future scans can track a stronger, more built trend over time.",
+    baselineComparison: female ? "First physique memory saved — future scans can compare your silhouette and presentation against today." : "First physique memory saved — future scans can compare your muscularity and presence against today.",
     muscleSignals: {
       delts: 0.62,
       arms: 0.64,
@@ -185,12 +187,10 @@ function fallbackPoseSession(gender = "male") {
       back_scan: 0.73,
     },
     highlights: female
-      ? ["Elegant presence in frame", "Posture reads polished and poised", "Consistent scan angles improve tracking"]
+      ? ["Strong presence in frame", "Clean posture carries well", "Consistent scan angles improve tracking"]
       : ["Solid baseline locked", "Strong momentum signal", "Consistent framing = better tracking"],
     levers: ["Add +25g protein today", "Lift 3× this week", "Re-scan weekly in similar lighting"],
-    confidenceNote: female
-      ? "Beautiful starting point — consistent lighting and repeat scans will make your progress feel even clearer over time."
-      : "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
+    confidenceNote: "Solid baseline — consistent lighting and distance will sharpen your progress tracking.",
   };
 }
 
@@ -222,6 +222,229 @@ function visibilityNoteForGroup(group, visibility) {
     return `${g} are only partially visible here, so any read is limited and should be treated as a light estimate rather than a firm conclusion.`;
   }
   return "";
+}
+
+function sanitizeRecentPoseScans(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .slice(0, 3)
+    .map((row) => {
+      const ms = row?.muscleSignals && typeof row.muscleSignals === "object" ? row.muscleSignals : {};
+      return {
+        local_day: String(row?.local_day || row?.localDay || "").slice(0, 24),
+        gender: String(row?.gender || "").toLowerCase() === "female" ? "female" : "male",
+        scan_mode: String(row?.scan_mode || row?.scanMode || "").slice(0, 48),
+        build_arc: clamp(row?.build_arc ?? row?.buildArcScore ?? 0, 0, 100),
+        strongest_feature: String(row?.strongest_feature || row?.strongestFeature || "").slice(0, 120),
+        momentum_note: String(row?.momentum_note || row?.momentumNote || "").slice(0, 160),
+        muscleSignals: {
+          delts: clamp(ms?.delts ?? 0, 0, 1),
+          arms: clamp(ms?.arms ?? 0, 0, 1),
+          lats: clamp(ms?.lats ?? 0, 0, 1),
+          chest: clamp(ms?.chest ?? 0, 0, 1),
+          back: clamp(ms?.back ?? 0, 0, 1),
+          waist_taper: clamp(ms?.waist_taper ?? ms?.taper ?? 0, 0, 1),
+          legs: clamp(ms?.legs ?? 0, 0, 1),
+        },
+      };
+    })
+    .filter((row) => row.local_day || Object.values(row.muscleSignals || {}).some((v) => Number(v) > 0));
+}
+
+function averagePoseSignals(scans) {
+  const keys = ["delts", "arms", "lats", "chest", "back", "waist_taper", "legs"];
+  const out = Object.fromEntries(keys.map((k) => [k, 0]));
+  if (!Array.isArray(scans) || !scans.length) return out;
+  for (const row of scans) {
+    for (const k of keys) out[k] += Number(row?.muscleSignals?.[k] || 0);
+  }
+  for (const k of keys) out[k] = out[k] / scans.length;
+  return out;
+}
+
+function poseSignalLabel(key, gender = "male") {
+  const male = {
+    delts: "shoulders",
+    arms: "arms",
+    lats: "lat flare",
+    chest: "chest",
+    back: "back width",
+    waist_taper: "taper",
+    legs: "lower body",
+  };
+  const female = {
+    delts: "shoulder line",
+    arms: "arm line",
+    lats: "upper-body shape",
+    chest: "posture line",
+    back: "back line",
+    waist_taper: "silhouette flow",
+    legs: "lower-body line",
+  };
+  return (gender === "female" ? female : male)[key] || key;
+}
+
+function normalizeGoalType(goalType, gender = "male") {
+  const g = String(goalType || "").toLowerCase().trim();
+  if (["cut", "cutting", "lean", "get lean"].includes(g)) return "cutting";
+  if (["bulk", "bulking", "build muscle", "muscle"].includes(g)) return "bulking";
+  if (["maintenance", "recomp", "recomposition", "tone", "toning"].includes(g)) return g === "toning" ? "toning" : "maintenance";
+  return gender === "female" ? "toning" : "maintenance";
+}
+
+function goalToneHint(goalType, gender = "male") {
+  const goal = normalizeGoalType(goalType, gender);
+  if (gender === "female") {
+    if (goal === "cutting") return "She wants a leaner, more polished, beautifully put-together look.";
+    if (goal === "bulking") return "She wants a stronger, more sculpted, athletic look while still feeling feminine and beautiful.";
+    return "She wants a toned, elegant, athletic look that feels pretty, confident, and motivating.";
+  }
+  if (goal === "cutting") return "He wants a sharper, leaner, more defined look that still feels muscular and jacked.";
+  if (goal === "bulking") return "He wants a bigger, fuller, thicker, more muscular look.";
+  return "He wants a strong, aesthetic, jacked look with obvious upper-body presence.";
+}
+
+function summarizeRecentPoseContext(scans, gender = "male") {
+  if (!Array.isArray(scans) || !scans.length) return "No recent physique baseline is available yet.";
+  const avg = averagePoseSignals(scans);
+  const ordered = Object.entries(avg).sort((a, b) => b[1] - a[1]);
+  const top = ordered.slice(0, 2).map(([k]) => poseSignalLabel(k, gender));
+  const last = scans[0] || {};
+  const parts = [];
+  if (last.local_day) parts.push(`Most recent saved scan day: ${last.local_day}.`);
+  if (top.length) parts.push(`Recent baseline reads strongest through ${top.join(" and ")}.`);
+  if (last.strongest_feature) parts.push(`Last saved strongest feature: ${last.strongest_feature}.`);
+  return parts.join(" ");
+}
+
+function buildPhysiqueSnapshot(session, { gender = "male", scanMode = "", localDay = "" } = {}) {
+  const ms = session?.muscleSignals || {};
+  const visibleRegions = {
+    shoulders: true,
+    arms: true,
+    chest: gender === "male",
+    waist: true,
+    back: true,
+    glutes: /female/.test(scanMode),
+    legs: /scan/.test(scanMode),
+  };
+
+  const traits = {
+    upper_body_presence: clamp(((ms.delts || 0) + (ms.arms || 0) + (ms.lats || 0) + (ms.chest || 0)) / 4 * 10, 0, 10),
+    shoulder_presence: clamp((ms.delts || 0) * 10, 0, 10),
+    arm_fullness: clamp((ms.arms || 0) * 10, 0, 10),
+    chest_presence: clamp((ms.chest || 0) * 10, 0, 10),
+    v_taper: clamp((ms.waist_taper || 0) * 10, 0, 10),
+    back_width: clamp((ms.back || ms.lats || 0) * 10, 0, 10),
+    posture_confidence: clamp((((session?.poseQuality?.front_double_bi || 0) + (session?.poseQuality?.back_double_bi || 0) + (session?.poseQuality?.side_scan || 0)) / 3) * 10, 0, 10),
+    athletic_polish: clamp((session?.aesthetic_score || 0), 0, 10),
+    silhouette_balance: clamp((((ms.waist_taper || 0) + (ms.delts || 0) + (ms.back || 0)) / 3) * 10, 0, 10),
+  };
+
+  const confidence = {
+    upper_body_presence: 0.84,
+    shoulder_presence: 0.84,
+    arm_fullness: 0.82,
+    chest_presence: gender === "male" ? 0.8 : 0.72,
+    v_taper: 0.76,
+    back_width: 0.8,
+    posture_confidence: 0.78,
+    athletic_polish: 0.8,
+    silhouette_balance: 0.75,
+  };
+
+  const sortedSignals = Object.entries(ms).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+  const topKey = sortedSignals[0]?.[0] || (gender === "female" ? "waist_taper" : "arms");
+  const strongestFeature = poseSignalLabel(topKey, gender);
+
+  return {
+    gender,
+    scan_mode: scanMode || (gender === "female" ? "female_pose_session" : "male_pose_session"),
+    local_day: localDay || dayKeyUTC(),
+    visible_regions: visibleRegions,
+    traits,
+    confidence,
+    muscleSignals: {
+      delts: clamp(ms.delts ?? 0, 0, 1),
+      arms: clamp(ms.arms ?? 0, 0, 1),
+      lats: clamp(ms.lats ?? 0, 0, 1),
+      chest: clamp(ms.chest ?? 0, 0, 1),
+      back: clamp(ms.back ?? 0, 0, 1),
+      waist_taper: clamp(ms.waist_taper ?? 0, 0, 1),
+      legs: clamp(ms.legs ?? 0, 0, 1),
+    },
+    summary_seed: {
+      strongest_feature: strongestFeature,
+      improvement_hint: "Consistent weekly scans make trend language smarter and more personal.",
+      visibility_note: String(session?.confidenceNote || "").slice(0, 160),
+    },
+  };
+}
+
+function buildTrendNarrative({ session, recentScans = [], gender = "male", goalType = "", localDay = "" }) {
+  const scans = sanitizeRecentPoseScans(recentScans);
+  const current = session?.muscleSignals || {};
+  const avg = averagePoseSignals(scans);
+  const keys = ["delts", "arms", "lats", "chest", "back", "waist_taper", "legs"];
+  const deltas = keys.map((k) => ({ key: k, delta: Number(current?.[k] || 0) - Number(avg?.[k] || 0) }));
+  deltas.sort((a, b) => b.delta - a.delta);
+  const top = deltas[0] || { key: gender === "female" ? "waist_taper" : "arms", delta: 0 };
+  const label = poseSignalLabel(top.key, gender);
+  const days = scans[0]?.local_day ? `${scans.length} recent check${scans.length > 1 ? "s" : ""}` : "your recent baseline";
+  const goalHint = normalizeGoalType(goalType, gender);
+
+  let momentumNote = "";
+  let baselineComparison = "";
+  let highlight = "";
+
+  if (!scans.length) {
+    if (gender === "female") {
+      momentumNote = "This is your baseline beauty check, so the win today is locking in a clean starting point you can build on. The overall presentation already reads polished, pretty, and athletic.";
+      baselineComparison = "First physique memory saved — future scans can now track how your silhouette and polish evolve over time.";
+      highlight = "Baseline beauty check locked in";
+    } else {
+      momentumNote = "This is your baseline physique check, so the win today is locking in a strong starting point you can measure against. The overall presentation already reads muscular, athletic, and built.";
+      baselineComparison = "First physique memory saved — future scans can now track how much more jacked and dialed-in you look over time.";
+      highlight = "Baseline jacked check locked in";
+    }
+  } else if (top.delta > 0.045) {
+    if (gender === "female") {
+      momentumNote = `Compared with ${days}, your ${label} is reading cleaner today, and the overall silhouette feels more polished and beautifully put together. This scan lands with a prettier, more confident energy while still feeling athletic and real.`;
+      baselineComparison = `Your ${label} is trending above your recent baseline, which is a strong sign that your current look is becoming more refined and photogenic.`;
+      highlight = `${label.charAt(0).toUpperCase() + label.slice(1)} is trending prettier than your recent baseline`;
+    } else {
+      momentumNote = `Compared with ${days}, your ${label} is reading stronger today, and the overall physique comes across more muscular and built. This scan has a fuller, more jacked feel than your recent baseline without forcing it.`;
+      baselineComparison = `Your ${label} is trending above your recent baseline, which is a strong sign that your look is getting sharper and more powerful over time.`;
+      highlight = `${label.charAt(0).toUpperCase() + label.slice(1)} is trending more jacked than your recent baseline`;
+    }
+  } else {
+    if (gender === "female") {
+      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read feels polished, pretty, and steadily more put together.`;
+      baselineComparison = "Your recent scans are clustering in a good way, which means your silhouette and presentation are becoming more repeatable and reliable.";
+      highlight = "Your polished look is staying consistent";
+    } else {
+      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read still lands as muscular, strong, and convincingly built.`;
+      baselineComparison = "Your recent scans are clustering in a good way, which means your physique presentation is becoming more repeatable and easier to track.";
+      highlight = "Your muscular look is staying consistent";
+    }
+  }
+
+  if (goalHint === "cutting") {
+    baselineComparison += gender === "female"
+      ? " For a leaner goal, that kind of cleaner presentation is exactly the right direction."
+      : " For a leaner goal, that sharper presentation is exactly the right direction.";
+  } else if (goalHint === "bulking") {
+    baselineComparison += gender === "female"
+      ? " For a sculpted-building goal, the extra presence is a great sign."
+      : " For a muscle-building goal, the extra fullness is a great sign.";
+  }
+
+  return {
+    momentumNote,
+    baselineComparison,
+    highlight,
+    local_day: localDay || dayKeyUTC(),
+  };
 }
 
 
@@ -1252,6 +1475,9 @@ const freeBypass =
     try {
       const style = String(body?.style || "").toLowerCase();
       const scanMode = String(body?.scanMode || "").toLowerCase();
+      const goalType = normalizeGoalType(body?.goalType, gender);
+      const localDay = String(body?.localDay || body?.local_day || dayKeyUTC()).slice(0, 24);
+      const recentScans = sanitizeRecentPoseScans(body?.recentScans);
       const poses = Array.isArray(body?.poses) ? body.poses : [];
       if (!poses.length) {
         res.status(400).json({ error: "Missing poses" });
@@ -1280,6 +1506,8 @@ const freeBypass =
 
       const poseTitles = cleanPoses.map((p) => p.title || p.poseKey).filter(Boolean).join(", ");
       const subjectLabel = gender === "female" ? "female physique scan" : "male physique scan";
+      const recentContextSummary = summarizeRecentPoseContext(recentScans, gender);
+      const goalTone = goalToneHint(goalType, gender);
       const sys =
         "You are SlimCal Pose Session Scanner. " +
         "Return VALID JSON ONLY (no markdown, no extra text). " +
@@ -1287,7 +1515,7 @@ const freeBypass =
         "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels, fear framing, or harsh comparisons. " +
         "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
         "Write as a fresh, careful analyst focusing on what is visible, flattering, and genuinely supported by the images. " +
-        "For women, use female-specific language naturally and supportively with an uplifting best-friend energy that feels warm, affirming, and motivating. Emphasize beauty, elegance, poise, glow, feminine presence, and visible progress when supported by the images. Do not mention body weight, being thin, dieting, or body-size judgments. For men, use male-specific language naturally and supportively. " +
+        "For women, use female-specific language naturally and supportively. For men, use male-specific language naturally and supportively. " +
         "Output JSON keys (required): " +
         "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
         "aesthetic_score (number 0-10), " +
@@ -1300,12 +1528,15 @@ const freeBypass =
 
       const userText =
         `Analyze this ${subjectLabel} using these captures: ${poseTitles || "pose scans"}. ` +
+        `Goal context: ${goalTone} ` +
+        `Recent physique memory: ${recentContextSummary} ` +
         "Estimate supportive physique signals per muscle group (0..1) and pose quality (0..1). " +
         "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
         "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
         "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
-        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, softness, elegance, confidence, and overall presence without objectifying language. Make the experience feel like a supportive girls-best-friend coach: encouraging, beauty-affirming, and motivating, while staying grounded in what is actually visible. Highlight pretty, polished, graceful, radiant, or sculpted qualities only when the images support them. Never use weight-loss language or imply that being smaller is better. Only mention glute or leg shape if those areas are clearly visible. " +
-        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. " +
+        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, polished silhouette, beauty, elegance, and confidence without objectifying language. Use words like pretty, polished, graceful, sculpted, beautiful, athletic, and motivating when genuinely supported by the scan. " +
+        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. Use words like jacked, fuller, broader, more built, more muscular, and sharper when genuinely supported by the scan. " +
+        "If recent physique memory is provided, compare today's look against that recent baseline in a believable, positive-only way. Favor trend language like stronger than your recent baseline, more polished than your recent baseline, or more consistent than your recent baseline when the structured numbers support it. " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
         "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
@@ -1407,6 +1638,35 @@ const freeBypass =
         session.report = cleaned.length > 40 ? cleaned : raw;
       }
       delete session.__rawText;
+
+      const trend = buildTrendNarrative({ session, recentScans, gender, goalType, localDay });
+      const physiqueSnapshot = buildPhysiqueSnapshot(session, { gender, scanMode, localDay });
+      physiqueSnapshot.summary_seed.improvement_hint = trend.baselineComparison;
+      session.gender = gender;
+      session.goalType = goalType;
+      session.scanMode = scanMode || (gender === "female" ? "female_pose_session" : "male_pose_session");
+      session.momentumNote = trend.momentumNote;
+      session.baselineComparison = trend.baselineComparison;
+      session.physiqueSnapshot = physiqueSnapshot;
+
+      if (trend.momentumNote) {
+        const baseReport = String(session.report || "").trim();
+        session.report = baseReport
+          ? `${trend.momentumNote}
+
+${baseReport}`
+          : trend.momentumNote;
+      }
+
+      const nextHighlights = Array.isArray(session.highlights) ? session.highlights.slice() : [];
+      if (trend.highlight && !nextHighlights.some((h) => String(h || "").toLowerCase() === trend.highlight.toLowerCase())) {
+        nextHighlights.unshift(trend.highlight);
+      }
+      session.highlights = nextHighlights.slice(0, 5);
+
+      if (!session.bestDeveloped?.length && physiqueSnapshot?.summary_seed?.strongest_feature) {
+        session.bestDeveloped = [physiqueSnapshot.summary_seed.strongest_feature];
+      }
 
       if (Array.isArray(session.muscleBreakdown) && session.muscleBreakdown.length) {
         const lowerOutOfFrame = session.muscleBreakdown.some((row) => /\b(leg|quad|hamstring|hamstrings|calf|calves|glute|glutes|hip|hips)\b/i.test(String(row.group || "")) && /not clearly in frame|not in frame|not clearly visible|not visible enough|partially visible|limited visibility|cannot make a confident visual assessment|cannot confidently assess|can't confidently assess|unable to assess/i.test(String(row.note || "")));

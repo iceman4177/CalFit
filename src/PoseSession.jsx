@@ -31,6 +31,7 @@ import {
   appendPoseSession,
   computeDeltasPositiveOnly,
   localDayISO,
+  buildRecentPoseContext,
 } from "./lib/poseSessionStore.js";
 
 const MALE_POSES = [
@@ -56,6 +57,22 @@ const ALL_OUTLINE_ASSETS = [
   femaleSideOutline,
   femaleBackOutline,
 ];
+
+function readStoredGoalType() {
+  try {
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.goalType || parsed?.goal || "").toLowerCase().trim();
+      if (g) return g;
+    }
+  } catch {}
+  try {
+    const g = String(localStorage.getItem("fitness_goal") || "").toLowerCase().trim();
+    if (g) return g;
+  } catch {}
+  return "maintenance";
+}
 
 function readStoredGender() {
   try {
@@ -186,6 +203,7 @@ export default function PoseSession() {
 
   const userId = user?.id || "anon";
   const gender = useMemo(() => readStoredGender(), []);
+  const goalType = useMemo(() => readStoredGoalType(), []);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
   const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
@@ -211,6 +229,7 @@ export default function PoseSession() {
 
   const todayISO = useMemo(() => localDayISO(), []);
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
+  const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
 
   useEffect(() => {
@@ -356,6 +375,8 @@ export default function PoseSession() {
         feature: "pose_session",
         style: "detailed_muscle_groups_v1",
         gender,
+        goalType,
+        localDay: todayISO,
         scanMode: isFemale ? "female_pose_session" : "male_pose_session",
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
@@ -363,6 +384,7 @@ export default function PoseSession() {
           imageDataUrl: c.thumbDataUrl, // keep payload small
         })),
         deltas, // optional; app uses positive-only deltas
+        recentScans: recentScanContext,
       };
 
       const res = await fetch("/api/ai/generate", {
@@ -377,11 +399,19 @@ export default function PoseSession() {
       // Persist a small record for deltas
       try {
         appendPoseSession(userId, {
+          id: `pose-${todayISO}`,
           local_day: todayISO,
           created_at: Date.now(),
+          gender,
+          goalType,
+          scanMode: isFemale ? "female_pose_session" : "male_pose_session",
           build_arc: clamp(session?.build_arc ?? session?.buildArcScore ?? 78, 0, 100),
           muscleSignals: session?.muscleSignals || {},
           poseQuality: session?.poseQuality || {},
+          momentumNote: session?.momentumNote || "",
+          baselineComparison: session?.baselineComparison || "",
+          strongestFeature: session?.physiqueSnapshot?.summary_seed?.strongest_feature || session?.bestDeveloped?.[0] || "",
+          physiqueSnapshot: session?.physiqueSnapshot || null,
         });
       } catch {}
 
@@ -393,7 +423,7 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, isFemale, todayISO, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, recentScanContext, todayISO, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;

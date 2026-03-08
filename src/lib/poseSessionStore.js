@@ -81,19 +81,14 @@ export function computeSessionStreak(history, todayISO = localDayISO()) {
 
   if (days.length === 0) return { streak: 0, lastDay: null };
 
-  // If last session was today: streak counts from today backward.
-  // If last session was yesterday: streak counts from yesterday backward.
   const lastDay = days[0];
   const gap = daysBetweenLocal(lastDay, todayISO);
-  // If gap >= 2, streak is 1 (starting at lastDay), not 0.
-  // If gap is null, default to 1.
 
   let streak = 1;
   for (let i = 0; i < days.length - 1; i++) {
     const a = days[i];
     const b = days[i + 1];
     const diff = daysBetweenLocal(b, a); // note reversed for descending order
-    // a is newer than b, so diff should be 1 for consecutive.
     if (diff === 1) {
       streak += 1;
     } else {
@@ -101,8 +96,6 @@ export function computeSessionStreak(history, todayISO = localDayISO()) {
     }
   }
 
-  // If the most recent day is too old (gap >= 2), we still show "streak: 1".
-  // If gap is 0 or 1, streak is as computed.
   if (gap == null) return { streak, lastDay };
   if (gap >= 2) return { streak: 1, lastDay };
   return { streak, lastDay };
@@ -115,8 +108,6 @@ function clamp(n, a, b) {
 }
 
 function pctFromDelta(delta01) {
-  // Convert 0..1-ish delta to a friendly +% number.
-  // Keep small but noticeable.
   const d = clamp(delta01, 0, 0.25);
   const pct = Math.round(d * 100);
   return Math.max(0, pct);
@@ -160,7 +151,6 @@ export function computeDeltasPositiveOnly(prevSession, curSession) {
     return { k: label[r.key] || r.key, v: text };
   });
 
-  // A single “overall” delta for share/summary.
   const overall = rows.reduce((acc, r) => acc + r.delta, 0) / Math.max(1, rows.length);
   const overallPct = pctFromDelta(overall);
 
@@ -169,4 +159,51 @@ export function computeDeltasPositiveOnly(prevSession, curSession) {
     overallPct,
     hasPrev: !!prevSession,
   };
+}
+
+function normalizeSignals(signals) {
+  const src = signals && typeof signals === "object" ? signals : {};
+  return {
+    delts: clamp(src.delts ?? 0, 0, 1),
+    arms: clamp(src.arms ?? 0, 0, 1),
+    lats: clamp(src.lats ?? 0, 0, 1),
+    chest: clamp(src.chest ?? 0, 0, 1),
+    back: clamp(src.back ?? 0, 0, 1),
+    waist_taper: clamp(src.waist_taper ?? src.taper ?? 0, 0, 1),
+    legs: clamp(src.legs ?? 0, 0, 1),
+  };
+}
+
+export function buildRecentPoseContext(history, limit = 3) {
+  if (!Array.isArray(history) || !history.length) return [];
+
+  return history
+    .slice(0, Math.max(1, limit))
+    .map((row) => {
+      const snapshot = row?.physiqueSnapshot || {};
+      const muscleSignals = normalizeSignals(row?.muscleSignals || snapshot?.muscleSignals || {});
+      const strongestFeature =
+        String(
+          snapshot?.summary_seed?.strongest_feature ||
+            row?.strongestFeature ||
+            row?.momentumNote ||
+            ""
+        ).trim().slice(0, 120);
+
+      const visibleRegions = snapshot?.visible_regions && typeof snapshot.visible_regions === "object"
+        ? snapshot.visible_regions
+        : null;
+
+      return {
+        local_day: row?.local_day || row?.localDay || null,
+        gender: String(row?.gender || snapshot?.gender || "").trim() || null,
+        scan_mode: String(row?.scanMode || row?.scan_mode || snapshot?.scan_mode || "").trim() || null,
+        build_arc: clamp(row?.build_arc ?? row?.buildArcScore ?? snapshot?.build_arc ?? 0, 0, 100),
+        muscleSignals,
+        strongest_feature: strongestFeature,
+        momentum_note: String(row?.momentumNote || row?.baselineComparison || "").trim().slice(0, 160),
+        visible_regions: visibleRegions,
+      };
+    })
+    .filter((row) => row.local_day || Object.values(row.muscleSignals || {}).some((v) => Number(v) > 0));
 }
