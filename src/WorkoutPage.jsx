@@ -205,12 +205,12 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-function scrollElementToViewportTop(el, { behavior = 'smooth', offset = 0 } = {}) {
+function scrollElementToViewportTop(el, { behavior = 'smooth', topPadding = 16 } = {}) {
   try {
     if (!el || typeof window === 'undefined') return;
     const rect = el.getBoundingClientRect();
     const absoluteTop = window.scrollY + rect.top;
-    const targetTop = Math.max(0, absoluteTop - offset);
+    const targetTop = Math.max(0, absoluteTop - topPadding);
     window.scrollTo({ top: targetTop, behavior });
   } catch {}
 }
@@ -1253,43 +1253,6 @@ setNewExercise({
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  const handleGeneratedReady = () => {
-    let cancelled = false;
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer = 0;
-    let attempts = 0;
-
-    const scrollToGeneratedExerciseList = () => {
-      if (cancelled) return;
-      const wrapper = suggestRef.current;
-      const target = wrapper?.querySelector('[data-generated-exercise-list="true"]') || wrapper;
-      if (target) {
-        const offset = window.innerWidth < 700 ? 84 : 96;
-        scrollElementToViewportTop(target, { behavior: 'smooth', offset });
-      }
-      attempts += 1;
-      if (attempts < 6) {
-        timer = window.setTimeout(() => {
-          raf1 = window.requestAnimationFrame(() => {
-            raf2 = window.requestAnimationFrame(scrollToGeneratedExerciseList);
-          });
-        }, 180);
-      }
-    };
-
-    raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(scrollToGeneratedExerciseList);
-    });
-
-    return () => {
-      cancelled = true;
-      if (timer) window.clearTimeout(timer);
-      if (raf1) window.cancelAnimationFrame(raf1);
-      if (raf2) window.cancelAnimationFrame(raf2);
-    };
-  };
-
   const handleAcceptSuggested = workout => {
     const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
     const enriched = (workout?.exercises || []).map(ex => {
@@ -1317,8 +1280,9 @@ setNewExercise({
         )
       };
     });
-    setCumulativeExercises(enriched);
     setShowSuggestCard(false);
+    setAiSuggestLoading(false);
+    setCumulativeExercises(enriched);
     setPendingAcceptedScroll(true);
   };
 
@@ -1334,13 +1298,19 @@ setNewExercise({
 
     const scrollToAcceptedExerciseList = () => {
       if (cancelled) return;
-      const target = firstSessionExerciseRef.current || sessionLogRef.current;
-      if (target) {
-        const offset = window.innerWidth < 700 ? 82 : 96;
-        scrollElementToViewportTop(target, { behavior: 'smooth', offset });
+      const topPadding = window.innerWidth < 700 ? 18 : 28;
+      const containerTarget = sessionLogRef.current;
+      const rowTarget = firstSessionExerciseRef.current;
+      if (containerTarget) {
+        scrollElementToViewportTop(containerTarget, { behavior: 'smooth', topPadding });
+      }
+      if (rowTarget) {
+        window.setTimeout(() => {
+          if (!cancelled) scrollElementToViewportTop(rowTarget, { behavior: 'smooth', topPadding: topPadding + 52 });
+        }, 120);
       }
       attempts += 1;
-      if (attempts < 6) {
+      if (attempts < 8) {
         timer = window.setTimeout(() => {
           raf1 = window.requestAnimationFrame(() => {
             raf2 = window.requestAnimationFrame(scrollToAcceptedExerciseList);
@@ -1642,7 +1612,6 @@ setNewExercise({
               userData={userData}
               onAccept={handleAcceptSuggested}
               onLoadingChange={setAiSuggestLoading}
-              onGeneratedReady={handleGeneratedReady}
             />
           </Box>
         )}

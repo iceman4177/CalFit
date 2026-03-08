@@ -91,7 +91,17 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange, onGeneratedReady }) {
+function scrollElementToViewportTop(el, { behavior = 'smooth', topPadding = 16 } = {}) {
+  try {
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const absoluteTop = window.scrollY + rect.top;
+    const targetTop = Math.max(0, absoluteTop - topPadding);
+    window.scrollTo({ top: targetTop, behavior });
+  } catch {}
+}
+
+export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -163,34 +173,31 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   useEffect(() => {
     if (loading || !current) return;
 
-    const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (typeof onGeneratedReady === 'function') {
-          onGeneratedReady();
-          return;
-        }
-        try {
-          const primary = workoutListRef.current || actionRowRef.current;
-          if (!primary) return;
-          const offset = window.innerWidth < 700 ? 84 : 96;
-          const rect = primary.getBoundingClientRect();
-          const absoluteTop = window.scrollY + rect.top;
-          const targetTop = Math.max(0, absoluteTop - offset);
-          window.scrollTo({ top: targetTop, behavior: 'smooth' });
-        } catch {}
-      }));
+    const scrollGeneratedWorkoutIntoView = () => {
+      try {
+        const primary = workoutListRef.current || actionRowRef.current;
+        if (!primary) return;
+        const topPadding = window.innerWidth < 700 ? 18 : 28;
+        scrollElementToViewportTop(primary, { behavior: 'smooth', topPadding });
+      } catch {}
     };
 
-    const t1 = setTimeout(run, 70);
-    const t2 = setTimeout(run, 240);
+    const run = () => {
+      requestAnimationFrame(() => requestAnimationFrame(scrollGeneratedWorkoutIntoView));
+    };
+
+    const t1 = setTimeout(run, 80);
+    const t2 = setTimeout(run, 260);
     const t3 = setTimeout(run, 520);
+    const t4 = setTimeout(run, 820);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearTimeout(t4);
     };
-  }, [loading, current?.title, split, onGeneratedReady]);
+  }, [loading, current?.title, split]);
 
   useEffect(() => {
     let active = true;
@@ -405,7 +412,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
           <Box
             ref={workoutListRef}
-            data-generated-exercise-list="true"
             sx={{
               p: { xs: 1.5, md: 2 },
               borderRadius: 3,
