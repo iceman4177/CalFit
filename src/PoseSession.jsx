@@ -24,6 +24,7 @@ import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
 import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 
 import { useAuth } from "./context/AuthProvider";
+import { readProfileBundle } from "./lib/profileStorage";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
@@ -63,36 +64,22 @@ const ALL_OUTLINE_ASSETS = [
   femaleBackOutline,
 ];
 
-function readStoredGoalType() {
+function readStoredGoalType(userId) {
   try {
-    const raw = localStorage.getItem("userData");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const g = String(parsed?.goalType || parsed?.goal || "").toLowerCase().trim();
-      if (g) return g;
-    }
+    const bundle = readProfileBundle(userId || null);
+    const parsedGoal = String(bundle?.userData?.goalType || bundle?.userData?.goal || bundle?.fitnessGoal || '').toLowerCase().trim();
+    if (parsedGoal) return parsedGoal;
   } catch {}
-  try {
-    const g = String(localStorage.getItem("fitness_goal") || "").toLowerCase().trim();
-    if (g) return g;
-  } catch {}
-  return "maintenance";
+  return 'maintenance';
 }
 
-function readStoredGender() {
+function readStoredGender(userId) {
   try {
-    const raw = localStorage.getItem("userData");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const g = String(parsed?.gender || "").toLowerCase().trim();
-      if (g === "male" || g === "female") return g;
-    }
+    const bundle = readProfileBundle(userId || null);
+    const g = String(bundle?.userData?.gender || bundle?.gender || '').toLowerCase().trim();
+    if (g === 'male' || g === 'female') return g;
   } catch {}
-  try {
-    const g = String(localStorage.getItem("gender") || "").toLowerCase().trim();
-    if (g === "male" || g === "female") return g;
-  } catch {}
-  return "male";
+  return 'male';
 }
 
 function readStoredIsPro() {
@@ -101,24 +88,6 @@ function readStoredIsPro() {
   } catch {}
   return false;
 }
-
-function readStoredPoseToneMode() {
-  try {
-    const raw = String(localStorage.getItem("pose_session_tone_mode") || "balanced").toLowerCase().trim();
-    if (["hype", "balanced", "coach"].includes(raw)) return raw;
-  } catch {}
-  return "balanced";
-}
-
-function saveStoredPoseToneMode(mode) {
-  try {
-    const next = String(mode || "balanced").toLowerCase().trim();
-    if (["hype", "balanced", "coach"].includes(next)) {
-      localStorage.setItem("pose_session_tone_mode", next);
-    }
-  } catch {}
-}
-
 
 function getOrCreateClientId() {
   try {
@@ -283,9 +252,9 @@ export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
 
-  const userId = user?.id || "anon";
-  const gender = useMemo(() => readStoredGender(), []);
-  const goalType = useMemo(() => readStoredGoalType(), []);
+  const userId = user?.id || null;
+  const gender = useMemo(() => readStoredGender(userId), [userId]);
+  const goalType = useMemo(() => readStoredGoalType(userId), [userId]);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
   const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
@@ -303,8 +272,6 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
-  const [toneMode, setToneMode] = useState(() => readStoredPoseToneMode());
-  const [showMoreDetail, setShowMoreDetail] = useState(false);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -466,7 +433,6 @@ export default function PoseSession() {
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
-    setShowMoreDetail(false);
     setPoseIdx(0);
     setStage("capture");
   }, [isPro]);
@@ -478,8 +444,7 @@ export default function PoseSession() {
     try {
       const payload = {
         feature: "pose_session",
-        style: "detailed_muscle_groups_v2",
-        toneMode,
+        style: "detailed_muscle_groups_v1",
         gender,
         goalType,
         localDay: todayISO,
@@ -538,16 +503,14 @@ export default function PoseSession() {
       } catch {}
 
       setResult(session);
-      setShowMoreDetail(false);
       setStage("results");
     } catch (e) {
       console.error(e);
       setErrorMsg("AI analysis failed. Please try again.");
       setStage("results");
-      setShowMoreDetail(false);
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, toneMode, user?.id, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -558,7 +521,7 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
-      const shareSummary = String(result?.shareCardSummary || "").trim() || buildMemoryAwareShareSummary(result, isFemale);
+      const shareSummary = buildMemoryAwareShareSummary(result, isFemale);
       const topWins = (Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length
         ? result.bestDeveloped
         : (result?.highlights || result?.levers || [])
@@ -740,52 +703,6 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 </Stack>
               </Stack>
 
-              <Box
-                sx={{
-                  p: 1.2,
-                  borderRadius: 3,
-                  border: "1px solid rgba(120,255,220,0.16)",
-                  bgcolor: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <Typography sx={{ color: titleColor, fontWeight: 800, mb: 0.9 }}>
-                  Result Style
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-                  {[
-                    { key: "hype", label: "Hype" },
-                    { key: "balanced", label: "Balanced" },
-                    { key: "coach", label: "Coach" },
-                  ].map((opt) => {
-                    const active = toneMode === opt.key;
-                    return (
-                      <Chip
-                        key={opt.key}
-                        clickable
-                        label={opt.label}
-                        onClick={() => {
-                          setToneMode(opt.key);
-                          saveStoredPoseToneMode(opt.key);
-                        }}
-                        sx={{
-                          color: active ? "#061014" : bodyColor,
-                          bgcolor: active ? "rgba(40, 220, 190, 0.95)" : "rgba(255,255,255,0.06)",
-                          border: active ? "1px solid rgba(40,220,190,0.95)" : "1px solid rgba(255,255,255,0.12)",
-                          fontWeight: 800,
-                        }}
-                      />
-                    );
-                  })}
-                </Stack>
-                <Typography sx={{ color: "rgba(180,220,230,0.72)", fontSize: 12, mt: 0.9, lineHeight: 1.35 }}>
-                  {toneMode === "hype"
-                    ? "More punchy and social-native."
-                    : toneMode === "coach"
-                    ? "More analytical and progress-focused."
-                    : "Best all-around mix of hype, sincerity, and clarity."}
-                </Typography>
-              </Box>
-
               <Button
                 variant="contained"
                 onClick={startScan}
@@ -959,28 +876,6 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
 
               <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
 
-              {(result?.shortHeadline || result?.quickSummary) ? (
-                <Box
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 3,
-                    bgcolor: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  {result?.shortHeadline ? (
-                    <Typography sx={{ color: titleColor, fontWeight: 900, lineHeight: 1.3 }}>
-                      {String(result.shortHeadline)}
-                    </Typography>
-                  ) : null}
-                  {result?.quickSummary ? (
-                    <Typography sx={{ color: bodyColor, lineHeight: 1.5, mt: result?.shortHeadline ? 0.8 : 0 }}>
-                      {String(result.quickSummary)}
-                    </Typography>
-                  ) : null}
-                </Box>
-              ) : null}
-
               {(result?.momentumNote || result?.baselineComparison) ? (
                 <Box
                   sx={{
@@ -1018,50 +913,9 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 ))}
               </Stack>
 
-
-              {(result?.detailedExpansion || (typeof result?.report === "string" && result.report.trim()) || (Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length)) ? (
-                <Box
-                  sx={{
-                    p: 1.2,
-                    borderRadius: 3,
-                    border: "1px solid rgba(120,255,220,0.14)",
-                    bgcolor: "rgba(120,255,220,0.05)",
-                  }}
-                >
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                    <Box>
-                      <Typography sx={{ color: titleColor, fontWeight: 900 }}>
-                        More Detail
-                      </Typography>
-                      <Typography sx={{ color: "rgba(180,220,230,0.72)", fontSize: 12 }}>
-                        Open the full expansion and muscle-by-muscle breakdown.
-                      </Typography>
-                    </Box>
-                    <Button
-                      onClick={() => setShowMoreDetail((v) => !v)}
-                      sx={{
-                        color: "#061014",
-                        textTransform: "none",
-                        fontWeight: 800,
-                        borderRadius: 999,
-                        px: 1.6,
-                        bgcolor: "rgba(40, 220, 190, 0.95)",
-                        '&:hover': { bgcolor: "rgba(40, 220, 190, 1)" },
-                      }}
-                    >
-                      {showMoreDetail ? "Hide" : "Open"}
-                    </Button>
-                  </Stack>
-                  {showMoreDetail && result?.detailedExpansion ? (
-                    <Typography sx={{ color: bodyColor, lineHeight: 1.55, mt: 1.1 }}>
-                      {String(result.detailedExpansion)}
-                    </Typography>
-                  ) : null}
-                </Box>
-              ) : null}
-
+              
               {/* Long-form detailed report */}
-              {showMoreDetail && typeof result?.report === "string" && result.report.trim() ? (
+              {typeof result?.report === "string" && result.report.trim() ? (
                 <>
                   <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
                   <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
@@ -1134,7 +988,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               ) : null}
 
 {/* Detailed muscle-by-muscle breakdown */}
-              {showMoreDetail && Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length ? (
+              {Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length ? (
                 <>
                   <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
                   <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>

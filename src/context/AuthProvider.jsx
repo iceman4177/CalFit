@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import useBootstrapSync from '../hooks/useBootstrapSync';
+import { mirrorProfileToLegacy, readProfileBundle, writeProfileBundle } from '../lib/profileStorage';
 
 const DEFAULT_AUTH = {
   session: null,
@@ -49,11 +50,14 @@ export function AuthProvider({ children }) {
       try {
         // Pro flags written by ProSuccess.jsx (and older builds)
         localStorage.removeItem('isPro');
-        const ud = JSON.parse(localStorage.getItem('userData') || '{}');
-        if (ud?.isPremium) {
-          delete ud.isPremium;
-          localStorage.setItem('userData', JSON.stringify(ud));
+        const prevBundle = readProfileBundle(prevId);
+        const prevUserData = prevBundle.userData || {};
+        if (prevUserData?.isPremium) {
+          const cleanedPrev = { ...prevUserData };
+          delete cleanedPrev.isPremium;
+          writeProfileBundle(prevId, cleanedPrev);
         }
+        mirrorProfileToLegacy(currentId, null);
 
         // Optional: clear any account-scoped gating/trial flags that could hide CTAs
         // Uncomment if you use these keys elsewhere:

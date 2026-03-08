@@ -63,6 +63,7 @@ import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
+import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
@@ -316,9 +317,11 @@ function markHealthFormSeen(userId) {
     localStorage.setItem(key, 'true');
   } catch (e) {}
 }
-function hasHealthDataLocal(saved) {
+function hasHealthDataLocal(saved, userId) {
   try {
-    const hasCompleted = localStorage.getItem('hasCompletedHealthData') === 'true';
+    const hasCompleted = userId
+      ? localStorage.getItem(`hasCompletedHealthData:${userId}`) === 'true'
+      : localStorage.getItem('hasCompletedHealthData') === 'true';
     if (hasCompleted) return true;
     const age = saved?.age;
     return !!age;
@@ -497,9 +500,12 @@ export default function App() {
   const closeMore = () => setMoreAnchor(null);
 
   const setUserData = data => {
-    const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+    const bundle = readProfileBundle(authUser?.id || null);
+    const prev = bundle.userData || {};
     const next = { ...prev, ...data, isPremium: isProActive };
-    localStorage.setItem('userData', JSON.stringify(next));
+    writeProfileBundle(authUser?.id || null, next);
+    if (authUser?.id) mirrorProfileToLegacy(authUser.id, next);
+    else localStorage.setItem('userData', JSON.stringify(next));
     setUserDataState(next);
   };
 
@@ -508,7 +514,9 @@ export default function App() {
   useEffect(() => {
     hydrateStreakOnStartup();
 
-    const saved = JSON.parse(localStorage.getItem('userData') || '{}');
+    const userId = authUser?.id || null;
+    const bundle = readProfileBundle(userId);
+    const saved = bundle.userData || {};
 
     // If logged in and local health is missing, try to rehydrate from Supabase user metadata
     const metaHealth =
@@ -521,19 +529,22 @@ export default function App() {
     if (!saved?.age && metaHealth && typeof metaHealth === 'object') {
       merged = { ...saved, ...metaHealth };
       try {
-        localStorage.setItem('userData', JSON.stringify(merged));
-        localStorage.setItem('hasCompletedHealthData', 'true');
+        writeProfileBundle(userId, merged);
       } catch (e) {}
     }
 
     const normalized = { ...merged, isPremium: isProActive };
+    if (userId) {
+      writeProfileBundle(userId, normalized);
+      mirrorProfileToLegacy(userId, normalized);
+    } else {
+      localStorage.setItem('userData', JSON.stringify(normalized));
+    }
     setUserDataState(normalized);
-    localStorage.setItem('userData', JSON.stringify(normalized));
     refreshCalories();
 
     // ---- Show Health form only once per anon device OR once per user ----
-    const userId = authUser?.id || null;
-    const hasHealth = hasHealthDataLocal(merged);
+    const hasHealth = hasHealthDataLocal(merged, userId);
     const hasSeen = hasSeenHealthForm(userId);
 
     // Only redirect from Acquisition Home (Daily Evaluation). Never loop.
@@ -841,9 +852,12 @@ export default function App() {
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
-              const prev = JSON.parse(localStorage.getItem('userData') || '{}');
+              const bundle = readProfileBundle(authUser?.id || null);
+              const prev = bundle.userData || {};
               const next = { ...prev, ...data, isPremium: (proCheck.isPro || isProActive || localPro) };
-              localStorage.setItem('userData', JSON.stringify(next));
+              writeProfileBundle(authUser?.id || null, next);
+              if (authUser?.id) mirrorProfileToLegacy(authUser.id, next);
+              else localStorage.setItem('userData', JSON.stringify(next));
               setUserDataState(next);
               history.push('/');
             }} />

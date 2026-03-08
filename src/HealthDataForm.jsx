@@ -16,6 +16,8 @@ import {
 } from '@mui/material';
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { supabase } from './lib/supabaseClient';
+import { useAuth } from './context/AuthProvider';
+import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
 
 function getHealthSeenKeyForUser(userId) {
   return userId ? `slimcal:healthFormSeen:user:${userId}:v1` : 'slimcal:healthFormSeen:anon:v1';
@@ -140,6 +142,7 @@ function roundToNearest(n, step = 25) {
 
 export default function HealthDataForm({ setUserData }) {
   const history = useHistory();
+  const { user: authUser } = useAuth();
 
   // Dropdown open controls
   const [activityOpen, setActivityOpen] = useState(false);
@@ -152,14 +155,7 @@ export default function HealthDataForm({ setUserData }) {
 
   // Fields
   const [age, setAge] = useState('');
-  const [gender, setGender] = useState(() => {
-    try {
-      const ud = JSON.parse(localStorage.getItem('userData') || '{}') || {};
-      return ud?.gender || localStorage.getItem('gender') || '';
-    } catch {
-      return localStorage.getItem('gender') || '';
-    }
-  });
+  const [gender, setGender] = useState('');
   const [weight, setWeight] = useState(''); // lbs
   const [heightFeet, setHeightFeet] = useState('');
   const [heightInches, setHeightInches] = useState('');
@@ -167,48 +163,43 @@ export default function HealthDataForm({ setUserData }) {
   const [dailyGoal, setDailyGoal] = useState('');
   const [goalType, setGoalType] = useState('');
 
-  const [dietPreference, setDietPreference] = useState(
-    localStorage.getItem('diet_preference') || 'omnivore'
-  );
-  const [trainingIntent, setTrainingIntent] = useState(
-    localStorage.getItem('training_intent') || 'general'
-  );
-  const [trainingSplit, setTrainingSplit] = useState(
-    localStorage.getItem('training_split') || 'upper_lower'
-  );
-  const [lastFocus, setLastFocus] = useState(
-    localStorage.getItem('last_focus') || 'none'
-  );
+  const [dietPreference, setDietPreference] = useState('omnivore');
+  const [trainingIntent, setTrainingIntent] = useState('general');
+  const [trainingSplit, setTrainingSplit] = useState('upper_lower');
+  const [lastFocus, setLastFocus] = useState('none');
 
-  const [equipment, setEquipment] = useState(() => {
-    try {
-      const raw = localStorage.getItem('equipment_list');
-      const parsed = raw ? JSON.parse(raw) : null;
-      return Array.isArray(parsed) && parsed.length ? parsed : ['Full gym'];
-    } catch {
-      return ['Full gym'];
-    }
-  });
+  const [equipment, setEquipment] = useState(['Full gym']);
 
-  // Load saved userData on mount
+  // Load saved userData for current account (or guest fallback)
   useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('userData') || '{}');
+    const bundle = readProfileBundle(authUser?.id || null);
+    const saved = bundle.userData || {};
 
-    if (saved.age != null && saved.age !== '') setAge(String(saved.age));
-    if (saved.gender) setGender(saved.gender);
-    if (saved.weight) setWeight(saved.weight);
-    if (saved.height?.feet) setHeightFeet(saved.height.feet);
-    if (saved.height?.inches) setHeightInches(saved.height.inches);
-    if (saved.activityLevel) setActivityLevel(saved.activityLevel);
-    if (saved.dailyGoal) setDailyGoal(saved.dailyGoal);
-    if (saved.goalType) setGoalType(saved.goalType);
+    setAge(saved.age != null && saved.age !== '' ? String(saved.age) : '');
+    setGender(saved.gender || bundle.gender || '');
+    setWeight(saved.weight ? String(saved.weight) : '');
+    setHeightFeet(saved.height?.feet ? String(saved.height.feet) : '');
+    setHeightInches(saved.height?.inches ? String(saved.height.inches) : '');
+    setActivityLevel(saved.activityLevel || '');
+    setDailyGoal(saved.dailyGoal ? String(saved.dailyGoal) : '');
+    setGoalType(saved.goalType || '');
 
-    if (saved.dietPreference) setDietPreference(saved.dietPreference);
-    if (saved.trainingIntent) setTrainingIntent(saved.trainingIntent);
-    if (saved.trainingSplit) setTrainingSplit(saved.trainingSplit);
-    if (saved.lastFocus) setLastFocus(saved.lastFocus);
-    if (Array.isArray(saved.equipment) && saved.equipment.length) setEquipment(saved.equipment);
-  }, []);
+    setDietPreference(saved.dietPreference || bundle.dietPreference || 'omnivore');
+    setTrainingIntent(saved.trainingIntent || bundle.trainingIntent || 'general');
+    setTrainingSplit(saved.trainingSplit || bundle.trainingSplit || 'upper_lower');
+    setLastFocus(saved.lastFocus || bundle.lastFocus || 'none');
+
+    try {
+      const parsedEquipment = bundle.equipmentListRaw ? JSON.parse(bundle.equipmentListRaw) : null;
+      setEquipment(Array.isArray(saved.equipment) && saved.equipment.length
+        ? saved.equipment
+        : Array.isArray(parsedEquipment) && parsedEquipment.length
+          ? parsedEquipment
+          : ['Full gym']);
+    } catch {
+      setEquipment(Array.isArray(saved.equipment) && saved.equipment.length ? saved.equipment : ['Full gym']);
+    }
+  }, [authUser?.id]);
 
   // First-time tips
   const [AgeTip, triggerAgeTip] = useFirstTimeTip(
@@ -346,32 +337,24 @@ export default function HealthDataForm({ setUserData }) {
       tdee_est: tdee || null
     };
 
-    // Persist for the rest of the app
-    localStorage.setItem('userData', JSON.stringify(enriched));
-    localStorage.setItem('hasCompletedHealthData', 'true');
+    // Persist account-scoped profile first, then mirror the active account into legacy keys
+    let authedUser = authUser || null;
+    if (!authedUser?.id) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        authedUser = data?.user ?? null;
+      } catch {}
+    }
 
-    // Keys used by AI endpoints/components
-    localStorage.setItem('diet_preference', dietPreference);
-    localStorage.setItem('training_intent', trainingIntent);
-    localStorage.setItem('training_split', trainingSplit);
-    localStorage.setItem('last_focus', lastFocus);
-    localStorage.setItem('equipment_list', JSON.stringify(equipment));
-
-    localStorage.setItem('protein_target_daily_g', String(previewProteinDailyG));
-    localStorage.setItem('protein_target_meal_g', String(previewProteinMealG));
-    localStorage.setItem('calorie_bias', String(calorieBias));
-    localStorage.setItem('fitness_goal', goalType);
-    localStorage.setItem('gender', gender);
-
-    if (bmr) localStorage.setItem('bmr_est', String(bmr));
-    if (tdee) localStorage.setItem('tdee_est', String(tdee));
+    writeProfileBundle(authedUser?.id || null, enriched);
+    if (authedUser?.id) {
+      mirrorProfileToLegacy(authedUser.id, enriched);
+    } else {
+      localStorage.setItem('userData', JSON.stringify(enriched));
+      localStorage.setItem('hasCompletedHealthData', 'true');
+    }
 
     // Mark "seen" once
-    let authedUser = null;
-    try {
-      const { data } = await supabase.auth.getUser();
-      authedUser = data?.user ?? null;
-    } catch {}
 
     const seenKey = getHealthSeenKeyForUser(authedUser?.id || null);
     try { localStorage.setItem(seenKey, 'true'); } catch {}
