@@ -467,9 +467,16 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const startScan = useCallback(() => {
-    const localRemaining = getDailyRemaining("pose_session");
-    const effectiveRemaining = user?.id ? serverPoseRemaining : localRemaining;
+  const startScan = useCallback(async () => {
+    let effectiveRemaining = user?.id ? serverPoseRemaining : getDailyRemaining("pose_session");
+
+    if (!isPro && user?.id) {
+      const refreshed = await fetchServerDailyRemaining("pose_session", user.id);
+      if (refreshed !== null) {
+        effectiveRemaining = refreshed;
+        setServerPoseRemaining(refreshed);
+      }
+    }
 
     if (!isPro && effectiveRemaining !== null && effectiveRemaining <= 0) {
       setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");

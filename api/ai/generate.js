@@ -607,6 +607,35 @@ async function allowFreeFeature({ req, feature, userId }) {
   return dbAllow(clientId, feature, userId);
 }
 
+async function getFreeFeatureRemaining({ req, feature, userId }) {
+  const limit = getFreeLimitForFeature(feature);
+  const identityKey = idKey(req, userId);
+  const today = dayKeyUTC();
+
+  if (!supabaseAdmin) {
+    const rec = freeMem.get(`m:${identityKey}:${feature}`);
+    if (!rec || rec.day !== today) return { remaining: limit, limit };
+    return { remaining: Math.max(0, limit - (rec.used || 0)), limit };
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ai_free_passes')
+      .select('uses')
+      .eq('client_id', identityKey)
+      .eq('feature', feature)
+      .eq('day_key', today)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') return { remaining: limit, limit };
+
+    const used = Math.max(0, Number(data?.uses || 0));
+    return { remaining: Math.max(0, limit - used), limit };
+  } catch {
+    return { remaining: limit, limit };
+  }
+}
+
 
 
 // -------------------- VERDICT FALLBACK --------------------

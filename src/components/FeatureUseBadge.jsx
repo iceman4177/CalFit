@@ -181,10 +181,13 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
   }
 
   const limit = getFreeDailyLimit(featureKey);
-  const remaining = user?.id && serverRemaining !== null ? serverRemaining : getDailyRemaining(featureKey);
+  const usingServerQuota = !!user?.id;
+  const remaining = usingServerQuota ? serverRemaining : getDailyRemaining(featureKey);
 
   const freePrefix = labelPrefix || "Free";
-  const label = `${freePrefix}: ${remaining}/${limit}`;
+  const label = usingServerQuota && remaining === null
+    ? `${freePrefix}: …/${limit}`
+    : `${freePrefix}: ${remaining}/${limit}`;
 
   return <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />;
 }
