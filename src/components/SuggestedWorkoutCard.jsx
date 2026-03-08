@@ -1,5 +1,5 @@
 // src/components/SuggestedWorkoutCard.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -85,6 +85,9 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const actionRowRef = useRef(null);
+  const loadingCardRef = useRef(null);
+  const cardRootRef = useRef(null);
 
   const pro = isProUser();
 
@@ -98,6 +101,59 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
+
+  useEffect(() => {
+    const scrollLoadingCardIntoView = () => {
+      try {
+        const el = loadingCardRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+        const absoluteTop = window.scrollY + rect.top;
+        const targetTop = Math.max(0, absoluteTop - Math.max(24, (viewportH - rect.height) / 2 - 8));
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const scrollFullCardIntoView = () => {
+      try {
+        const card = cardRootRef.current;
+        const actions = actionRowRef.current;
+        if (!card) return;
+        const cardRect = card.getBoundingClientRect();
+        const absoluteTop = window.scrollY + cardRect.top;
+        const topPadding = window.innerWidth < 700 ? 92 : 110;
+        let targetTop = Math.max(0, absoluteTop - topPadding);
+
+        if (actions) {
+          const actionsRect = actions.getBoundingClientRect();
+          const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+          const bottomSafe = window.innerWidth < 700 ? 128 : 72;
+          const actionsAbsoluteBottom = window.scrollY + actionsRect.bottom;
+          const actionsBottomAtTarget = actionsAbsoluteBottom - targetTop;
+          if (actionsBottomAtTarget > viewportH - bottomSafe) {
+            targetTop = Math.max(0, targetTop + (actionsBottomAtTarget - (viewportH - bottomSafe)));
+          }
+        }
+
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const run = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+    const timers = [];
+
+    if (loading) {
+      timers.push(setTimeout(() => run(scrollLoadingCardIntoView), 40));
+      timers.push(setTimeout(() => run(scrollLoadingCardIntoView), 180));
+    } else if (current) {
+      timers.push(setTimeout(() => run(scrollFullCardIntoView), 70));
+      timers.push(setTimeout(() => run(scrollFullCardIntoView), 260));
+      timers.push(setTimeout(() => run(scrollFullCardIntoView), 520));
+    }
+
+    return () => timers.forEach(clearTimeout);
+  }, [loading, current?.title, split]);
 
   useEffect(() => {
     let active = true;
@@ -209,20 +265,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (loading) {
     return (
-      <Card
-        sx={{
-          mb: 2.5,
-          borderRadius: 3,
-          overflow: 'hidden',
-          border: '1px solid rgba(0,0,0,0.06)',
-          boxShadow: '0 10px 28px rgba(0,0,0,0.05)'
-        }}
-      >
-        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
-          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.75 }}>
-            Generating your workout…
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
+      <Card ref={loadingCardRef} sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+        <CardContent sx={{ overflow: 'visible', p: { xs: 2, md: 3 } }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.5 }}>Generating a plan…</Typography>
+          <Typography variant="body2" color="text.secondary">
             Personalizing for your goal, equipment, and today’s split.
           </Typography>
         </CardContent>
@@ -232,21 +278,14 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (err) {
     return (
-      <Card
-        sx={{
-          mb: 2.5,
-          borderRadius: 3,
-          border: '1px solid rgba(0,0,0,0.06)',
-          boxShadow: '0 10px 28px rgba(0,0,0,0.05)'
-        }}
-      >
-        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
-          <Typography variant="h6" color="error" sx={{ fontWeight: 800 }}>
+      <Card ref={cardRootRef} sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+        <CardContent sx={{ overflow: 'visible' }}>
+          <Typography variant="h6" color="error">
             {err}
           </Typography>
           <Button
             variant="outlined"
-            sx={{ mt: 1.5, borderRadius: 999 }}
+            sx={{ mt: 1 }}
             onClick={() => fetchAI(undefined, { countAsUse: true })}
           >
             Try Again
@@ -272,96 +311,100 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const localWorkout = toLocalWorkout(current);
 
   return (
-    <Card
-      sx={{
-        mb: 2.5,
-        borderRadius: 3,
-        overflow: 'hidden',
-        border: '1px solid rgba(0,0,0,0.06)',
-        boxShadow: '0 12px 32px rgba(0,0,0,0.05)'
-      }}
-    >
-      <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
-        <Stack spacing={1.5}>
+    <Card ref={cardRootRef} sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+      <CardContent sx={{ overflow: 'visible', p: { xs: 2, md: 3 } }}>
+        <Stack spacing={2}>
           <Box
             sx={{
               display: 'flex',
-              alignItems: { xs: 'flex-start', sm: 'center' },
+              alignItems: { xs: 'flex-start', md: 'center' },
               justifyContent: 'space-between',
-              gap: 1.25,
-              flexWrap: 'wrap'
+              gap: 1.5,
+              flexWrap: 'wrap',
             }}
           >
             <Box>
-              <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.05 }}>
+              <Typography variant="h5" sx={{ lineHeight: 1.15, fontWeight: 800 }}>
                 Suggested Workout
               </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 Built for today so you can start fast.
               </Typography>
             </Box>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 1,
+                flexWrap: 'wrap',
+                justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+                alignItems: 'center',
+              }}
+            >
               <FeatureUseBadge featureKey="ai_workout" isPro={pro} sx={{ flexShrink: 0 }} />
-              <Chip size="small" label={(trainingIntent || 'general').replace('_', ' ')} />
-              <Chip size="small" label={(split || 'upper').replace('_', ' ')} />
-            </Stack>
+              <Chip size="small" label={(trainingIntent || 'general').replace('_', ' ')} sx={{ flexShrink: 0, borderRadius: 999 }} />
+              <Chip size="small" label={(split || 'upper').replace('_', ' ')} sx={{ flexShrink: 0, borderRadius: 999 }} />
+            </Box>
           </Box>
 
-          <Box>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-              Today’s workout
-            </Typography>
-            <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
-          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: -0.5, mb: -0.5 }}>
+            Pick today’s focus
+          </Typography>
+          <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 
           <Box
             sx={{
+              p: { xs: 1.5, md: 2 },
               borderRadius: 3,
-              border: '1px solid rgba(0,0,0,0.06)',
-              backgroundColor: 'rgba(17,24,39,0.02)',
-              p: { xs: 1.5, md: 2 }
+              backgroundColor: 'rgba(248,250,252,0.85)',
+              border: '1px solid rgba(15,23,42,0.06)'
             }}
           >
-            <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2, mb: 1.25 }}>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
               {localWorkout.name}
             </Typography>
 
-            <List dense disablePadding>
+            <List dense sx={{ py: 0 }}>
               {localWorkout.exercises.map((ex, i) => (
-                <ListItem key={i} sx={{ px: 0, py: 0.55, display: 'list-item', listStyleType: 'disc', ml: 2.25 }}>
-                  {ex.exerciseName} — {ex.sets}×{ex.reps}
+                <ListItem key={i} sx={{ pl: 0, pr: 0, alignItems: 'flex-start' }}>
+                  • {ex.exerciseName} — {ex.sets}×{ex.reps}
                 </ListItem>
               ))}
             </List>
           </Box>
 
+          <Typography variant="body2" color="text.secondary">
+            Tuned for <strong>{(trainingIntent || 'general').replace('_', ' ')}</strong> • <strong>{(split || 'upper').replace('_', ' ')}</strong>
+          </Typography>
+
           <Divider />
 
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={1.25}
-            alignItems={{ xs: 'stretch', sm: 'center' }}
-            justifyContent="space-between"
+          <Box
+            ref={actionRowRef}
+            sx={{
+              display: 'flex',
+              gap: 1.25,
+              flexWrap: 'wrap',
+              position: { xs: 'sticky', md: 'static' },
+              bottom: { xs: 0, md: 'auto' },
+              pt: 0.5,
+              pb: { xs: 0.5, md: 0 },
+              backgroundColor: { xs: 'rgba(255,255,255,0.96)', md: 'transparent' }
+            }}
           >
-            <Typography variant="body2" color="text.secondary">
-              Tuned for <strong>{(trainingIntent || 'general').replace('_', ' ')}</strong> • <strong>{(split || 'upper').replace('_', ' ')}</strong>
-            </Typography>
-
-            <Stack direction="row" spacing={1.25}>
-              <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 999, fontWeight: 700 }}>
-                Refresh
-              </Button>
-              <Button
-                variant="contained"
-                onClick={() => {
-                  if (typeof onAccept === 'function') onAccept(localWorkout);
-                }}
-                sx={{ borderRadius: 999, fontWeight: 800 }}
-              >
-                Accept Workout
-              </Button>
-            </Stack>
-          </Stack>
+            <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 3, fontWeight: 700 }}>
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              onClick={() => {
+                if (typeof onAccept === 'function') onAccept(localWorkout);
+              }}
+              sx={{ borderRadius: 3, fontWeight: 800, minWidth: { sm: 220 } }}
+            >
+              Accept Workout
+            </Button>
+          </Box>
         </Stack>
       </CardContent>
 
