@@ -46,12 +46,14 @@ function headerClientId(req) {
   return `ip:${ip}`;
 }
 
-function normalizeQuotaFeature(feature) {
-  const raw = String(feature || "").trim().toLowerCase();
-  if (raw === "meal") return "ai_meal";
-  if (raw === "workout") return "ai_workout";
-  if (raw === "pose") return "pose_session";
-  return raw;
+function normalizeFeature(feature) {
+  const f = String(feature || "").trim().toLowerCase();
+  if (!f) return "";
+  if (f === "ai_meal") return "meal";
+  if (f === "ai_workout") return "workout";
+  if (f === "meal_ai") return "meal";
+  if (f === "workout_ai") return "workout";
+  return f;
 }
 
 function idKey(req, userId) {
@@ -547,8 +549,6 @@ function quotaIdentity({ clientId, userId, feature }) {
 }
 
 function memRead({ clientId, userId, feature }) {
-  feature = normalizeQuotaFeature(feature);
-  feature = normalizeQuotaFeature(feature);
   const key = quotaIdentity({ clientId, userId, feature });
   const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
@@ -559,7 +559,6 @@ function memRead({ clientId, userId, feature }) {
 }
 
 function memConsume({ clientId, userId, feature }) {
-  feature = normalizeQuotaFeature(feature);
   const key = quotaIdentity({ clientId, userId, feature });
   const snap = memRead({ clientId, userId, feature });
   if (snap.used >= snap.limit) return { allowed: false, remaining: 0, used: snap.used, limit: snap.limit };
@@ -569,7 +568,6 @@ function memConsume({ clientId, userId, feature }) {
 }
 
 async function dbQuotaStatus(clientId, feature, userId) {
-  feature = normalizeQuotaFeature(feature);
   if (!supabaseAdmin) {
     const snap = memRead({ clientId, userId, feature });
     return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
@@ -593,7 +591,6 @@ async function dbQuotaStatus(clientId, feature, userId) {
 }
 
 async function dbConsume(clientId, feature, userId) {
-  feature = normalizeQuotaFeature(feature);
   if (!supabaseAdmin) return memConsume({ clientId, userId, feature });
   try {
     const today = dayKeyUTC();
@@ -601,26 +598,19 @@ async function dbConsume(clientId, feature, userId) {
     const status = await dbQuotaStatus(clientId, feature, userId);
     if (status.used >= limit) return { allowed: false, remaining: 0, used: status.used, limit };
 
-    let existingQuery = supabaseAdmin.from('ai_free_passes').select('uses');
-    existingQuery = userId ? existingQuery.eq('user_id', userId) : existingQuery.eq('client_id', clientId);
-    const { data: existing, error: existingError } = await existingQuery.eq('feature', feature).eq('day_key', today).maybeSingle();
-    if (existingError && existingError.code !== 'PGRST116') return memConsume({ clientId, userId, feature });
-
-    const nextUsed = Math.max(0, Number(existing?.uses ?? status.used)) + 1;
-
-    if (existing) {
-      let updateQuery = supabaseAdmin.from('ai_free_passes').update({ uses: nextUsed });
-      updateQuery = userId ? updateQuery.eq('user_id', userId) : updateQuery.eq('client_id', clientId);
-      const { error } = await updateQuery.eq('feature', feature).eq('day_key', today);
+    if (userId) {
+      const { error } = await supabaseAdmin
+        .from('ai_free_passes')
+        .upsert([{ user_id: userId, client_id: clientId || null, feature, day_key: today, uses: status.used + 1 }], { onConflict: 'user_id,feature,day_key' });
       if (error) return memConsume({ clientId, userId, feature });
     } else {
-      const payload = userId
-        ? { user_id: userId, client_id: clientId || null, feature, day_key: today, uses: nextUsed }
-        : { client_id: clientId, user_id: null, feature, day_key: today, uses: nextUsed };
-      const { error } = await supabaseAdmin.from('ai_free_passes').insert(payload);
+      const { error } = await supabaseAdmin
+        .from('ai_free_passes')
+        .upsert([{ client_id: clientId, user_id: null, feature, day_key: today, uses: status.used + 1 }], { onConflict: 'client_id,feature,day_key' });
       if (error) return memConsume({ clientId, userId, feature });
     }
 
+    const nextUsed = status.used + 1;
     return { allowed: true, remaining: Math.max(0, limit - nextUsed), used: nextUsed, limit };
   } catch {
     return memConsume({ clientId, userId, feature });
@@ -1318,7 +1308,7 @@ export default async function handler(req, res) {
   }
 
   const body = await readJson(req);
-  const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
+  const feature = normalizeFeature(body?.feature || body?.type || body?.mode || "workout");
 
 
 const freeBypass =
