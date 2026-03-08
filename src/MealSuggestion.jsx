@@ -208,6 +208,19 @@ export default function MealSuggestion({ consumedCalories, onAddMeal, onQuotaCha
     [proOrTrial, freeRefreshesLeft, quotaTick]
   );
 
+  useEffect(() => {
+    if (lockInteractions) setShowUpgrade(true);
+  }, [lockInteractions]);
+
+  const upgradeModalNode = (
+    <UpgradeModal
+      open={showUpgrade}
+      onClose={() => setShowUpgrade(false)}
+      title="Unlock unlimited meal ideas"
+      description="You’ve used today’s free AI refreshes. Start a 7-day trial of Slimcal Pro to continue."
+    />
+  );
+
   // time-of-day label
   const hour = new Date().getHours();
   const period = hour < 10 ? 'Breakfast' : hour < 14 ? 'Lunch' : hour < 17 ? 'Snack' : 'Dinner';
@@ -390,41 +403,40 @@ export default function MealSuggestion({ consumedCalories, onAddMeal, onQuotaCha
   // ---------- UI: Error ----------
   if (errMsg) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 3 }}>
-        <Typography color="error" sx={{ mb: 1 }}>
-          {errMsg}
-        </Typography>
-        <Button
-          onClick={handleRefreshClick}
-          variant="contained"
-          sx={{ textTransform: 'none', fontWeight: 600 }}
-        >
-          Retry
-        </Button>
-      </Box>
+      <>
+        <Box sx={{ textAlign: 'center', mt: 3 }}>
+          <Typography color="error" sx={{ mb: 1 }}>
+            {errMsg}
+          </Typography>
+          <Button
+            onClick={handleRefreshClick}
+            variant="contained"
+            sx={{ textTransform: 'none', fontWeight: 600 }}
+          >
+            Retry
+          </Button>
+        </Box>
+        {upgradeModalNode}
+      </>
     );
   }
 
   // ---------- UI: Empty ----------
   if (!suggestions.length) {
     return (
-      <Box sx={{ textAlign: 'center', mt: 3 }}>
-        <Typography sx={{ mb: 1 }}>No more ideas right now.</Typography>
-        <Button
-          onClick={handleRefreshClick}
-          variant="contained"
-          sx={{ textTransform: 'none', fontWeight: 600 }}
-        >
-          Get New Ideas
-        </Button>
-
-        <UpgradeModal
-          open={showUpgrade}
-          onClose={() => setShowUpgrade(false)}
-          title="Upgrade to Slimcal Pro"
-          description="You’ve reached your free daily AI limit. Upgrade for unlimited smart meal suggestions."
-        />
-      </Box>
+      <>
+        <Box sx={{ textAlign: 'center', mt: 3 }}>
+          <Typography sx={{ mb: 1 }}>No more ideas right now.</Typography>
+          <Button
+            onClick={handleRefreshClick}
+            variant="contained"
+            sx={{ textTransform: 'none', fontWeight: 600 }}
+          >
+            Get New Ideas
+          </Button>
+        </Box>
+        {upgradeModalNode}
+      </>
     );
   }
 
@@ -480,6 +492,8 @@ export default function MealSuggestion({ consumedCalories, onAddMeal, onQuotaCha
           </Box>
         </Box>
       )}
+
+      {upgradeModalNode}
 
       {suggestions.map((s, idx) => (
         <Card
