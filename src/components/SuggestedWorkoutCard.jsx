@@ -1,5 +1,5 @@
 // src/components/SuggestedWorkoutCard.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -78,7 +78,8 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onReady }) {
+export default function SuggestedWorkoutCard({ userData, onAccept }) {
+  const cardRef = useRef(null);
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -97,14 +98,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onReady }) {
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
-
-  useEffect(() => {
-    if (loading || !current || typeof onReady !== 'function') return;
-    const t = setTimeout(() => {
-      try { onReady(); } catch {}
-    }, 70);
-    return () => clearTimeout(t);
-  }, [loading, current, onReady]);
 
   useEffect(() => {
     let active = true;
@@ -261,8 +254,30 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onReady }) {
 
   const localWorkout = toLocalWorkout(current);
 
+  useEffect(() => {
+    if (loading || !current || !cardRef.current) return;
+
+    const scrollToSuggestedCard = () => {
+      try {
+        const el = cardRef.current;
+        const rect = el.getBoundingClientRect();
+        const absoluteTop = window.scrollY + rect.top;
+        const topPadding = window.innerWidth < 700 ? 92 : 110;
+        const targetTop = Math.max(0, absoluteTop - topPadding);
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const t1 = setTimeout(scrollToSuggestedCard, 40);
+    const t2 = setTimeout(scrollToSuggestedCard, 220);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [loading, current?.title, split]);
+
   return (
-    <Card sx={{ mb: 4, overflow: 'visible' }}>
+    <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
       <CardContent sx={{ overflow: 'visible' }}>
         {/* Header */}
         <Box
