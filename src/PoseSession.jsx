@@ -638,11 +638,26 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
                 AI Physique Tracker
               </Typography>
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Stack spacing={1}>
                 <Typography sx={{ color: bodyColor }}>
                   3 guided scans · 15 seconds · shareable results
                 </Typography>
-                <FeatureUseBadge featureKey="pose_session" isPro={isPro} labelPrefix="Free" />
+                <Box>
+                  <FeatureUseBadge
+                    featureKey="pose_session"
+                    isPro={isPro}
+                    labelPrefix="Free"
+                    sx={{
+                      color: "rgba(220,235,245,0.92)",
+                      borderColor: "rgba(120,255,220,0.28)",
+                      bgcolor: "rgba(255,255,255,0.02)",
+                      '& .MuiChip-label': {
+                        px: 1.1,
+                        color: "rgba(220,235,245,0.92)",
+                      },
+                    }}
+                  />
+                </Box>
               </Stack>
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
