@@ -37,6 +37,7 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import foodData from './foodData.json';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
+import { getAIQuotaStatus } from './lib/ai';
 
 import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { updateStreak, hydrateStreakOnStartup } from './utils/streak';
@@ -52,7 +53,7 @@ import FeatureUseBadge, {
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMealLocalFirst, deleteMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
-import { getAIQuotaStatus } from './lib/ai';
+import { callAIGenerate } from './lib/ai';
 
 // ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
 import { supabase } from './lib/supabaseClient';
@@ -402,6 +403,7 @@ export default function MealTracker({ onMealUpdate }) {
 
   // AI panel state
   const [showSuggest, setShowSuggest] = useState(false);
+  const [mealBadgeTick, setMealBadgeTick] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   // dialogs
@@ -886,24 +888,7 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  useEffect(() => {
-    let active = true;
-    const syncQuota = async () => {
-      if (isProUser()) return;
-      try {
-        const q = await getAIQuotaStatus('meal');
-        if (!active) return;
-        if (typeof q?.remaining === 'number') setDailyRemaining('ai_meal', q.remaining);
-      } catch {}
-    };
-    syncQuota();
-    window.addEventListener('focus', syncQuota);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', syncQuota);
-    };
-  }, [user?.id]);
-
+  // toggle meal ideas panel — like workouts/pose, opening the panel does not consume a use
   const handleToggleMealIdeas = useCallback(() => {
     if (showSuggest) {
       setShowSuggest(false);
@@ -923,6 +908,27 @@ export default function MealTracker({ onMealUpdate }) {
       } catch {}
     }, 50);
   }, [showSuggest]);
+
+  useEffect(() => {
+    let active = true;
+    const syncMealQuota = async () => {
+      if (isProUser()) return;
+      try {
+        const q = await getAIQuotaStatus('meal');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') {
+          setDailyRemaining('ai_meal', q.remaining);
+          setMealBadgeTick(t => t + 1);
+        }
+      } catch {}
+    };
+    syncMealQuota();
+    window.addEventListener('focus', syncMealQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncMealQuota);
+    };
+  }, []);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
 
@@ -966,7 +972,7 @@ export default function MealTracker({ onMealUpdate }) {
         >
           {!isProUser() && (
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-              <FeatureUseBadge featureKey="ai_meal" isPro={false} />
+              <FeatureUseBadge key={`meal-badge-${mealBadgeTick}`} featureKey="ai_meal" isPro={false} />
             </Box>
           )}
 
