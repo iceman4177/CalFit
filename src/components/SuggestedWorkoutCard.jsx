@@ -91,7 +91,7 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange }) {
+export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange, onGeneratedReady }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -163,17 +163,22 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   useEffect(() => {
     if (loading || !current) return;
 
-    const scrollGeneratedWorkoutIntoView = () => {
-      try {
-        const primary = workoutListRef.current || actionRowRef.current;
-        if (!primary) return;
-        const offset = window.innerWidth < 700 ? 18 : 28;
-        scrollElementToViewportCenter(primary, { behavior: 'smooth', offset });
-      } catch {}
-    };
-
     const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(scrollGeneratedWorkoutIntoView));
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (typeof onGeneratedReady === 'function') {
+          onGeneratedReady();
+          return;
+        }
+        try {
+          const primary = workoutListRef.current || actionRowRef.current;
+          if (!primary) return;
+          const offset = window.innerWidth < 700 ? 84 : 96;
+          const rect = primary.getBoundingClientRect();
+          const absoluteTop = window.scrollY + rect.top;
+          const targetTop = Math.max(0, absoluteTop - offset);
+          window.scrollTo({ top: targetTop, behavior: 'smooth' });
+        } catch {}
+      }));
     };
 
     const t1 = setTimeout(run, 70);
@@ -185,7 +190,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
       clearTimeout(t2);
       clearTimeout(t3);
     };
-  }, [loading, current?.title, split]);
+  }, [loading, current?.title, split, onGeneratedReady]);
 
   useEffect(() => {
     let active = true;
@@ -400,6 +405,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
           <Box
             ref={workoutListRef}
+            data-generated-exercise-list="true"
             sx={{
               p: { xs: 1.5, md: 2 },
               borderRadius: 3,
