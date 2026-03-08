@@ -289,6 +289,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [todaySessions, setTodaySessions] = useState([]);
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
+  const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -299,6 +300,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
   const sessionLogRef = useRef(null);
+  const firstSessionExerciseRef = useRef(null);
 
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
@@ -1269,11 +1271,48 @@ setNewExercise({
       };
     });
     setCumulativeExercises(enriched);
-
-    setTimeout(() => {
-      scrollElementToViewportCenter(sessionLogRef.current, { offset: 10 });
-    }, 80);
+    setPendingAcceptedScroll(true);
   };
+
+
+  useEffect(() => {
+    if (!pendingAcceptedScroll || cumulativeExercises.length === 0) return;
+
+    let cancelled = false;
+    let raf1 = 0;
+    let raf2 = 0;
+    let timer = 0;
+    let attempts = 0;
+
+    const scrollToAcceptedExerciseList = () => {
+      if (cancelled) return;
+      const target = firstSessionExerciseRef.current || sessionLogRef.current;
+      if (target) {
+        scrollElementToViewportCenter(target, { behavior: 'smooth', offset: 12 });
+      }
+      attempts += 1;
+      if (attempts < 6) {
+        timer = window.setTimeout(() => {
+          raf1 = window.requestAnimationFrame(() => {
+            raf2 = window.requestAnimationFrame(scrollToAcceptedExerciseList);
+          });
+        }, 180);
+      } else {
+        setPendingAcceptedScroll(false);
+      }
+    };
+
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(scrollToAcceptedExerciseList);
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      if (raf1) window.cancelAnimationFrame(raf1);
+      if (raf2) window.cancelAnimationFrame(raf2);
+    };
+  }, [pendingAcceptedScroll, cumulativeExercises.length]);
 
   useEffect(() => {
     let active = true;
@@ -1656,6 +1695,7 @@ setNewExercise({
                     {cumulativeExercises.map((ex, idx) => (
                       <Box
                         key={idx}
+                        ref={idx === 0 ? firstSessionExerciseRef : null}
                         sx={{
                           p: 1.5,
                           borderRadius: 3,

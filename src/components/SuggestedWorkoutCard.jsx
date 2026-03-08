@@ -99,6 +99,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   const [showUpgrade, setShowUpgrade] = useState(false);
   const loadingCardRef = useRef(null);
   const actionRowRef = useRef(null);
+  const workoutListRef = useRef(null);
 
   const pro = isProUser();
 
@@ -160,26 +161,23 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   }, [loading]);
 
   useEffect(() => {
-    if (loading || !current || !actionRowRef.current) return;
+    if (loading || !current) return;
 
-    const scrollActionRowIntoView = () => {
+    const scrollGeneratedWorkoutIntoView = () => {
       try {
-        const el = actionRowRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const absoluteTop = window.scrollY + rect.top;
-        const desiredY = Math.min(window.innerHeight * 0.72, window.innerHeight - 180);
-        const targetTop = Math.max(0, absoluteTop - desiredY);
-        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+        const primary = workoutListRef.current || actionRowRef.current;
+        if (!primary) return;
+        const offset = window.innerWidth < 700 ? 18 : 28;
+        scrollElementToViewportCenter(primary, { behavior: 'smooth', offset });
       } catch {}
     };
 
     const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(scrollActionRowIntoView));
+      requestAnimationFrame(() => requestAnimationFrame(scrollGeneratedWorkoutIntoView));
     };
 
-    const t1 = setTimeout(run, 60);
-    const t2 = setTimeout(run, 260);
+    const t1 = setTimeout(run, 70);
+    const t2 = setTimeout(run, 240);
     const t3 = setTimeout(run, 520);
 
     return () => {
@@ -401,6 +399,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
           <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 
           <Box
+            ref={workoutListRef}
             sx={{
               p: { xs: 1.5, md: 2 },
               borderRadius: 3,
