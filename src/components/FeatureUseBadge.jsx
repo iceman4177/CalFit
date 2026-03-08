@@ -58,15 +58,15 @@ function readState() {
   return st;
 }
 
-function notifyUsageChanged() {
-  try { window.dispatchEvent(new Event("slimcal:usage-updated")); } catch {}
+function emitUsageChanged(featureKey = null) {
+  try { window.dispatchEvent(new CustomEvent('slimcal:usage-changed', { detail: { featureKey } })); } catch {}
 }
 
-function writeState(st) {
+function writeState(st, featureKey = null) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   } catch {}
-  notifyUsageChanged();
+  emitUsageChanged(featureKey);
 }
 
 export function getFreeDailyLimit(featureKey) {
@@ -98,7 +98,7 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts = st.counts || {};
   st.counts[featureKey] = nextUsed;
 
-  writeState(st);
+  writeState(st, featureKey);
 
   return nextUsed;
 }
@@ -112,7 +112,7 @@ export function setDailyRemaining(featureKey, remaining) {
   const st = readState();
   st.counts = st.counts || {};
   st.counts[featureKey] = used;
-  writeState(st);
+  writeState(st, featureKey);
   return safeRemaining;
 }
 
@@ -120,41 +120,36 @@ export function setDailyRemaining(featureKey, remaining) {
 // UI Badge
 // -----------------------------------------------------------------------------
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
-  const [, forceRender] = useState(0);
+  const [remaining, setRemaining] = useState(() => getDailyRemaining(featureKey));
+  const limit = getFreeDailyLimit(featureKey);
 
   useEffect(() => {
-    const bump = () => forceRender((n) => n + 1);
-    try {
-      window.addEventListener("storage", bump);
-      window.addEventListener("focus", bump);
-      window.addEventListener("slimcal:usage-updated", bump);
-    } catch {}
-    return () => {
-      try {
-        window.removeEventListener("storage", bump);
-        window.removeEventListener("focus", bump);
-        window.removeEventListener("slimcal:usage-updated", bump);
-      } catch {}
+    const refresh = () => setRemaining(getDailyRemaining(featureKey));
+    refresh();
+    const onUsage = (e) => {
+      const changed = e?.detail?.featureKey;
+      if (!changed || changed === featureKey) refresh();
     };
-  }, []);
+    window.addEventListener('slimcal:usage-changed', onUsage);
+    window.addEventListener('storage', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('slimcal:usage-changed', onUsage);
+      window.removeEventListener('storage', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [featureKey]);
 
   if (isPro) {
     return (
-      
-        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
-      
+      <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
     );
   }
-
-  const limit = getFreeDailyLimit(featureKey);
-  const remaining = getDailyRemaining(featureKey);
 
   const freePrefix = labelPrefix || "Free";
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
-    
-      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
-    
+    <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
   );
 }

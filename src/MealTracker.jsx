@@ -46,13 +46,14 @@ import UpgradeModal from './components/UpgradeModal';
 import AIFoodLookupBox from './components/AIFoodLookupBox.jsx';
 import FeatureUseBadge, {
   canUseDailyFeature,
-  registerDailyFeatureUse
+  registerDailyFeatureUse,
+  setDailyRemaining
 } from './components/FeatureUseBadge.jsx';
 
 // auth + db
 import { useAuth } from './context/AuthProvider.jsx';
 import { saveMealLocalFirst, deleteMealLocalFirst, upsertDailyMetricsLocalFirst } from './lib/localFirst';
-import { callAIGenerate } from './lib/ai';
+import { callAIGenerate, getAIQuotaStatus } from './lib/ai';
 
 // ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
 import { supabase } from './lib/supabaseClient';
@@ -878,6 +879,24 @@ export default function MealTracker({ onMealUpdate }) {
     })();
   };
 
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (isProUser() || !user?.id) return;
+      try {
+        const q = await getAIQuotaStatus('meal');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_meal', q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [user?.id]);
+
   const handleClear = () => {
     const rest = readMealHistory().filter(e => e.date !== todayUS);
     writeMealHistory(rest);
@@ -905,7 +924,7 @@ export default function MealTracker({ onMealUpdate }) {
       const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
       const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      await callAIGenerate({
+      const aiResp = await callAIGenerate({
         feature: 'meal',
         user_id: user?.id || null,
         constraints: {
@@ -916,16 +935,17 @@ export default function MealTracker({ onMealUpdate }) {
         },
         count: 1
       });
+
+      if (!isProUser()) {
+        if (typeof aiResp?.remaining === 'number') setDailyRemaining('ai_meal', aiResp.remaining);
+        else registerDailyFeatureUse('ai_meal');
+      }
     } catch (e) {
       if (e?.code === 402) {
         setShowUpgrade(true);
         return;
       }
       console.warn('[MealTracker] gateway probe failed', e);
-    }
-
-    if (!isProUser()) {
-      registerDailyFeatureUse('ai_meal');
     }
 
     setShowSuggest(true);

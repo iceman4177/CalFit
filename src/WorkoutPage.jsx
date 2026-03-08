@@ -47,10 +47,10 @@ import FeatureUseBadge, {
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
-import { getAIQuotaStatus } from './lib/ai';
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
+import { getAIQuotaStatus } from './lib/ai';
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, scopedKey, KEYS } from './lib/scopedStorage.js';
 
 // ✅ local-first wrappers (idempotent, queued sync, syncs to Supabase when signed in)
@@ -268,6 +268,24 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showSuggestCard, setShowSuggestCard] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (isProUser() || !user?.id) return;
+      try {
+        const q = await getAIQuotaStatus('workout');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [user?.id]);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showBackHelp, setShowBackHelp] = useState(false);
   const [showLogHelp, setShowLogHelp] = useState(false);
@@ -1283,25 +1301,6 @@ setNewExercise({
     }
     setShowSuggestCard(false);
   };
-
-
-  useEffect(() => {
-    let active = true;
-    const syncWorkoutQuota = async () => {
-      if (isProUser() || !user?.id) return;
-      try {
-        const q = await getAIQuotaStatus('workout');
-        if (!active) return;
-        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
-      } catch {}
-    };
-    syncWorkoutQuota();
-    window.addEventListener('focus', syncWorkoutQuota);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', syncWorkoutQuota);
-    };
-  }, [user?.id]);
 
   // ---- derived UI stats for a compact strip ----
   const sessionTotals = useMemo(() => {
