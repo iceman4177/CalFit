@@ -205,32 +205,12 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-function scrollElementToViewportTop(el, { behavior = 'smooth', offset = 0 } = {}) {
+function scrollElementToViewportTop(el, { behavior = 'smooth', topPadding = 16 } = {}) {
   try {
     if (!el || typeof window === 'undefined') return;
     const rect = el.getBoundingClientRect();
     const absoluteTop = window.scrollY + rect.top;
-    const targetTop = Math.max(0, absoluteTop - offset);
-    window.scrollTo({ top: targetTop, behavior });
-  } catch {}
-}
-
-function scrollContainerIntoFullView(el, { behavior = 'smooth', topOffset = 84, bottomOffset = 110 } = {}) {
-  try {
-    if (!el || typeof window === 'undefined') return;
-    const rect = el.getBoundingClientRect();
-    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
-    const absoluteTop = window.scrollY + rect.top;
-    const availableH = Math.max(0, viewportH - topOffset - bottomOffset);
-
-    let targetTop;
-    if (rect.height <= availableH && availableH > 0) {
-      const extra = (availableH - rect.height) / 2;
-      targetTop = Math.max(0, absoluteTop - topOffset - extra);
-    } else {
-      targetTop = Math.max(0, absoluteTop - topOffset);
-    }
-
+    const targetTop = Math.max(0, absoluteTop - topPadding);
     window.scrollTo({ top: targetTop, behavior });
   } catch {}
 }
@@ -320,7 +300,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [loadingTodaySessions, setLoadingTodaySessions] = useState(false);
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
-  const [pendingGeneratedSnap, setPendingGeneratedSnap] = useState(false);
+  const [suggestedReadyTick, setSuggestedReadyTick] = useState(0);
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -1274,58 +1254,6 @@ setNewExercise({
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  const handleGeneratedReady = () => {
-    setPendingGeneratedSnap(true);
-  };
-
-
-  useEffect(() => {
-    if (!pendingGeneratedSnap || aiSuggestLoading || !showSuggestCard) return;
-
-    let cancelled = false;
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer = 0;
-    let doneTimer = 0;
-    let attempts = 0;
-
-    const snapToSuggestedWorkout = () => {
-      if (cancelled) return;
-      const wrapper = suggestRef.current;
-      const card = wrapper?.querySelector('[data-suggested-workout-card="true"]') || wrapper;
-      if (card) {
-        const topOffset = window.innerWidth < 700 ? 84 : 96;
-        const bottomOffset = window.innerWidth < 700 ? 18 : 32;
-        scrollContainerIntoFullView(card, { behavior: 'smooth', topOffset, bottomOffset });
-      }
-
-      attempts += 1;
-      if (attempts < 9) {
-        timer = window.setTimeout(() => {
-          raf1 = window.requestAnimationFrame(() => {
-            raf2 = window.requestAnimationFrame(snapToSuggestedWorkout);
-          });
-        }, attempts < 4 ? 140 : 220);
-      } else {
-        doneTimer = window.setTimeout(() => {
-          if (!cancelled) setPendingGeneratedSnap(false);
-        }, 180);
-      }
-    };
-
-    raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(snapToSuggestedWorkout);
-    });
-
-    return () => {
-      cancelled = true;
-      if (timer) window.clearTimeout(timer);
-      if (doneTimer) window.clearTimeout(doneTimer);
-      if (raf1) window.cancelAnimationFrame(raf1);
-      if (raf2) window.cancelAnimationFrame(raf2);
-    };
-  }, [pendingGeneratedSnap, aiSuggestLoading, showSuggestCard]);
-
   const handleAcceptSuggested = workout => {
     const intent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
     const enriched = (workout?.exercises || []).map(ex => {
@@ -1353,57 +1281,93 @@ setNewExercise({
         )
       };
     });
-    setCumulativeExercises(enriched);
     setShowSuggestCard(false);
+    setAiSuggestLoading(false);
+    setCumulativeExercises(enriched);
     setPendingAcceptedScroll(true);
   };
 
 
   useEffect(() => {
-    if (!pendingAcceptedScroll || cumulativeExercises.length === 0 || showSuggestCard) return;
+    if (!pendingAcceptedScroll || cumulativeExercises.length === 0) return;
 
     let cancelled = false;
     let raf1 = 0;
     let raf2 = 0;
     let timer = 0;
-    let doneTimer = 0;
     let attempts = 0;
 
-    const scrollToAcceptedSession = () => {
+    const scrollToAcceptedExerciseList = () => {
       if (cancelled) return;
-      const target = sessionLogRef.current || firstSessionExerciseRef.current;
-      if (target) {
-        const topOffset = window.innerWidth < 700 ? 84 : 96;
-        const bottomOffset = window.innerWidth < 700 ? 22 : 34;
-        scrollContainerIntoFullView(target, { behavior: 'smooth', topOffset, bottomOffset });
+      const topPadding = window.innerWidth < 700 ? 12 : 24;
+      const containerTarget = sessionLogRef.current;
+      const rowTarget = firstSessionExerciseRef.current;
+      if (containerTarget) {
+        scrollElementToViewportTop(containerTarget, { behavior: 'smooth', topPadding });
+      } else if (rowTarget) {
+        scrollElementToViewportTop(rowTarget, { behavior: 'smooth', topPadding: topPadding + 56 });
       }
-
       attempts += 1;
-      if (attempts < 10) {
+      if (attempts < 8) {
         timer = window.setTimeout(() => {
           raf1 = window.requestAnimationFrame(() => {
-            raf2 = window.requestAnimationFrame(scrollToAcceptedSession);
+            raf2 = window.requestAnimationFrame(scrollToAcceptedExerciseList);
           });
-        }, attempts < 4 ? 140 : 220);
+        }, 180);
       } else {
-        doneTimer = window.setTimeout(() => {
-          if (!cancelled) setPendingAcceptedScroll(false);
-        }, 260);
+        setPendingAcceptedScroll(false);
       }
     };
 
     raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(scrollToAcceptedSession);
+      raf2 = window.requestAnimationFrame(scrollToAcceptedExerciseList);
     });
 
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
-      if (doneTimer) window.clearTimeout(doneTimer);
       if (raf1) window.cancelAnimationFrame(raf1);
       if (raf2) window.cancelAnimationFrame(raf2);
     };
-  }, [pendingAcceptedScroll, cumulativeExercises.length, showSuggestCard]);
+  }, [pendingAcceptedScroll, cumulativeExercises.length]);
+
+  useEffect(() => {
+    if (!showSuggestCard || aiSuggestLoading || !suggestedReadyTick) return;
+
+    let cancelled = false;
+    let raf1 = 0;
+    let raf2 = 0;
+    let timer = 0;
+    let attempts = 0;
+
+    const scrollSuggestedIntoView = () => {
+      if (cancelled) return;
+      const el = suggestRef.current;
+      if (el) {
+        const topPadding = window.innerWidth < 700 ? 12 : 24;
+        scrollElementToViewportTop(el, { behavior: 'smooth', topPadding });
+      }
+      attempts += 1;
+      if (attempts < 6) {
+        timer = window.setTimeout(() => {
+          raf1 = window.requestAnimationFrame(() => {
+            raf2 = window.requestAnimationFrame(scrollSuggestedIntoView);
+          });
+        }, 160);
+      }
+    };
+
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(scrollSuggestedIntoView);
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      if (raf1) window.cancelAnimationFrame(raf1);
+      if (raf2) window.cancelAnimationFrame(raf2);
+    };
+  }, [showSuggestCard, aiSuggestLoading, suggestedReadyTick]);
 
   useEffect(() => {
     let active = true;
@@ -1590,7 +1554,8 @@ setNewExercise({
   }
 
   const simplifiedGenerationMode = showSuggestCard && aiSuggestLoading;
-  const suppressSubmitCTA = simplifiedGenerationMode || showSuggestCard || pendingAcceptedScroll || pendingGeneratedSnap;
+  const simplifiedSuggestMode = showSuggestCard;
+  const hideChromeForFocus = showSuggestCard || pendingAcceptedScroll;
 
   // --- main UI ---
   return (
@@ -1632,7 +1597,7 @@ setNewExercise({
             >
               {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
             </Button>
-            {!simplifiedGenerationMode && (
+            {!hideChromeForFocus && (
               <Button
                 variant="text"
                 onClick={() => setShowTemplate(true)}
@@ -1648,13 +1613,13 @@ setNewExercise({
           </Stack>
         </Box>
 
-        {!simplifiedGenerationMode && !isProUser() && (
+        {!hideChromeForFocus && !isProUser() && (
           <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
-        {!simplifiedGenerationMode && (
+        {!hideChromeForFocus && (
           <Stack
             direction={{ xs: 'column', md: 'row' }}
             spacing={1}
@@ -1676,8 +1641,8 @@ setNewExercise({
           <Box
             ref={suggestRef}
             sx={{
-              maxWidth: simplifiedGenerationMode ? 720 : 'none',
-              mx: simplifiedGenerationMode ? 'auto' : 0,
+              maxWidth: simplifiedSuggestMode ? 720 : 'none',
+              mx: simplifiedSuggestMode ? 'auto' : 0,
               width: '100%'
             }}
           >
@@ -1685,14 +1650,15 @@ setNewExercise({
               userData={userData}
               onAccept={handleAcceptSuggested}
               onLoadingChange={setAiSuggestLoading}
-              onGeneratedReady={handleGeneratedReady}
+              onReady={() => setSuggestedReadyTick(Date.now())}
             />
           </Box>
         )}
 
-        {!simplifiedGenerationMode && (
+        {!showSuggestCard && (
         <Grid container spacing={{ xs: 2.5, md: 3 }}>
-          <Grid item xs={12} md={showSuggestCard ? 7 : 8}>
+          {!pendingAcceptedScroll && (
+          <Grid item xs={12} md={showSuggestCard ? 7 : 8} sx={{ order: { xs: cumulativeExercises.length > 0 ? 2 : 1, md: 1 } }}>
             <Stack spacing={2.5}>
               <Paper
                 variant="outlined"
@@ -1760,8 +1726,9 @@ setNewExercise({
               )}
             </Stack>
           </Grid>
+          )}
 
-          <Grid item xs={12} md={showSuggestCard ? 5 : 4}>
+          <Grid item xs={12} md={pendingAcceptedScroll ? 12 : (showSuggestCard ? 5 : 4)} sx={{ order: { xs: cumulativeExercises.length > 0 ? 1 : 2, md: 2 } }}>
             <Stack spacing={2.5}>
               <Paper
                 ref={sessionLogRef}
@@ -1825,7 +1792,7 @@ setNewExercise({
         </Grid>
         )}
 
-        {cumulativeExercises.length > 0 && !suppressSubmitCTA && (
+        {cumulativeExercises.length > 0 && !hideChromeForFocus && (
         <Box sx={{ display: { xs: 'none', md: 'block' }, pt: 1 }}>
           <Button
             variant="contained"
@@ -1840,7 +1807,7 @@ setNewExercise({
         )}
       </Stack>
 
-      {cumulativeExercises.length > 0 && !suppressSubmitCTA && (
+      {cumulativeExercises.length > 0 && !hideChromeForFocus && (
       <Paper
         elevation={0}
         sx={{

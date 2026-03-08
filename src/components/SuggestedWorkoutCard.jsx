@@ -91,14 +91,23 @@ function scrollElementToViewportCenter(el, { behavior = 'smooth', offset = 0 } =
   } catch {}
 }
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange, onGeneratedReady }) {
+function scrollElementToViewportTop(el, { behavior = 'smooth', topPadding = 16 } = {}) {
+  try {
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const absoluteTop = window.scrollY + rect.top;
+    const targetTop = Math.max(0, absoluteTop - topPadding);
+    window.scrollTo({ top: targetTop, behavior });
+  } catch {}
+}
+
+export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChange, onReady }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const loadingCardRef = useRef(null);
-  const cardRootRef = useRef(null);
   const actionRowRef = useRef(null);
   const workoutListRef = useRef(null);
 
@@ -163,11 +172,8 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
   useEffect(() => {
     if (loading || !current) return;
-    const t = setTimeout(() => {
-      if (typeof onGeneratedReady === 'function') onGeneratedReady();
-    }, 60);
-    return () => clearTimeout(t);
-  }, [loading, current?.title, split, onGeneratedReady]);
+    if (typeof onReady === 'function') onReady(current);
+  }, [loading, current?.title, split, onReady]);
 
   useEffect(() => {
     let active = true;
@@ -305,7 +311,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
   if (err) {
     return (
-      <Card ref={cardRootRef} data-suggested-workout-card="true" sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+      <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6" color="error">
             {err}
@@ -338,7 +344,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   const localWorkout = toLocalWorkout(current);
 
   return (
-    <Card ref={cardRootRef} data-suggested-workout-card="true" sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
+    <Card sx={{ mb: 1, overflow: 'visible', borderRadius: 4, boxShadow: '0 18px 40px rgba(15,23,42,0.07)' }}>
       <CardContent sx={{ overflow: 'visible', p: { xs: 2, md: 3 } }}>
         <Stack spacing={2}>
           <Box
@@ -382,7 +388,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
           <Box
             ref={workoutListRef}
-            data-generated-exercise-list="true"
             sx={{
               p: { xs: 1.5, md: 2 },
               borderRadius: 3,
@@ -415,8 +420,11 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
               display: 'flex',
               gap: 1.25,
               flexWrap: 'wrap',
+              position: { xs: 'sticky', md: 'static' },
+              bottom: { xs: 0, md: 'auto' },
               pt: 0.5,
-              pb: 0
+              pb: { xs: 0.5, md: 0 },
+              backgroundColor: { xs: 'rgba(255,255,255,0.96)', md: 'transparent' }
             }}
           >
             <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 3, fontWeight: 700 }}>
