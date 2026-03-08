@@ -78,7 +78,7 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-export default function SuggestedWorkoutCard({ userData, onAccept }) {
+export default function SuggestedWorkoutCard({ userData, onAccept, onReady }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -97,6 +97,14 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
+
+  useEffect(() => {
+    if (loading || !current || typeof onReady !== 'function') return;
+    const t = setTimeout(() => {
+      try { onReady(); } catch {}
+    }, 70);
+    return () => clearTimeout(t);
+  }, [loading, current, onReady]);
 
   useEffect(() => {
     let active = true;

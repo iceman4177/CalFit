@@ -1528,7 +1528,11 @@ setNewExercise({
 {/* AI suggested workout results (auto-scroll target) */}
 <Box ref={suggestRef} sx={{ mb: 2 }}>
   {showSuggestCard && (
-    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
+    <SuggestedWorkoutCard
+      userData={userData}
+      onAccept={handleAcceptSuggested}
+      onReady={() => scrollElementToViewportCenter(suggestRef.current, { offset: 10 })}
+    />
   )}
 </Box>
 
