@@ -287,6 +287,7 @@ export default function PoseSession() {
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
   const [serverRemaining, setServerRemaining] = useState(null);
   const [serverQuotaLoading, setServerQuotaLoading] = useState(false);
+  const serverRemainingRef = useRef(null);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -299,6 +300,10 @@ export default function PoseSession() {
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
   const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
+
+  useEffect(() => {
+    serverRemainingRef.current = serverRemaining;
+  }, [serverRemaining]);
 
   const refreshPoseQuota = useCallback(async () => {
     if (isPro) {
@@ -331,9 +336,7 @@ export default function PoseSession() {
       setServerQuotaLoading(false);
     }
 
-    const fallbackRemaining = getDailyRemaining("pose_session");
-    setServerRemaining(fallbackRemaining);
-    return fallbackRemaining;
+    return typeof serverRemainingRef.current === "number" ? serverRemainingRef.current : null;
   }, [isPro, user?.id]);
 
   useEffect(() => {
@@ -546,10 +549,13 @@ export default function PoseSession() {
 
       const session = json?.session || null;
       if (!isPro) {
-        registerDailyFeatureUse("pose_session");
-        if (typeof json?.remaining === "number") setServerRemaining(json.remaining);
-        else if (user?.id) await refreshPoseQuota();
-        else setServerRemaining(getDailyRemaining("pose_session"));
+        if (user?.id) {
+          if (typeof json?.remaining === "number") setServerRemaining(json.remaining);
+          else await refreshPoseQuota();
+        } else {
+          registerDailyFeatureUse("pose_session");
+          setServerRemaining(getDailyRemaining("pose_session"));
+        }
       }
 
       // Persist a small record for deltas

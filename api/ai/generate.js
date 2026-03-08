@@ -551,20 +551,21 @@ function memAllow(clientId, feature) {
 }
 
 async function dbAllow(clientId, feature, userId) {
-  if (!supabaseAdmin) return memAllow(clientId, feature);
+  if (!supabaseAdmin) return memAllow(userId ? `uid:${userId}` : clientId, feature);
   try {
     const today = dayKeyUTC();
     const limit = getFreeLimitForFeature(feature);
 
-    const { data, error } = await supabaseAdmin
+    let lookup = supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
-      .eq("client_id", clientId)
       .eq("feature", feature)
-      .eq("day_key", today)
-      .maybeSingle();
+      .eq("day_key", today);
 
-    if (error && error.code !== "PGRST116") return memAllow(clientId, feature);
+    lookup = userId ? lookup.eq("user_id", userId) : lookup.eq("client_id", clientId);
+    const { data, error } = await lookup.maybeSingle();
+
+    if (error && error.code !== "PGRST116") return memAllow(userId ? `uid:${userId}` : clientId, feature);
 
     if (!data) {
       const ins = await supabaseAdmin
@@ -573,27 +574,27 @@ async function dbAllow(clientId, feature, userId) {
         .select("uses")
         .single();
 
-      if (ins.error) return memAllow(clientId, feature);
+      if (ins.error) return memAllow(userId ? `uid:${userId}` : clientId, feature);
       return { allowed: true, remaining: limit - 1 };
     }
 
     const currentUses = data.uses || 0;
     if (currentUses >= limit) return { allowed: false, remaining: 0 };
 
-    const upd = await supabaseAdmin
+    let update = supabaseAdmin
       .from("ai_free_passes")
-      .update({ uses: currentUses + 1, user_id: userId || null })
-      .eq("client_id", clientId)
+      .update({ uses: currentUses + 1, user_id: userId || null, client_id: clientId })
       .eq("feature", feature)
-      .eq("day_key", today)
-      .select("uses")
-      .single();
+      .eq("day_key", today);
 
-    if (upd.error) return memAllow(clientId, feature);
+    update = userId ? update.eq("user_id", userId) : update.eq("client_id", clientId);
+    const upd = await update.select("uses").single();
+
+    if (upd.error) return memAllow(userId ? `uid:${userId}` : clientId, feature);
     const newUses = upd.data?.uses ?? currentUses + 1;
     return { allowed: true, remaining: Math.max(0, limit - newUses) };
   } catch {
-    return memAllow(clientId, feature);
+    return memAllow(userId ? `uid:${userId}` : clientId, feature);
   }
 }
 
@@ -604,9 +605,10 @@ async function allowFreeFeature({ req, feature, userId }) {
 
 async function getFreeFeatureRemaining({ req, feature, userId }) {
   const clientId = idKey(req, userId);
+  const memKey = userId ? `uid:${userId}` : clientId;
   const limit = getFreeLimitForFeature(feature);
   if (!supabaseAdmin) {
-    const key = `m:${clientId}:${feature}`;
+    const key = `m:${memKey}:${feature}`;
     const rec = freeMem.get(key);
     if (!rec || rec.day !== dayKeyUTC()) return limit;
     return Math.max(0, limit - Math.max(0, Number(rec.used || 0)));
@@ -614,16 +616,16 @@ async function getFreeFeatureRemaining({ req, feature, userId }) {
 
   try {
     const today = dayKeyUTC();
-    const { data, error } = await supabaseAdmin
+    let lookup = supabaseAdmin
       .from('ai_free_passes')
       .select('uses')
-      .eq('client_id', clientId)
       .eq('feature', feature)
-      .eq('day_key', today)
-      .maybeSingle();
+      .eq('day_key', today);
+    lookup = userId ? lookup.eq('user_id', userId) : lookup.eq('client_id', clientId);
+    const { data, error } = await lookup.maybeSingle();
 
     if (error && error.code !== 'PGRST116') {
-      const key = `m:${clientId}:${feature}`;
+      const key = `m:${memKey}:${feature}`;
       const rec = freeMem.get(key);
       if (!rec || rec.day !== today) return limit;
       return Math.max(0, limit - Math.max(0, Number(rec.used || 0)));
@@ -632,7 +634,7 @@ async function getFreeFeatureRemaining({ req, feature, userId }) {
     const used = Math.max(0, Number(data?.uses || 0));
     return Math.max(0, limit - used);
   } catch {
-    const key = `m:${clientId}:${feature}`;
+    const key = `m:${memKey}:${feature}`;
     const rec = freeMem.get(key);
     if (!rec || rec.day !== dayKeyUTC()) return limit;
     return Math.max(0, limit - Math.max(0, Number(rec.used || 0)));
