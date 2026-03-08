@@ -253,6 +253,7 @@ export default function PoseSession() {
   const { user } = useAuth();
 
   const userId = user?.id || null;
+  const isLoggedIn = !!userId;
   const gender = useMemo(() => readStoredGender(userId), [userId]);
   const goalType = useMemo(() => readStoredGoalType(userId), [userId]);
   const isFemale = gender === "female";
