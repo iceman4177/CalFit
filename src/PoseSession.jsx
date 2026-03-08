@@ -29,9 +29,10 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
+  getDailyRemaining,
   setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
-import { getAuthHeaders } from "./lib/ai";
+import { postAI, getAuthHeaders } from "./lib/ai";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -286,6 +287,7 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
+  const [serverRemaining, setServerRemaining] = useState(() => getDailyRemaining("pose_session"));
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -310,6 +312,35 @@ export default function PoseSession() {
     });
   }, []);
 
+  const refreshPoseQuota = useCallback(async () => {
+    if (isPro) {
+      setServerRemaining(getDailyRemaining("pose_session"));
+      return;
+    }
+    if (!user?.id) {
+      const remaining = getDailyRemaining("pose_session");
+      setServerRemaining(remaining);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ feature: "pose_session", quota_status: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Number.isFinite(Number(json?.remaining))) {
+        const remaining = Math.max(0, Number(json.remaining));
+        setDailyRemaining("pose_session", remaining);
+        setServerRemaining(remaining);
+        return;
+      }
+    } catch {}
+
+    setServerRemaining(getDailyRemaining("pose_session"));
+  }, [isPro, user?.id]);
+
   useEffect(() => {
     const refreshPro = () => setIsPro(readStoredIsPro());
     refreshPro();
@@ -320,6 +351,20 @@ export default function PoseSession() {
       window.removeEventListener("slimcal:pro:refresh", refreshPro);
     };
   }, []);
+
+  useEffect(() => {
+    refreshPoseQuota();
+    const onFocus = () => { refreshPoseQuota(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshPoseQuota();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshPoseQuota]);
 
   const stopCamera = useCallback(() => {
     try {
@@ -437,32 +482,6 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const refreshPoseQuota = useCallback(async () => {
-    if (isPro || !user?.id) return;
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ feature: "quota_status", targetFeature: "pose_session" }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && typeof json?.remaining === "number") {
-        setDailyRemaining("pose_session", json.remaining);
-      }
-    } catch {}
-  }, [isPro, user?.id]);
-
-  useEffect(() => {
-    refreshPoseQuota();
-  }, [refreshPoseQuota]);
-
-  useEffect(() => {
-    if (isPro || !user?.id) return undefined;
-    const onFocus = () => { refreshPoseQuota(); };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [isPro, user?.id, refreshPoseQuota]);
-
   const resetToIntro = useCallback(() => {
     setErrorMsg("");
     setCaptures([]);
@@ -492,7 +511,6 @@ export default function PoseSession() {
 
     try {
       const payload = {
-        feature: "pose_session",
         style: "detailed_muscle_groups_v1",
         gender,
         goalType,
@@ -501,37 +519,35 @@ export default function PoseSession() {
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
-          imageDataUrl: c.thumbDataUrl, // keep payload small
+          imageDataUrl: c.thumbDataUrl,
         })),
-        deltas, // optional; app uses positive-only deltas
+        deltas,
         recentScans: recentScanContext,
       };
 
-      const headers = getAuthHeaders();
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...payload, user_id: user?.id || null, email: user?.email || null }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 402 || json?.reason === "limit_reached") {
+      let json;
+      try {
+        json = await postAI("pose_session", payload);
+      } catch (err) {
+        if (err?.code === 402) {
           setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
           setStage("intro");
           try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
           try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
           return;
         }
-        throw new Error(json?.error || "Pose Session failed");
+        throw err;
       }
 
       const session = json?.session || null;
       if (!isPro) {
-        if (user?.id && typeof json?.remaining === "number") {
-          setDailyRemaining("pose_session", json.remaining);
+        if (user?.id && Number.isFinite(Number(json?.remaining))) {
+          const remaining = Math.max(0, Number(json.remaining));
+          setDailyRemaining("pose_session", remaining);
+          setServerRemaining(remaining);
         } else {
           registerDailyFeatureUse("pose_session");
+          setServerRemaining(getDailyRemaining("pose_session"));
         }
       }
 
@@ -701,6 +717,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                     featureKey="pose_session"
                     isPro={isPro}
                     labelPrefix="Free"
+                    forceRemaining={user?.id && !isPro ? serverRemaining : undefined}
                     sx={{
                       color: "rgba(220,235,245,0.92)",
                       borderColor: "rgba(120,255,220,0.28)",
@@ -1097,7 +1114,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={startScan}
+                    onClick={resetToIntro}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",

@@ -43,13 +43,12 @@ import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import FeatureUseBadge, {
   canUseDailyFeature,
-  registerDailyFeatureUse,
+  getDailyRemaining,
   setDailyRemaining
 } from './components/FeatureUseBadge.jsx';
-import { getAuthHeaders } from './lib/ai';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
-import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
+import { getAuthHeaders } from './lib/ai';
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
@@ -270,6 +269,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showSuggestCard, setShowSuggestCard] = useState(false);
+  const [workoutAiRemaining, setWorkoutAiRemaining] = useState(() => getDailyRemaining('ai_workout'));
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showBackHelp, setShowBackHelp] = useState(false);
   const [showLogHelp, setShowLogHelp] = useState(false);
@@ -288,6 +288,32 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
 
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
+
+  const refreshWorkoutAiQuota = useCallback(async () => {
+    if (isProUser()) {
+      setWorkoutAiRemaining(getDailyRemaining('ai_workout'));
+      return;
+    }
+    if (!user?.id) {
+      setWorkoutAiRemaining(getDailyRemaining('ai_workout'));
+      return;
+    }
+    try {
+      const res = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ feature: 'workout', quota_status: true })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Number.isFinite(Number(json?.remaining))) {
+        const remaining = Math.max(0, Number(json.remaining));
+        setDailyRemaining('ai_workout', remaining);
+        setWorkoutAiRemaining(remaining);
+        return;
+      }
+    } catch {}
+    setWorkoutAiRemaining(getDailyRemaining('ai_workout'));
+  }, [user?.id]);
   const sessionLogRef = useRef(null);
 
 
@@ -1267,33 +1293,19 @@ setNewExercise({
     }, 80);
   };
 
-  // ✅ Identity-aware AI call prevents false 402 for trial/Pro
-  const refreshWorkoutQuota = useCallback(async () => {
-    if (isProUser() || !user?.id) return;
-    try {
-      const resp = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ feature: 'quota_status', targetFeature: 'workout' }),
-      });
-      const json = await resp.json().catch(() => ({}));
-      if (resp.ok && typeof json?.remaining === 'number') {
-        setDailyRemaining('ai_workout', json.remaining);
-      }
-    } catch {}
-  }, [user?.id]);
-
   useEffect(() => {
-    refreshWorkoutQuota();
-  }, [refreshWorkoutQuota]);
-
-  useEffect(() => {
-    if (isProUser() || !user?.id) return undefined;
-    const onFocus = () => { refreshWorkoutQuota(); };
+    refreshWorkoutAiQuota();
+    const onFocus = () => { refreshWorkoutAiQuota(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshWorkoutAiQuota(); };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [user?.id, refreshWorkoutQuota]);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshWorkoutAiQuota]);
 
+  // AI workout open path mirrors meals: local badge gates UI, generation consumes on successful output only
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
       if (!isProUser() && !canUseDailyFeature('ai_workout')) {
@@ -1301,7 +1313,6 @@ setNewExercise({
         return;
       }
       setShowSuggestCard(true);
-
       setTimeout(() => {
         try {
           suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1480,7 +1491,7 @@ setNewExercise({
   <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
     {!isProUser() && (
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-        <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+        <FeatureUseBadge featureKey="ai_workout" isPro={false} forceRemaining={user?.id && !isProUser() ? workoutAiRemaining : undefined} />
       </Box>
     )}
 
@@ -1531,7 +1542,7 @@ setNewExercise({
 {/* AI suggested workout results (auto-scroll target) */}
 <Box ref={suggestRef} sx={{ mb: 2 }}>
   {showSuggestCard && (
-    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} onServerRemaining={(remaining) => { if (!isProUser()) setDailyRemaining('ai_workout', remaining); }} />
+    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} onRemainingChange={(remaining) => { setWorkoutAiRemaining(remaining); }} />
   )}
 </Box>
 

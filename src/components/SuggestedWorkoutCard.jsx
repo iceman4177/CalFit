@@ -13,14 +13,14 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
-import { supabase } from '../lib/supabaseClient';
+import FeatureUseBadge, {
+  canUseDailyFeature,
+  getDailyRemaining,
+  registerDailyFeatureUse,
+  setDailyRemaining,
+} from './FeatureUseBadge.jsx';
+import { postAI } from '../lib/ai';
 
-// ✅ ADD
-import useAiQuota from '../hooks/useAiQuota';
-import AiQuotaBadge from './AiQuotaBadge';
-import { registerDailyFeatureUse, setDailyRemaining, getDailyRemaining } from './FeatureUseBadge.jsx';
-
-// --- normalize split to server values ---
 function normalizeFocus(focus) {
   const s = String(focus || '').toLowerCase().replace(/\s+/g, '_');
   const map = {
@@ -40,46 +40,6 @@ function normalizeFocus(focus) {
   return map[s] || s || 'upper';
 }
 
-// ---- client id helper (per-device free passes) ----
-function getClientId() {
-  try {
-    let cid = localStorage.getItem('clientId');
-    if (!cid) {
-      cid = (crypto?.randomUUID?.() || String(Date.now())).slice(0, 36);
-      localStorage.setItem('clientId', cid);
-    }
-    return cid;
-  } catch {
-    return 'anon';
-  }
-}
-
-// --- auth headers (so backend can resolve entitlement and bypass limits) ---
-async function buildAuthHeaders() {
-  let token = null;
-  let userId = null;
-  let email = null;
-
-  try {
-    const [{ data: sessionData }, { data: userData }] = await Promise.all([
-      supabase.auth.getSession(),
-      supabase.auth.getUser()
-    ]);
-    token = sessionData?.session?.access_token || null;
-    userId = userData?.user?.id || null;
-    email = userData?.user?.email || null;
-  } catch {}
-
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userId ? { 'x-supabase-user-id': userId } : {}),
-    ...(email ? { 'x-user-email': email } : {}),
-    'x-client-id': getClientId()
-  };
-}
-
-// Parse tempo like "2-1-2" -> { conc: '2', ecc: '2' }
 function parseTempo(s) {
   if (!s || typeof s !== 'string') return { conc: '2', ecc: '2' };
   const dash = s.match(/(\d+)\s*-\s*\d+\s*-\s*(\d+)/);
@@ -89,7 +49,6 @@ function parseTempo(s) {
   return { conc: '2', ecc: '2' };
 }
 
-// Map AI → local "Accept Workout" shape used by WorkoutPage.handleAcceptSuggested
 function toLocalWorkout(ai) {
   const title = ai?.title || 'Suggested Workout';
   const blocks = Array.isArray(ai?.blocks) ? ai.blocks : [];
@@ -114,25 +73,21 @@ function toLocalWorkout(ai) {
   return { name: title, exercises: exs };
 }
 
-// ✅ helper (client-side hint only)
 const isProUser = () => {
   if (localStorage.getItem('isPro') === 'true') return true;
   const ud = JSON.parse(localStorage.getItem('userData') || '{}');
   return !!ud.isPremium;
 };
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemaining }) {
-  const [pack, setPack] = useState([]); // array of AI suggestions
+export default function SuggestedWorkoutCard({ userData, onAccept, onRemainingChange }) {
+  const [pack, setPack] = useState([]);
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [remaining, setRemaining] = useState(() => getDailyRemaining('ai_workout'));
 
-  // ✅ quota for this feature
-  const quota = useAiQuota('workout');
   const pro = isProUser();
-
-  // derive intent/goal/split defaults
   const trainingIntent = (localStorage.getItem('training_intent') || 'general').toLowerCase();
   const initialSplit = normalizeFocus(
     localStorage.getItem('training_split') ||
@@ -142,7 +97,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
-  const featureRemaining = useMemo(() => getDailyRemaining('ai_workout'), [quota.remaining, pack.length]);
 
   async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
@@ -150,45 +104,23 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
 
     try {
       const intentLS = localStorage.getItem('training_intent') || 'general';
-      const fitnessGoal =
-        localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+      const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
       const equipmentList = JSON.parse(
-        localStorage.getItem('equipment_list') ||
-          '["dumbbell","barbell","machine","bodyweight"]'
+        localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]'
       );
-
       const focus = normalizeFocus(focusOverride || split || 'upper');
 
-      // keep local prefs in sync for the rest of the app
       localStorage.setItem('training_split', focus);
       localStorage.setItem('last_focus', focus);
 
-      const headers = await buildAuthHeaders();
-
-      const resp = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          feature: 'workout',
-          goal: fitnessGoal,
-          focus,
-          equipment: equipmentList,
-          constraints: { training_intent: intentLS },
-          count: 5
-        })
+      const data = await postAI('workout', {
+        goal: fitnessGoal,
+        focus,
+        equipment: equipmentList,
+        constraints: { training_intent: intentLS },
+        count: 5,
       });
 
-      if (resp.status === 402) {
-        setShowUpgrade(true);
-        setPack([]);
-        setLoading(false);
-        return;
-      }
-
-      const raw = await resp.text();
-      if (!resp.ok) throw new Error(`Server responded ${resp.status} ${raw ? `- ${raw}` : ''}`);
-
-      const data = raw ? JSON.parse(raw) : {};
       const suggestions = Array.isArray(data?.suggestions)
         ? data.suggestions
         : Array.isArray(data)
@@ -201,15 +133,24 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
       setIdx(0);
 
       if (!pro && countAsUse) {
-        if (typeof data?.remaining === 'number') {
-          setDailyRemaining('ai_workout', data.remaining);
-          if (typeof onServerRemaining === 'function') onServerRemaining(data.remaining);
+        if (Number.isFinite(Number(data?.remaining))) {
+          const nextRemaining = Math.max(0, Number(data.remaining));
+          setDailyRemaining('ai_workout', nextRemaining);
+          setRemaining(nextRemaining);
+          onRemainingChange?.(nextRemaining);
         } else {
-          quota.increment();
           registerDailyFeatureUse('ai_workout');
+          const nextRemaining = getDailyRemaining('ai_workout');
+          setRemaining(nextRemaining);
+          onRemainingChange?.(nextRemaining);
         }
       }
     } catch (e) {
+      if (e?.code === 402) {
+        setShowUpgrade(true);
+        setPack([]);
+        return;
+      }
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
       setErr('Could not fetch a workout suggestion. Try again.');
       setPack([]);
@@ -218,21 +159,18 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
     }
   }
 
-  // Fetch on mount and when userData changes — counts as a use (unless Pro)
   useEffect(() => {
     fetchAI(undefined, { countAsUse: true });
-    // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userData]);
 
   const handleRefresh = () => {
-    // ✅ If we have extra suggestions already, cycling does NOT consume a use
     if (pack.length > 1) {
       setIdx((i) => (i + 1) % pack.length);
       return;
     }
 
-    // ✅ Need to call server → enforce local free quota UX (server still final)
-    if (!pro && !quota.canUse) {
+    if (!pro && !canUseDailyFeature('ai_workout')) {
       setShowUpgrade(true);
       return;
     }
@@ -244,7 +182,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
     const focus = normalizeFocus(v);
     setSplit(focus);
 
-    if (!pro && !quota.canUse) {
+    if (!pro && !canUseDailyFeature('ai_workout')) {
       setShowUpgrade(true);
       return;
     }
@@ -302,7 +240,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
   return (
     <Card sx={{ mb: 4, overflow: 'visible' }}>
       <CardContent sx={{ overflow: 'visible' }}>
-        {/* Header */}
         <Box
           sx={{
             display: 'flex',
@@ -316,7 +253,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
             Suggested Workout
           </Typography>
 
-          {/* Badges/Chips row */}
           <Box
             sx={{
               display: 'flex',
@@ -324,27 +260,18 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemai
               flexWrap: 'wrap',
               justifyContent: { xs: 'flex-start', sm: 'flex-end' },
               alignItems: 'center',
-              // give a little room so top-right chips don't feel cramped
               mt: { xs: 0.5, sm: 0 },
             }}
           >
-            <AiQuotaBadge
+            <FeatureUseBadge
+              featureKey="ai_workout"
               isPro={pro}
-              remaining={featureRemaining}
-              limit={quota.limit}
-              label="Free"
+              forceRemaining={!pro ? remaining : undefined}
+              labelPrefix="Free"
               sx={{ flexShrink: 0 }}
             />
-            <Chip
-              size="small"
-              label={(trainingIntent || 'general').replace('_', ' ')}
-              sx={{ flexShrink: 0 }}
-            />
-            <Chip
-              size="small"
-              label={(split || 'upper').replace('_', ' ')}
-              sx={{ flexShrink: 0 }}
-            />
+            <Chip size="small" label={(trainingIntent || 'general').replace('_', ' ')} sx={{ flexShrink: 0 }} />
+            <Chip size="small" label={(split || 'upper').replace('_', ' ')} sx={{ flexShrink: 0 }} />
           </Box>
         </Box>
 

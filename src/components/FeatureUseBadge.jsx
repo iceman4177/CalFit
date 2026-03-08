@@ -82,6 +82,20 @@ export function canUseDailyFeature(featureKey) {
   return getDailyRemaining(featureKey) > 0;
 }
 
+export function setDailyRemaining(featureKey, remaining) {
+  const limit = getFreeDailyLimit(featureKey);
+  if (!limit) return 0;
+
+  const safeRemaining = Math.max(0, Math.min(limit, Number(remaining) || 0));
+  const nextUsed = Math.max(0, limit - safeRemaining);
+
+  const st = readState();
+  st.counts = st.counts || {};
+  st.counts[featureKey] = nextUsed;
+  writeState(st);
+  return safeRemaining;
+}
+
 export function registerDailyFeatureUse(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
   if (!limit) return 0;
@@ -98,23 +112,10 @@ export function registerDailyFeatureUse(featureKey) {
   return nextUsed;
 }
 
-export function setDailyRemaining(featureKey, remaining) {
-  const limit = getFreeDailyLimit(featureKey);
-  if (!limit) return 0;
-
-  const safeRemaining = Math.max(0, Math.min(limit, Number(remaining ?? limit)));
-  const used = Math.max(0, limit - safeRemaining);
-  const st = readState();
-  st.counts = st.counts || {};
-  st.counts[featureKey] = used;
-  writeState(st);
-  return safeRemaining;
-}
-
 // -----------------------------------------------------------------------------
 // UI Badge
 // -----------------------------------------------------------------------------
-export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
+export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix, forceRemaining }) {
   if (isPro) {
     return (
       
@@ -124,7 +125,7 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
   }
 
   const limit = getFreeDailyLimit(featureKey);
-  const remaining = getDailyRemaining(featureKey);
+  const remaining = Number.isFinite(Number(forceRemaining)) ? Math.max(0, Math.min(limit, Number(forceRemaining))) : getDailyRemaining(featureKey);
 
   const freePrefix = labelPrefix || "Free";
   const label = `${freePrefix}: ${remaining}/${limit}`;
