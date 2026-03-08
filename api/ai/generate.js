@@ -597,17 +597,20 @@ async function dbAllow(clientId, feature, userId) {
   }
 }
 
-async function getFreeFeatureRemaining({ req, feature, userId }) {
+async function allowFreeFeature({ req, feature, userId }) {
   const clientId = idKey(req, userId);
+  return dbAllow(clientId, feature, userId);
+}
+
+async function dbGetRemaining(clientId, feature) {
   const limit = getFreeLimitForFeature(feature);
-  if (!limit) return 0;
-
   if (!supabaseAdmin) {
-    const rec = freeMem.get(`m:${clientId}:${feature}`);
-    const used = rec && rec.day === dayKeyUTC() ? Math.max(0, Number(rec.used || 0)) : 0;
-    return Math.max(0, limit - used);
+    const key = `m:${clientId}:${feature}`;
+    const today = dayKeyUTC();
+    const rec = freeMem.get(key);
+    if (!rec || rec.day !== today) return limit;
+    return Math.max(0, limit - Number(rec.used || 0));
   }
-
   try {
     const today = dayKeyUTC();
     const { data, error } = await supabaseAdmin
@@ -617,27 +620,25 @@ async function getFreeFeatureRemaining({ req, feature, userId }) {
       .eq("feature", feature)
       .eq("day_key", today)
       .maybeSingle();
-
-    if (error && error.code !== "PGRST116") {
-      const rec = freeMem.get(`m:${clientId}:${feature}`);
-      const used = rec && rec.day === today ? Math.max(0, Number(rec.used || 0)) : 0;
-      return Math.max(0, limit - used);
-    }
-
+    if (error && error.code !== "PGRST116") return null;
     const used = Math.max(0, Number(data?.uses || 0));
     return Math.max(0, limit - used);
   } catch {
-    const rec = freeMem.get(`m:${clientId}:${feature}`);
-    const used = rec && rec.day === dayKeyUTC() ? Math.max(0, Number(rec.used || 0)) : 0;
-    return Math.max(0, limit - used);
+    return null;
   }
 }
 
-async function allowFreeFeature({ req, feature, userId }) {
+async function getFreeFeatureRemaining({ req, feature, userId }) {
   const clientId = idKey(req, userId);
-  return dbAllow(clientId, feature, userId);
+  const fromDb = await dbGetRemaining(clientId, feature);
+  if (Number.isFinite(fromDb)) return fromDb;
+  const limit = getFreeLimitForFeature(feature);
+  const key = `m:${clientId}:${feature}`;
+  const today = dayKeyUTC();
+  const rec = freeMem.get(key);
+  if (!rec || rec.day !== today) return limit;
+  return Math.max(0, limit - Number(rec.used || 0));
 }
-
 
 
 // -------------------- VERDICT FALLBACK --------------------
@@ -1336,12 +1337,6 @@ const freeBypass =
   const email = (body?.email || "").trim().toLowerCase();
   const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
 
-  if (feature === "pose_session" && String(body?.action || "").toLowerCase() === "quota_status") {
-    const remaining = await getFreeFeatureRemaining({ req, feature: "pose_session", userId: resolvedUserId });
-    res.status(200).json({ remaining, limit: getFreeLimitForFeature("pose_session") });
-    return;
-  }
-
   const {
     constraints = {},
     count = 5,
@@ -1360,22 +1355,23 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
+  if (feature === "pose_session" && String(body?.action || "").toLowerCase() === "quota_status") {
+    if (pro) {
+      res.status(200).json({ remaining: getFreeLimitForFeature("pose_session"), limit: getFreeLimitForFeature("pose_session"), isPro: true });
+      return;
+    }
+    const remaining = await getFreeFeatureRemaining({ req, feature: "pose_session", userId: resolvedUserId });
+    res.status(200).json({ remaining, limit: getFreeLimitForFeature("pose_session"), isPro: false });
+    return;
+  }
+
   // 2) If not Pro/Trial → per-feature free-pass
-  // Pose Session should only decrement AFTER a successful output is generated.
-  let pass = null;
-  if (!pro && !freeBypass) {
-    if (feature === "pose_session" || feature === "pose_session_beta") {
-      const remaining = await getFreeFeatureRemaining({ req, feature: "pose_session", userId: resolvedUserId });
-      if (remaining <= 0) {
-        res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
-        return;
-      }
-    } else {
-      pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
-      if (!pass.allowed) {
-        res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
-        return;
-      }
+  const deferPoseConsumption = feature === "pose_session" || feature === "pose_session_beta";
+  if (!pro && !freeBypass && !deferPoseConsumption) {
+    const pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    if (!pass.allowed) {
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
+      return;
     }
   }
 
@@ -1550,8 +1546,21 @@ const freeBypass =
         return;
       }
 
+      let remainingAfterUse = null;
+      if (!pro) {
+        const remainingBefore = await getFreeFeatureRemaining({ req, feature: "pose_session", userId: resolvedUserId });
+        if ((Number(remainingBefore) || 0) <= 0) {
+          res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0 });
+          return;
+        }
+      }
+
       if (!openai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback" });
+        if (!pro) {
+          const pass = await allowFreeFeature({ req, feature: "pose_session", userId: resolvedUserId });
+          remainingAfterUse = pass.remaining;
+        }
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback", ...(remainingAfterUse !== null ? { remaining: remainingAfterUse } : {}) });
         return;
       }
 
@@ -1612,7 +1621,11 @@ const freeBypass =
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
       if (!ai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback" });
+        if (!pro) {
+          const pass = await allowFreeFeature({ req, feature: "pose_session", userId: resolvedUserId });
+          remainingAfterUse = pass.remaining;
+        }
+        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback", ...(remainingAfterUse !== null ? { remaining: remainingAfterUse } : {}) });
         return;
       }
 
@@ -1734,15 +1747,16 @@ ${note}`;
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
 
-      if (!pro && !freeBypass) {
-        pass = await allowFreeFeature({ req, feature: "pose_session", userId: resolvedUserId });
+      if (!pro) {
+        const pass = await allowFreeFeature({ req, feature: "pose_session", userId: resolvedUserId });
         if (!pass.allowed) {
-          res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
+          res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0 });
           return;
         }
+        remainingAfterUse = pass.remaining;
       }
 
-      res.status(200).json({ session, remaining: pass?.remaining, ...(body?.debug ? { raw: text } : {}) });
+      res.status(200).json({ session, ...(remainingAfterUse !== null ? { remaining: remainingAfterUse } : {}), ...(body?.debug ? { raw: text } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);

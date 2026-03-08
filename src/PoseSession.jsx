@@ -26,8 +26,7 @@ import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import FeatureUseBadge, {
-  canUseDailyFeature,
+import {
   registerDailyFeatureUse,
   getDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
@@ -285,8 +284,8 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
-  const [poseRemaining, setPoseRemaining] = useState(() => (user?.id ? null : getDailyRemaining("pose_session")));
-  const [poseQuotaLoading, setPoseQuotaLoading] = useState(false);
+  const isLoggedIn = !!user?.id;
+  const [poseRemaining, setPoseRemaining] = useState(() => getDailyRemaining("pose_session"));
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -438,65 +437,20 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const refreshPoseRemaining = useCallback(async () => {
-    if (isPro) {
-      setPoseRemaining(null);
-      return null;
-    }
-
-    if (!user?.id) {
-      const remaining = getDailyRemaining("pose_session");
-      setPoseRemaining(remaining);
-      return remaining;
-    }
-
-    setPoseQuotaLoading(true);
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Client-Id": getOrCreateClientId(),
-          "X-User-Id": user.id,
-        },
-        body: JSON.stringify({ feature: "pose_session", action: "quota_status" }),
-      });
-      const json = await res.json().catch(() => ({}));
-      const remaining = Math.max(0, Number(json?.remaining ?? 0));
-      setPoseRemaining(remaining);
-      return remaining;
-    } catch {
-      const fallback = getDailyRemaining("pose_session");
-      setPoseRemaining(fallback);
-      return fallback;
-    } finally {
-      setPoseQuotaLoading(false);
-    }
-  }, [isPro, user?.id]);
-
-  useEffect(() => {
-    if (stage !== "intro") return;
-    refreshPoseRemaining();
-  }, [refreshPoseRemaining, stage]);
-
   const startScan = useCallback(async () => {
-    let remaining = null;
-    if (!isPro) {
-      remaining = user?.id ? await refreshPoseRemaining() : getDailyRemaining("pose_session");
-      if (remaining <= 0) {
-        setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-        try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-        setStage("intro");
-        return;
-      }
+    const remaining = isLoggedIn ? await refreshPoseQuota() : getDailyRemaining("pose_session");
+    if (!isPro && remaining <= 0) {
+      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+      return;
     }
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isPro, refreshPoseRemaining, user?.id]);
+  }, [isLoggedIn, isPro, refreshPoseQuota]);
 
   const resetToIntro = useCallback(async () => {
     setErrorMsg("");
@@ -504,14 +458,12 @@ export default function PoseSession() {
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
-    if (!isPro) {
-      if (user?.id) {
-        await refreshPoseRemaining();
-      } else {
-        setPoseRemaining(getDailyRemaining("pose_session"));
-      }
+    if (isLoggedIn) {
+      await refreshPoseQuota();
+    } else {
+      setPoseRemaining(getDailyRemaining("pose_session"));
     }
-  }, [isPro, refreshPoseRemaining, user?.id]);
+  }, [isLoggedIn, refreshPoseQuota]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -558,8 +510,8 @@ export default function PoseSession() {
 
       const session = json?.session || null;
       if (!isPro) {
-        if (user?.id) {
-          setPoseRemaining(Math.max(0, Number(json?.remaining ?? 0)));
+        if (isLoggedIn) {
+          setPoseRemaining(Math.max(0, Number(json?.remaining ?? poseRemaining)));
         } else {
           registerDailyFeatureUse("pose_session");
           setPoseRemaining(getDailyRemaining("pose_session"));
@@ -593,7 +545,7 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isLoggedIn, isPro, poseRemaining, recentScanContext, todayISO, user?.id, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -729,50 +681,31 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 </Typography>
                 <Box>
                   {isPro ? (
-                    <FeatureUseBadge
-                      featureKey="pose_session"
-                      isPro={true}
-                      labelPrefix="Free"
-                      sx={{
-                        color: "rgba(220,235,245,0.92)",
-                        borderColor: "rgba(120,255,220,0.28)",
-                        bgcolor: "rgba(255,255,255,0.02)",
-                        '& .MuiChip-label': {
-                          px: 1.1,
-                          color: "rgba(220,235,245,0.92)",
-                        },
-                      }}
-                    />
-                  ) : user?.id ? (
                     <Chip
                       size="small"
-                      variant="outlined"
-                      label={`Free: ${poseQuotaLoading && poseRemaining == null ? "…" : Math.max(0, Number(poseRemaining ?? 0))}/3`}
+                      color="success"
+                      label="PRO ∞"
                       sx={{
                         fontWeight: 800,
                         borderRadius: 999,
                         color: "rgba(220,235,245,0.92)",
                         borderColor: "rgba(120,255,220,0.28)",
                         bgcolor: "rgba(255,255,255,0.02)",
-                        '& .MuiChip-label': {
-                          px: 1.1,
-                          color: "rgba(220,235,245,0.92)",
-                        },
+                        '& .MuiChip-label': { px: 1.1, color: "rgba(220,235,245,0.92)" },
                       }}
                     />
                   ) : (
-                    <FeatureUseBadge
-                      featureKey="pose_session"
-                      isPro={false}
-                      labelPrefix="Free"
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Free: ${Math.max(0, Number(poseRemaining || 0))}/3`}
                       sx={{
+                        fontWeight: 800,
+                        borderRadius: 999,
                         color: "rgba(220,235,245,0.92)",
                         borderColor: "rgba(120,255,220,0.28)",
                         bgcolor: "rgba(255,255,255,0.02)",
-                        '& .MuiChip-label': {
-                          px: 1.1,
-                          color: "rgba(220,235,245,0.92)",
-                        },
+                        '& .MuiChip-label': { px: 1.1, color: "rgba(220,235,245,0.92)" },
                       }}
                     />
                   )}
@@ -1162,7 +1095,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={startScan}
+                    onClick={resetToIntro}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",
