@@ -14,9 +14,11 @@ import {
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
 import { supabase } from '../lib/supabaseClient';
-import { canUseDailyFeature } from './FeatureUseBadge.jsx';
 
 // ✅ ADD
+import useAiQuota from '../hooks/useAiQuota';
+import AiQuotaBadge from './AiQuotaBadge';
+import { registerDailyFeatureUse, setDailyRemaining, getDailyRemaining } from './FeatureUseBadge.jsx';
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -119,13 +121,15 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSuccess }) {
+export default function SuggestedWorkoutCard({ userData, onAccept, onServerRemaining }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
+  // ✅ quota for this feature
+  const quota = useAiQuota('workout');
   const pro = isProUser();
 
   // derive intent/goal/split defaults
@@ -138,6 +142,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSucc
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
+  const featureRemaining = useMemo(() => getDailyRemaining('ai_workout'), [quota.remaining, pack.length]);
 
   async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
@@ -195,7 +200,15 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSucc
       setPack(suggestions);
       setIdx(0);
 
-      if (!pro && countAsUse) onConsumeSuccess?.(data?.remaining);
+      if (!pro && countAsUse) {
+        if (typeof data?.remaining === 'number') {
+          setDailyRemaining('ai_workout', data.remaining);
+          if (typeof onServerRemaining === 'function') onServerRemaining(data.remaining);
+        } else {
+          quota.increment();
+          registerDailyFeatureUse('ai_workout');
+        }
+      }
     } catch (e) {
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
       setErr('Could not fetch a workout suggestion. Try again.');
@@ -219,7 +232,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSucc
     }
 
     // ✅ Need to call server → enforce local free quota UX (server still final)
-    if (!pro && !canUseDailyFeature('ai_workout')) {
+    if (!pro && !quota.canUse) {
       setShowUpgrade(true);
       return;
     }
@@ -231,7 +244,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSucc
     const focus = normalizeFocus(v);
     setSplit(focus);
 
-    if (!pro && !canUseDailyFeature('ai_workout')) {
+    if (!pro && !quota.canUse) {
       setShowUpgrade(true);
       return;
     }
@@ -315,6 +328,13 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onConsumeSucc
               mt: { xs: 0.5, sm: 0 },
             }}
           >
+            <AiQuotaBadge
+              isPro={pro}
+              remaining={featureRemaining}
+              limit={quota.limit}
+              label="Free"
+              sx={{ flexShrink: 0 }}
+            />
             <Chip
               size="small"
               label={(trainingIntent || 'general').replace('_', ' ')}

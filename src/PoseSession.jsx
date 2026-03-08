@@ -26,13 +26,12 @@ import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import { getAuthHeaders } from "./lib/ai";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
   setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
+import { getAuthHeaders } from "./lib/ai";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -439,12 +438,12 @@ export default function PoseSession() {
   }, [pose.key]);
 
   const refreshPoseQuota = useCallback(async () => {
-    if (!user?.id || isPro) return;
+    if (isPro || !user?.id) return;
     try {
       const res = await fetch("/api/ai/generate", {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ feature: "pose_session", mode: "quota_status", user_id: user.id }),
+        body: JSON.stringify({ feature: "quota_status", targetFeature: "pose_session" }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.ok && typeof json?.remaining === "number") {
@@ -455,15 +454,14 @@ export default function PoseSession() {
 
   useEffect(() => {
     refreshPoseQuota();
-    const onFocus = () => { refreshPoseQuota(); };
-    const onVis = () => { if (document.visibilityState === "visible") refreshPoseQuota(); };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
   }, [refreshPoseQuota]);
+
+  useEffect(() => {
+    if (isPro || !user?.id) return undefined;
+    const onFocus = () => { refreshPoseQuota(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [isPro, user?.id, refreshPoseQuota]);
 
   const resetToIntro = useCallback(() => {
     setErrorMsg("");
@@ -509,10 +507,11 @@ export default function PoseSession() {
         recentScans: recentScanContext,
       };
 
+      const headers = getAuthHeaders();
       const res = await fetch("/api/ai/generate", {
         method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ...payload, user_id: user?.id || null }),
+        headers,
+        body: JSON.stringify({ ...payload, user_id: user?.id || null, email: user?.email || null }),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -529,8 +528,11 @@ export default function PoseSession() {
 
       const session = json?.session || null;
       if (!isPro) {
-        if (typeof json?.remaining === "number") setDailyRemaining("pose_session", json.remaining);
-        else registerDailyFeatureUse("pose_session");
+        if (user?.id && typeof json?.remaining === "number") {
+          setDailyRemaining("pose_session", json.remaining);
+        } else {
+          registerDailyFeatureUse("pose_session");
+        }
       }
 
       // Persist a small record for deltas
@@ -1095,7 +1097,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={resetToIntro}
+                    onClick={startScan}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",
