@@ -918,13 +918,14 @@ export default function MealTracker({ onMealUpdate }) {
       return;
     }
 
+    let aiResp = null;
     try {
       const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
       const trainingIntent = localStorage.getItem('training_intent') || 'general';
       const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
       const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      const aiResp = await callAIGenerate({
+      aiResp = await callAIGenerate({
         feature: 'meal',
         user_id: user?.id || null,
         constraints: {
