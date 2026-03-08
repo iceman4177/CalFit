@@ -90,11 +90,6 @@ export async function postAI(feature, body = {}) {
   return resp.json();
 }
 
-
-export async function getAIQuotaStatus(feature, body = {}) {
-  return postAI(feature, { quota_status: true, ...body });
-}
-
 // Lightweight probe to decide if a feature is gated for the current user/device
 export async function probeEntitlement(feature, body = {}) {
   try {
@@ -115,4 +110,8 @@ export async function probeEntitlement(feature, body = {}) {
 export async function callAIGenerate(payload) {
   const feature = String(payload?.feature || payload?.type || payload?.mode || 'workout').toLowerCase();
   return postAI(feature, payload);
+}
+
+export async function getAIQuotaStatus(feature, body = {}) {
+  return postAI(feature, { ...body, quota_status: true });
 }

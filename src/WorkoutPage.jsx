@@ -42,12 +42,10 @@ import { updateStreak } from './utils/streak';
 import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import FeatureUseBadge, {
-  canUseDailyFeature,
-  setDailyRemaining
+  canUseDailyFeature
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
-import { getAIQuotaStatus } from './lib/ai';
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
@@ -1285,28 +1283,6 @@ setNewExercise({
   };
 
   // ---- derived UI stats for a compact strip ----
-  useEffect(() => {
-    if (isProUser() || !user?.id) return;
-    let alive = true;
-    const syncWorkoutQuota = async () => {
-      try {
-        const data = await getAIQuotaStatus('workout', { user_id: user.id });
-        if (!alive || typeof data?.remaining !== 'number') return;
-        setDailyRemaining('ai_workout', data.remaining);
-        try { window.dispatchEvent(new Event('storage')); } catch {}
-      } catch {}
-    };
-    syncWorkoutQuota();
-    const onFocus = () => syncWorkoutQuota();
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => {
-      alive = false;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
-  }, [user?.id]);
-
   const sessionTotals = useMemo(() => {
     const total = cumulativeExercises.reduce((s, ex) => s + (Number(ex.calories) || 0), 0);
     const sets = cumulativeExercises.reduce((s, ex) => s + (parseInt(ex.sets, 10) || 0), 0);

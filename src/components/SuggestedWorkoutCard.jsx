@@ -13,10 +13,8 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
-import { supabase } from '../lib/supabaseClient';
-
-// ✅ ADD
 import FeatureUseBadge, { canUseDailyFeature, registerDailyFeatureUse, setDailyRemaining } from './FeatureUseBadge.jsx';
+import { postAI, getAIQuotaStatus } from '../lib/ai';
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -36,45 +34,6 @@ function normalizeFocus(focus) {
     conditioning: 'cardio'
   };
   return map[s] || s || 'upper';
-}
-
-// ---- client id helper (per-device free passes) ----
-function getClientId() {
-  try {
-    let cid = localStorage.getItem('clientId');
-    if (!cid) {
-      cid = (crypto?.randomUUID?.() || String(Date.now())).slice(0, 36);
-      localStorage.setItem('clientId', cid);
-    }
-    return cid;
-  } catch {
-    return 'anon';
-  }
-}
-
-// --- auth headers (so backend can resolve entitlement and bypass limits) ---
-async function buildAuthHeaders() {
-  let token = null;
-  let userId = null;
-  let email = null;
-
-  try {
-    const [{ data: sessionData }, { data: userData }] = await Promise.all([
-      supabase.auth.getSession(),
-      supabase.auth.getUser()
-    ]);
-    token = sessionData?.session?.access_token || null;
-    userId = userData?.user?.id || null;
-    email = userData?.user?.email || null;
-  } catch {}
-
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userId ? { 'x-supabase-user-id': userId } : {}),
-    ...(email ? { 'x-user-email': email } : {}),
-    'x-client-id': getClientId()
-  };
 }
 
 // Parse tempo like "2-1-2" -> { conc: '2', ecc: '2' }
@@ -139,51 +98,47 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (pro) return;
+      try {
+        const q = await getAIQuotaStatus('workout');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [pro]);
+
   async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
     setErr(null);
 
     try {
       const intentLS = localStorage.getItem('training_intent') || 'general';
-      const fitnessGoal =
-        localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
+      const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
       const equipmentList = JSON.parse(
-        localStorage.getItem('equipment_list') ||
-          '["dumbbell","barbell","machine","bodyweight"]'
+        localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]'
       );
 
       const focus = normalizeFocus(focusOverride || split || 'upper');
-
-      // keep local prefs in sync for the rest of the app
       localStorage.setItem('training_split', focus);
       localStorage.setItem('last_focus', focus);
 
-      const headers = await buildAuthHeaders();
-
-      const resp = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          feature: 'workout',
-          goal: fitnessGoal,
-          focus,
-          equipment: equipmentList,
-          constraints: { training_intent: intentLS },
-          count: 5
-        })
+      const data = await postAI('workout', {
+        goal: fitnessGoal,
+        focus,
+        equipment: equipmentList,
+        constraints: { training_intent: intentLS },
+        count: 5
       });
 
-      if (resp.status === 402) {
-        setShowUpgrade(true);
-        setPack([]);
-        setLoading(false);
-        return;
-      }
-
-      const raw = await resp.text();
-      if (!resp.ok) throw new Error(`Server responded ${resp.status} ${raw ? `- ${raw}` : ''}`);
-
-      const data = raw ? JSON.parse(raw) : {};
       const suggestions = Array.isArray(data?.suggestions)
         ? data.suggestions
         : Array.isArray(data)
@@ -198,12 +153,16 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       if (!pro && countAsUse) {
         if (typeof data?.remaining === 'number') setDailyRemaining('ai_workout', data.remaining);
         else registerDailyFeatureUse('ai_workout');
-        try { window.dispatchEvent(new Event('storage')); } catch {}
       }
     } catch (e) {
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
-      setErr('Could not fetch a workout suggestion. Try again.');
-      setPack([]);
+      if (e?.code === 402) {
+        setShowUpgrade(true);
+        setPack([]);
+      } else {
+        setErr('Could not fetch a workout suggestion. Try again.');
+        setPack([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -211,6 +170,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   // Fetch on mount and when userData changes — counts as a use (unless Pro)
   useEffect(() => {
+    if (!pro && !canUseDailyFeature('ai_workout')) {
+      setShowUpgrade(true);
+      return;
+    }
     fetchAI(undefined, { countAsUse: true });
     // eslint-disable-next-line
   }, [userData]);

@@ -29,9 +29,9 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
+  getDailyRemaining,
   setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
-import { postAI, getAIQuotaStatus } from "./lib/ai.js";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -39,6 +39,7 @@ import {
   localDayISO,
   buildRecentPoseContext,
 } from "./lib/poseSessionStore.js";
+import { postAI, getAIQuotaStatus } from "./lib/ai";
 
 const MALE_POSES = [
   { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
@@ -101,6 +102,17 @@ function readStoredIsPro() {
     return localStorage.getItem("isPro") === "true";
   } catch {}
   return false;
+}
+
+function getOrCreateClientId() {
+  try {
+    let id = localStorage.getItem("slimcal_client_id");
+    if (id) return id;
+    id = (globalThis.crypto?.randomUUID?.() || `slimcal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    localStorage.setItem("slimcal_client_id", id);
+    return id;
+  } catch {}
+  return `slimcal-${Date.now()}`;
 }
 
 function firstNonEmpty(...vals) {
@@ -289,6 +301,24 @@ export default function PoseSession() {
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
 
   useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (isPro || !user?.id) return;
+      try {
+        const q = await getAIQuotaStatus("pose_session");
+        if (!active) return;
+        if (typeof q?.remaining === "number") setDailyRemaining("pose_session", q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener("focus", syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", syncQuota);
+    };
+  }, [isPro, user?.id]);
+
+  useEffect(() => {
     ALL_OUTLINE_ASSETS.forEach((src) => {
       try {
         const img = new Image();
@@ -426,7 +456,7 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const resetToIntro = useCallback(() => {
+  const goToIntro = useCallback(() => {
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
@@ -469,13 +499,11 @@ export default function PoseSession() {
         recentScans: recentScanContext,
       };
 
-      const json = await postAI("pose_session", { ...payload, user_id: user?.id || null });
-      const res = { ok: true, status: 200 };
+      const json = await postAI("pose_session", payload);
       const session = json?.session || null;
       if (!isPro) {
-        if (typeof json?.remaining === 'number') setDailyRemaining('pose_session', json.remaining);
+        if (typeof json?.remaining === "number") setDailyRemaining("pose_session", json.remaining);
         else registerDailyFeatureUse("pose_session");
-        try { window.dispatchEvent(new Event('storage')); } catch {}
       }
 
       // Persist a small record for deltas
@@ -518,28 +546,6 @@ export default function PoseSession() {
     if (stage !== "scanning") return;
     callAI();
   }, [stage, callAI]);
-
-  useEffect(() => {
-    if (isPro || !user?.id) return;
-    let alive = true;
-    const syncPoseQuota = async () => {
-      try {
-        const data = await getAIQuotaStatus('pose_session', { user_id: user.id });
-        if (!alive || typeof data?.remaining !== 'number') return;
-        setDailyRemaining('pose_session', data.remaining);
-        try { window.dispatchEvent(new Event('storage')); } catch {}
-      } catch {}
-    };
-    syncPoseQuota();
-    const onFocus = () => syncPoseQuota();
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => {
-      alive = false;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
-  }, [isPro, user?.id]);
 
   const onShare = useCallback(async () => {
     if (!captures.length) return;
@@ -639,7 +645,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={resetToIntro}
+                  onClick={goToIntro}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
@@ -1069,7 +1075,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={resetToIntro}
+                    onClick={goToIntro}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",
