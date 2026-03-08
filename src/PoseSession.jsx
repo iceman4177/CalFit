@@ -24,10 +24,9 @@ import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
 import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 
 import { useAuth } from "./context/AuthProvider";
-import { readProfileBundle } from "./lib/profileStorage";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import {
+import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
   getDailyRemaining,
@@ -64,22 +63,36 @@ const ALL_OUTLINE_ASSETS = [
   femaleBackOutline,
 ];
 
-function readStoredGoalType(userId) {
+function readStoredGoalType() {
   try {
-    const bundle = readProfileBundle(userId || null);
-    const parsedGoal = String(bundle?.userData?.goalType || bundle?.userData?.goal || bundle?.fitnessGoal || '').toLowerCase().trim();
-    if (parsedGoal) return parsedGoal;
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.goalType || parsed?.goal || "").toLowerCase().trim();
+      if (g) return g;
+    }
   } catch {}
-  return 'maintenance';
+  try {
+    const g = String(localStorage.getItem("fitness_goal") || "").toLowerCase().trim();
+    if (g) return g;
+  } catch {}
+  return "maintenance";
 }
 
-function readStoredGender(userId) {
+function readStoredGender() {
   try {
-    const bundle = readProfileBundle(userId || null);
-    const g = String(bundle?.userData?.gender || bundle?.gender || '').toLowerCase().trim();
-    if (g === 'male' || g === 'female') return g;
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const g = String(parsed?.gender || "").toLowerCase().trim();
+      if (g === "male" || g === "female") return g;
+    }
   } catch {}
-  return 'male';
+  try {
+    const g = String(localStorage.getItem("gender") || "").toLowerCase().trim();
+    if (g === "male" || g === "female") return g;
+  } catch {}
+  return "male";
 }
 
 function readStoredIsPro() {
@@ -252,10 +265,9 @@ export default function PoseSession() {
   const history = useHistory();
   const { user } = useAuth();
 
-  const userId = user?.id || null;
-  const isLoggedIn = !!userId;
-  const gender = useMemo(() => readStoredGender(userId), [userId]);
-  const goalType = useMemo(() => readStoredGoalType(userId), [userId]);
+  const userId = user?.id || "anon";
+  const gender = useMemo(() => readStoredGender(), []);
+  const goalType = useMemo(() => readStoredGoalType(), []);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
   const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
@@ -273,8 +285,8 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
-  const [serverRemaining, setServerRemaining] = useState(null);
-  const [serverQuotaLoading, setServerQuotaLoading] = useState(false);
+  const [poseRemaining, setPoseRemaining] = useState(() => (user?.id ? null : getDailyRemaining("pose_session")));
+  const [poseQuotaLoading, setPoseQuotaLoading] = useState(false);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -309,35 +321,6 @@ export default function PoseSession() {
       window.removeEventListener("slimcal:pro:refresh", refreshPro);
     };
   }, []);
-
-  const refreshServerQuota = useCallback(async () => {
-    if (!isLoggedIn || isPro) {
-      setServerRemaining(null);
-      setServerQuotaLoading(false);
-      return;
-    }
-    setServerQuotaLoading(true);
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Client-Id": getOrCreateClientId(),
-          ...(user?.id ? { "X-User-Id": user.id } : {}),
-        },
-        body: JSON.stringify({ feature: "quota_status", targetFeature: "pose_session" }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && Number.isFinite(json?.remaining)) setServerRemaining(Math.max(0, Number(json.remaining)));
-    } catch {}
-    finally { setServerQuotaLoading(false); }
-  }, [isLoggedIn, isPro, user?.id]);
-
-  useEffect(() => {
-    refreshServerQuota();
-    window.addEventListener("focus", refreshServerQuota);
-    return () => window.removeEventListener("focus", refreshServerQuota);
-  }, [refreshServerQuota]);
 
   const stopCamera = useCallback(() => {
     try {
@@ -455,39 +438,80 @@ export default function PoseSession() {
     setStage("capture");
   }, [pose.key]);
 
-  const startScan = useCallback(() => {
-    const remaining = isLoggedIn ? serverRemaining : getDailyRemaining("pose_session");
-    if (!isPro && Number.isFinite(remaining) && remaining <= 0) {
-      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-      return;
+  const refreshPoseRemaining = useCallback(async () => {
+    if (isPro) {
+      setPoseRemaining(null);
+      return null;
     }
-    if (!isPro && !isLoggedIn && !canUseDailyFeature("pose_session")) {
-      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-      return;
+
+    if (!user?.id) {
+      const remaining = getDailyRemaining("pose_session");
+      setPoseRemaining(remaining);
+      return remaining;
+    }
+
+    setPoseQuotaLoading(true);
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Client-Id": getOrCreateClientId(),
+          "X-User-Id": user.id,
+        },
+        body: JSON.stringify({ feature: "pose_session", action: "quota_status" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      const remaining = Math.max(0, Number(json?.remaining ?? 0));
+      setPoseRemaining(remaining);
+      return remaining;
+    } catch {
+      const fallback = getDailyRemaining("pose_session");
+      setPoseRemaining(fallback);
+      return fallback;
+    } finally {
+      setPoseQuotaLoading(false);
+    }
+  }, [isPro, user?.id]);
+
+  useEffect(() => {
+    if (stage !== "intro") return;
+    refreshPoseRemaining();
+  }, [refreshPoseRemaining, stage]);
+
+  const startScan = useCallback(async () => {
+    let remaining = null;
+    if (!isPro) {
+      remaining = user?.id ? await refreshPoseRemaining() : getDailyRemaining("pose_session");
+      if (remaining <= 0) {
+        setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+        try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+        setStage("intro");
+        return;
+      }
     }
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isLoggedIn, isPro, serverRemaining]);
+  }, [isPro, refreshPoseRemaining, user?.id]);
 
   const resetToIntro = useCallback(async () => {
-    stopCamera();
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
     if (!isPro) {
-      if (isLoggedIn) await refreshServerQuota();
-      else setServerRemaining(null);
+      if (user?.id) {
+        await refreshPoseRemaining();
+      } else {
+        setPoseRemaining(getDailyRemaining("pose_session"));
+      }
     }
-  }, [isLoggedIn, isPro, refreshServerQuota, stopCamera]);
+  }, [isPro, refreshPoseRemaining, user?.id]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -524,7 +548,6 @@ export default function PoseSession() {
       if (!res.ok) {
         if (res.status === 402 || json?.reason === "limit_reached") {
           setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-          setServerRemaining(0);
           setStage("intro");
           try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
           try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
@@ -535,11 +558,11 @@ export default function PoseSession() {
 
       const session = json?.session || null;
       if (!isPro) {
-        if (isLoggedIn) {
-          if (Number.isFinite(json?.remaining)) setServerRemaining(Math.max(0, Number(json.remaining)));
-          else await refreshServerQuota();
+        if (user?.id) {
+          setPoseRemaining(Math.max(0, Number(json?.remaining ?? 0)));
         } else {
           registerDailyFeatureUse("pose_session");
+          setPoseRemaining(getDailyRemaining("pose_session"));
         }
       }
 
@@ -570,7 +593,7 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isLoggedIn, isPro, recentScanContext, refreshServerQuota, todayISO, user?.id, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -705,22 +728,54 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   3 guided scans · 15 seconds · shareable results
                 </Typography>
                 <Box>
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={isPro ? "PRO ∞" : `Free: ${isLoggedIn ? (serverQuotaLoading ? "…" : (Number.isFinite(serverRemaining) ? serverRemaining : "…")) : getDailyRemaining("pose_session")}/3`}
-                    sx={{
-                      fontWeight: 800,
-                      borderRadius: 999,
-                      color: "rgba(220,235,245,0.92)",
-                      borderColor: isPro ? "rgba(120,255,220,0.38)" : "rgba(120,255,220,0.28)",
-                      bgcolor: isPro ? "rgba(40,220,190,0.10)" : "rgba(255,255,255,0.02)",
-                      '& .MuiChip-label': {
-                        px: 1.1,
+                  {isPro ? (
+                    <FeatureUseBadge
+                      featureKey="pose_session"
+                      isPro={true}
+                      labelPrefix="Free"
+                      sx={{
                         color: "rgba(220,235,245,0.92)",
-                      },
-                    }}
-                  />
+                        borderColor: "rgba(120,255,220,0.28)",
+                        bgcolor: "rgba(255,255,255,0.02)",
+                        '& .MuiChip-label': {
+                          px: 1.1,
+                          color: "rgba(220,235,245,0.92)",
+                        },
+                      }}
+                    />
+                  ) : user?.id ? (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Free: ${poseQuotaLoading && poseRemaining == null ? "…" : Math.max(0, Number(poseRemaining ?? 0))}/3`}
+                      sx={{
+                        fontWeight: 800,
+                        borderRadius: 999,
+                        color: "rgba(220,235,245,0.92)",
+                        borderColor: "rgba(120,255,220,0.28)",
+                        bgcolor: "rgba(255,255,255,0.02)",
+                        '& .MuiChip-label': {
+                          px: 1.1,
+                          color: "rgba(220,235,245,0.92)",
+                        },
+                      }}
+                    />
+                  ) : (
+                    <FeatureUseBadge
+                      featureKey="pose_session"
+                      isPro={false}
+                      labelPrefix="Free"
+                      sx={{
+                        color: "rgba(220,235,245,0.92)",
+                        borderColor: "rgba(120,255,220,0.28)",
+                        bgcolor: "rgba(255,255,255,0.02)",
+                        '& .MuiChip-label': {
+                          px: 1.1,
+                          color: "rgba(220,235,245,0.92)",
+                        },
+                      }}
+                    />
+                  )}
                 </Box>
               </Stack>
 
