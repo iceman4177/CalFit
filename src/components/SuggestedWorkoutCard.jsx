@@ -78,8 +78,7 @@ const isProUser = () => {
   return !!ud.isPremium;
 };
 
-export default function SuggestedWorkoutCard({ userData, onAccept }) {
-  const cardRef = useRef(null);
+export default function SuggestedWorkoutCard({ userData, onAccept, onReady }) {
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -98,6 +97,38 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
+  const cardRef = useRef(null);
+
+  useEffect(() => {
+    if (loading || !current || typeof onReady !== 'function') return;
+    const t = setTimeout(() => {
+      try { onReady(); } catch {}
+    }, 70);
+    return () => clearTimeout(t);
+  }, [loading, current, onReady]);
+
+  useEffect(() => {
+    if (loading || !current || !cardRef.current) return;
+
+    const scrollToSuggestedCard = () => {
+      try {
+        const el = cardRef.current;
+        const rect = el.getBoundingClientRect();
+        const absoluteTop = window.scrollY + rect.top;
+        const topPadding = window.innerWidth < 700 ? 92 : 110;
+        const targetTop = Math.max(0, absoluteTop - topPadding);
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const t1 = setTimeout(scrollToSuggestedCard, 40);
+    const t2 = setTimeout(scrollToSuggestedCard, 220);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [loading, current?.title, split]);
 
   useEffect(() => {
     let active = true;
@@ -209,7 +240,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (loading) {
     return (
-      <Card sx={{ mb: 4, overflow: 'visible' }}>
+      <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6">Generating a plan…</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -222,7 +253,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (err) {
     return (
-      <Card sx={{ mb: 4, overflow: 'visible' }}>
+      <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6" color="error">
             {err}
@@ -253,28 +284,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   }
 
   const localWorkout = toLocalWorkout(current);
-
-  useEffect(() => {
-    if (loading || !current || !cardRef.current) return;
-
-    const scrollToSuggestedCard = () => {
-      try {
-        const el = cardRef.current;
-        const rect = el.getBoundingClientRect();
-        const absoluteTop = window.scrollY + rect.top;
-        const topPadding = window.innerWidth < 700 ? 92 : 110;
-        const targetTop = Math.max(0, absoluteTop - topPadding);
-        window.scrollTo({ top: targetTop, behavior: 'smooth' });
-      } catch {}
-    };
-
-    const t1 = setTimeout(scrollToSuggestedCard, 40);
-    const t2 = setTimeout(scrollToSuggestedCard, 220);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [loading, current?.title, split]);
 
   return (
     <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
