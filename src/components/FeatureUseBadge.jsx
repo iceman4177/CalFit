@@ -1,5 +1,5 @@
 // src/components/FeatureUseBadge.jsx
-import React, { useSyncExternalStore } from "react";
+import React, { useEffect, useState } from "react";
 import { Chip } from '@mui/material';
 
 // -----------------------------------------------------------------------------
@@ -7,7 +7,7 @@ import { Chip } from '@mui/material';
 // -----------------------------------------------------------------------------
 
 const STORAGE_KEY = "slimcal_usage_v1";
-const STORAGE_EVENT = "slimcal:usage-changed";
+const QUOTA_EVENT = "slimcal:quota-changed";
 
 // Free tier limits (per day)
 // Adjust here to tune upgrade psychology.
@@ -59,33 +59,18 @@ function readState() {
   return st;
 }
 
-function emitUsageChanged() {
-  try { window.dispatchEvent(new Event(STORAGE_EVENT)); } catch {}
-}
-
 function writeState(st) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   } catch {}
-  emitUsageChanged();
 }
 
-function subscribeUsage(cb) {
-  const onStorage = (e) => {
-    if (!e || !e.key || e.key === STORAGE_KEY) cb();
-  };
-  const onCustom = () => cb();
+function emitQuotaChanged(featureKey = null) {
   try {
-    window.addEventListener('storage', onStorage);
-    window.addEventListener(STORAGE_EVENT, onCustom);
+    window.dispatchEvent(new CustomEvent(QUOTA_EVENT, { detail: { featureKey, ts: Date.now() } }));
   } catch {}
-  return () => {
-    try {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener(STORAGE_EVENT, onCustom);
-    } catch {}
-  };
 }
+
 
 export function getFreeDailyLimit(featureKey) {
   return FREE_DAILY_LIMITS?.[featureKey] ?? 0;
@@ -117,6 +102,7 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts[featureKey] = nextUsed;
 
   writeState(st);
+  emitQuotaChanged(featureKey);
 
   return nextUsed;
 }
@@ -131,6 +117,7 @@ export function setDailyRemaining(featureKey, remaining) {
   st.counts = st.counts || {};
   st.counts[featureKey] = used;
   writeState(st);
+  emitQuotaChanged(featureKey);
   return safeRemaining;
 }
 
@@ -138,6 +125,25 @@ export function setDailyRemaining(featureKey, remaining) {
 // UI Badge
 // -----------------------------------------------------------------------------
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const rerender = () => setTick((n) => n + 1);
+    const onStorage = (e) => {
+      if (!e || !e.key || e.key === STORAGE_KEY) rerender();
+    };
+    const onQuota = (e) => {
+      const fk = e?.detail?.featureKey;
+      if (!fk || fk === featureKey) rerender();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(QUOTA_EVENT, onQuota);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(QUOTA_EVENT, onQuota);
+    };
+  }, [featureKey]);
+
   if (isPro) {
     return (
       
@@ -146,8 +152,8 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
     );
   }
 
-  const remaining = useSyncExternalStore(subscribeUsage, () => getDailyRemaining(featureKey), () => getDailyRemaining(featureKey));
   const limit = getFreeDailyLimit(featureKey);
+  const remaining = getDailyRemaining(featureKey);
 
   const freePrefix = labelPrefix || "Free";
   const label = `${freePrefix}: ${remaining}/${limit}`;

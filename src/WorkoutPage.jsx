@@ -197,24 +197,6 @@ function clearActiveWorkoutSessionId() {
 export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
-
-  useEffect(() => {
-    let active = true;
-    const syncWorkoutQuota = async () => {
-      if (isProUser() || !user?.id) return;
-      try {
-        const q = await getAIQuotaStatus('ai_workout');
-        if (!active) return;
-        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
-      } catch {}
-    };
-    syncWorkoutQuota();
-    window.addEventListener('focus', syncWorkoutQuota);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', syncWorkoutQuota);
-    };
-  }, [user?.id]);
   // --- User-scoped local caches (prevents cross-account contamination on same device) ---
   const userId = user?.id || null;
 
@@ -1282,6 +1264,24 @@ setNewExercise({
       } catch {}
     }, 80);
   };
+
+  useEffect(() => {
+    let active = true;
+    const syncWorkoutQuota = async () => {
+      if (!user?.id || isProUser()) return;
+      try {
+        const q = await getAIQuotaStatus('workout');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
+      } catch {}
+    };
+    syncWorkoutQuota();
+    window.addEventListener('focus', syncWorkoutQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncWorkoutQuota);
+    };
+  }, [user?.id]);
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {

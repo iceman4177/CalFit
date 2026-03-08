@@ -879,6 +879,24 @@ export default function MealTracker({ onMealUpdate }) {
     })();
   };
 
+  useEffect(() => {
+    let active = true;
+    const syncMealQuota = async () => {
+      if (!user?.id || isProUser()) return;
+      try {
+        const q = await getAIQuotaStatus('meal');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_meal', q.remaining);
+      } catch {}
+    };
+    syncMealQuota();
+    window.addEventListener('focus', syncMealQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncMealQuota);
+    };
+  }, [user?.id]);
+
   const handleClear = () => {
     const rest = readMealHistory().filter(e => e.date !== todayUS);
     writeMealHistory(rest);
@@ -906,8 +924,8 @@ export default function MealTracker({ onMealUpdate }) {
       const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
       const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      await callAIGenerate({
-        feature: 'ai_meal',
+      const aiResp = await callAIGenerate({
+        feature: 'meal',
         user_id: user?.id || null,
         constraints: {
           diet_preference: dietPreference,
@@ -926,12 +944,8 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     if (!isProUser()) {
-      const q = await getAIQuotaStatus('ai_meal').catch(() => null);
-      if (typeof q?.remaining === 'number') {
-        setDailyRemaining('ai_meal', q.remaining);
-      } else {
-        registerDailyFeatureUse('ai_meal');
-      }
+      if (typeof aiResp?.remaining === 'number') setDailyRemaining('ai_meal', aiResp.remaining);
+      else registerDailyFeatureUse('ai_meal');
     }
 
     setShowSuggest(true);
@@ -942,26 +956,6 @@ export default function MealTracker({ onMealUpdate }) {
       } catch {}
     }, 50);
   }, [showSuggest, user?.id]);
-
-  useEffect(() => {
-    let active = true;
-    const syncQuota = async () => {
-      if (isProUser() || !user?.id) return;
-      try {
-        const q = await getAIQuotaStatus('ai_meal');
-        if (!active) return;
-        if (typeof q?.remaining === 'number') {
-          setDailyRemaining('ai_meal', q.remaining);
-        }
-      } catch {}
-    };
-    syncQuota();
-    window.addEventListener('focus', syncQuota);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', syncQuota);
-    };
-  }, [user?.id]);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
 
