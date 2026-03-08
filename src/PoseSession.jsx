@@ -16,6 +16,12 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
+import maleFrontOutline from "./assets/poseGhosts/male_front_outline.png";
+import maleSideOutline from "./assets/poseGhosts/male_side_outline.png";
+import maleBackOutline from "./assets/poseGhosts/male_back_outline.png";
+import femaleFrontOutline from "./assets/poseGhosts/female_front_outline.png";
+import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
+import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
@@ -58,162 +64,25 @@ function readStoredGender() {
   return "male";
 }
 
-function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "rgba(90, 255, 160, 0.95)" }) {
+
+function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
-  const outlineFrameWidth = isFemaleCue ? "min(78%, 372px)" : "min(86%, 420px)";
-  const outlineBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.18)" : "1px solid rgba(90,255,160,0.22)";
-  const outlineBg = isFemaleCue ? "rgba(36, 8, 22, 0.08)" : "rgba(5, 20, 12, 0.08)";
-  const outlineShadow = isFemaleCue
-    ? "0 0 28px rgba(255,105,180,0.12), inset 0 0 20px rgba(255,105,180,0.05)"
-    : "0 0 40px rgba(90,255,160,0.16), inset 0 0 32px rgba(90,255,160,0.06)";
-  const femalePoseTransform = {
-    front_scan: "translate(22 20) scale(0.82)",
-    side_scan: "translate(22 20) scale(0.82)",
-    back_scan: "translate(22 20) scale(0.82)",
+  const imageMap = {
+    front_double_bi: maleFrontOutline,
+    lat_spread: maleSideOutline,
+    back_double_bi: maleBackOutline,
+    front_scan: femaleFrontOutline,
+    side_scan: femaleSideOutline,
+    back_scan: femaleBackOutline,
   };
 
-  const common = {
-    fill: "none",
-    stroke: color,
-    strokeWidth: isFemaleCue ? 2.4 : 4,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    vectorEffect: "non-scaling-stroke",
-  };
-
-  const glow = {
-    fill: "none",
-    stroke: color.replace("0.95", "0.22"),
-    strokeWidth: isFemaleCue ? 7 : 12,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    vectorEffect: "non-scaling-stroke",
-  };
-
-  const outlines = {
-    front_double_bi: (
-      <>
-        <circle cx="150" cy="92" r="28" {...glow} />
-        <circle cx="150" cy="92" r="28" {...common} />
-        <path d="M150 122 L150 220" {...glow} />
-        <path d="M150 122 L150 220" {...common} />
-        <path d="M150 142 C126 146,112 155,100 172" {...glow} />
-        <path d="M150 142 C126 146,112 155,100 172" {...common} />
-        <path d="M100 172 C84 156,70 140,54 118" {...glow} />
-        <path d="M100 172 C84 156,70 140,54 118" {...common} />
-        <path d="M54 118 C44 104,48 88,63 84" {...glow} />
-        <path d="M54 118 C44 104,48 88,63 84" {...common} />
-        <path d="M150 142 C174 146,188 155,200 172" {...glow} />
-        <path d="M150 142 C174 146,188 155,200 172" {...common} />
-        <path d="M200 172 C216 156,230 140,246 118" {...glow} />
-        <path d="M200 172 C216 156,230 140,246 118" {...common} />
-        <path d="M246 118 C256 104,252 88,237 84" {...glow} />
-        <path d="M246 118 C256 104,252 88,237 84" {...common} />
-        <path d="M150 220 C132 236,122 258,118 292" {...glow} />
-        <path d="M150 220 C132 236,122 258,118 292" {...common} />
-        <path d="M150 220 C168 236,178 258,182 292" {...glow} />
-        <path d="M150 220 C168 236,178 258,182 292" {...common} />
-      </>
-    ),
-    lat_spread: (
-      <>
-        <circle cx="150" cy="88" r="28" {...glow} />
-        <circle cx="150" cy="88" r="28" {...common} />
-        <path d="M150 118 L150 220" {...glow} />
-        <path d="M150 118 L150 220" {...common} />
-        <path d="M150 134 C120 140,96 158,80 190" {...glow} />
-        <path d="M150 134 C120 140,96 158,80 190" {...common} />
-        <path d="M80 190 C96 206,112 214,126 220" {...glow} />
-        <path d="M80 190 C96 206,112 214,126 220" {...common} />
-        <path d="M150 134 C180 140,204 158,220 190" {...glow} />
-        <path d="M150 134 C180 140,204 158,220 190" {...common} />
-        <path d="M220 190 C204 206,188 214,174 220" {...glow} />
-        <path d="M220 190 C204 206,188 214,174 220" {...common} />
-        <path d="M110 150 C116 200,126 218,150 224" {...glow} />
-        <path d="M110 150 C116 200,126 218,150 224" {...common} />
-        <path d="M190 150 C184 200,174 218,150 224" {...glow} />
-        <path d="M190 150 C184 200,174 218,150 224" {...common} />
-        <path d="M150 220 C134 236,124 258,120 292" {...glow} />
-        <path d="M150 220 C134 236,124 258,120 292" {...common} />
-        <path d="M150 220 C166 236,176 258,180 292" {...glow} />
-        <path d="M150 220 C166 236,176 258,180 292" {...common} />
-      </>
-    ),
-    back_double_bi: (
-      <>
-        <circle cx="150" cy="96" r="26" {...glow} />
-        <circle cx="150" cy="96" r="26" {...common} />
-        <path d="M150 124 C126 132,114 150,108 174" {...glow} />
-        <path d="M150 124 C126 132,114 150,108 174" {...common} />
-        <path d="M108 174 C92 160,76 142,58 118" {...glow} />
-        <path d="M108 174 C92 160,76 142,58 118" {...common} />
-        <path d="M58 118 C48 104,50 88,64 84" {...glow} />
-        <path d="M58 118 C48 104,50 88,64 84" {...common} />
-        <path d="M150 124 C174 132,186 150,192 174" {...glow} />
-        <path d="M150 124 C174 132,186 150,192 174" {...common} />
-        <path d="M192 174 C208 160,224 142,242 118" {...glow} />
-        <path d="M192 174 C208 160,224 142,242 118" {...common} />
-        <path d="M242 118 C252 104,250 88,236 84" {...glow} />
-        <path d="M242 118 C252 104,250 88,236 84" {...common} />
-        <path d="M118 150 C126 206,136 226,150 232" {...glow} />
-        <path d="M118 150 C126 206,136 226,150 232" {...common} />
-        <path d="M182 150 C174 206,164 226,150 232" {...glow} />
-        <path d="M182 150 C174 206,164 226,150 232" {...common} />
-        <path d="M150 232 C136 246,128 266,124 292" {...glow} />
-        <path d="M150 232 C136 246,128 266,124 292" {...common} />
-        <path d="M150 232 C164 246,172 266,176 292" {...glow} />
-        <path d="M150 232 C164 246,172 266,176 292" {...common} />
-      </>
-    ),
-    front_scan: (
-      <>
-        <circle cx="150" cy="86" r="20" {...glow} />
-        <circle cx="150" cy="86" r="20" {...common} />
-        <path d="M150 106 L150 228" {...glow} />
-        <path d="M150 106 L150 228" {...common} />
-        <path d="M150 132 L114 172" {...glow} />
-        <path d="M150 132 L114 172" {...common} />
-        <path d="M150 132 L186 172" {...glow} />
-        <path d="M150 132 L186 172" {...common} />
-        <path d="M150 228 L126 304" {...glow} />
-        <path d="M150 228 L126 304" {...common} />
-        <path d="M150 228 L174 304" {...glow} />
-        <path d="M150 228 L174 304" {...common} />
-      </>
-    ),
-    side_scan: (
-      <>
-        <circle cx="150" cy="86" r="20" {...glow} />
-        <circle cx="150" cy="86" r="20" {...common} />
-        <path d="M150 106 L150 228" {...glow} />
-        <path d="M150 106 L150 228" {...common} />
-        <path d="M150 136 L182 170" {...glow} />
-        <path d="M150 136 L182 170" {...common} />
-        <path d="M150 136 L126 170" {...glow} />
-        <path d="M150 136 L126 170" {...common} />
-        <path d="M150 228 L138 304" {...glow} />
-        <path d="M150 228 L138 304" {...common} />
-        <path d="M150 228 L170 304" {...glow} />
-        <path d="M150 228 L170 304" {...common} />
-      </>
-    ),
-    back_scan: (
-      <>
-        <circle cx="150" cy="86" r="20" {...glow} />
-        <circle cx="150" cy="86" r="20" {...common} />
-        <path d="M150 106 L150 228" {...glow} />
-        <path d="M150 106 L150 228" {...common} />
-        <path d="M150 132 L112 170" {...glow} />
-        <path d="M150 132 L112 170" {...common} />
-        <path d="M150 132 L188 170" {...glow} />
-        <path d="M150 132 L188 170" {...common} />
-        <path d="M150 228 L128 304" {...glow} />
-        <path d="M150 228 L128 304" {...common} />
-        <path d="M150 228 L172 304" {...glow} />
-        <path d="M150 228 L172 304" {...common} />
-      </>
-    ),
-  };
+  const src = imageMap[poseKey] || maleFrontOutline;
+  const frameWidth = isFemaleCue ? "min(74%, 360px)" : "min(82%, 400px)";
+  const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(90,255,160,0.20)";
+  const frameBg = isFemaleCue ? "rgba(36, 8, 22, 0.04)" : "rgba(5, 20, 12, 0.04)";
+  const frameShadow = isFemaleCue
+    ? "0 0 28px rgba(255,105,180,0.10), inset 0 0 18px rgba(255,105,180,0.04)"
+    : "0 0 36px rgba(90,255,160,0.12), inset 0 0 22px rgba(90,255,160,0.05)";
 
   return (
     <Box
@@ -230,34 +99,37 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false, color = "
     >
       <Box
         sx={{
-          width: outlineFrameWidth,
-          maxWidth: isFemaleCue ? "72%" : "86%",
+          width: frameWidth,
           aspectRatio: "3 / 4",
           borderRadius: "32px",
-          border: outlineBorder,
-          bgcolor: outlineBg,
-          boxShadow: active ? outlineShadow : "none",
+          border: frameBorder,
+          bgcolor: frameBg,
+          boxShadow: active ? frameShadow : "none",
+          overflow: "hidden",
           transform: mirrored ? "scaleX(-1)" : "none",
           animation: active ? "matrixPulse 1.1s ease-in-out infinite" : "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        <svg viewBox="0 0 300 400" width="100%" height="100%" aria-hidden="true">
-          <defs>
-            <filter id="poseGlow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <g
-            filter="url(#poseGlow)"
-            transform={isFemaleCue ? (femalePoseTransform[poseKey] || "translate(24 20) scale(0.74)") : undefined}
-          >
-            {outlines[poseKey] || outlines.front_double_bi}
-          </g>
-        </svg>
+        <Box
+          component="img"
+          src={src}
+          alt=""
+          aria-hidden="true"
+          sx={{
+            width: isFemaleCue ? "68%" : "82%",
+            height: "auto",
+            objectFit: "contain",
+            opacity: isFemaleCue ? 0.96 : 0.92,
+            filter: isFemaleCue
+              ? "drop-shadow(0 0 12px rgba(255,105,180,0.45)) drop-shadow(0 0 24px rgba(255,105,180,0.22))"
+              : "drop-shadow(0 0 12px rgba(90,255,160,0.40)) drop-shadow(0 0 24px rgba(90,255,160,0.20))",
+            userSelect: "none",
+            WebkitUserDrag: "none",
+          }}
+        />
       </Box>
     </Box>
   );
