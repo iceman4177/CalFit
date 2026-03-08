@@ -12,7 +12,7 @@ function uuidv4Fallback() {
     return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, () => '0');
   }
 }
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Container,
   Typography,
@@ -287,6 +287,8 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
   const sessionLogRef = useRef(null);
+  const firstExerciseRowRef = useRef(null);
+  const [pendingAcceptScroll, setPendingAcceptScroll] = useState(false);
 
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
@@ -1256,23 +1258,37 @@ setNewExercise({
         )
       };
     });
+    setPendingAcceptScroll(true);
     setCumulativeExercises(enriched);
+  };
 
-    const scrollToSessionLogs = () => {
+
+  useLayoutEffect(() => {
+    if (!pendingAcceptScroll || cumulativeExercises.length === 0) return;
+
+    const scrollToFirstExercise = () => {
       try {
-        const el = sessionLogRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
+        const target = firstExerciseRowRef.current || sessionLogRef.current;
+        if (!target) return false;
+        const rect = target.getBoundingClientRect();
         const absoluteTop = window.scrollY + rect.top;
-        const topPadding = window.innerWidth < 700 ? 96 : 120;
-        const targetTop = Math.max(0, absoluteTop - topPadding);
+        const topOffset = window.innerWidth < 700 ? 116 : 92;
+        const targetTop = Math.max(0, absoluteTop - topOffset);
         window.scrollTo({ top: targetTop, behavior: 'smooth' });
-      } catch {}
+        return true;
+      } catch {
+        return false;
+      }
     };
 
-    setTimeout(scrollToSessionLogs, 80);
-    setTimeout(scrollToSessionLogs, 220);
-  };
+    const timers = [
+      setTimeout(scrollToFirstExercise, 30),
+      setTimeout(scrollToFirstExercise, 180),
+      setTimeout(() => setPendingAcceptScroll(false), 420),
+    ];
+
+    return () => timers.forEach(clearTimeout);
+  }, [pendingAcceptScroll, cumulativeExercises]);
 
   useEffect(() => {
     let active = true;
@@ -1300,6 +1316,7 @@ setNewExercise({
         return;
       }
       setShowSuggestCard(true);
+
       return;
     }
     setShowSuggestCard(false);
@@ -1569,6 +1586,7 @@ setNewExercise({
                 </Typography>
                 {cumulativeExercises.map((ex, idx) => (
                   <Box
+                    ref={idx === 0 ? firstExerciseRowRef : null}
                     key={idx}
                     sx={{
                       mb: 1,

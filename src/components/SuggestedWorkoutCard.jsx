@@ -1,5 +1,5 @@
 // src/components/SuggestedWorkoutCard.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -79,6 +79,8 @@ const isProUser = () => {
 };
 
 export default function SuggestedWorkoutCard({ userData, onAccept }) {
+  const loadingCardRef = useRef(null);
+  const cardRef = useRef(null);
   const [pack, setPack] = useState([]); // array of AI suggestions
   const [idx, setIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -97,33 +99,52 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
-  const cardRef = useRef(null);
-  const loadingScrolledRef = useRef(false);
-  const readyKeyRef = useRef('');
 
-  const scrollCardIntoView = (mode = 'loading') => {
-    try {
-      const el = cardRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const absoluteTop = window.scrollY + rect.top;
-      const viewportH = window.innerHeight || 0;
-      const mobile = window.innerWidth < 700;
 
-      let targetTop = absoluteTop;
-      if (mode === 'loading') {
-        const cardH = rect.height || 220;
-        targetTop = absoluteTop - Math.max(16, (viewportH - cardH) / 2 - (mobile ? 56 : 70));
-      } else {
-        targetTop = absoluteTop - (mobile ? 74 : 96);
-      }
+  useLayoutEffect(() => {
+    if (!loading) return;
 
-      window.scrollTo({
-        top: Math.max(0, targetTop),
-        behavior: 'smooth'
-      });
-    } catch {}
-  };
+    const scrollLoadingCardIntoView = () => {
+      try {
+        const target = loadingCardRef.current;
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const absoluteTop = window.scrollY + rect.top;
+        const viewport = window.innerHeight || 800;
+        const targetTop = Math.max(0, absoluteTop - Math.max(72, (viewport - rect.height) / 2));
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const timers = [
+      setTimeout(scrollLoadingCardIntoView, 30),
+      setTimeout(scrollLoadingCardIntoView, 150),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [loading]);
+
+  useLayoutEffect(() => {
+    if (loading || !current) return;
+
+    const scrollReadyCardIntoView = () => {
+      try {
+        const target = cardRef.current;
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const absoluteTop = window.scrollY + rect.top;
+        const bottomPad = window.innerWidth < 700 ? 190 : 120;
+        const viewport = window.innerHeight || 800;
+        const targetTop = Math.max(0, absoluteTop - Math.max(72, (viewport - rect.height - bottomPad) / 2));
+        window.scrollTo({ top: targetTop, behavior: 'smooth' });
+      } catch {}
+    };
+
+    const timers = [
+      setTimeout(scrollReadyCardIntoView, 50),
+      setTimeout(scrollReadyCardIntoView, 220),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [loading, current?.title, current?.name, split]);
 
   useEffect(() => {
     let active = true;
@@ -142,34 +163,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       window.removeEventListener('focus', syncQuota);
     };
   }, [pro]);
-
-  useEffect(() => {
-    if (!loading) {
-      loadingScrolledRef.current = false;
-      return;
-    }
-    if (loadingScrolledRef.current) return;
-    loadingScrolledRef.current = true;
-    const t1 = setTimeout(() => scrollCardIntoView('loading'), 30);
-    const t2 = setTimeout(() => scrollCardIntoView('loading'), 180);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [loading]);
-
-  useEffect(() => {
-    if (loading || !current) return;
-    const readyKey = `${split}:${idx}:${current?.title || ''}:${current?.blocks?.length || 0}`;
-    if (readyKeyRef.current === readyKey) return;
-    readyKeyRef.current = readyKey;
-    const t1 = setTimeout(() => scrollCardIntoView('ready'), 60);
-    const t2 = setTimeout(() => scrollCardIntoView('ready'), 220);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [loading, current, idx, split]);
 
   async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
@@ -229,7 +222,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       setShowUpgrade(true);
       return;
     }
-    readyKeyRef.current = '';
     fetchAI(undefined, { countAsUse: true });
     // eslint-disable-next-line
   }, [userData]);
@@ -247,8 +239,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       return;
     }
 
-    readyKeyRef.current = '';
-    readyKeyRef.current = '';
     fetchAI(undefined, { countAsUse: true });
   };
 
@@ -261,13 +251,12 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       return;
     }
 
-    readyKeyRef.current = '';
     fetchAI(focus, { countAsUse: true });
   };
 
   if (loading) {
     return (
-      <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
+      <Card ref={loadingCardRef} sx={{ mb: 4, overflow: 'visible' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6">Generating a plan…</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -280,7 +269,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
 
   if (err) {
     return (
-      <Card ref={cardRef} sx={{ mb: 4, overflow: 'visible' }}>
+      <Card ref={loadingCardRef} sx={{ mb: 4, overflow: 'visible' }}>
         <CardContent sx={{ overflow: 'visible' }}>
           <Typography variant="h6" color="error">
             {err}
