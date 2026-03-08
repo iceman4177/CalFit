@@ -1259,21 +1259,31 @@ setNewExercise({
       };
     });
     setPendingAcceptScroll(true);
+    setShowSuggestCard(false);
     setCumulativeExercises(enriched);
   };
 
 
   useLayoutEffect(() => {
-    if (!pendingAcceptScroll || cumulativeExercises.length === 0) return;
+    if (!pendingAcceptScroll || showSuggestCard || cumulativeExercises.length === 0) return;
 
-    const scrollToFirstExercise = () => {
+    let raf1 = 0;
+    let raf2 = 0;
+    let timeoutId = 0;
+
+    const scrollToAcceptedList = () => {
       try {
         const target = firstExerciseRowRef.current || sessionLogRef.current;
         if (!target) return false;
         const rect = target.getBoundingClientRect();
         const absoluteTop = window.scrollY + rect.top;
-        const topOffset = window.innerWidth < 700 ? 116 : 92;
-        const targetTop = Math.max(0, absoluteTop - topOffset);
+        const viewport = window.innerHeight || 800;
+        const mobile = window.innerWidth < 700;
+        const stickyBottomAllowance = mobile ? 120 : 32;
+        const targetTop = Math.max(
+          0,
+          absoluteTop - Math.max(84, (viewport - rect.height) / 2) - stickyBottomAllowance / 2
+        );
         window.scrollTo({ top: targetTop, behavior: 'smooth' });
         return true;
       } catch {
@@ -1281,14 +1291,26 @@ setNewExercise({
       }
     };
 
-    const timers = [
-      setTimeout(scrollToFirstExercise, 30),
-      setTimeout(scrollToFirstExercise, 180),
-      setTimeout(() => setPendingAcceptScroll(false), 420),
-    ];
+    timeoutId = window.setTimeout(() => {
+      raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(() => {
+          const ok = scrollToAcceptedList();
+          if (ok) {
+            window.setTimeout(scrollToAcceptedList, 180);
+            window.setTimeout(() => setPendingAcceptScroll(false), 260);
+          } else {
+            window.setTimeout(() => setPendingAcceptScroll(false), 260);
+          }
+        });
+      });
+    }, 40);
 
-    return () => timers.forEach(clearTimeout);
-  }, [pendingAcceptScroll, cumulativeExercises]);
+    return () => {
+      try { window.clearTimeout(timeoutId); } catch {}
+      try { window.cancelAnimationFrame(raf1); } catch {}
+      try { window.cancelAnimationFrame(raf2); } catch {}
+    };
+  }, [pendingAcceptScroll, showSuggestCard, cumulativeExercises]);
 
   useEffect(() => {
     let active = true;
