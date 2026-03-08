@@ -98,6 +98,19 @@ export function registerDailyFeatureUse(featureKey) {
   return nextUsed;
 }
 
+export function syncDailyFeatureRemaining(featureKey, remaining) {
+  const limit = getFreeDailyLimit(featureKey);
+  if (!limit) return 0;
+
+  const safeRemaining = Math.max(0, Math.min(limit, Number(remaining) || 0));
+  const nextUsed = Math.max(0, limit - safeRemaining);
+  const st = readState();
+  st.counts = st.counts || {};
+  st.counts[featureKey] = nextUsed;
+  writeState(st);
+  return safeRemaining;
+}
+
 // -----------------------------------------------------------------------------
 // UI Badge
 // -----------------------------------------------------------------------------

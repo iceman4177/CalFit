@@ -29,8 +29,9 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
+  syncDailyFeatureRemaining,
 } from "./components/FeatureUseBadge.jsx";
+import { callAIGenerate } from "./lib/ai";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -285,9 +286,6 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
-  const [serverRemaining, setServerRemaining] = useState(null);
-  const [serverQuotaLoading, setServerQuotaLoading] = useState(false);
-  const serverRemainingRef = useRef(null);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -300,54 +298,6 @@ export default function PoseSession() {
   const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
   const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
   const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
-
-  useEffect(() => {
-    serverRemainingRef.current = serverRemaining;
-  }, [serverRemaining]);
-
-  const refreshPoseQuota = useCallback(async () => {
-    if (isPro) {
-      setServerRemaining(null);
-      return null;
-    }
-    if (!user?.id) {
-      const localRemaining = getDailyRemaining("pose_session");
-      setServerRemaining(localRemaining);
-      return localRemaining;
-    }
-
-    setServerQuotaLoading(true);
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Client-Id": getOrCreateClientId(),
-          ...(user?.id ? { "X-User-Id": user.id } : {}),
-        },
-        body: JSON.stringify({ feature: "quota_status", targetFeature: "pose_session", user_id: user?.id || null }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && typeof json?.remaining === "number") {
-        setServerRemaining(json.remaining);
-        return json.remaining;
-      }
-    } catch {} finally {
-      setServerQuotaLoading(false);
-    }
-
-    return typeof serverRemainingRef.current === "number" ? serverRemainingRef.current : null;
-  }, [isPro, user?.id]);
-
-  useEffect(() => {
-    refreshPoseQuota();
-  }, [refreshPoseQuota]);
-
-  useEffect(() => {
-    const onFocus = () => { refreshPoseQuota(); };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refreshPoseQuota]);
 
   useEffect(() => {
     ALL_OUTLINE_ASSETS.forEach((src) => {
@@ -481,28 +431,48 @@ export default function PoseSession() {
     setFacingMode((m) => (m === "user" ? "environment" : "user"));
   }, []);
 
+  useEffect(() => {
+    if (isPro) return undefined;
+    let cancelled = false;
+
+    const syncPoseQuota = async () => {
+      try {
+        const data = await callAIGenerate({ feature: "quota_status", target_feature: "pose_session" });
+        if (!cancelled && typeof data?.remaining === "number") {
+          syncDailyFeatureRemaining("pose_session", data.remaining);
+          try { window.dispatchEvent(new Event("storage")); } catch {}
+        }
+      } catch {}
+    };
+
+    syncPoseQuota();
+    const onFocus = () => { syncPoseQuota(); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [isPro, user?.id]);
+
   const retakePose = useCallback(() => {
     // Remove last capture for current pose and re-open capture stage
     setCaptures((prev) => prev.filter((c) => c.poseKey !== pose.key));
     setStage("capture");
   }, [pose.key]);
 
-  const startScan = useCallback(async () => {
-    if (!isPro) {
-      const remaining = user?.id ? await refreshPoseQuota() : getDailyRemaining("pose_session");
-      if ((remaining ?? 0) <= 0) {
-        setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-        try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-        return;
-      }
+  const startScan = useCallback(() => {
+    if (!isPro && !canUseDailyFeature("pose_session")) {
+      setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
+      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
+      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+      return;
     }
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isPro, refreshPoseQuota, user?.id]);
+  }, [isPro]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -519,44 +489,28 @@ export default function PoseSession() {
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
-          imageDataUrl: c.thumbDataUrl, // keep payload small
+          imageDataUrl: c.thumbDataUrl,
         })),
-        deltas, // optional; app uses positive-only deltas
+        deltas,
         recentScans: recentScanContext,
       };
 
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Client-Id": getOrCreateClientId(),
-          ...(user?.id ? { "X-User-Id": user.id } : {}),
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 402 || json?.reason === "limit_reached") {
+      const json = await callAIGenerate(payload).catch((e) => {
+        if (e?.code === 402) {
           setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
           setStage("intro");
           try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
           try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-          return;
+          return null;
         }
-        throw new Error(json?.error || "Pose Session failed");
-      }
+        throw e;
+      });
+
+      if (!json) return;
 
       const session = json?.session || null;
-      if (!isPro) {
-        if (user?.id) {
-          if (typeof json?.remaining === "number") setServerRemaining(json.remaining);
-          else await refreshPoseQuota();
-        } else {
-          registerDailyFeatureUse("pose_session");
-          setServerRemaining(getDailyRemaining("pose_session"));
-        }
-      }
+      if (!isPro) registerDailyFeatureUse("pose_session");
+      if (!isPro && typeof json?.remaining === "number") syncDailyFeatureRemaining("pose_session", json.remaining);
 
       // Persist a small record for deltas
       try {
@@ -585,24 +539,12 @@ export default function PoseSession() {
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, refreshPoseQuota, todayISO, user?.id, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
     callAI();
   }, [stage, callAI]);
-
-  const resetToIntro = useCallback(async () => {
-    setErrorMsg("");
-    setCaptures([]);
-    setResult(null);
-    setPoseIdx(0);
-    setStage("intro");
-    if (!isPro) {
-      if (user?.id) await refreshPoseQuota();
-      else setServerRemaining(getDailyRemaining("pose_session"));
-    }
-  }, [isPro, refreshPoseQuota, user?.id]);
 
   const onShare = useCallback(async () => {
     if (!captures.length) return;
@@ -653,7 +595,6 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
   const titleColor = "rgba(245,250,255,0.92)";
   const bodyColor = "rgba(220,235,245,0.86)";
   const outlinePulseActive = stage === "capture" && countdownMs > CAPTURE_DELAY_MS - OUTLINE_PULSE_MS;
-  const poseRemaining = isPro ? null : (typeof serverRemaining === "number" ? serverRemaining : getDailyRemaining("pose_session"));
 
   return (
     <>
@@ -703,7 +644,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={resetToIntro}
+                  onClick={startScan}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
@@ -733,39 +674,20 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   3 guided scans · 15 seconds · shareable results
                 </Typography>
                 <Box>
-                  {isPro ? (
-                    <FeatureUseBadge
-                      featureKey="pose_session"
-                      isPro={true}
-                      labelPrefix="Free"
-                      sx={{
+                  <FeatureUseBadge
+                    featureKey="pose_session"
+                    isPro={isPro}
+                    labelPrefix="Free"
+                    sx={{
+                      color: "rgba(220,235,245,0.92)",
+                      borderColor: "rgba(120,255,220,0.28)",
+                      bgcolor: "rgba(255,255,255,0.02)",
+                      '& .MuiChip-label': {
+                        px: 1.1,
                         color: "rgba(220,235,245,0.92)",
-                        borderColor: "rgba(120,255,220,0.28)",
-                        bgcolor: "rgba(255,255,255,0.02)",
-                        '& .MuiChip-label': {
-                          px: 1.1,
-                          color: "rgba(220,235,245,0.92)",
-                        },
-                      }}
-                    />
-                  ) : (
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={`Free: ${poseRemaining ?? 0}/3`}
-                      sx={{
-                        fontWeight: 800,
-                        borderRadius: 999,
-                        color: "rgba(220,235,245,0.92)",
-                        borderColor: "rgba(120,255,220,0.28)",
-                        bgcolor: "rgba(255,255,255,0.02)",
-                        '& .MuiChip-label': {
-                          px: 1.1,
-                          color: "rgba(220,235,245,0.92)",
-                        },
-                      }}
-                    />
-                  )}
+                      },
+                    }}
+                  />
                 </Box>
               </Stack>
 
@@ -1152,7 +1074,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={resetToIntro}
+                    onClick={startScan}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",

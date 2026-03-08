@@ -43,7 +43,8 @@ import SuggestedWorkoutCard from './components/SuggestedWorkoutCard';
 import UpgradeModal from './components/UpgradeModal';
 import FeatureUseBadge, {
   canUseDailyFeature,
-  registerDailyFeatureUse
+  registerDailyFeatureUse,
+  syncDailyFeatureRemaining
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
@@ -1265,6 +1266,30 @@ setNewExercise({
     }, 80);
   };
 
+
+  useEffect(() => {
+    if (isProUser()) return undefined;
+    let cancelled = false;
+
+    const syncWorkoutQuota = async () => {
+      try {
+        const data = await callAIGenerate({ feature: 'quota_status', target_feature: 'workout' });
+        if (!cancelled && typeof data?.remaining === 'number') {
+          syncDailyFeatureRemaining('ai_workout', data.remaining);
+          try { window.dispatchEvent(new Event('storage')); } catch {}
+        }
+      } catch {}
+    };
+
+    syncWorkoutQuota();
+    const onFocus = () => { syncWorkoutQuota(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user?.id]);
+
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
@@ -1277,7 +1302,7 @@ setNewExercise({
         const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
         const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
 
-        await callAIGenerate({
+        const aiResp = await callAIGenerate({
           feature: 'workout',
           user_id: user?.id || null,
           goal: fitnessGoal,
@@ -1286,6 +1311,10 @@ setNewExercise({
           constraints: { training_intent: trainingIntent },
           count: 1
         });
+        if (!isProUser() && typeof aiResp?.remaining === 'number') {
+          syncDailyFeatureRemaining('ai_workout', aiResp.remaining);
+          try { window.dispatchEvent(new Event('storage')); } catch {}
+        }
       } catch (e) {
         if (e?.code === 402) {
           setShowUpgrade(true);
