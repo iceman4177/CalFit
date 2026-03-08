@@ -13,8 +13,8 @@ import {
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
-import FeatureUseBadge, { canUseDailyFeature, registerDailyFeatureUse } from './FeatureUseBadge.jsx';
-import { postAI } from '../lib/ai';
+import FeatureUseBadge, { canUseDailyFeature, registerDailyFeatureUse, setDailyRemaining } from './FeatureUseBadge.jsx';
+import { postAI, getAIQuotaStatus } from '../lib/ai';
 
 // --- normalize split to server values ---
 function normalizeFocus(focus) {
@@ -98,6 +98,24 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (pro) return;
+      try {
+        const q = await getAIQuotaStatus('ai_workout');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining('ai_workout', q.remaining);
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [pro]);
+
   async function fetchAI(focusOverride, { countAsUse } = {}) {
     setLoading(true);
     setErr(null);
@@ -113,7 +131,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       localStorage.setItem('training_split', focus);
       localStorage.setItem('last_focus', focus);
 
-      const data = await postAI('workout', {
+      const data = await postAI('ai_workout', {
         goal: fitnessGoal,
         focus,
         equipment: equipmentList,
@@ -132,7 +150,10 @@ export default function SuggestedWorkoutCard({ userData, onAccept }) {
       setPack(suggestions);
       setIdx(0);
 
-      if (!pro && countAsUse) registerDailyFeatureUse('ai_workout');
+      if (!pro && countAsUse) {
+        if (typeof data?.remaining === 'number') setDailyRemaining('ai_workout', data.remaining);
+        else registerDailyFeatureUse('ai_workout');
+      }
     } catch (e) {
       console.error('[SuggestedWorkoutCard] fetchAI failed', e);
       if (e?.code === 402) {

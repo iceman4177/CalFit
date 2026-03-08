@@ -879,24 +879,6 @@ export default function MealTracker({ onMealUpdate }) {
     })();
   };
 
-  useEffect(() => {
-    let active = true;
-    const syncQuota = async () => {
-      if (isProUser() || !user?.id) return;
-      try {
-        const q = await getAIQuotaStatus('meal');
-        if (!active) return;
-        if (typeof q?.remaining === 'number') setDailyRemaining('ai_meal', q.remaining);
-      } catch {}
-    };
-    syncQuota();
-    window.addEventListener('focus', syncQuota);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', syncQuota);
-    };
-  }, [user?.id]);
-
   const handleClear = () => {
     const rest = readMealHistory().filter(e => e.date !== todayUS);
     writeMealHistory(rest);
@@ -924,8 +906,8 @@ export default function MealTracker({ onMealUpdate }) {
       const proteinMealG = parseInt(localStorage.getItem('protein_target_meal_g') || '0', 10);
       const calorieBias = parseInt(localStorage.getItem('calorie_bias') || '0', 10);
 
-      const aiResp = await callAIGenerate({
-        feature: 'meal',
+      await callAIGenerate({
+        feature: 'ai_meal',
         user_id: user?.id || null,
         constraints: {
           diet_preference: dietPreference,
@@ -935,17 +917,21 @@ export default function MealTracker({ onMealUpdate }) {
         },
         count: 1
       });
-
-      if (!isProUser()) {
-        if (typeof aiResp?.remaining === 'number') setDailyRemaining('ai_meal', aiResp.remaining);
-        else registerDailyFeatureUse('ai_meal');
-      }
     } catch (e) {
       if (e?.code === 402) {
         setShowUpgrade(true);
         return;
       }
       console.warn('[MealTracker] gateway probe failed', e);
+    }
+
+    if (!isProUser()) {
+      const q = await getAIQuotaStatus('ai_meal').catch(() => null);
+      if (typeof q?.remaining === 'number') {
+        setDailyRemaining('ai_meal', q.remaining);
+      } else {
+        registerDailyFeatureUse('ai_meal');
+      }
     }
 
     setShowSuggest(true);
@@ -956,6 +942,26 @@ export default function MealTracker({ onMealUpdate }) {
       } catch {}
     }, 50);
   }, [showSuggest, user?.id]);
+
+  useEffect(() => {
+    let active = true;
+    const syncQuota = async () => {
+      if (isProUser() || !user?.id) return;
+      try {
+        const q = await getAIQuotaStatus('ai_meal');
+        if (!active) return;
+        if (typeof q?.remaining === 'number') {
+          setDailyRemaining('ai_meal', q.remaining);
+        }
+      } catch {}
+    };
+    syncQuota();
+    window.addEventListener('focus', syncQuota);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncQuota);
+    };
+  }, [user?.id]);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
 

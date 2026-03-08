@@ -46,6 +46,14 @@ function headerClientId(req) {
   return `ip:${ip}`;
 }
 
+function normalizeQuotaFeature(feature) {
+  const raw = String(feature || "").trim().toLowerCase();
+  if (raw === "meal") return "ai_meal";
+  if (raw === "workout") return "ai_workout";
+  if (raw === "pose") return "pose_session";
+  return raw;
+}
+
 function idKey(req, userId) {
   if (userId) return `uid:${userId}`;
   return headerClientId(req);
@@ -529,26 +537,18 @@ const FREE_LIMITS = {
   pose_session: 3,
 };
 
-function canonicalQuotaFeature(feature) {
-  const f = String(feature || '').toLowerCase();
-  if (f === 'meal' || f === 'ai_meal') return 'ai_meal';
-  if (f === 'workout' || f === 'ai_workout') return 'ai_workout';
-  if (f === 'pose_session') return 'pose_session';
-  return f || 'default';
-}
-
 function getFreeLimitForFeature(feature) {
-  const key = canonicalQuotaFeature(feature);
-  return FREE_LIMITS[key] ?? FREE_LIMITS.default;
+  return FREE_LIMITS[feature] ?? FREE_LIMITS.default;
 }
 const freeMem = new Map();
 
 function quotaIdentity({ clientId, userId, feature }) {
-  const key = canonicalQuotaFeature(feature);
-  return userId ? `u:${userId}:${key}` : `c:${clientId}:${key}`;
+  return userId ? `u:${userId}:${feature}` : `c:${clientId}:${feature}`;
 }
 
 function memRead({ clientId, userId, feature }) {
+  feature = normalizeQuotaFeature(feature);
+  feature = normalizeQuotaFeature(feature);
   const key = quotaIdentity({ clientId, userId, feature });
   const today = dayKeyUTC();
   const limit = getFreeLimitForFeature(feature);
@@ -559,6 +559,7 @@ function memRead({ clientId, userId, feature }) {
 }
 
 function memConsume({ clientId, userId, feature }) {
+  feature = normalizeQuotaFeature(feature);
   const key = quotaIdentity({ clientId, userId, feature });
   const snap = memRead({ clientId, userId, feature });
   if (snap.used >= snap.limit) return { allowed: false, remaining: 0, used: snap.used, limit: snap.limit };
@@ -568,93 +569,61 @@ function memConsume({ clientId, userId, feature }) {
 }
 
 async function dbQuotaStatus(clientId, feature, userId) {
-  const quotaFeature = canonicalQuotaFeature(feature);
+  feature = normalizeQuotaFeature(feature);
   if (!supabaseAdmin) {
-    const snap = memRead({ clientId, userId, feature: quotaFeature });
-    return { remaining: snap.remaining, used: snap.used, limit: snap.limit, feature: quotaFeature };
+    const snap = memRead({ clientId, userId, feature });
+    return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
   }
   try {
     const today = dayKeyUTC();
-    const limit = getFreeLimitForFeature(quotaFeature);
+    const limit = getFreeLimitForFeature(feature);
     let query = supabaseAdmin.from('ai_free_passes').select('uses');
-    query = userId ? query.eq('user_id', userId) : query.eq('client_id', clientId).is('user_id', null);
-    const { data, error } = await query.eq('feature', quotaFeature).eq('day_key', today).maybeSingle();
+    query = userId ? query.eq('user_id', userId) : query.eq('client_id', clientId);
+    const { data, error } = await query.eq('feature', feature).eq('day_key', today).maybeSingle();
     if (error && error.code !== 'PGRST116') {
-      const snap = memRead({ clientId, userId, feature: quotaFeature });
-      return { remaining: snap.remaining, used: snap.used, limit: snap.limit, feature: quotaFeature };
+      const snap = memRead({ clientId, userId, feature });
+      return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
     }
     const used = Math.max(0, Number(data?.uses || 0));
-    return { remaining: Math.max(0, limit - used), used, limit, feature: quotaFeature };
+    return { remaining: Math.max(0, limit - used), used, limit };
   } catch {
-    const snap = memRead({ clientId, userId, feature: quotaFeature });
-    return { remaining: snap.remaining, used: snap.used, limit: snap.limit, feature: quotaFeature };
+    const snap = memRead({ clientId, userId, feature });
+    return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
   }
 }
 
 async function dbConsume(clientId, feature, userId) {
-  const quotaFeature = canonicalQuotaFeature(feature);
-  if (!supabaseAdmin) return memConsume({ clientId, userId, feature: quotaFeature });
+  feature = normalizeQuotaFeature(feature);
+  if (!supabaseAdmin) return memConsume({ clientId, userId, feature });
   try {
     const today = dayKeyUTC();
-    const limit = getFreeLimitForFeature(quotaFeature);
-    const status = await dbQuotaStatus(clientId, quotaFeature, userId);
-    if (status.used >= limit) return { allowed: false, remaining: 0, used: status.used, limit, feature: quotaFeature };
+    const limit = getFreeLimitForFeature(feature);
+    const status = await dbQuotaStatus(clientId, feature, userId);
+    if (status.used >= limit) return { allowed: false, remaining: 0, used: status.used, limit };
 
-    if (userId) {
-      const nextUses = status.used + 1;
-      const { data: existing, error: selErr } = await supabaseAdmin
-        .from('ai_free_passes')
-        .select('user_id')
-        .eq('user_id', userId)
-        .eq('feature', quotaFeature)
-        .eq('day_key', today)
-        .maybeSingle();
-      if (selErr && selErr.code !== 'PGRST116') throw selErr;
-      if (existing?.user_id) {
-        const { error } = await supabaseAdmin
-          .from('ai_free_passes')
-          .update({ uses: nextUses, client_id: clientId || null })
-          .eq('user_id', userId)
-          .eq('feature', quotaFeature)
-          .eq('day_key', today);
-        if (error) throw error;
-      } else {
-        const { error } = await supabaseAdmin
-          .from('ai_free_passes')
-          .insert([{ user_id: userId, client_id: clientId || null, feature: quotaFeature, day_key: today, uses: nextUses }]);
-        if (error) throw error;
-      }
-      return { allowed: true, remaining: Math.max(0, limit - nextUses), used: nextUses, limit, feature: quotaFeature };
-    }
+    let existingQuery = supabaseAdmin.from('ai_free_passes').select('uses');
+    existingQuery = userId ? existingQuery.eq('user_id', userId) : existingQuery.eq('client_id', clientId);
+    const { data: existing, error: existingError } = await existingQuery.eq('feature', feature).eq('day_key', today).maybeSingle();
+    if (existingError && existingError.code !== 'PGRST116') return memConsume({ clientId, userId, feature });
 
-    const nextUses = status.used + 1;
-    const { data: existing, error: selErr } = await supabaseAdmin
-      .from('ai_free_passes')
-      .select('client_id')
-      .eq('client_id', clientId)
-      .is('user_id', null)
-      .eq('feature', quotaFeature)
-      .eq('day_key', today)
-      .maybeSingle();
-    if (selErr && selErr.code !== 'PGRST116') throw selErr;
-    if (existing?.client_id) {
-      const { error } = await supabaseAdmin
-        .from('ai_free_passes')
-        .update({ uses: nextUses })
-        .eq('client_id', clientId)
-        .is('user_id', null)
-        .eq('feature', quotaFeature)
-        .eq('day_key', today);
-      if (error) throw error;
+    const nextUsed = Math.max(0, Number(existing?.uses ?? status.used)) + 1;
+
+    if (existing) {
+      let updateQuery = supabaseAdmin.from('ai_free_passes').update({ uses: nextUsed });
+      updateQuery = userId ? updateQuery.eq('user_id', userId) : updateQuery.eq('client_id', clientId);
+      const { error } = await updateQuery.eq('feature', feature).eq('day_key', today);
+      if (error) return memConsume({ clientId, userId, feature });
     } else {
-      const { error } = await supabaseAdmin
-        .from('ai_free_passes')
-        .insert([{ client_id: clientId, user_id: null, feature: quotaFeature, day_key: today, uses: nextUses }]);
-      if (error) throw error;
+      const payload = userId
+        ? { user_id: userId, client_id: clientId || null, feature, day_key: today, uses: nextUsed }
+        : { client_id: clientId, user_id: null, feature, day_key: today, uses: nextUsed };
+      const { error } = await supabaseAdmin.from('ai_free_passes').insert(payload);
+      if (error) return memConsume({ clientId, userId, feature });
     }
-    return { allowed: true, remaining: Math.max(0, limit - nextUses), used: nextUses, limit, feature: quotaFeature };
+
+    return { allowed: true, remaining: Math.max(0, limit - nextUsed), used: nextUsed, limit };
   } catch {
-    return memConsume({ clientId, userId, feature: quotaFeature });
+    return memConsume({ clientId, userId, feature });
   }
 }
 

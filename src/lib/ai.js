@@ -73,7 +73,7 @@ export async function postAI(feature, body = {}) {
   const resp = await fetch('/api/ai/generate', {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ feature, ...body }),
+    body: JSON.stringify({ ...body, feature: normalizeQuotaFeature(body?.feature || feature) }),
   });
 
   if (resp.status === 402) {
@@ -96,7 +96,7 @@ export async function probeEntitlement(feature, body = {}) {
     const resp = await fetch('/api/ai/generate', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ feature, count: 1, ...body }),
+      body: JSON.stringify({ feature: normalizeQuotaFeature(feature), count: 1, ...body }),
     });
     if (resp.status === 402) return { gated: true };
     return { gated: !resp.ok };
@@ -114,4 +114,13 @@ export async function callAIGenerate(payload) {
 
 export async function getAIQuotaStatus(feature, body = {}) {
   return postAI(feature, { ...body, quota_status: true });
+}
+
+
+export function normalizeQuotaFeature(feature) {
+  const raw = String(feature || "").trim().toLowerCase();
+  if (raw === "meal") return "ai_meal";
+  if (raw === "workout") return "ai_workout";
+  if (raw === "pose" || raw === "pose_session") return "pose_session";
+  return raw;
 }

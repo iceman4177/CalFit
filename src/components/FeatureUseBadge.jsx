@@ -1,5 +1,5 @@
 // src/components/FeatureUseBadge.jsx
-import React, { useEffect, useState } from "react";
+import React, { useSyncExternalStore } from "react";
 import { Chip } from '@mui/material';
 
 // -----------------------------------------------------------------------------
@@ -7,6 +7,7 @@ import { Chip } from '@mui/material';
 // -----------------------------------------------------------------------------
 
 const STORAGE_KEY = "slimcal_usage_v1";
+const STORAGE_EVENT = "slimcal:usage-changed";
 
 // Free tier limits (per day)
 // Adjust here to tune upgrade psychology.
@@ -58,15 +59,32 @@ function readState() {
   return st;
 }
 
-function emitUsageChanged(featureKey = null) {
-  try { window.dispatchEvent(new CustomEvent('slimcal:usage-changed', { detail: { featureKey } })); } catch {}
+function emitUsageChanged() {
+  try { window.dispatchEvent(new Event(STORAGE_EVENT)); } catch {}
 }
 
-function writeState(st, featureKey = null) {
+function writeState(st) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   } catch {}
-  emitUsageChanged(featureKey);
+  emitUsageChanged();
+}
+
+function subscribeUsage(cb) {
+  const onStorage = (e) => {
+    if (!e || !e.key || e.key === STORAGE_KEY) cb();
+  };
+  const onCustom = () => cb();
+  try {
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(STORAGE_EVENT, onCustom);
+  } catch {}
+  return () => {
+    try {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(STORAGE_EVENT, onCustom);
+    } catch {}
+  };
 }
 
 export function getFreeDailyLimit(featureKey) {
@@ -98,7 +116,7 @@ export function registerDailyFeatureUse(featureKey) {
   st.counts = st.counts || {};
   st.counts[featureKey] = nextUsed;
 
-  writeState(st, featureKey);
+  writeState(st);
 
   return nextUsed;
 }
@@ -112,7 +130,7 @@ export function setDailyRemaining(featureKey, remaining) {
   const st = readState();
   st.counts = st.counts || {};
   st.counts[featureKey] = used;
-  writeState(st, featureKey);
+  writeState(st);
   return safeRemaining;
 }
 
@@ -120,36 +138,23 @@ export function setDailyRemaining(featureKey, remaining) {
 // UI Badge
 // -----------------------------------------------------------------------------
 export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefix }) {
-  const [remaining, setRemaining] = useState(() => getDailyRemaining(featureKey));
-  const limit = getFreeDailyLimit(featureKey);
-
-  useEffect(() => {
-    const refresh = () => setRemaining(getDailyRemaining(featureKey));
-    refresh();
-    const onUsage = (e) => {
-      const changed = e?.detail?.featureKey;
-      if (!changed || changed === featureKey) refresh();
-    };
-    window.addEventListener('slimcal:usage-changed', onUsage);
-    window.addEventListener('storage', refresh);
-    window.addEventListener('focus', refresh);
-    return () => {
-      window.removeEventListener('slimcal:usage-changed', onUsage);
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('focus', refresh);
-    };
-  }, [featureKey]);
-
   if (isPro) {
     return (
-      <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+      
+        <Chip size="small" color="success" label="PRO ∞" sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+      
     );
   }
+
+  const remaining = useSyncExternalStore(subscribeUsage, () => getDailyRemaining(featureKey), () => getDailyRemaining(featureKey));
+  const limit = getFreeDailyLimit(featureKey);
 
   const freePrefix = labelPrefix || "Free";
   const label = `${freePrefix}: ${remaining}/${limit}`;
 
   return (
-    <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+    
+      <Chip size="small" variant="outlined" label={label} sx={{ fontWeight: 800, borderRadius: 999, ...sx }} />
+    
   );
 }
