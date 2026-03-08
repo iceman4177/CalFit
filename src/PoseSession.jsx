@@ -286,6 +286,8 @@ export default function PoseSession() {
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
+  const [serverRemaining, setServerRemaining] = useState(() => (readStoredIsPro() ? null : getDailyRemaining("pose_session")));
+  const [serverQuotaLoading, setServerQuotaLoading] = useState(false);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
