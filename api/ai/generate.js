@@ -597,25 +597,11 @@ async function dbAllow(clientId, feature, userId) {
   }
 }
 
-async function allowFreeFeature({ req, feature, userId }) {
-  const clientId = idKey(req, userId);
-  return dbAllow(clientId, feature, userId);
-}
-
-function memRemaining(clientId, feature) {
-  const key = `m:${clientId}:${feature}`;
-  const today = dayKeyUTC();
+async function dbRemaining(clientId, feature, userId) {
   const limit = getFreeLimitForFeature(feature);
-  const rec = freeMem.get(key);
-  if (!rec || rec.day !== today) return limit;
-  return Math.max(0, limit - Math.max(0, Number(rec.used || 0)));
-}
-
-async function dbRemaining(clientId, feature) {
-  if (!supabaseAdmin) return memRemaining(clientId, feature);
+  if (!supabaseAdmin) return { remaining: limit, used: 0 };
   try {
     const today = dayKeyUTC();
-    const limit = getFreeLimitForFeature(feature);
     const { data, error } = await supabaseAdmin
       .from("ai_free_passes")
       .select("uses")
@@ -623,18 +609,22 @@ async function dbRemaining(clientId, feature) {
       .eq("feature", feature)
       .eq("day_key", today)
       .maybeSingle();
-
-    if (error && error.code !== "PGRST116") return memRemaining(clientId, feature);
+    if (error && error.code !== "PGRST116") return { remaining: limit, used: 0 };
     const used = Math.max(0, Number(data?.uses || 0));
-    return Math.max(0, limit - used);
+    return { remaining: Math.max(0, limit - used), used };
   } catch {
-    return memRemaining(clientId, feature);
+    return { remaining: limit, used: 0 };
   }
+}
+
+async function allowFreeFeature({ req, feature, userId }) {
+  const clientId = idKey(req, userId);
+  return dbAllow(clientId, feature, userId);
 }
 
 async function getFreeFeatureRemaining({ req, feature, userId }) {
   const clientId = idKey(req, userId);
-  return dbRemaining(clientId, feature);
+  return dbRemaining(clientId, feature, userId);
 }
 
 
@@ -1321,6 +1311,7 @@ export default async function handler(req, res) {
 
   const body = await readJson(req);
   const feature = String(body?.feature || body?.type || body?.mode || "workout").toLowerCase();
+  const quotaStatusOnly = String(body?.mode || "").toLowerCase() === "quota_status" || body?.quota_status === true;
 
 
 const freeBypass =
@@ -1334,6 +1325,12 @@ const freeBypass =
   // Resolve user id robustly (headers OR body.user_id OR body.email)
   const email = (body?.email || "").trim().toLowerCase();
   const resolvedUserId = await resolveUserId(req, { user_id: body?.user_id || null, email });
+
+  if (quotaStatusOnly) {
+    const status = await getFreeFeatureRemaining({ req, feature, userId: resolvedUserId });
+    res.status(200).json({ ok: true, remaining: status.remaining, used: status.used, limit: getFreeLimitForFeature(feature) });
+    return;
+  }
 
   const {
     constraints = {},
@@ -1353,30 +1350,12 @@ const freeBypass =
   // 1) Pro/Trial users bypass limits (honors trial until trial_end even if canceled)
   const pro = await isEntitled(resolvedUserId);
 
-  if (feature === "quota_status") {
-    const targetFeature = String(body?.target_feature || body?.targetFeature || body?.forFeature || "").toLowerCase();
-    if (!targetFeature) {
-      res.status(400).json({ error: "Missing target_feature" });
-      return;
-    }
-    if (pro) {
-      const limit = getFreeLimitForFeature(targetFeature);
-      res.status(200).json({ remaining: limit, limit, isPro: true });
-      return;
-    }
-    const limit = getFreeLimitForFeature(targetFeature);
-    const remaining = await getFreeFeatureRemaining({ req, feature: targetFeature, userId: resolvedUserId });
-    res.status(200).json({ remaining, limit, isPro: false });
-    return;
-  }
-
-  let pass = null;
-
   // 2) If not Pro/Trial → per-feature free-pass
+  let pass = null;
   if (!pro && !freeBypass) {
     pass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
     if (!pass.allowed) {
-      res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0 });
+      res.status(402).json({ error: "Upgrade required", reason: "limit_reached" });
       return;
     }
   }
@@ -1389,7 +1368,7 @@ const freeBypass =
         { focus, goal, intent, equipment },
         Math.max(1, Math.min(parseInt(count, 10) || 5, 8))
       );
-      res.status(200).json({ suggestions, remaining: pass?.remaining ?? null });
+      res.status(200).json({ suggestions, ...(pass ? { remaining: pass.remaining } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] workout error:", e);
@@ -1409,7 +1388,7 @@ const freeBypass =
         { diet, intent, proteinTargetG, calorieBias },
         Math.max(1, Math.min(parseInt(count, 10) || 3, 6))
       );
-      res.status(200).json({ suggestions });
+      res.status(200).json({ suggestions, ...(pass ? { remaining: pass.remaining } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] meal error:", e);
@@ -1428,12 +1407,12 @@ const freeBypass =
     try {
       const intent = normalizeIntent(constraints?.training_intent || "general");
       const suggestions = fallbackCoachSuggestions({ intent }, Math.max(1, Math.min(parseInt(count, 10) || 3, 5)));
-      res.status(200).json({ suggestions });
+      res.status(200).json({ suggestions, ...(pass ? { remaining: pass.remaining } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] coach error:", e);
       const suggestions = fallbackCoachSuggestions({ intent: "general" }, 3);
-      res.status(200).json({ suggestions });
+      res.status(200).json({ suggestions, ...(pass ? { remaining: pass.remaining } : {}) });
       return;
     }
   }
@@ -1553,7 +1532,7 @@ const freeBypass =
       }
 
       if (!openai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_unavailable_fallback" });
+        res.status(200).json({ session: fallbackPoseSession(gender), ...(pass ? { remaining: pass.remaining } : {}), warning: "ai_unavailable_fallback" });
         return;
       }
 
@@ -1614,7 +1593,7 @@ const freeBypass =
 
       const ai = await withTimeout(call, OPENAI_TIMEOUT_MS, null);
       if (!ai) {
-        res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_timeout_fallback" });
+        res.status(200).json({ session: fallbackPoseSession(gender), ...(pass ? { remaining: pass.remaining } : {}), warning: "ai_timeout_fallback" });
         return;
       }
 
@@ -1736,11 +1715,11 @@ ${note}`;
       if (!session.highlights?.length) session.highlights = fb.highlights;
       if (!session.levers?.length) session.levers = fb.levers;
 
-      res.status(200).json({ session, remaining: pass?.remaining ?? null, ...(body?.debug ? { raw: text } : {}) });
+      res.status(200).json({ session, ...(pass ? { remaining: pass.remaining } : {}), ...(body?.debug ? { raw: text } : {}) });
       return;
     } catch (e) {
       console.error("[ai/generate] pose_session error:", e);
-      res.status(200).json({ session: fallbackPoseSession(gender), warning: "ai_error_fallback" });
+      res.status(200).json({ session: fallbackPoseSession(gender), ...(pass ? { remaining: pass.remaining } : {}), warning: "ai_error_fallback" });
       return;
     }
   }

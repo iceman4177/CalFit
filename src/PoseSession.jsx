@@ -26,12 +26,13 @@ import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
 import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
+import { getAuthHeaders } from "./lib/ai";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  syncDailyFeatureRemaining,
+  getDailyRemaining,
+  setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
-import { callAIGenerate } from "./lib/ai";
 import {
   readPoseSessionHistory,
   appendPoseSession,
@@ -431,34 +432,47 @@ export default function PoseSession() {
     setFacingMode((m) => (m === "user" ? "environment" : "user"));
   }, []);
 
-  useEffect(() => {
-    if (isPro) return undefined;
-    let cancelled = false;
-
-    const syncPoseQuota = async () => {
-      try {
-        const data = await callAIGenerate({ feature: "quota_status", target_feature: "pose_session" });
-        if (!cancelled && typeof data?.remaining === "number") {
-          syncDailyFeatureRemaining("pose_session", data.remaining);
-          try { window.dispatchEvent(new Event("storage")); } catch {}
-        }
-      } catch {}
-    };
-
-    syncPoseQuota();
-    const onFocus = () => { syncPoseQuota(); };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [isPro, user?.id]);
-
   const retakePose = useCallback(() => {
     // Remove last capture for current pose and re-open capture stage
     setCaptures((prev) => prev.filter((c) => c.poseKey !== pose.key));
     setStage("capture");
   }, [pose.key]);
+
+  const refreshPoseQuota = useCallback(async () => {
+    if (!user?.id || isPro) return;
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ feature: "pose_session", mode: "quota_status", user_id: user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && typeof json?.remaining === "number") {
+        setDailyRemaining("pose_session", json.remaining);
+      }
+    } catch {}
+  }, [isPro, user?.id]);
+
+  useEffect(() => {
+    refreshPoseQuota();
+    const onFocus = () => { refreshPoseQuota(); };
+    const onVis = () => { if (document.visibilityState === "visible") refreshPoseQuota(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [refreshPoseQuota]);
+
+  const resetToIntro = useCallback(() => {
+    setErrorMsg("");
+    setCaptures([]);
+    setResult(null);
+    setPoseIdx(0);
+    setStage("intro");
+    refreshPoseQuota();
+  }, [refreshPoseQuota]);
 
   const startScan = useCallback(() => {
     if (!isPro && !canUseDailyFeature("pose_session")) {
@@ -489,28 +503,35 @@ export default function PoseSession() {
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
-          imageDataUrl: c.thumbDataUrl,
+          imageDataUrl: c.thumbDataUrl, // keep payload small
         })),
-        deltas,
+        deltas, // optional; app uses positive-only deltas
         recentScans: recentScanContext,
       };
 
-      const json = await callAIGenerate(payload).catch((e) => {
-        if (e?.code === 402) {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ...payload, user_id: user?.id || null }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 402 || json?.reason === "limit_reached") {
           setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
           setStage("intro");
           try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
           try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
-          return null;
+          return;
         }
-        throw e;
-      });
-
-      if (!json) return;
+        throw new Error(json?.error || "Pose Session failed");
+      }
 
       const session = json?.session || null;
-      if (!isPro) registerDailyFeatureUse("pose_session");
-      if (!isPro && typeof json?.remaining === "number") syncDailyFeatureRemaining("pose_session", json.remaining);
+      if (!isPro) {
+        if (typeof json?.remaining === "number") setDailyRemaining("pose_session", json.remaining);
+        else registerDailyFeatureUse("pose_session");
+      }
 
       // Persist a small record for deltas
       try {
@@ -644,7 +665,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               {stage === "results" && (
                 <Button
                   variant="outlined"
-                  onClick={startScan}
+                  onClick={resetToIntro}
                   sx={{
                     color: bodyColor,
                     textTransform: "none",
@@ -1074,7 +1095,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                 <Stack direction="row" spacing={1.2}>
                   <Button
                     variant="outlined"
-                    onClick={startScan}
+                    onClick={resetToIntro}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",

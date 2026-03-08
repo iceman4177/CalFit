@@ -82,6 +82,19 @@ export function canUseDailyFeature(featureKey) {
   return getDailyRemaining(featureKey) > 0;
 }
 
+
+export function setDailyRemaining(featureKey, remaining) {
+  const limit = getFreeDailyLimit(featureKey);
+  if (!limit) return 0;
+  const clampedRemaining = Math.max(0, Math.min(limit, Number(remaining) || 0));
+  const used = Math.max(0, limit - clampedRemaining);
+  const st = readState();
+  st.counts = st.counts || {};
+  st.counts[featureKey] = used;
+  writeState(st);
+  return clampedRemaining;
+}
+
 export function registerDailyFeatureUse(featureKey) {
   const limit = getFreeDailyLimit(featureKey);
   if (!limit) return 0;
@@ -96,19 +109,6 @@ export function registerDailyFeatureUse(featureKey) {
   writeState(st);
 
   return nextUsed;
-}
-
-export function syncDailyFeatureRemaining(featureKey, remaining) {
-  const limit = getFreeDailyLimit(featureKey);
-  if (!limit) return 0;
-
-  const safeRemaining = Math.max(0, Math.min(limit, Number(remaining) || 0));
-  const nextUsed = Math.max(0, limit - safeRemaining);
-  const st = readState();
-  st.counts = st.counts || {};
-  st.counts[featureKey] = nextUsed;
-  writeState(st);
-  return safeRemaining;
 }
 
 // -----------------------------------------------------------------------------

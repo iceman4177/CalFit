@@ -44,11 +44,11 @@ import UpgradeModal from './components/UpgradeModal';
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  syncDailyFeatureRemaining
+  setDailyRemaining
 } from './components/FeatureUseBadge.jsx';
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
-import { callAIGenerate } from './lib/ai'; // ✅ identity-aware AI helper
+import { getAuthHeaders } from './lib/ai'; // AI auth helpers
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
@@ -1266,65 +1266,13 @@ setNewExercise({
     }, 80);
   };
 
-
-  useEffect(() => {
-    if (isProUser()) return undefined;
-    let cancelled = false;
-
-    const syncWorkoutQuota = async () => {
-      try {
-        const data = await callAIGenerate({ feature: 'quota_status', target_feature: 'workout' });
-        if (!cancelled && typeof data?.remaining === 'number') {
-          syncDailyFeatureRemaining('ai_workout', data.remaining);
-          try { window.dispatchEvent(new Event('storage')); } catch {}
-        }
-      } catch {}
-    };
-
-    syncWorkoutQuota();
-    const onFocus = () => { syncWorkoutQuota(); };
-    window.addEventListener('focus', onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [user?.id]);
-
-  // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
       if (!isProUser() && !canUseDailyFeature('ai_workout')) {
         setShowUpgrade(true);
         return;
       }
-      try {
-        const trainingIntent = localStorage.getItem('training_intent') || 'general';
-        const fitnessGoal = localStorage.getItem('fitness_goal') || (userData?.goalType || 'maintenance');
-        const equipmentList = JSON.parse(localStorage.getItem('equipment_list') || '["dumbbell","barbell","machine","bodyweight"]');
-
-        const aiResp = await callAIGenerate({
-          feature: 'workout',
-          user_id: user?.id || null,
-          goal: fitnessGoal,
-          focus: localStorage.getItem('last_focus') || 'upper',
-          equipment: equipmentList,
-          constraints: { training_intent: trainingIntent },
-          count: 1
-        });
-        if (!isProUser() && typeof aiResp?.remaining === 'number') {
-          syncDailyFeatureRemaining('ai_workout', aiResp.remaining);
-          try { window.dispatchEvent(new Event('storage')); } catch {}
-        }
-      } catch (e) {
-        if (e?.code === 402) {
-          setShowUpgrade(true);
-          return;
-        }
-        console.warn('[WorkoutPage] AI gateway probe failed; continuing with local UI', e);
-      }
-      if (!isProUser()) registerDailyFeatureUse('ai_workout');
       setShowSuggestCard(true);
-
       setTimeout(() => {
         try {
           suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1334,6 +1282,39 @@ setNewExercise({
     }
     setShowSuggestCard(false);
   };
+
+  const handleWorkoutAiConsumed = useCallback((remaining) => {
+    if (isProUser()) return;
+    if (typeof remaining === 'number') setDailyRemaining('ai_workout', remaining);
+    else registerDailyFeatureUse('ai_workout');
+  }, []);
+
+  const refreshWorkoutQuota = useCallback(async () => {
+    if (!user?.id || isProUser()) return;
+    try {
+      const res = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ feature: 'workout', mode: 'quota_status', user_id: user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && typeof json?.remaining === 'number') {
+        setDailyRemaining('ai_workout', json.remaining);
+      }
+    } catch {}
+  }, [user?.id]);
+
+  useEffect(() => {
+    refreshWorkoutQuota();
+    const onFocus = () => { refreshWorkoutQuota(); };
+    const onVis = () => { if (document.visibilityState === 'visible') refreshWorkoutQuota(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [refreshWorkoutQuota]);
 
   // ---- derived UI stats for a compact strip ----
   const sessionTotals = useMemo(() => {
@@ -1554,7 +1535,7 @@ setNewExercise({
 {/* AI suggested workout results (auto-scroll target) */}
 <Box ref={suggestRef} sx={{ mb: 2 }}>
   {showSuggestCard && (
-    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
+    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} onConsumeSuccess={handleWorkoutAiConsumed} />
   )}
 </Box>
 
