@@ -334,7 +334,12 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         </Typography>
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
-            <Stack key={i} direction="row" spacing={1}>
+            <Stack
+              key={i}
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={1}
+              alignItems={{ xs: 'stretch', sm: 'center' }}
+            >
               <TextField
                 label={`Ingredient ${i + 1}`}
                 value={r.name}
@@ -346,9 +351,15 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
                 type="number"
                 value={r.calories}
                 onChange={e => update(i, 'calories', e.target.value)}
-                sx={{ width: 140 }}
+                fullWidth
+                sx={{ width: { xs: '100%', sm: 160 } }}
               />
-              <IconButton aria-label="remove" onClick={() => remove(i)} disabled={rows.length === 1}>
+              <IconButton
+                aria-label="remove"
+                onClick={() => remove(i)}
+                disabled={rows.length === 1}
+                sx={{ alignSelf: { xs: 'flex-end', sm: 'center' } }}
+              >
                 <DeleteIcon />
               </IconButton>
             </Stack>
@@ -1273,10 +1284,6 @@ export default function MealTracker({ onMealUpdate }) {
               <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" justifyContent="center">
                 <Chip label={`${mealLog.length} ${mealLog.length === 1 ? 'meal' : 'meals'}`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
                 <Chip label={`${total} cals`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
-                <Chip
-                  label={`P ${mealLog.reduce((s, m) => s + (Number(m.protein_g) || 0), 0)}g • C ${mealLog.reduce((s, m) => s + (Number(m.carbs_g) || 0), 0)}g • F ${mealLog.reduce((s, m) => s + (Number(m.fat_g) || 0), 0)}g`}
-                  sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }}
-                />
               </Stack>
 
               {mealLog.length === 0 ? (
@@ -1304,11 +1311,6 @@ export default function MealTracker({ onMealUpdate }) {
                             </Typography>
                             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
                               {Number(m.calories) || 0} cals
-                              {((Number(m.protein_g) || 0) + (Number(m.carbs_g) || 0) + (Number(m.fat_g) || 0)) > 0 && (
-                                <>
-                                  {' • P '}{Number(m.protein_g) || 0}g{' • C '}{Number(m.carbs_g) || 0}g{' • F '}{Number(m.fat_g) || 0}g
-                                </>
-                              )}
                             </Typography>
                           </Box>
                           <IconButton
