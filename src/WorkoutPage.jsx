@@ -29,7 +29,7 @@ import {
   Stack,
   Chip
 } from '@mui/material';
-import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import FitnessCenterRoundedIcon from '@mui/icons-material/FitnessCenterRounded';
 import { useHistory } from 'react-router-dom';
 import ExerciseForm from './ExerciseForm';
 import SaunaForm from './SaunaForm';
@@ -1560,10 +1560,27 @@ setNewExercise({
 
         <Stack spacing={2}>
           <Box sx={{ maxWidth: 620, mx: 'auto' }}>
-            <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+            <Typography
+              variant="h4"
+              sx={{
+                fontWeight: 800,
+                lineHeight: 1.08,
+                letterSpacing: '-0.02em',
+                fontSize: { xs: '2.15rem', sm: '2.35rem' }
+              }}
+            >
               Workout
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560, mx: 'auto' }}>
+            <Typography
+              variant="body1"
+              color="text.secondary"
+              sx={{
+                maxWidth: 560,
+                mx: 'auto',
+                fontSize: { xs: '1rem', sm: '1.08rem' },
+                lineHeight: 1.5
+              }}
+            >
               Build your workout manually or let AI create one, then review and submit in one smooth flow.
             </Typography>
           </Box>
@@ -1571,9 +1588,9 @@ setNewExercise({
           <Button
             onClick={handleSuggestAIClick}
             variant={showSuggestCard ? 'outlined' : 'contained'}
-            startIcon={<SmartToyOutlinedIcon />}
+            startIcon={<FitnessCenterRoundedIcon />}
             size="large"
-            sx={{ fontWeight: 700, borderRadius: 999, alignSelf: 'center', minWidth: { xs: '100%', sm: 320 }, maxWidth: 420 }}
+            sx={{ fontWeight: 700, fontSize: { xs: '1.05rem', sm: '1.08rem' }, borderRadius: 999, alignSelf: 'center', minWidth: { xs: '100%', sm: 320 }, maxWidth: 420 }}
           >
             {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
           </Button>
@@ -1603,19 +1620,38 @@ setNewExercise({
           <Paper variant="outlined" sx={{ ...surfaceSx, p: { xs: 2, md: 2.5 } }}>
             <Stack spacing={2.25}>
               <Stack spacing={0.5} sx={{ textAlign: 'center', alignItems: 'center' }}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                <Typography
+                  variant="h5"
+                  sx={{
+                    fontWeight: 800,
+                    lineHeight: 1.12,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                  }}
+                >
                   Build Today&apos;s Workout
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 540 }}>
+                <Typography
+                  variant="body1"
+                  color="text.secondary"
+                  sx={{ maxWidth: 540, fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
+                >
                   Add exercises below. Your current session updates live as you go.
                 </Typography>
               </Stack>
 
               <Button
-                fullWidth
                 variant="outlined"
                 onClick={() => setShowTemplate(true)}
-                sx={{ fontWeight: 700, borderRadius: 999, maxWidth: 520, mx: 'auto' }}
+                sx={{
+                  fontWeight: 700,
+                  borderRadius: 999,
+                  alignSelf: 'center',
+                  width: { xs: '100%', md: 'auto' },
+                  minWidth: { md: 320 },
+                  maxWidth: 520,
+                  px: { md: 5 },
+                }}
               >
                 Load Past Workout
               </Button>
@@ -1650,7 +1686,15 @@ setNewExercise({
                   <Stack spacing={1.25} sx={{ pt: 1.25 }}>
                     <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center' }}>
                       <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                        <Typography
+                  variant="h5"
+                  sx={{
+                    fontWeight: 800,
+                    lineHeight: 1.12,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                  }}
+                >
                           Current Session Logs
                         </Typography>
                         <Typography variant="body2" color="text.secondary">

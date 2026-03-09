@@ -32,7 +32,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RestaurantIcon from '@mui/icons-material/RamenDining';
-import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import RestaurantMenuRoundedIcon from '@mui/icons-material/RestaurantMenuRounded';
 
 import foodData from './foodData.json';
 
@@ -1020,26 +1020,35 @@ export default function MealTracker({ onMealUpdate }) {
                 </Box>
               )}
 
-              <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.1 }}>
+              <Typography
+                variant="h4"
+                sx={{
+                  fontWeight: 800,
+                  lineHeight: 1.08,
+                  letterSpacing: '-0.02em',
+                  fontSize: { xs: '2.15rem', sm: '2.35rem' }
+                }}
+              >
                 Meals
               </Typography>
               <Typography
                 variant="body1"
                 color="text.secondary"
-                sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1.05rem', sm: '1.1rem' } }}
+                sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.08rem' }, lineHeight: 1.5 }}
               >
                 Log meals, keep macros clean, and keep your daily net calories up to date.
               </Typography>
               <Button
                 onClick={handleToggleMealIdeas}
                 variant={showSuggest ? 'outlined' : 'contained'}
-                startIcon={<SmartToyOutlinedIcon />}
+                startIcon={<RestaurantMenuRoundedIcon />}
                 size="large"
                 sx={{
                   width: '100%',
                   maxWidth: 560,
                   minHeight: 56,
                   fontWeight: 700,
+                  fontSize: { xs: '1.05rem', sm: '1.08rem' },
                   borderRadius: 999,
                   px: 3
                 }}
@@ -1056,13 +1065,21 @@ export default function MealTracker({ onMealUpdate }) {
           <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
             <Stack spacing={2.5}>
               <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.1, fontSize: { xs: '1.9rem', sm: '2.125rem' } }}>
+                <Typography
+                  variant="h5"
+                  sx={{
+                    fontWeight: 800,
+                    lineHeight: 1.12,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                  }}
+                >
                   Meal Builder
                 </Typography>
                 <Typography
                   variant="body1"
                   color="text.secondary"
-                  sx={{ mt: 1, maxWidth: 560, mx: 'auto', fontSize: { xs: '1.05rem', sm: '1.1rem' } }}
+                  sx={{ mt: 1, maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
                   Add meals manually, then review everything you’ve logged for today below.
                 </Typography>
@@ -1239,7 +1256,15 @@ export default function MealTracker({ onMealUpdate }) {
                   </Box>
                 )}
                 <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mb: 1 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.1, fontSize: { xs: '1.9rem', sm: '2.125rem' } }}>
+                  <Typography
+                    variant="h5"
+                    sx={{
+                      fontWeight: 800,
+                      lineHeight: 1.12,
+                      letterSpacing: '-0.02em',
+                      fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                    }}
+                  >
                     AI Assist
                   </Typography>
                   <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 700, height: 28 }} />
@@ -1247,7 +1272,7 @@ export default function MealTracker({ onMealUpdate }) {
                 <Typography
                   variant="body1"
                   color="text.secondary"
-                  sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1.05rem', sm: '1.1rem' } }}
+                  sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
                   Use AI food lookup or generate meal ideas without leaving the flow.
                 </Typography>
