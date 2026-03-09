@@ -824,6 +824,10 @@ setNewExercise({
   };
 
   // ✅ Sauna logging
+  const handleAddSaunaClick = () => {
+    setShowSaunaSection(s => !s);
+  };
+
   const handleSaveSauna = () => {
     if (saunaTime.trim()) {
       const t = parseFloat(saunaTime) || 0;
