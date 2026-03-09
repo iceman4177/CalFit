@@ -288,6 +288,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
   const sessionLogRef = useRef(null);
+  const addExerciseRef = useRef(null);
 
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
@@ -1321,6 +1322,12 @@ setNewExercise({
     setAiFlowMode(cumulativeExercises.length ? 'accepted' : 'idle');
   };
 
+  const handleAddMoreExercises = useCallback(() => {
+    setShowSuggestCard(false);
+    setAiFlowMode('idle');
+    scheduleWindowScroll(addExerciseRef, { offset: 96, retries: [0, 120, 260] });
+  }, [scheduleWindowScroll]);
+
   useEffect(() => {
     if (aiFlowMode === 'suggested') {
       scheduleWindowScroll(suggestRef, { offset: 96, retries: [0, 120, 260] });
@@ -1490,8 +1497,6 @@ setNewExercise({
   const showGenerating = aiFlowMode === 'generating';
   const showSuggested = aiFlowMode === 'suggested';
   const showAccepted = aiFlowMode === 'accepted' && cumulativeExercises.length > 0;
-  const showSuggestArea = showSuggestCard && (showGenerating || showSuggested);
-  const showCurrentSession = cumulativeExercises.length > 0 && !showGenerating && !showSuggested;
 
   const surfaceSx = {
     borderRadius: 3,
@@ -1537,18 +1542,33 @@ setNewExercise({
     <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
       {(showIdle || showGenerating) && renderHeroCard()}
 
-      {showSuggestArea && (
-        <Box ref={suggestRef} sx={{ mt: showGenerating ? 3 : { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
-          <SuggestedWorkoutCard
-            userData={userData}
-            onAccept={handleAcceptSuggested}
-            onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-            onReady={handleSuggestedReady}
-          />
+      {showGenerating && (
+        <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
+          {showSuggestCard && (
+            <SuggestedWorkoutCard
+              userData={userData}
+              onAccept={handleAcceptSuggested}
+              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
+              onReady={handleSuggestedReady}
+            />
+          )}
         </Box>
       )}
 
-      {showCurrentSession && (
+      {showSuggested && (
+        <Box ref={suggestRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
+          {showSuggestCard && (
+            <SuggestedWorkoutCard
+              userData={userData}
+              onAccept={handleAcceptSuggested}
+              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
+              onReady={handleSuggestedReady}
+            />
+          )}
+        </Box>
+      )}
+
+      {showAccepted && (
         <Box ref={sessionLogRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, mb: 1.5 }}>Current Session Logs</Typography>
@@ -1556,7 +1576,7 @@ setNewExercise({
               <Button variant="contained" size="large" fullWidth onClick={handleFinish}>
                 Submit Workout
               </Button>
-              <Button variant="outlined" size="large" fullWidth onClick={() => setAiFlowMode('idle')}>
+              <Button variant="outlined" size="large" fullWidth onClick={handleAddMoreExercises}>
                 Add More Exercises
               </Button>
             </Stack>
@@ -1588,7 +1608,7 @@ setNewExercise({
 
           <Grid item xs={12}>
             <Stack spacing={3}>
-              <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
+              <Paper ref={addExerciseRef} variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
                 <ExerciseForm
                   newExercise={newExercise}
                   setNewExercise={setNewExercise}
