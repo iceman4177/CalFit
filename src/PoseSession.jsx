@@ -16,13 +16,12 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
-import maleFrontOutline from "./assets/poseGhosts/male_front_outline.png";
-import maleSideOutline from "./assets/poseGhosts/male_side_outline.png";
-import maleBackOutline from "./assets/poseGhosts/male_back_outline.png";
-import maleLatSpread from "./assets/poseGhosts/male_lat_spread.png";
-import femaleFrontOutline from "./assets/poseGhosts/female_front_outline.png";
-import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
-import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
+import maleFrontOutline from "./assets/poseGhosts/male_front_double_bicep.png";
+import maleSideOutline from "./assets/poseGhosts/male_front_lat_spread.png";
+import maleBackOutline from "./assets/poseGhosts/male_back_double_bicep.png";
+import femaleFrontOutline from "./assets/poseGhosts/female_front_pose.png";
+import femaleSideOutline from "./assets/poseGhosts/female_side_pose.png";
+import femaleBackOutline from "./assets/poseGhosts/female_back_pose.png";
 
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
@@ -44,7 +43,7 @@ import { postAI, getAIQuotaStatus } from "./lib/ai";
 
 const MALE_POSES = [
   { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
-  { key: "lat_spread", title: "Front Lat Spread", subtitle: "Hands near waist · flare lats wide · elbows slightly forward" },
+  { key: "lat_spread", title: "Lat Spread", subtitle: "Chest up · spread lats · stay tall" },
   { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
 ];
 
@@ -61,7 +60,6 @@ const ALL_OUTLINE_ASSETS = [
   maleFrontOutline,
   maleSideOutline,
   maleBackOutline,
-  maleLatSpread,
   femaleFrontOutline,
   femaleSideOutline,
   femaleBackOutline,
@@ -163,7 +161,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
   const imageMap = {
     front_double_bi: maleFrontOutline,
-    lat_spread: maleLatSpread,
+    lat_spread: maleSideOutline,
     back_double_bi: maleBackOutline,
     front_scan: femaleFrontOutline,
     side_scan: femaleSideOutline,
@@ -171,7 +169,16 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   };
 
   const src = imageMap[poseKey] || maleFrontOutline;
-  const frameWidth = isFemaleCue ? "min(74%, 360px)" : "min(90%, 440px)";
+  const frameWidth = isFemaleCue ? "min(78%, 380px)" : "min(88%, 430px)";
+  const imageWidthMap = {
+    front_double_bi: "66%",
+    lat_spread: "74%",
+    back_double_bi: "66%",
+    front_scan: "62%",
+    side_scan: "52%",
+    back_scan: "62%",
+  };
+  const imageWidth = imageWidthMap[poseKey] || (isFemaleCue ? "62%" : "66%");
   const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(57,255,20,0.24)";
   const frameBg = isFemaleCue ? "rgba(36, 8, 22, 0.04)" : "rgba(5, 20, 12, 0.04)";
   const frameShadow = isFemaleCue
@@ -213,7 +220,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
           alt=""
           aria-hidden="true"
           sx={{
-            width: isFemaleCue ? "68%" : "82%",
+            width: imageWidth,
             height: "auto",
             objectFit: "contain",
             opacity: isFemaleCue ? 0.96 : 0.92,
@@ -618,7 +625,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           minHeight: { xs: "100svh", md: "auto" },
         }}
       >
-        <CardContent sx={{ p: { xs: 0.9, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
+        <CardContent sx={{ p: { xs: 1, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: { xs: 1, md: 2 } }}>
             <Button
               startIcon={<ArrowBackIcon />}
@@ -786,11 +793,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: { xs: "min(100%, 392px)", sm: "min(100%, 440px)", md: "100%" },
+                  width: { xs: "min(100%, 320px)", md: "100%" },
                   mx: "auto",
-                  aspectRatio: { xs: "4 / 5", md: "3 / 4" },
-                  height: { xs: "min(52svh, 520px)", md: "auto" },
-                  maxHeight: { xs: "52svh", md: "none" },
+                  aspectRatio: "3/4",
+                  height: { xs: "min(54svh, 440px)", md: "auto" },
+                  maxHeight: { xs: "54svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
@@ -805,7 +812,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "cover" : "cover",
+                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "contain" : "cover",
                     background: "#000",
                     transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   }}
@@ -817,71 +824,69 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   active={outlinePulseActive}
                   color={outlineColor}
                 />
+
+                {/* Minimal “fancy” prompt overlay (no tracking) */}
+                <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                  <Box
+                    sx={{
+                      position: "absolute",
+                      left: 10,
+                      right: 10,
+                      bottom: 10,
+                      p: { xs: 1.35, md: 2 },
+                      borderRadius: 3,
+                      bgcolor: "rgba(0,0,0,0.55)",
+                      border: "1px solid rgba(120,255,220,0.20)",
+                      backdropFilter: "blur(6px)",
+                    }}
+                  >
+                    <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>
+                      {pose.title}
+                    </Typography>
+                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, mt: 0.4, lineHeight: 1.35 }}>
+                      {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
+                    </Typography>
+
+                    <Divider sx={{ my: { xs: 0.9, md: 1.2 }, borderColor: "rgba(255,255,255,0.08)" }} />
+
+                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 11, md: 12 } }}>
+                      Auto-capturing in{" "}
+                      <b style={{ color: "rgba(120,255,220,0.95)" }}>
+                        {Math.max(0, Math.ceil(countdownMs / 1000))}
+                      </b>{" "}
+                      …
+                    </Typography>
+                  </Box>
+                </Box>
               </Box>
 
               <Box
                 sx={{
-                  mt: { xs: "auto", md: 1.25 },
-                  display: "grid",
-                  gap: { xs: 1, md: 1.2 },
-                  pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 76px)", md: 0 },
+                  px: { xs: 1.1, md: 2 },
+                  py: { xs: 0.8, md: 1.4 },
+                  borderRadius: 999,
+                  border: "1px solid rgba(120,255,220,0.18)",
+                  bgcolor: "rgba(0,0,0,0.22)",
                 }}
               >
-                <Box
-                  sx={{
-                    p: { xs: 1.2, md: 1.5 },
-                    borderRadius: 3,
-                    bgcolor: "rgba(0,0,0,0.55)",
-                    border: "1px solid rgba(120,255,220,0.20)",
-                    backdropFilter: "blur(6px)",
-                  }}
-                >
-                  <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5, fontSize: { xs: 15, md: 16 } }}>
-                    {pose.title}
-                  </Typography>
-                  <Typography sx={{ color: bodyColor, fontSize: { xs: 12.5, md: 13 }, mt: 0.35, lineHeight: 1.35 }}>
-                    {pose.subtitle}
-                  </Typography>
-
-                  <Divider sx={{ my: { xs: 0.85, md: 1 }, borderColor: "rgba(255,255,255,0.08)" }} />
-
-                  <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 12, md: 12.5 } }}>
-                    Auto-capturing in{" "}
-                    <b style={{ color: "rgba(120,255,220,0.95)" }}>
-                      {Math.max(0, Math.ceil(countdownMs / 1000))}
-                    </b>{" "}
-                    …
-                  </Typography>
+                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
+                  LOCK-ON
+                </Typography>
+                <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <Box
+                    sx={{
+                      height: "100%",
+                      width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
+                      bgcolor: "rgba(120,255,220,0.85)",
+                      boxShadow: "0 0 18px rgba(120,255,220,0.25)",
+                    }}
+                  />
                 </Box>
-
-                <Box
-                  sx={{
-                    px: { xs: 1.1, md: 2 },
-                    py: { xs: 0.8, md: 1.1 },
-                    borderRadius: 999,
-                    border: "1px solid rgba(120,255,220,0.18)",
-                    bgcolor: "rgba(0,0,0,0.22)",
-                  }}
-                >
-                  <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
-                    LOCK-ON
-                  </Typography>
-                  <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                    <Box
-                      sx={{
-                        height: "100%",
-                        width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
-                        bgcolor: "rgba(120,255,220,0.85)",
-                        boxShadow: "0 0 18px rgba(120,255,220,0.25)",
-                      }}
-                    />
-                  </Box>
-                  <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
-                    <Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                    <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                    <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                  </Stack>
-                </Box>
+                <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
+<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                </Stack>
               </Box>
             </Stack>
           )}
