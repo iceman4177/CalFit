@@ -1556,7 +1556,20 @@ setNewExercise({
       {showAccepted && (
         <Box ref={sessionLogRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, mb: 2 }}>Current Session Logs</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>Current Session Logs</Typography>
+              <Chip label={`${cumulativeExercises.length} logged`} sx={{ fontWeight: 700 }} />
+            </Box>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mb: 2 }}>
+              <Button variant="contained" size="large" fullWidth onClick={handleFinish}>
+                Submit Workout
+              </Button>
+              <Button variant="outlined" size="large" fullWidth onClick={() => setAiFlowMode('idle')}>
+                Add More Exercises
+              </Button>
+            </Stack>
+
             <Stack spacing={1.5}>
               {cumulativeExercises.map((ex, idx) => (
                 <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, p: 1.5, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
@@ -1568,15 +1581,6 @@ setNewExercise({
               ))}
             </Stack>
           </Paper>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mt: 2 }}>
-            <Button variant="contained" size="large" fullWidth onClick={handleFinish}>
-              Submit Workout
-            </Button>
-            <Button variant="outlined" size="large" fullWidth onClick={() => setAiFlowMode('idle')}>
-              Add More Exercises
-            </Button>
-          </Stack>
         </Box>
       )}
 
