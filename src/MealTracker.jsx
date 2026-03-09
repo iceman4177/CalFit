@@ -1349,18 +1349,9 @@ export default function MealTracker({ onMealUpdate }) {
                             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
                               {Number(m.calories) || 0} cals
                             </Typography>
-                            {(() => {
-                              const protein = normMacro(m?.macros?.protein_g);
-                              const carbs = normMacro(m?.macros?.carbs_g);
-                              const fat = normMacro(m?.macros?.fat_g);
-                              const hasAnyMacros = protein > 0 || carbs > 0 || fat > 0;
-                              if (!hasAnyMacros) return null;
-                              return (
-                                <Typography color="text.secondary" sx={{ mt: 0.75, fontWeight: 700, fontSize: '0.95rem' }}>
-                                  P {protein}g • C {carbs}g • F {fat}g
-                                </Typography>
-                              );
-                            })()}
+                            <Typography color="text.secondary" sx={{ mt: 0.25 }}>
+                              P {Number(m?.protein_g) || 0}g • C {Number(m?.carbs_g) || 0}g • F {Number(m?.fat_g) || 0}g
+                            </Typography>
                           </Box>
                           <IconButton
                             edge="end"
