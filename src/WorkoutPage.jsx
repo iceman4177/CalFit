@@ -1303,6 +1303,10 @@ setNewExercise({
   }, [user?.id]);
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
+  const handleSuggestedReady = useCallback(() => {
+    setAiFlowMode((prev) => (prev === 'generating' ? 'suggested' : prev));
+  }, []);
+
   const handleSuggestAIClick = async () => {
     if (!showSuggestCard) {
       if (!isProUser() && !canUseDailyFeature('ai_workout')) {
@@ -1538,7 +1542,7 @@ setNewExercise({
               userData={userData}
               onAccept={handleAcceptSuggested}
               onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={() => setAiFlowMode('suggested')}
+              onReady={handleSuggestedReady}
             />
           )}
         </Box>
@@ -1551,7 +1555,7 @@ setNewExercise({
               userData={userData}
               onAccept={handleAcceptSuggested}
               onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={() => setAiFlowMode('suggested')}
+              onReady={handleSuggestedReady}
             />
           )}
         </Box>

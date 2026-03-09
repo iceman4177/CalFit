@@ -1,5 +1,5 @@
 // src/components/SuggestedWorkoutCard.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -98,12 +98,21 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   const [split, setSplit] = useState(initialSplit);
   const current = useMemo(() => pack[idx] || null, [pack, idx]);
 
+  const readySignaledRef = useRef(false);
+
   useEffect(() => {
     if (typeof onLoadingChange === 'function') onLoadingChange(loading);
   }, [loading, onLoadingChange]);
 
   useEffect(() => {
-    if (!loading && current && typeof onReady === 'function') onReady();
+    if (loading) {
+      readySignaledRef.current = false;
+      return;
+    }
+    if (current && typeof onReady === 'function' && !readySignaledRef.current) {
+      readySignaledRef.current = true;
+      onReady();
+    }
   }, [loading, current, onReady]);
 
   useEffect(() => {
