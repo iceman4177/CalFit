@@ -1493,39 +1493,43 @@ setNewExercise({
     boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
   };
 
+  const renderHeroCard = () => (
+    <Card sx={{ ...surfaceSx, overflow: 'visible' }}>
+      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
+        {!isProUser() && showIdle && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+          </Box>
+        )}
+
+        <Stack spacing={2}>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+              Workout
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Log exercises and keep calories burned synced across devices.
+            </Typography>
+          </Box>
+
+          <Button
+            onClick={handleSuggestAIClick}
+            variant={showSuggestCard ? 'outlined' : 'contained'}
+            startIcon={<SmartToyOutlinedIcon />}
+            size="large"
+            sx={{ fontWeight: 700, borderRadius: 999, alignSelf: 'flex-start', minWidth: { xs: '100%', sm: 320 } }}
+          >
+            {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
+          </Button>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
   // --- main UI ---
   return (
     <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
-      <Card sx={{ ...surfaceSx, overflow: 'visible' }}>
-        <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
-          {!isProUser() && showIdle && (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-              <FeatureUseBadge featureKey="ai_workout" isPro={false} />
-            </Box>
-          )}
-
-          <Stack spacing={2}>
-            <Box>
-              <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                Workout
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Log exercises and keep calories burned synced across devices.
-              </Typography>
-            </Box>
-
-            <Button
-              onClick={handleSuggestAIClick}
-              variant={showSuggestCard ? 'outlined' : 'contained'}
-              startIcon={<SmartToyOutlinedIcon />}
-              size="large"
-              sx={{ fontWeight: 700, borderRadius: 999, alignSelf: 'flex-start', minWidth: { xs: '100%', sm: 320 } }}
-            >
-              {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
+      {(showIdle || showGenerating) && renderHeroCard()}
 
       {showGenerating && (
         <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
@@ -1541,7 +1545,7 @@ setNewExercise({
       )}
 
       {showSuggested && (
-        <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
+        <Box ref={suggestRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
           {showSuggestCard && (
             <SuggestedWorkoutCard
               userData={userData}
@@ -1554,13 +1558,9 @@ setNewExercise({
       )}
 
       {showAccepted && (
-        <Box ref={sessionLogRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
+        <Box ref={sessionLogRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-              <Typography variant="h6" sx={{ fontWeight: 800 }}>Current Session Logs</Typography>
-              <Chip label={`${cumulativeExercises.length} logged`} sx={{ fontWeight: 700 }} />
-            </Box>
-
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, mb: 1.5 }}>Current Session Logs</Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mb: 2 }}>
               <Button variant="contained" size="large" fullWidth onClick={handleFinish}>
                 Submit Workout
@@ -1569,7 +1569,6 @@ setNewExercise({
                 Add More Exercises
               </Button>
             </Stack>
-
             <Stack spacing={1.5}>
               {cumulativeExercises.map((ex, idx) => (
                 <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, p: 1.5, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
@@ -1598,26 +1597,6 @@ setNewExercise({
 
           <Grid item xs={12}>
             <Stack spacing={3}>
-              {cumulativeExercises.length > 0 && (
-                <Paper ref={sessionLogRef} variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
-                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, mb: 2 }}>
-                    Current Session Logs
-                  </Typography>
-                  <Stack spacing={1.5}>
-                    {cumulativeExercises.map((ex, idx) => (
-                      <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, p: 1.5, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
-                        <Typography sx={{ fontWeight: 600, flex: 1 }}>
-                          {formatExerciseLine(ex)}
-                        </Typography>
-                        <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
-                          Remove
-                        </Button>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-              )}
-
               <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
                 <ExerciseForm
                   newExercise={newExercise}
