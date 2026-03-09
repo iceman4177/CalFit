@@ -302,6 +302,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
   const [suggestedReadyTick, setSuggestedReadyTick] = useState(0);
   const [flowFocus, setFlowFocus] = useState('idle'); // idle | suggested | accepted
+  const [suppressSubmitOverlay, setSuppressSubmitOverlay] = useState(false);
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -1285,6 +1286,7 @@ setNewExercise({
     setShowSuggestCard(false);
     setAiSuggestLoading(false);
     setFlowFocus('accepted');
+    setSuppressSubmitOverlay(true);
     setCumulativeExercises(enriched);
     setPendingAcceptedScroll(true);
   };
@@ -1388,6 +1390,30 @@ setNewExercise({
       window.removeEventListener('focus', syncWorkoutQuota);
     };
   }, [user?.id]);
+
+
+  useEffect(() => {
+    if (!suppressSubmitOverlay) return;
+
+    let armed = false;
+    const armTimer = window.setTimeout(() => { armed = true; }, 450);
+    const release = () => {
+      if (!armed) return;
+      setSuppressSubmitOverlay(false);
+      setFlowFocus((prev) => (prev === 'accepted' ? 'idle' : prev));
+    };
+
+    window.addEventListener('touchstart', release, { passive: true });
+    window.addEventListener('wheel', release, { passive: true });
+    window.addEventListener('keydown', release);
+
+    return () => {
+      window.clearTimeout(armTimer);
+      window.removeEventListener('touchstart', release);
+      window.removeEventListener('wheel', release);
+      window.removeEventListener('keydown', release);
+    };
+  }, [suppressSubmitOverlay]);
 
   // ✅ Identity-aware AI call prevents false 402 for trial/Pro
   const handleSuggestAIClick = async () => {
@@ -1562,6 +1588,7 @@ setNewExercise({
   const acceptedFocus = !showSuggestCard && flowFocus === 'accepted';
   const simplifiedSuggestMode = showSuggestCard;
   const hideChromeForFocus = simplifiedGenerationMode || suggestedFocus || acceptedFocus || pendingAcceptedScroll;
+  const hideSubmitOverlay = showSuggestCard || suppressSubmitOverlay || flowFocus !== 'idle' || pendingAcceptedScroll;
 
   // --- main UI ---
   return (
@@ -1801,7 +1828,7 @@ setNewExercise({
         </Grid>
         )}
 
-        {cumulativeExercises.length > 0 && !hideChromeForFocus && (
+        {cumulativeExercises.length > 0 && !hideChromeForFocus && !hideSubmitOverlay && (
         <Box sx={{ display: { xs: 'none', md: 'block' }, pt: 1 }}>
           <Button
             variant="contained"
@@ -1816,7 +1843,7 @@ setNewExercise({
         )}
       </Stack>
 
-      {cumulativeExercises.length > 0 && !hideChromeForFocus && (
+      {cumulativeExercises.length > 0 && !hideChromeForFocus && !hideSubmitOverlay && (
       <Paper
         elevation={0}
         sx={{
