@@ -1404,6 +1404,16 @@ setNewExercise({
     setFlowFocus('idle');
   };
 
+  // ---- derived UI stats for a compact strip ----
+  const sessionTotals = useMemo(() => {
+    const total = cumulativeExercises.reduce((s, ex) => s + (Number(ex.calories) || 0), 0);
+    const sets = cumulativeExercises.reduce((s, ex) => s + (parseInt(ex.sets, 10) || 0), 0);
+    return {
+      kcal: Math.round(total),
+      exercises: cumulativeExercises.length,
+      sets
+    };
+  }, [cumulativeExercises]);
 
   // --- summary step UI ---
   if (currentStep === 3) {
@@ -1550,14 +1560,12 @@ setNewExercise({
   const simplifiedGenerationMode = showSuggestCard && aiSuggestLoading;
   const suggestedFocus = showSuggestCard && !aiSuggestLoading && flowFocus === 'suggested';
   const acceptedFocus = !showSuggestCard && flowFocus === 'accepted';
-  const simplifiedSuggestMode = showSuggestCard;
-  const hideChromeForFocus = simplifiedGenerationMode || suggestedFocus || acceptedFocus || pendingAcceptedScroll;
+  const hideChromeForFocus = showSuggestCard || pendingAcceptedScroll || acceptedFocus;
 
   // --- main UI ---
   return (
-    <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: { xs: 12, md: 4 } }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: { xs: 10, md: 4 } }}>
       <Stack spacing={{ xs: 2, md: 3 }}>
-        {!suggestedFocus && !acceptedFocus && (
         <Box
           sx={{
             display: 'flex',
@@ -1589,27 +1597,24 @@ setNewExercise({
               sx={{
                 fontWeight: 700,
                 borderRadius: 999,
-                minWidth: { sm: 220 }
+                minWidth: { sm: 260 }
               }}
             >
               {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
             </Button>
-            {!hideChromeForFocus && (
-              <Button
-                variant="text"
-                onClick={() => setShowTemplate(true)}
-                sx={{
-                  fontWeight: 700,
-                  alignSelf: { xs: 'flex-start', sm: 'center' },
-                  px: { xs: 0.5, sm: 1.5 }
-                }}
-              >
-                Load Past Workout
-              </Button>
-            )}
+            <Button
+              variant="text"
+              onClick={() => setShowTemplate(true)}
+              sx={{
+                fontWeight: 700,
+                alignSelf: { xs: 'flex-start', sm: 'center' },
+                px: { xs: 0.5, sm: 1.5 }
+              }}
+            >
+              Load Past Workout
+            </Button>
           </Stack>
         </Box>
-        )}
 
         {!hideChromeForFocus && !isProUser() && (
           <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
@@ -1617,13 +1622,12 @@ setNewExercise({
           </Box>
         )}
 
-
         {showSuggestCard && (
           <Box
             ref={suggestRef}
             sx={{
-              maxWidth: simplifiedSuggestMode ? 720 : 'none',
-              mx: simplifiedSuggestMode ? 'auto' : 0,
+              maxWidth: 760,
+              mx: 'auto',
               width: '100%',
               pt: suggestedFocus ? { xs: 2, md: 3 } : 0
             }}
@@ -1774,50 +1778,20 @@ setNewExercise({
         </Grid>
         )}
 
-        {cumulativeExercises.length > 0 && !hideChromeForFocus && (
-        <Box sx={{ display: { xs: 'none', md: 'block' }, pt: 1 }}>
-          <Button
-            variant="contained"
-            size="large"
-            fullWidth
-            onClick={handleFinish}
-            sx={{ borderRadius: 3, py: 1.75, fontWeight: 800, fontSize: '1rem' }}
-          >
-            Submit Workout
-          </Button>
-        </Box>
+        {cumulativeExercises.length > 0 && !showSuggestCard && !acceptedFocus && !pendingAcceptedScroll && (
+          <Box sx={{ pt: 1 }}>
+            <Button
+              variant="contained"
+              size="large"
+              fullWidth
+              onClick={handleFinish}
+              sx={{ borderRadius: 3, py: 1.75, fontWeight: 800, fontSize: '1rem' }}
+            >
+              Submit Workout
+            </Button>
+          </Box>
         )}
       </Stack>
-
-      {cumulativeExercises.length > 0 && !hideChromeForFocus && (
-      <Paper
-        elevation={0}
-        sx={{
-          display: { xs: 'block', md: 'none' },
-          position: 'fixed',
-          left: 12,
-          right: 12,
-          bottom: 76,
-          p: 1.25,
-          borderRadius: 3,
-          border: '1px solid rgba(15,23,42,0.08)',
-          boxShadow: '0 12px 32px rgba(15,23,42,0.12)',
-          backdropFilter: 'blur(10px)',
-          backgroundColor: 'rgba(255,255,255,0.96)',
-          zIndex: 12
-        }}
-      >
-        <Button
-          variant="contained"
-          fullWidth
-          size="large"
-          onClick={handleFinish}
-          sx={{ borderRadius: 2.5, py: 1.4, fontWeight: 800 }}
-        >
-          Submit Workout
-        </Button>
-      </Paper>
-      )}
 
       <TemplateSelector
         open={showTemplate}
