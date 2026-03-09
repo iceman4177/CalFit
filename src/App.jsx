@@ -865,6 +865,7 @@ export default function App() {
           <Route path="/workout" render={() =>
             <WorkoutPage
               userData={userData}
+              profileResolved={profileResolved}
               onWorkoutLogged={() => {
   const uid = authUser?.id || null;
   const todayUS = new Date().toLocaleDateString('en-US');

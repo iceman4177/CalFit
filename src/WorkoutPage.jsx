@@ -193,7 +193,7 @@ function clearActiveWorkoutSessionId() {
   } catch (e) { }
 }
 
-export default function WorkoutPage({ userData, onWorkoutLogged }) {
+export default function WorkoutPage({ userData, profileResolved = true, onWorkoutLogged }) {
   const history = useHistory();
   const { user } = useAuth();
   // --- User-scoped local caches (prevents cross-account contamination on same device) ---
@@ -243,8 +243,9 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   }, [userId]);
 
   useEffect(() => {
+    if (!profileResolved) return;
     if (!userData) history.replace('/edit-info');
-  }, [userData, history]);
+  }, [profileResolved, userData, history]);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [cumulativeExercises, setCumulativeExercises] = useState([]);
@@ -1237,15 +1238,24 @@ setNewExercise({
 
   const handleShareWorkout = () => setShareModalOpen(true);
 
-  const scheduleWindowScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260] } = {}) => {
-    retries.forEach((delay) => {
+  const scheduleWindowScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260], block = 'start' } = {}) => {
+    retries.forEach((delay, index) => {
       window.setTimeout(() => {
         try {
           const el = ref?.current;
           if (!el) return;
-          const rect = el.getBoundingClientRect();
-          const top = Math.max(0, window.scrollY + rect.top - offset);
-          window.scrollTo({ top, behavior: 'smooth' });
+
+          if (typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' });
+          }
+
+          window.setTimeout(() => {
+            try {
+              const rect = el.getBoundingClientRect();
+              const top = Math.max(0, window.scrollY + rect.top - offset);
+              window.scrollTo({ top, behavior: index === 0 ? 'auto' : 'smooth' });
+            } catch {}
+          }, 18);
         } catch {}
       }, delay);
     });
@@ -1283,6 +1293,10 @@ setNewExercise({
     setShowSuggestCard(false);
     setAiFlowMode('accepted');
     setPendingAcceptedScroll(true);
+
+    window.setTimeout(() => {
+      scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 160, 320, 520, 820, 1180] });
+    }, 0);
   };
 
   useEffect(() => {
@@ -1330,7 +1344,7 @@ setNewExercise({
 
   useEffect(() => {
     if (aiFlowMode === 'accepted' && cumulativeExercises.length > 0) {
-      scheduleWindowScroll(sessionLogRef, { offset: 96, retries: [0, 120, 260, 420, 700] });
+      scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 140, 300, 520, 820, 1180] });
     }
   }, [aiFlowMode, cumulativeExercises.length, scheduleWindowScroll]);
 
@@ -1340,10 +1354,10 @@ setNewExercise({
     let cancelled = false;
     const kick = () => {
       if (cancelled) return;
-      scheduleWindowScroll(sessionLogRef, { offset: 92, retries: [0, 140, 280, 460, 760] });
+      scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 180, 360, 620, 920, 1280] });
       window.setTimeout(() => {
         if (!cancelled) setPendingAcceptedScroll(false);
-      }, 820);
+      }, 1320);
     };
 
     const raf1 = window.requestAnimationFrame(() => {
