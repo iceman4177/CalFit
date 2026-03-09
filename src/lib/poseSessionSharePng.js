@@ -1,6 +1,6 @@
 // src/lib/poseSessionSharePng.js
-// Story-friendly Pose Session share card generator.
-// Designed for IG/FB story aspect ratio with short, proud, positive copy.
+// Premium Pose Session share card generator.
+// Social-first 9:16 story export with central safe area for feed reposts.
 
 function clamp(n, a, b) {
   const x = Number(n);
@@ -48,42 +48,16 @@ function trimTerminalPunctuation(text = "") {
   return String(text || "")
     .replace(/\s+/g, " ")
     .replace(/[.…·•]+\s*$/g, "")
-    .replace(/\s+/g, " ")
     .trim();
 }
 
 function cleanLine(text = "") {
   return trimTerminalPunctuation(
     String(text || "")
-      .replace(/\s+/g, " ")
       .replace(/^[-•\s]+/, "")
+      .replace(/\s+/g, " ")
       .trim()
   );
-}
-
-function positiveClean(text = "") {
-  let s = cleanLine(text);
-  if (!s) return "";
-
-  s = s
-    .replace(/\bmoderate\b/gi, "solid")
-    .replace(/\breasonable\b/gi, "strong")
-    .replace(/\bdecent\b/gi, "strong")
-    .replace(/\bsome\s+definition\b/gi, "visible definition")
-    .replace(/\bsome\s+potential\b/gi, "clear potential")
-    .replace(/\bpotential\b/gi, "upside")
-    .replace(/\bmay\s+obscure[^.]*\.?/gi, "")
-    .replace(/\bas\s+the\s+shirt[^.]*\.?/gi, "")
-    .replace(/\bpose\s+quality\s+is\s+solid[^.]*\.?/gi, "")
-    .replace(/\bpose\s+quality\s+is\s+moderate[^.]*\.?/gi, "")
-    .replace(/\bwith\s+some\s+/gi, "with ")
-    .replace(/\s+,/g, ",")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  s = s.replace(/^(the\s+poses?\s+(show|demonstrate|capture)\s+)/i, "");
-  s = s.replace(/^(this\s+set\s+shows\s+)/i, "");
-  return trimTerminalPunctuation(s);
 }
 
 function sentenceCase(text = "") {
@@ -92,13 +66,22 @@ function sentenceCase(text = "") {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function titleCase(text = "") {
+  return cleanLine(text)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function uniqueByMeaning(items = []) {
   const out = [];
   const seen = new Set();
   for (const item of items) {
     const t = cleanLine(item);
     if (!t) continue;
-    const k = t.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
+    const k = t.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).slice(0, 6).join(" ");
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(t);
@@ -106,109 +89,100 @@ function uniqueByMeaning(items = []) {
   return out;
 }
 
-function inferThemes(text = "") {
-  const s = ` ${String(text || "").toLowerCase()} `;
-  return {
-    arms: /\b(arm|bicep|tricep)\b/.test(s),
-    shoulders: /\b(shoulder|delt|deltoid)\b/.test(s),
-    chest: /\bchest|pec\b/.test(s),
-    back: /\bback|lat|v-taper|taper\b/.test(s),
-    posture: /\bposture|pose|frame|framing\b/.test(s),
-    confidence: /\bconfidence|confident|presence|command|poise\b/.test(s),
-    momentum: /\bmomentum|progress|consisten|signal\b/.test(s),
-  };
-}
-
-function pickViralWins(wins = [], summary = "", subhead = "") {
-  const pool = [];
-  for (const item of wins || []) {
-    const t = positiveClean(item);
-    if (t) pool.push(sentenceCase(t));
-  }
-
-  const deduped = uniqueByMeaning(pool);
-  const selected = deduped.slice(0, 3);
-
-  if (!selected.length && positiveClean(summary)) {
-    selected.push(sentenceCase(positiveClean(summary)));
-  }
-  if (selected.length < 2 && cleanLine(subhead) && !/baseline locked/i.test(subhead)) {
-    selected.push(sentenceCase(positiveClean(subhead)));
-  }
-  while (selected.length < 3) {
-    const fallbacks = [
-      "Upper-body presence is reading clearly on camera",
-      "The pose set is showing confidence and momentum",
-      "Consistent effort is giving the scan a strong visual signal"
-    ];
-    const next = fallbacks[selected.length] || "Strong progress signal";
-    if (!selected.includes(next)) selected.push(next);
-  }
-  return uniqueByMeaning(selected).slice(0, 3);
-}
-
-function compressAffirmation(text = "") {
-  let s = sentenceCase(positiveClean(text));
+function normalizeCopy(text = "", gender = "male") {
+  let s = cleanLine(text);
   if (!s) return "";
 
   s = s
-    .replace(/the\s+front\s+double\s+biceps\s+pose/gi, "Front double biceps")
-    .replace(/the\s+back\s+double\s+biceps\s+pose/gi, "Back double biceps")
-    .replace(/the\s+lat\s+spread\s+pose/gi, "Lat spread")
-    .replace(/displays/gi, "shows")
-    .replace(/highlighting/gi, "showing")
-    .replace(/appearing/gi, "looking")
-    .replace(/contributing\s+positively\s+to\s+the\s+overall\s+aesthetic[s]?/gi, "adding to the overall look")
-    .replace(/with\s+the/gi, "with")
+    .replace(/\bsilhouette\b/gi, gender === "female" ? "shape" : "look")
+    .replace(/\bbuild read\b/gi, "look")
+    .replace(/\bvisual signal\b/gi, "look")
+    .replace(/\bbaseline locked\b/gi, gender === "female" ? "Base look saved" : "Base look saved")
+    .replace(/\btrending up\b/gi, gender === "female" ? "looking better" : "looking better")
+    .replace(/\bbeautifully put together\b/gi, "really put together")
+    .replace(/\bput together\b/gi, "clean")
+    .replace(/\bphysique presentation\b/gi, "look")
+    .replace(/\bphysique memory\b/gi, "check history")
     .replace(/\s{2,}/g, " ")
     .trim();
 
-  const firstSentence = s.split(/(?<=[.!?])\s+/)[0].trim();
-  s = firstSentence || s;
-
-  if (s.length <= 118) return trimTerminalPunctuation(s);
-
-  const clauses = s.split(/,|;|\sand\s/i).map(x => trimTerminalPunctuation(x)).filter(Boolean);
-  let out = "";
-  for (const clause of clauses) {
-    const next = out ? `${out}, ${clause}` : clause;
-    if (next.length > 118) break;
-    out = next;
-  }
-  if (out) return trimTerminalPunctuation(out);
-
-  return trimTerminalPunctuation(s.slice(0, 112));
+  return trimTerminalPunctuation(s);
 }
 
-function getAffirmation({ summary = "", wins = [] }) {
-  const lead = compressAffirmation(summary);
-  if (lead) return lead;
+function pickStandouts({ wins = [], highlights = [], summary = "", gender = "male" }) {
+  const pool = uniqueByMeaning([
+    ...(Array.isArray(wins) ? wins : []),
+    ...(Array.isArray(highlights) ? highlights : []),
+    summary,
+  ].map((item) => normalizeCopy(item, gender)).filter(Boolean));
 
-  const topWin = compressAffirmation((wins || [])[0]);
-  if (topWin) return topWin;
+  const out = [];
+  for (const item of pool) {
+    if (item.length > 52) continue;
+    out.push(titleCase(item));
+    if (out.length >= 3) break;
+  }
 
-  return "Strong pose energy, confident upper-body presence, and clear momentum through the set";
+  const fallbacks = gender === "female"
+    ? ["Toned Shape", "Clean Presence", "Pretty Momentum"]
+    : ["Aesthetic Base", "Upper-Body Pop", "Built Momentum"];
+
+  while (out.length < 3) {
+    const next = fallbacks[out.length];
+    if (!out.includes(next)) out.push(next);
+  }
+  return out.slice(0, 3);
 }
 
-function getBottomAffirmation({ summary = "", wins = [] }) {
-  const allText = [summary, ...(wins || [])].map(positiveClean).join(" ");
-  const t = inferThemes(allText);
+function inferHero({ headline = "", subhead = "", summary = "", gender = "male", strength = "" }) {
+  const source = [headline, subhead, summary, strength].map((t) => normalizeCopy(t, gender)).join(" ").toLowerCase();
 
-  if (t.arms && t.shoulders) {
-    return "Really starting to see the upper-body work show up here — better arm pop, stronger shoulder presence, and cleaner pose execution across the set";
-  }
-  if (t.back && t.posture) {
-    return "This one feels sharp — stronger posture, more shape through the upper frame, and a back shot that gives the whole set a better look";
-  }
-  if (t.confidence || t.momentum) {
-    return "Liking the direction here — more confidence in the poses, better presence on camera, and progress that is getting easier to see";
+  if (gender === "female") {
+    if (/snatch|waist/.test(source)) return "Waist Is Looking Snatched";
+    if (/glute|lower/.test(source)) return "Shape Is Coming Through";
+    if (/sculpt|toned|defined/.test(source)) return "Looking Sculpted";
+    if (/pretty|gorgeous|elegant|polished/.test(source)) return "Pretty And Polished";
+    if (/strong|athletic/.test(source)) return "Strong And Pretty";
+    return "Looking Sculpted";
   }
 
-  return "This set feels strong — better upper-body presence, cleaner posing, and the kind of progress that makes you want to keep stacking good days";
+  if (/jacked|stacked|huge/.test(source)) return "Looking Jacked";
+  if (/wide|lat|back/.test(source)) return "Back Is Hitting";
+  if (/shoulder|delt|arms|bicep/.test(source)) return "Upper Body Is Popping";
+  if (/shredded|lean|sharp/.test(source)) return "Looking Sharp";
+  if (/built|muscular/.test(source)) return "Looking Built";
+  return "Looking Built";
+}
+
+function inferDeck({ summary = "", subhead = "", levers = [], gender = "male" }) {
+  const pool = [summary, subhead, ...(Array.isArray(levers) ? levers : [])]
+    .map((t) => sentenceCase(normalizeCopy(t, gender)))
+    .filter(Boolean);
+
+  const preferred = pool.find((line) => line.length >= 28 && line.length <= 108);
+  if (preferred) return preferred;
+
+  return gender === "female"
+    ? "Clean pose set, pretty energy, and the kind of shape that makes people want their own check."
+    : "Strong pose set, real upper-body presence, and the kind of look that makes people want their own check.";
+}
+
+function inferNextLine({ summary = "", levers = [], gender = "male" }) {
+  const source = [summary, ...(Array.isArray(levers) ? levers : [])].map((t) => normalizeCopy(t, gender)).join(" ").toLowerCase();
+
+  if (gender === "female") {
+    if (/lean|sharp|cut/.test(source)) return "A little more leanness and this look gets even cleaner.";
+    if (/glute|lower/.test(source)) return "Keep building and the full look will hit even harder on camera.";
+    return "Stay consistent and this look gets even prettier and more dialed in.";
+  }
+
+  if (/lean|sharp|cut/.test(source)) return "A little more leanness and this one gets crazy sharp.";
+  if (/bulk|size|full/.test(source)) return "Keep stacking size and this upper-body look gets even louder.";
+  return "Stay consistent and this one gets more aesthetic every check.";
 }
 
 function wrapLines(ctx, text, maxWidth, maxLines = 2) {
-  const source = sentenceCase(text);
+  const source = cleanLine(text);
   if (!source) return [];
   const words = source.split(" ");
   const lines = [];
@@ -222,20 +196,18 @@ function wrapLines(ctx, text, maxWidth, maxLines = 2) {
     }
     if (line) lines.push(line);
     line = word;
-    if (lines.length === maxLines - 1) break;
+    if (lines.length >= maxLines - 1) break;
   }
 
-  const usedWords = lines.join(" ").split(" ").filter(Boolean).length;
-  const remaining = words.slice(usedWords);
-  const last = line || remaining.shift() || "";
-  if (last) lines.push(last);
+  if (line) lines.push(line);
 
-  if (remaining.length > 0 && lines.length) {
-    let tail = lines[lines.length - 1];
-    while (ctx.measureText(tail).width > maxWidth && tail.length > 3) {
+  if (lines.length > maxLines) return lines.slice(0, maxLines);
+  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
+    let tail = lines[maxLines - 1];
+    while (ctx.measureText(`${tail}…`).width > maxWidth && tail.length > 4) {
       tail = tail.slice(0, -1).trim();
     }
-    lines[lines.length - 1] = cleanLine(tail);
+    lines[maxLines - 1] = `${trimTerminalPunctuation(tail)}…`;
   }
 
   return lines.slice(0, maxLines).map(cleanLine);
@@ -247,9 +219,53 @@ function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
   return lines.length;
 }
 
+function drawChip(ctx, { x, y, text, fill, stroke, color }) {
+  ctx.save();
+  ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+  const w = ctx.measureText(text).width + 34;
+  roundRectPath(ctx, x, y, w, 38, 19);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fillText(text, x + 17, y + 25);
+  ctx.restore();
+  return w;
+}
+
+function buildTagSet({ gender = "male", standouts = [], summary = "", strength = "" }) {
+  const source = `${standouts.join(" ")} ${summary} ${strength}`.toLowerCase();
+  const tags = [];
+
+  const add = (value) => {
+    const v = titleCase(value);
+    if (v && !tags.includes(v)) tags.push(v);
+  };
+
+  if (gender === "female") {
+    if (/snatch|waist/.test(source)) add("Snatched");
+    if (/toned|sculpt|defined/.test(source)) add("Sculpted");
+    if (/pretty|gorgeous|polished|elegant/.test(source)) add("Pretty");
+    if (/strong|athletic/.test(source)) add("Athletic");
+    add("Pose Check");
+    add("Momentum");
+  } else {
+    if (/jacked|stacked|built|muscular/.test(source)) add("Built");
+    if (/lean|shredded|sharp/.test(source)) add("Sharp");
+    if (/shoulder|arm|upper/.test(source)) add("Upper-Body Pop");
+    if (/aesthetic|back|lat|wide/.test(source)) add("Aesthetic");
+    add("Pose Check");
+    add("Momentum");
+  }
+
+  return tags.slice(0, 3);
+}
+
 export async function buildPoseSessionSharePng({
-  headline = "POSE SESSION",
-  subhead = "Baseline locked ✅",
+  headline = "PHYSIQUE CHECK",
+  subhead = "",
   wins = [],
   poseImages = [],
   poseTitles = [],
@@ -261,19 +277,38 @@ export async function buildPoseSessionSharePng({
   highlights = [],
   summary = "",
   hashtag = "#SlimCalAI",
+  gender = "male",
+  strength = "",
+  levers = [],
 } = {}) {
-  const viralWins = pickViralWins(
-    Array.isArray(wins) && wins.length ? wins : highlights,
-    summary,
-    subhead,
-  );
-  const affirmation = getAffirmation({ summary, wins: viralWins });
-  const bottomAffirmation = getBottomAffirmation({ summary, wins: viralWins });
-  const bottomTitle = "PROGRESS NOTE";
-  const title = cleanLine(headline || "POSE SESSION") || "POSE SESSION";
-  const subtitleRaw = cleanLine(subhead || "");
-  const subtitle = /baseline locked/i.test(subtitleRaw) ? "" : subtitleRaw;
+  const g = String(gender || "male").toLowerCase() === "female" ? "female" : "male";
+  const theme = g === "female"
+    ? {
+        accent: "#ff5db2",
+        accentSoft: "rgba(255,93,178,0.18)",
+        accentStroke: "rgba(255,93,178,0.30)",
+        radial: "rgba(255,93,178,0.18)",
+        chip: "rgba(255,93,178,0.14)",
+        chipStroke: "rgba(255,93,178,0.24)",
+        chipText: "rgba(255,238,248,0.96)",
+      }
+    : {
+        accent: "#cfff4d",
+        accentSoft: "rgba(207,255,77,0.17)",
+        accentStroke: "rgba(207,255,77,0.30)",
+        radial: "rgba(207,255,77,0.18)",
+        chip: "rgba(207,255,77,0.14)",
+        chipStroke: "rgba(207,255,77,0.25)",
+        chipText: "rgba(245,255,224,0.96)",
+      };
+
+  const standouts = pickStandouts({ wins, highlights, summary, gender: g });
+  const hero = inferHero({ headline, subhead, summary, gender: g, strength });
+  const deck = inferDeck({ summary, subhead, levers, gender: g });
+  const nextLine = inferNextLine({ summary, levers, gender: g });
+  const tags = buildTagSet({ gender: g, standouts, summary, strength });
   const safeHashtag = cleanLine(hashtag || "#SlimCalAI") || "#SlimCalAI";
+  const label = g === "female" ? "POSE SESSION · HER CHECK" : "POSE SESSION · HIS CHECK";
 
   const W = 1080;
   const H = 1920;
@@ -283,64 +318,88 @@ export async function buildPoseSessionSharePng({
   const ctx = c.getContext("2d");
 
   const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, "#02060b");
-  bg.addColorStop(0.4, "#051019");
-  bg.addColorStop(1, "#03070d");
+  bg.addColorStop(0, "#05070c");
+  bg.addColorStop(0.42, "#09111a");
+  bg.addColorStop(1, "#04060a");
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  const glow = ctx.createRadialGradient(W * 0.5, H * 0.18, 40, W * 0.5, H * 0.18, H * 0.9);
-  glow.addColorStop(0, "rgba(0,255,190,0.18)");
-  glow.addColorStop(0.5, "rgba(0,255,190,0.06)");
-  glow.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = glow;
+  const topGlow = ctx.createRadialGradient(W * 0.55, H * 0.14, 30, W * 0.55, H * 0.14, H * 0.75);
+  topGlow.addColorStop(0, theme.radial);
+  topGlow.addColorStop(0.4, theme.accentSoft);
+  topGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = topGlow;
   ctx.fillRect(0, 0, W, H);
 
-  const pad = 54;
-  const cardX = pad;
-  const cardY = pad;
-  const cardW = W - pad * 2;
-  const cardH = H - pad * 2;
+  const sideGlow = ctx.createRadialGradient(W * 0.08, H * 0.70, 10, W * 0.08, H * 0.70, H * 0.45);
+  sideGlow.addColorStop(0, theme.accentSoft);
+  sideGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = sideGlow;
+  ctx.fillRect(0, 0, W, H);
+
+  const safeX = 74;
+  const safeY = 84;
+  const safeW = W - safeX * 2;
+  const safeH = H - safeY * 2;
 
   ctx.save();
-  roundRectPath(ctx, cardX, cardY, cardW, cardH, 42);
-  ctx.fillStyle = "rgba(8,13,18,0.90)";
+  roundRectPath(ctx, safeX, safeY, safeW, safeH, 42);
+  ctx.fillStyle = "rgba(8,11,17,0.76)";
   ctx.fill();
   ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(0,255,190,0.18)";
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.stroke();
   ctx.restore();
-
-  ctx.fillStyle = "rgba(0,255,190,0.20)";
-  ctx.fillRect(cardX + 26, cardY + 26, cardW - 52, 2);
-
-  ctx.fillStyle = "#E9FFF8";
-  ctx.font = "900 68px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(title.slice(0, 18), cardX + 26, cardY + 104);
-
-  if (subtitle) {
-    ctx.fillStyle = "rgba(233,255,248,0.90)";
-    ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(subtitle.slice(0, 34), cardX + 26, cardY + 152);
-  }
 
   ctx.save();
-  ctx.font = "800 26px system-ui, -apple-system, Segoe UI, Roboto";
-  const tagW = ctx.measureText(safeHashtag).width + 40;
-  const tagX = cardX + cardW - 26 - tagW;
-  const tagY = cardY + 110;
-  roundRectPath(ctx, tagX, tagY, tagW, 42, 21);
-  ctx.fillStyle = "rgba(0,255,190,0.14)";
-  ctx.fill();
+  roundRectPath(ctx, safeX + 18, safeY + 18, safeW - 36, safeH - 36, 34);
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(0,255,190,0.20)";
+  ctx.strokeStyle = theme.accentStroke;
   ctx.stroke();
-  ctx.fillStyle = "rgba(233,255,248,0.96)";
-  ctx.fillText(safeHashtag.slice(0, 16), tagX + 20, tagY + 29);
   ctx.restore();
 
-  const contentX = cardX + 26;
-  const contentW = cardW - 52;
+  let cursorY = safeY + 34;
+  const contentX = safeX + 34;
+  const contentW = safeW - 68;
+
+  ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
+  const labelW = ctx.measureText(label).width + 34;
+  roundRectPath(ctx, contentX, cursorY, labelW, 36, 18);
+  ctx.fillStyle = "rgba(255,255,255,0.05)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = theme.accentStroke;
+  ctx.stroke();
+  ctx.fillStyle = "rgba(245,248,255,0.95)";
+  ctx.fillText(label, contentX + 17, cursorY + 24);
+
+  const hashW = ctx.measureText(safeHashtag).width + 30;
+  const hashX = contentX + contentW - hashW;
+  roundRectPath(ctx, hashX, cursorY, hashW, 36, 18);
+  ctx.fillStyle = theme.chip;
+  ctx.fill();
+  ctx.strokeStyle = theme.chipStroke;
+  ctx.stroke();
+  ctx.fillStyle = theme.chipText;
+  ctx.fillText(safeHashtag, hashX + 15, cursorY + 24);
+
+  cursorY += 72;
+
+  ctx.fillStyle = "rgba(255,255,255,0.62)";
+  ctx.font = "900 18px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText(cleanLine(headline || "PHYSIQUE CHECK").slice(0, 30), contentX, cursorY);
+
+  cursorY += 26;
+  ctx.fillStyle = "#F7FAFF";
+  ctx.font = "900 72px system-ui, -apple-system, Segoe UI, Roboto";
+  const heroLines = wrapLines(ctx, hero, contentW - 10, 2);
+  heroLines.forEach((line, idx) => ctx.fillText(line, contentX, cursorY + idx * 74));
+  cursorY += Math.max(1, heroLines.length) * 74 + 12;
+
+  ctx.fillStyle = "rgba(235,242,255,0.88)";
+  ctx.font = "700 30px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, deck, contentX, cursorY, contentW - 20, 36, 3);
+  cursorY += 116;
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
     ? thumbs
@@ -359,157 +418,127 @@ export async function buildPoseSessionSharePng({
     }
   }
 
-  const imgTop = cardY + 168;
-  const imgGap = 18;
-  const imgW = Math.floor((cardW - 52 - imgGap * 2) / 3);
-  const imgH = 430;
-  const imgX0 = contentX;
+  const panelY = cursorY;
+  const panelH = 510;
+  const gap = 18;
+  const panelW = Math.floor((contentW - gap * 2) / 3);
+  const imageTitles = normalizedThumbs.map((thumb, i) => cleanLine(thumb?.title || poseTitles?.[i] || ["Front", "Side", "Back"][i] || "Pose"));
 
   for (let i = 0; i < 3; i++) {
-    const x = imgX0 + i * (imgW + imgGap);
-    const y = imgTop;
+    const x = contentX + i * (panelW + gap);
+    const y = panelY;
 
     ctx.save();
-    roundRectPath(ctx, x, y, imgW, imgH, 28);
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    roundRectPath(ctx, x, y, panelW, panelH, 28);
+    ctx.fillStyle = "rgba(0,0,0,0.46)";
     ctx.fill();
     ctx.clip();
-
     if (imgs[i]) {
-      drawCover(ctx, imgs[i], x, y, imgW, imgH);
+      drawCover(ctx, imgs[i], x, y, panelW, panelH);
     } else {
-      ctx.fillStyle = "rgba(0,255,190,0.08)";
-      ctx.fillRect(x, y, imgW, imgH);
+      const filler = ctx.createLinearGradient(x, y, x, y + panelH);
+      filler.addColorStop(0, theme.accentSoft);
+      filler.addColorStop(1, "rgba(255,255,255,0.02)");
+      ctx.fillStyle = filler;
+      ctx.fillRect(x, y, panelW, panelH);
     }
+    const shadow = ctx.createLinearGradient(x, y + panelH * 0.50, x, y + panelH);
+    shadow.addColorStop(0, "rgba(0,0,0,0)");
+    shadow.addColorStop(1, "rgba(0,0,0,0.82)");
+    ctx.fillStyle = shadow;
+    ctx.fillRect(x, y, panelW, panelH);
     ctx.restore();
 
     ctx.save();
-    roundRectPath(ctx, x, y, imgW, imgH, 28);
+    roundRectPath(ctx, x, y, panelW, panelH, 28);
     ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0,255,190,0.22)";
+    ctx.strokeStyle = i === 1 ? theme.accentStroke : "rgba(255,255,255,0.10)";
     ctx.stroke();
     ctx.restore();
 
-    const lbl = cleanLine(normalizedThumbs?.[i]?.title || "").slice(0, 16);
-    if (lbl) {
-      ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
-      const labelW = Math.min(imgW - 26, Math.max(126, ctx.measureText(lbl).width + 28));
-      ctx.save();
-      roundRectPath(ctx, x + 12, y + imgH - 52, labelW, 38, 14);
-      ctx.fillStyle = "rgba(0,0,0,0.50)";
-      ctx.fill();
-      ctx.fillStyle = "rgba(233,255,248,0.95)";
-      ctx.fillText(lbl, x + 26, y + imgH - 25);
-      ctx.restore();
-    }
+    const indexText = `0${i + 1}`;
+    ctx.fillStyle = "rgba(255,255,255,0.40)";
+    ctx.font = "900 18px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText(indexText, x + 16, y + 30);
+
+    ctx.fillStyle = "#F8FBFF";
+    ctx.font = "900 26px system-ui, -apple-system, Segoe UI, Roboto";
+    drawWrappedText(ctx, imageTitles[i] || "Pose", x + 16, y + panelH - 56, panelW - 32, 28, 2);
   }
 
-  const affX = contentX;
-  const affY = imgTop + imgH + 26;
-  const affW = contentW;
-  const affH = 176;
+  cursorY = panelY + panelH + 28;
 
   ctx.save();
-  roundRectPath(ctx, affX, affY, affW, affH, 26);
+  roundRectPath(ctx, contentX, cursorY, contentW, 178, 28);
   ctx.fillStyle = "rgba(255,255,255,0.04)";
   ctx.fill();
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255,210,120,0.20)";
+  ctx.strokeStyle = theme.accentStroke;
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = "rgba(255,210,120,0.95)";
-  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("WHAT HITS", affX + 22, affY + 34);
-  ctx.fillStyle = "rgba(233,255,248,0.94)";
-  ctx.font = "800 25px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, affirmation, affX + 22, affY + 76, affW - 44, 29, 4);
+  ctx.fillStyle = theme.chipText;
+  ctx.font = "900 22px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("STANDS OUT", contentX + 24, cursorY + 36);
 
-  let y = affY + affH + 40;
-  ctx.fillStyle = "#E9FFF8";
-  ctx.font = "900 38px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("WINS", contentX, y);
-  y += 22;
-
-  const boxW = contentW;
-  for (const item of viralWins.slice(0, 3)) {
-    y += 16;
-    const lines = (() => {
-      ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
-      return wrapLines(ctx, item, boxW - 54, 2);
-    })();
-    const boxH = lines.length > 1 ? 94 : 72;
-
-    ctx.save();
-    roundRectPath(ctx, contentX, y, boxW, boxH, 20);
-    ctx.fillStyle = "rgba(0,0,0,0.34)";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0,255,190,0.16)";
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.fillStyle = "rgba(233,255,248,0.94)";
-    ctx.font = "800 28px system-ui, -apple-system, Segoe UI, Roboto";
-    lines.forEach((line, idx) => {
-      ctx.fillText(line, contentX + 24, y + 31 + idx * 32);
-    });
-
-    ctx.fillStyle = "rgba(0,255,190,0.92)";
-    ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText("•", contentX + 8, y + 31);
-
-    y += boxH;
+  let chipX = contentX + 24;
+  let chipY = cursorY + 56;
+  for (const text of standouts) {
+    const width = ctx.measureText(text).width + 34;
+    if (chipX + width > contentX + contentW - 24) {
+      chipX = contentX + 24;
+      chipY += 50;
+    }
+    chipX += drawChip(ctx, {
+      x: chipX,
+      y: chipY,
+      text,
+      fill: theme.chip,
+      stroke: theme.chipStroke,
+      color: theme.chipText,
+    }) + 12;
   }
 
-  const bottomY = y + 28;
-  const bottomH = Math.max(150, cardY + cardH - 112 - bottomY);
+  cursorY += 206;
+
   ctx.save();
-  roundRectPath(ctx, contentX, bottomY, boxW, bottomH, 24);
-  ctx.fillStyle = "rgba(255,255,255,0.035)";
+  roundRectPath(ctx, contentX, cursorY, contentW, 204, 28);
+  const noteGrad = ctx.createLinearGradient(contentX, cursorY, contentX + contentW, cursorY + 204);
+  noteGrad.addColorStop(0, "rgba(255,255,255,0.05)");
+  noteGrad.addColorStop(1, theme.accentSoft);
+  ctx.fillStyle = noteGrad;
   ctx.fill();
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(0,255,190,0.12)";
+  ctx.strokeStyle = theme.accentStroke;
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = "rgba(0,255,190,0.92)";
-  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText(bottomTitle, contentX + 24, bottomY + 38);
+  ctx.fillStyle = "rgba(255,255,255,0.68)";
+  ctx.font = "900 20px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("NEXT UP", contentX + 24, cursorY + 34);
+  ctx.fillStyle = "#F7FAFF";
+  ctx.font = "800 37px system-ui, -apple-system, Segoe UI, Roboto";
+  drawWrappedText(ctx, nextLine, contentX + 24, cursorY + 82, contentW - 48, 42, 3);
 
-  ctx.fillStyle = "rgba(233,255,248,0.92)";
-  ctx.font = "800 29px system-ui, -apple-system, Segoe UI, Roboto";
-  drawWrappedText(ctx, bottomAffirmation, contentX + 24, bottomY + 84, boxW - 48, 34, 5);
+  cursorY += 236;
 
-  const chipY = bottomY + bottomH - 62;
-  const chips = ["Upper body", "Dialed in", "Momentum"];
-  let chipX = contentX + 24;
+  const footerY = safeY + safeH - 114;
+  ctx.fillStyle = "rgba(255,255,255,0.90)";
+  ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("Get your own on SlimCal AI", contentX, footerY);
+  ctx.fillStyle = "rgba(255,255,255,0.56)";
   ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
-  for (const chip of chips) {
-    const chipW = ctx.measureText(chip).width + 32;
-    ctx.save();
-    roundRectPath(ctx, chipX, chipY, chipW, 34, 17);
-    ctx.fillStyle = "rgba(0,255,190,0.11)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,255,190,0.16)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = "rgba(233,255,248,0.86)";
-    ctx.fillText(chip, chipX + 16, chipY + 23);
-    ctx.restore();
-    chipX += chipW + 12;
+  ctx.fillText("Pose. Scan. Post. Repeat.", contentX, footerY + 36);
+
+  const meta = cleanLine(localDay || trackLabel || tier || "").slice(0, 26);
+  if (meta) {
+    ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
+    const mw = ctx.measureText(meta).width;
+    ctx.fillText(meta, contentX + contentW - mw, footerY + 36);
   }
 
-  const footY = cardY + cardH - 34;
-  ctx.fillStyle = "rgba(233,255,248,0.58)";
-  ctx.font = "800 24px system-ui, -apple-system, Segoe UI, Roboto";
-  ctx.fillText("Slimcal.ai", cardX + 26, footY);
-
-  const rightFoot = cleanLine(localDay || trackLabel || safeHashtag).slice(0, 20);
-  if (rightFoot) {
-    const m = ctx.measureText(rightFoot);
-    ctx.fillText(rightFoot, cardX + cardW - 26 - m.width, footY);
-  }
+  ctx.fillStyle = theme.accent;
+  ctx.fillRect(contentX, footerY + 58, contentW, 2);
 
   return c.toDataURL("image/png");
 }

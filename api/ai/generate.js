@@ -168,8 +168,8 @@ function fallbackPoseSession(gender = "male") {
     percentile: 19,
     strength: female ? "Presence" : "Consistency",
     horizon_days: 90,
-    momentumNote: female ? "Baseline beauty check locked in — future scans can track a prettier, more polished trend over time." : "Baseline jacked check locked in — future scans can track a stronger, more built trend over time.",
-    baselineComparison: female ? "First physique memory saved — future scans can compare your silhouette and presentation against today." : "First physique memory saved — future scans can compare your muscularity and presence against today.",
+    momentumNote: female ? "Base look saved — future scans can track a prettier, more polished trend over time." : "Base look saved — future scans can track a stronger, more jacked trend over time.",
+    baselineComparison: female ? "First physique memory saved — future scans can compare your look and polish against today." : "First physique memory saved — future scans can compare how much more built your look gets against today.",
     muscleSignals: {
       delts: 0.62,
       arms: 0.64,
@@ -399,17 +399,17 @@ function buildTrendNarrative({ session, recentScans = [], gender = "male", goalT
 
   if (!scans.length) {
     if (gender === "female") {
-      momentumNote = "This is your baseline beauty check, so the win today is locking in a clean starting point you can build on. The overall presentation already reads polished, pretty, and athletic.";
-      baselineComparison = "First physique memory saved — future scans can now track how your silhouette and polish evolve over time.";
+      momentumNote = "This is your first physique check, and it already reads pretty, polished, and athletic. You have a clean base to build on and future scans can make the glow-up way more obvious.";
+      baselineComparison = "First physique memory saved — future scans can now track how your look and polish level up over time.";
       highlight = "Baseline beauty check locked in";
     } else {
-      momentumNote = "This is your baseline physique check, so the win today is locking in a strong starting point you can measure against. The overall presentation already reads muscular, athletic, and built.";
-      baselineComparison = "First physique memory saved — future scans can now track how much more jacked and dialed-in you look over time.";
+      momentumNote = "This is your first physique check, and it already reads muscular, athletic, and built. You have a strong base right now and future scans can show just how much more jacked you get.";
+      baselineComparison = "First physique memory saved — future scans can now track how much more jacked and dialed-in your look gets over time.";
       highlight = "Baseline jacked check locked in";
     }
   } else if (top.delta > 0.045) {
     if (gender === "female") {
-      momentumNote = `Compared with ${days}, your ${label} is reading cleaner today, and the overall silhouette feels more polished and beautifully put together. This scan lands with a prettier, more confident energy while still feeling athletic and real.`;
+      momentumNote = `Compared with ${days}, your ${label} is reading cleaner today, and the overall look feels more polished and more photogenic. This scan lands with prettier, more confident energy while still feeling athletic and real.`;
       baselineComparison = `Your ${label} is trending above your recent baseline, which is a strong sign that your current look is becoming more refined and photogenic.`;
       highlight = `${label.charAt(0).toUpperCase() + label.slice(1)} is trending prettier than your recent baseline`;
     } else {
@@ -419,8 +419,8 @@ function buildTrendNarrative({ session, recentScans = [], gender = "male", goalT
     }
   } else {
     if (gender === "female") {
-      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read feels polished, pretty, and steadily more put together.`;
-      baselineComparison = "Your recent scans are clustering in a good way, which means your silhouette and presentation are becoming more repeatable and reliable.";
+      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read feels polished, pretty, and steadily more dialed in.`;
+      baselineComparison = "Your recent scans are clustering in a good way, which means your look is becoming more repeatable and easier to trust.";
       highlight = "Your polished look is staying consistent";
     } else {
       momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read still lands as muscular, strong, and convincingly built.`;
@@ -431,11 +431,11 @@ function buildTrendNarrative({ session, recentScans = [], gender = "male", goalT
 
   if (goalHint === "cutting") {
     baselineComparison += gender === "female"
-      ? " For a leaner goal, that kind of cleaner presentation is exactly the right direction."
+      ? " For a leaner goal, that cleaner look is exactly the right direction."
       : " For a leaner goal, that sharper presentation is exactly the right direction.";
   } else if (goalHint === "bulking") {
     baselineComparison += gender === "female"
-      ? " For a sculpted-building goal, the extra presence is a great sign."
+      ? " For a sculpted-building goal, that extra presence is a great sign."
       : " For a muscle-building goal, the extra fullness is a great sign.";
   }
 
@@ -1635,11 +1635,11 @@ const freeBypass =
         "Very important: only analyze what is actually visible in frame. If a body part is cropped out, covered, too dark, blurred, or only partially visible, explicitly say that it is not clearly in frame or only partially visible. " +
         "Do not invent leg, glute, hip, or lower-body development commentary unless those areas are clearly visible in at least one image. For out-of-frame lower body areas, say you cannot confidently assess them yet. " +
         "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
-        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, polished silhouette, beauty, elegance, and confidence without objectifying language. Use words like pretty, polished, graceful, sculpted, beautiful, athletic, and motivating when genuinely supported by the scan. " +
-        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. Use words like jacked, fuller, broader, more built, more muscular, and sharper when genuinely supported by the scan. " +
+        "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, clean shape, beauty, elegance, and confidence without objectifying language. Use natural words like sculpted, toned, snatched, gorgeous, elegant, pretty, polished, athletic, and strong when genuinely supported by the scan. " +
+        "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. Use natural words like jacked, aesthetic, built, shredded, stacked, wide, lean, sharp, muscular, and fuller when genuinely supported by the scan. " +
         "If recent physique memory is provided, compare today's look against that recent baseline in a believable, positive-only way. Favor trend language like stronger than your recent baseline, more polished than your recent baseline, or more consistent than your recent baseline when the structured numbers support it. " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
-        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
+        "Highlights should be positive-only, specific, and short enough to feel cool on a social share card. BestDeveloped and biggestOpportunity should use natural, youth-friendly fitness language, not clinical or awkward phrasing. Avoid weird wording like silhouette, build read, visual signal, or baseline to measure against. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
 
       const content = [
         { type: "text", text: userText },
