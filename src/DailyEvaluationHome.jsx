@@ -1577,8 +1577,12 @@ Score: ${bundle.derived.score}/100
       sx={{
         // Mobile-first: let the carousel own the viewport height.
         p: { xs: 0, sm: 3 },
+        width: "100%",
         maxWidth: { xs: "100%", sm: 1150 },
         mx: "auto",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
       }}
     >
       <Stack
@@ -1586,7 +1590,7 @@ Score: ${bundle.derived.score}/100
         spacing={1}
         alignItems={{ xs: "flex-start", sm: "center" }}
         justifyContent="space-between"
-        sx={{ display: { xs: "none", sm: "flex" } }}
+        sx={{ display: { xs: "none", sm: "flex" }, width: "100%", maxWidth: 980, mx: "auto" }}
       >
         <Box>
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(2,6,23,0.98)" }}>
@@ -1606,6 +1610,9 @@ Score: ${bundle.derived.score}/100
         sx={{
           mt: { xs: 0, sm: 2 },
           px: { xs: 2, sm: 0 },
+          width: "100%",
+          maxWidth: { xs: "100%", sm: 980 },
+          mx: "auto",
           // Full-screen carousel on mobile (accounts for app header + bottom nav + iOS safe area).
           height: {
             xs: "calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))",
@@ -1613,6 +1620,8 @@ Score: ${bundle.derived.score}/100
           },
           display: "flex",
           flexDirection: isSingleView ? "column" : "row",
+          justifyContent: "center",
+          alignItems: isSingleView ? "center" : "stretch",
           gap: 1.5,
           overflowX: isSingleView ? "hidden" : "auto",
           overflowY: { xs: isSingleView ? "auto" : "hidden", sm: "visible" },
