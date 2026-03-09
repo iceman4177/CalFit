@@ -902,15 +902,24 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  const scheduleMealIdeasScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260] } = {}) => {
-    retries.forEach((delay) => {
+  const scheduleMealIdeasScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260, 520, 900] } = {}) => {
+    retries.forEach((delay, idx) => {
       window.setTimeout(() => {
         try {
           const el = ref?.current || suggestRef.current;
           if (!el) return;
-          const rect = el.getBoundingClientRect();
-          const top = Math.max(0, window.scrollY + rect.top - offset);
-          window.scrollTo({ top, behavior: 'smooth' });
+
+          // iOS Safari is more reliable when we first anchor the element into view,
+          // then apply the same offset correction used by the workout flow.
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+          window.requestAnimationFrame(() => {
+            try {
+              const rect = el.getBoundingClientRect();
+              const top = Math.max(0, window.scrollY + rect.top - offset);
+              window.scrollTo({ top, behavior: idx === 0 ? 'auto' : 'smooth' });
+            } catch {}
+          });
         } catch {}
       }, delay);
     });
@@ -929,11 +938,17 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     setShowSuggest(true);
-  }, [showSuggest]);
+
+    // Match the post-render AI workout feel: open the panel and immediately
+    // begin guiding the viewport toward the ideas/loading container.
+    window.setTimeout(() => {
+      scheduleMealIdeasScroll(suggestionBoxRef, { offset: 96, retries: [0, 140, 320, 640, 980] });
+    }, 0);
+  }, [showSuggest, scheduleMealIdeasScroll]);
 
   useEffect(() => {
     if (!showSuggest) return;
-    scheduleMealIdeasScroll(suggestionBoxRef, { offset: 96, retries: [0, 120, 260] });
+    scheduleMealIdeasScroll(suggestionBoxRef, { offset: 96, retries: [0, 140, 320, 640, 980] });
   }, [showSuggest, scheduleMealIdeasScroll]);
 
   useEffect(() => {
