@@ -43,7 +43,7 @@ import { postAI, getAIQuotaStatus } from "./lib/ai";
 
 const MALE_POSES = [
   { key: "front_double_bi", title: "Double Bi", subtitle: "Elbows up · flex biceps · chin neutral" },
-  { key: "lat_spread", title: "Lat Spread", subtitle: "Chest up · spread lats · stay tall" },
+  { key: "lat_spread", title: "Front Lat Spread", subtitle: "Hands near waist · flare lats wide · elbows slightly forward" },
   { key: "back_double_bi", title: "Back Double Bi", subtitle: "Turn around · elbows up · spread back" },
 ];
 
@@ -161,7 +161,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
   const imageMap = {
     front_double_bi: maleFrontOutline,
-    lat_spread: maleSideOutline,
+    lat_spread: maleFrontOutline,
     back_double_bi: maleBackOutline,
     front_scan: femaleFrontOutline,
     side_scan: femaleSideOutline,
@@ -169,7 +169,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   };
 
   const src = imageMap[poseKey] || maleFrontOutline;
-  const frameWidth = isFemaleCue ? "min(74%, 360px)" : "min(82%, 400px)";
+  const frameWidth = isFemaleCue ? "min(74%, 360px)" : "min(90%, 440px)";
   const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(57,255,20,0.24)";
   const frameBg = isFemaleCue ? "rgba(36, 8, 22, 0.04)" : "rgba(5, 20, 12, 0.04)";
   const frameShadow = isFemaleCue
@@ -784,11 +784,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: { xs: "min(100%, 368px)", sm: "min(100%, 420px)", md: "100%" },
+                  width: { xs: "min(100%, 392px)", sm: "min(100%, 440px)", md: "100%" },
                   mx: "auto",
-                  aspectRatio: "3/4",
-                  height: { xs: "min(60svh, 540px)", md: "auto" },
-                  maxHeight: { xs: "60svh", md: "none" },
+                  aspectRatio: { xs: "4 / 5", md: "3 / 4" },
+                  height: { xs: "min(52svh, 520px)", md: "auto" },
+                  maxHeight: { xs: "52svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
@@ -803,7 +803,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "contain" : "cover",
+                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "cover" : "cover",
                     background: "#000",
                     transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   }}
@@ -822,7 +822,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   mt: { xs: "auto", md: 1.25 },
                   display: "grid",
                   gap: { xs: 1, md: 1.2 },
-                  pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 2px)", md: 0 },
+                  pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 76px)", md: 0 },
                 }}
               >
                 <Box
