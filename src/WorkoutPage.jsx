@@ -301,6 +301,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
   const [suggestedReadyTick, setSuggestedReadyTick] = useState(0);
+  const [flowFocus, setFlowFocus] = useState('idle'); // idle | suggested | accepted
 
   // ✅ stable draft id ref for this workout session
   const activeWorkoutSessionIdRef = useRef(getOrCreateActiveWorkoutSessionId());
@@ -1283,6 +1284,7 @@ setNewExercise({
     });
     setShowSuggestCard(false);
     setAiSuggestLoading(false);
+    setFlowFocus('accepted');
     setCumulativeExercises(enriched);
     setPendingAcceptedScroll(true);
   };
@@ -1332,7 +1334,7 @@ setNewExercise({
   }, [pendingAcceptedScroll, cumulativeExercises.length]);
 
   useEffect(() => {
-    if (!showSuggestCard || aiSuggestLoading || !suggestedReadyTick) return;
+    if (!showSuggestCard || aiSuggestLoading || !suggestedReadyTick || flowFocus !== 'suggested') return;
 
     let cancelled = false;
     let raf1 = 0;
@@ -1367,7 +1369,7 @@ setNewExercise({
       if (raf1) window.cancelAnimationFrame(raf1);
       if (raf2) window.cancelAnimationFrame(raf2);
     };
-  }, [showSuggestCard, aiSuggestLoading, suggestedReadyTick]);
+  }, [showSuggestCard, aiSuggestLoading, suggestedReadyTick, flowFocus]);
 
   useEffect(() => {
     let active = true;
@@ -1394,10 +1396,12 @@ setNewExercise({
         setShowUpgrade(true);
         return;
       }
+      setFlowFocus('idle');
       setShowSuggestCard(true);
       return;
     }
     setShowSuggestCard(false);
+    setFlowFocus('idle');
   };
 
   // ---- derived UI stats for a compact strip ----
@@ -1554,13 +1558,16 @@ setNewExercise({
   }
 
   const simplifiedGenerationMode = showSuggestCard && aiSuggestLoading;
+  const suggestedFocus = showSuggestCard && !aiSuggestLoading && flowFocus === 'suggested';
+  const acceptedFocus = !showSuggestCard && flowFocus === 'accepted';
   const simplifiedSuggestMode = showSuggestCard;
-  const hideChromeForFocus = showSuggestCard || pendingAcceptedScroll;
+  const hideChromeForFocus = simplifiedGenerationMode || suggestedFocus || acceptedFocus || pendingAcceptedScroll;
 
   // --- main UI ---
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: { xs: 12, md: 4 } }}>
       <Stack spacing={{ xs: 2, md: 3 }}>
+        {!suggestedFocus && !acceptedFocus && (
         <Box
           sx={{
             display: 'flex',
@@ -1612,6 +1619,7 @@ setNewExercise({
             )}
           </Stack>
         </Box>
+        )}
 
         {!hideChromeForFocus && !isProUser() && (
           <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
@@ -1643,21 +1651,22 @@ setNewExercise({
             sx={{
               maxWidth: simplifiedSuggestMode ? 720 : 'none',
               mx: simplifiedSuggestMode ? 'auto' : 0,
-              width: '100%'
+              width: '100%',
+              pt: suggestedFocus ? { xs: 2, md: 3 } : 0
             }}
           >
             <SuggestedWorkoutCard
               userData={userData}
               onAccept={handleAcceptSuggested}
               onLoadingChange={setAiSuggestLoading}
-              onReady={() => setSuggestedReadyTick(Date.now())}
+              onReady={() => { setSuggestedReadyTick(Date.now()); setFlowFocus('suggested'); }}
             />
           </Box>
         )}
 
         {!showSuggestCard && (
         <Grid container spacing={{ xs: 2.5, md: 3 }}>
-          {!pendingAcceptedScroll && (
+          {!pendingAcceptedScroll && !acceptedFocus && (
           <Grid item xs={12} md={showSuggestCard ? 7 : 8} sx={{ order: { xs: cumulativeExercises.length > 0 ? 2 : 1, md: 1 } }}>
             <Stack spacing={2.5}>
               <Paper
@@ -1728,7 +1737,7 @@ setNewExercise({
           </Grid>
           )}
 
-          <Grid item xs={12} md={pendingAcceptedScroll ? 12 : (showSuggestCard ? 5 : 4)} sx={{ order: { xs: cumulativeExercises.length > 0 ? 1 : 2, md: 2 } }}>
+          <Grid item xs={12} md={(pendingAcceptedScroll || acceptedFocus) ? 12 : (showSuggestCard ? 5 : 4)} sx={{ order: { xs: 1, md: 2 }, maxWidth: { md: acceptedFocus ? 720 : 'none' }, mx: { md: acceptedFocus ? 'auto' : 0 } }}>
             <Stack spacing={2.5}>
               <Paper
                 ref={sessionLogRef}
@@ -1738,7 +1747,7 @@ setNewExercise({
                   borderRadius: 4,
                   border: '1px solid rgba(15,23,42,0.08)',
                   boxShadow: '0 12px 32px rgba(15,23,42,0.05)',
-                  minHeight: 220
+                  minHeight: acceptedFocus ? 'calc(100vh - 180px)' : 220
                 }}
               >
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>

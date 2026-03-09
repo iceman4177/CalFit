@@ -380,10 +380,6 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
             </Box>
           </Box>
 
-          <Typography variant="body2" color="text.secondary" sx={{ mt: -0.5 }}>
-            Pick today’s focus
-          </Typography>
-
           <WorkoutTypePicker intent={trainingIntent} value={split} onChange={onPickSplit} />
 
           <Box
@@ -420,11 +416,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
               display: 'flex',
               gap: 1.25,
               flexWrap: 'wrap',
-              position: { xs: 'sticky', md: 'static' },
-              bottom: { xs: 0, md: 'auto' },
-              pt: 0.5,
-              pb: { xs: 0.5, md: 0 },
-              backgroundColor: { xs: 'rgba(255,255,255,0.96)', md: 'transparent' }
+              pt: 0.5
             }}
           >
             <Button variant="outlined" onClick={handleRefresh} sx={{ borderRadius: 3, fontWeight: 700 }}>
