@@ -19,6 +19,7 @@ import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 import maleFrontOutline from "./assets/poseGhosts/male_front_outline.png";
 import maleSideOutline from "./assets/poseGhosts/male_side_outline.png";
 import maleBackOutline from "./assets/poseGhosts/male_back_outline.png";
+import maleLatSpread from "./assets/poseGhosts/male_lat_spread.png";
 import femaleFrontOutline from "./assets/poseGhosts/female_front_outline.png";
 import femaleSideOutline from "./assets/poseGhosts/female_side_outline.png";
 import femaleBackOutline from "./assets/poseGhosts/female_back_outline.png";
@@ -60,6 +61,7 @@ const ALL_OUTLINE_ASSETS = [
   maleFrontOutline,
   maleSideOutline,
   maleBackOutline,
+  maleLatSpread,
   femaleFrontOutline,
   femaleSideOutline,
   femaleBackOutline,
@@ -161,7 +163,7 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
   const imageMap = {
     front_double_bi: maleFrontOutline,
-    lat_spread: maleFrontOutline,
+    lat_spread: maleLatSpread,
     back_double_bi: maleBackOutline,
     front_scan: femaleFrontOutline,
     side_scan: femaleSideOutline,
