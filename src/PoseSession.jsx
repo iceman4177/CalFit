@@ -157,54 +157,6 @@ function buildMemoryAwareShareSummary(result, isFemale = false) {
 }
 
 
-
-function naturalShareTitles(captures = [], isFemale = false) {
-  const map = isFemale
-    ? { front_scan: "Front", side_scan: "Side", back_scan: "Back" }
-    : { front_double_bi: "Front", lat_spread: "Lat Spread", back_double_bi: "Back" };
-  return (captures || []).map((c, i) => ({
-    title: map[c?.poseKey] || map[c?.key] || c?.title || ["Front", "Side", "Back"][i] || "Pose",
-    dataUrl: c?.fullDataUrl || c?.dataUrl || "",
-  }));
-}
-
-function inferShareHeadline(result, isFemale = false) {
-  const text = [
-    result?.physiqueSnapshot?.summary_seed?.strongest_feature,
-    ...(Array.isArray(result?.bestDeveloped) ? result.bestDeveloped : []),
-    ...(Array.isArray(result?.highlights) ? result.highlights : []),
-    result?.momentumNote,
-    result?.baselineComparison,
-  ].join(" ").toLowerCase();
-
-  if (isFemale) {
-    if (/snatch|waist/.test(text)) return "Waist is looking snatched";
-    if (/sculpt|tone|defined/.test(text)) return "Looking sculpted";
-    if (/pretty|gorgeous|polished|elegant/.test(text)) return "Pretty and polished";
-    if (/strong|athletic/.test(text)) return "Strong and pretty";
-    return "Looking sculpted";
-  }
-
-  if (/jacked|stacked|huge/.test(text)) return "Looking jacked";
-  if (/shoulder|delt|arm|bicep/.test(text)) return "Upper body is popping";
-  if (/back|lat|wide/.test(text)) return "Back is hitting";
-  if (/lean|sharp|shredded/.test(text)) return "Looking sharp";
-  return "Looking built";
-}
-
-function inferShareDeck(result, isFemale = false) {
-  const lines = [result?.momentumNote, result?.baselineComparison, result?.report]
-    .map((t) => String(t || "").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-
-  const natural = lines.find((line) => line.length >= 28 && line.length <= 110);
-  if (natural) return natural;
-
-  return isFemale
-    ? "Clean pose set, pretty energy, and the kind of shape that makes people want their own check."
-    : "Strong pose set, real upper-body presence, and the kind of look that makes people want their own check.";
-}
-
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
   const imageMap = {
@@ -601,16 +553,13 @@ export default function PoseSession() {
         .slice(0, 2);
 
       const pngDataUrl = await buildPoseSessionSharePng({
-        headline: "PHYSIQUE CHECK",
-        subhead: inferShareHeadline(result, isFemale),
+        headline: isFemale ? "PHYSIQUE CHECK" : "PHYSIQUE CHECK",
+        subhead: isFemale ? "Pretty, polished, and trending up" : "Built, sharp, and trending up",
         wins: topWins,
-        highlights: result?.highlights || [],
         levers: progressNotes,
-        summary: inferShareDeck(result, isFemale) || shareSummary,
+        summary: shareSummary,
         hashtag: "#SlimCalAI",
-        gender: isFemale ? "female" : "male",
-        strength: result?.strength || result?.physiqueSnapshot?.summary_seed?.strongest_feature || "",
-        thumbs: naturalShareTitles(captures, isFemale),
+        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res for export
       });
 await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     } catch (e) {
