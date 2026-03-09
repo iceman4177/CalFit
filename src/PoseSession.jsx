@@ -616,7 +616,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
           minHeight: { xs: "100svh", md: "auto" },
         }}
       >
-        <CardContent sx={{ p: { xs: 1, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
+        <CardContent sx={{ p: { xs: 0.9, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: { xs: 1, md: 2 } }}>
             <Button
               startIcon={<ArrowBackIcon />}
@@ -784,11 +784,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: { xs: "min(100%, 320px)", md: "100%" },
+                  width: { xs: "min(100%, 368px)", sm: "min(100%, 420px)", md: "100%" },
                   mx: "auto",
                   aspectRatio: "3/4",
-                  height: { xs: "min(54svh, 440px)", md: "auto" },
-                  maxHeight: { xs: "54svh", md: "none" },
+                  height: { xs: "min(60svh, 540px)", md: "auto" },
+                  maxHeight: { xs: "60svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
@@ -815,69 +815,71 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   active={outlinePulseActive}
                   color={outlineColor}
                 />
-
-                {/* Minimal “fancy” prompt overlay (no tracking) */}
-                <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                  <Box
-                    sx={{
-                      position: "absolute",
-                      left: 10,
-                      right: 10,
-                      bottom: 10,
-                      p: { xs: 1.35, md: 2 },
-                      borderRadius: 3,
-                      bgcolor: "rgba(0,0,0,0.55)",
-                      border: "1px solid rgba(120,255,220,0.20)",
-                      backdropFilter: "blur(6px)",
-                    }}
-                  >
-                    <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>
-                      {pose.title}
-                    </Typography>
-                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, mt: 0.4, lineHeight: 1.35 }}>
-                      {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
-                    </Typography>
-
-                    <Divider sx={{ my: { xs: 0.9, md: 1.2 }, borderColor: "rgba(255,255,255,0.08)" }} />
-
-                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 11, md: 12 } }}>
-                      Auto-capturing in{" "}
-                      <b style={{ color: "rgba(120,255,220,0.95)" }}>
-                        {Math.max(0, Math.ceil(countdownMs / 1000))}
-                      </b>{" "}
-                      …
-                    </Typography>
-                  </Box>
-                </Box>
               </Box>
 
               <Box
                 sx={{
-                  px: { xs: 1.1, md: 2 },
-                  py: { xs: 0.8, md: 1.4 },
-                  borderRadius: 999,
-                  border: "1px solid rgba(120,255,220,0.18)",
-                  bgcolor: "rgba(0,0,0,0.22)",
+                  mt: { xs: "auto", md: 1.25 },
+                  display: "grid",
+                  gap: { xs: 1, md: 1.2 },
+                  pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 2px)", md: 0 },
                 }}
               >
-                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
-                  LOCK-ON
-                </Typography>
-                <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <Box
-                    sx={{
-                      height: "100%",
-                      width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
-                      bgcolor: "rgba(120,255,220,0.85)",
-                      boxShadow: "0 0 18px rgba(120,255,220,0.25)",
-                    }}
-                  />
+                <Box
+                  sx={{
+                    p: { xs: 1.2, md: 1.5 },
+                    borderRadius: 3,
+                    bgcolor: "rgba(0,0,0,0.55)",
+                    border: "1px solid rgba(120,255,220,0.20)",
+                    backdropFilter: "blur(6px)",
+                  }}
+                >
+                  <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5, fontSize: { xs: 15, md: 16 } }}>
+                    {pose.title}
+                  </Typography>
+                  <Typography sx={{ color: bodyColor, fontSize: { xs: 12.5, md: 13 }, mt: 0.35, lineHeight: 1.35 }}>
+                    {pose.subtitle}
+                  </Typography>
+
+                  <Divider sx={{ my: { xs: 0.85, md: 1 }, borderColor: "rgba(255,255,255,0.08)" }} />
+
+                  <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 12, md: 12.5 } }}>
+                    Auto-capturing in{" "}
+                    <b style={{ color: "rgba(120,255,220,0.95)" }}>
+                      {Math.max(0, Math.ceil(countdownMs / 1000))}
+                    </b>{" "}
+                    …
+                  </Typography>
                 </Box>
-                <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
-<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                </Stack>
+
+                <Box
+                  sx={{
+                    px: { xs: 1.1, md: 2 },
+                    py: { xs: 0.8, md: 1.1 },
+                    borderRadius: 999,
+                    border: "1px solid rgba(120,255,220,0.18)",
+                    bgcolor: "rgba(0,0,0,0.22)",
+                  }}
+                >
+                  <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
+                    LOCK-ON
+                  </Typography>
+                  <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <Box
+                      sx={{
+                        height: "100%",
+                        width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
+                        bgcolor: "rgba(120,255,220,0.85)",
+                        boxShadow: "0 0 18px rgba(120,255,220,0.25)",
+                      }}
+                    />
+                  </Box>
+                  <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
+                    <Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                    <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                    <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
+                  </Stack>
+                </Box>
               </Box>
             </Stack>
           )}
