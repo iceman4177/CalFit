@@ -1542,33 +1542,26 @@ setNewExercise({
     <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
       {(showIdle || showGenerating) && renderHeroCard()}
 
-      {showGenerating && (
-        <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
-          {showSuggestCard && (
-            <SuggestedWorkoutCard
-              userData={userData}
-              onAccept={handleAcceptSuggested}
-              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={handleSuggestedReady}
-            />
-          )}
+      {showSuggestCard && (showGenerating || showSuggested) && (
+        <Box
+          ref={suggestRef}
+          sx={{ mt: showGenerating ? 3 : { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}
+        >
+          <SuggestedWorkoutCard
+            userData={userData}
+            onAccept={handleAcceptSuggested}
+            onLoadingChange={(isLoading) => {
+              if (isLoading) {
+                setAiFlowMode('generating');
+                return;
+              }
+            }}
+            onReady={handleSuggestedReady}
+          />
         </Box>
       )}
 
-      {showSuggested && (
-        <Box ref={suggestRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
-          {showSuggestCard && (
-            <SuggestedWorkoutCard
-              userData={userData}
-              onAccept={handleAcceptSuggested}
-              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={handleSuggestedReady}
-            />
-          )}
-        </Box>
-      )}
-
-      {showAccepted && (
+      {(showAccepted || (cumulativeExercises.length > 0 && !showGenerating && !showSuggested)) && (
         <Box ref={sessionLogRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: 2.25 }}>
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, mb: 1.5 }}>Current Session Logs</Typography>
