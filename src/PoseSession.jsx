@@ -16,12 +16,12 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
-import maleFrontOutline from "./assets/poseGhosts/male_front_double_bicep.png";
-import maleSideOutline from "./assets/poseGhosts/male_front_lat_spread.png";
-import maleBackOutline from "./assets/poseGhosts/male_back_double_bicep.png";
-import femaleFrontOutline from "./assets/poseGhosts/female_front_pose.png";
-import femaleSideOutline from "./assets/poseGhosts/female_side_pose.png";
-import femaleBackOutline from "./assets/poseGhosts/female_back_pose.png";
+import maleFrontDoubleBicep from "./assets/poseGhosts/male_front_double_bicep.png";
+import maleFrontLatSpread from "./assets/poseGhosts/male_front_lat_spread.png";
+import maleBackDoubleBicep from "./assets/poseGhosts/male_back_double_bicep.png";
+import femaleFrontPose from "./assets/poseGhosts/female_front_pose.png";
+import femaleSidePose from "./assets/poseGhosts/female_side_pose.png";
+import femaleBackPose from "./assets/poseGhosts/female_back_pose.png";
 
 import { useAuth } from "./context/AuthProvider";
 import { buildPoseSessionSharePng } from "./lib/poseSessionSharePng.js";
@@ -57,12 +57,12 @@ const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
 const OUTLINE_PULSE_MS = 2000;
 
 const ALL_OUTLINE_ASSETS = [
-  maleFrontOutline,
-  maleSideOutline,
-  maleBackOutline,
-  femaleFrontOutline,
-  femaleSideOutline,
-  femaleBackOutline,
+  maleFrontDoubleBicep,
+  maleFrontLatSpread,
+  maleBackDoubleBicep,
+  femaleFrontPose,
+  femaleSidePose,
+  femaleBackPose,
 ];
 
 function readStoredGoalType() {
@@ -160,30 +160,24 @@ function buildMemoryAwareShareSummary(result, isFemale = false) {
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
   const imageMap = {
-    front_double_bi: maleFrontOutline,
-    lat_spread: maleSideOutline,
-    back_double_bi: maleBackOutline,
-    front_scan: femaleFrontOutline,
-    side_scan: femaleSideOutline,
-    back_scan: femaleBackOutline,
+    front_double_bi: maleFrontDoubleBicep,
+    lat_spread: maleFrontLatSpread,
+    back_double_bi: maleBackDoubleBicep,
+    front_scan: femaleFrontPose,
+    side_scan: femaleSidePose,
+    back_scan: femaleBackPose,
   };
 
-  const src = imageMap[poseKey] || maleFrontOutline;
-  const frameWidth = isFemaleCue ? "min(78%, 380px)" : "min(88%, 430px)";
-  const imageWidthMap = {
-    front_double_bi: "66%",
-    lat_spread: "74%",
-    back_double_bi: "66%",
-    front_scan: "62%",
-    side_scan: "52%",
-    back_scan: "62%",
+  const src = imageMap[poseKey] || maleFrontDoubleBicep;
+  const fitMap = {
+    front_double_bi: { width: { xs: "74%", md: "72%" }, maxHeight: { xs: "82%", md: "84%" }, opacity: 0.96 },
+    lat_spread: { width: { xs: "90%", md: "86%" }, maxHeight: { xs: "78%", md: "80%" }, opacity: 0.96 },
+    back_double_bi: { width: { xs: "74%", md: "72%" }, maxHeight: { xs: "82%", md: "84%" }, opacity: 0.96 },
+    front_scan: { width: { xs: "64%", md: "62%" }, maxHeight: { xs: "84%", md: "86%" }, opacity: 0.94 },
+    side_scan: { width: { xs: "44%", md: "40%" }, maxHeight: { xs: "82%", md: "84%" }, opacity: 0.94 },
+    back_scan: { width: { xs: "64%", md: "62%" }, maxHeight: { xs: "84%", md: "86%" }, opacity: 0.94 },
   };
-  const imageWidth = imageWidthMap[poseKey] || (isFemaleCue ? "62%" : "66%");
-  const frameBorder = isFemaleCue ? "1px solid rgba(255,105,180,0.16)" : "1px solid rgba(57,255,20,0.24)";
-  const frameBg = isFemaleCue ? "rgba(36, 8, 22, 0.04)" : "rgba(5, 20, 12, 0.04)";
-  const frameShadow = isFemaleCue
-    ? "0 0 28px rgba(255,105,180,0.10), inset 0 0 18px rgba(255,105,180,0.04)"
-    : "0 0 36px rgba(57,255,20,0.16), inset 0 0 22px rgba(57,255,20,0.07)";
+  const fit = fitMap[poseKey] || fitMap.front_double_bi;
 
   return (
     <Box
@@ -196,42 +190,29 @@ function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
         pointerEvents: "none",
         opacity: active ? 1 : 0,
         transition: "opacity 220ms ease",
+        px: { xs: 0.5, md: 1 },
       }}
     >
       <Box
+        component="img"
+        src={src}
+        alt=""
+        aria-hidden="true"
         sx={{
-          width: frameWidth,
-          aspectRatio: "3 / 4",
-          borderRadius: "32px",
-          border: frameBorder,
-          bgcolor: frameBg,
-          boxShadow: active ? frameShadow : "none",
-          overflow: "hidden",
+          width: fit.width,
+          maxHeight: fit.maxHeight,
+          height: "auto",
+          objectFit: "contain",
           transform: mirrored ? "scaleX(-1)" : "none",
+          opacity: fit.opacity,
+          userSelect: "none",
+          WebkitUserDrag: "none",
+          filter: isFemaleCue
+            ? "drop-shadow(0 0 10px rgba(255,105,180,0.28))"
+            : "drop-shadow(0 0 10px rgba(198,255,80,0.24))",
           animation: active ? "matrixPulse 1.1s ease-in-out infinite" : "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
         }}
-      >
-        <Box
-          component="img"
-          src={src}
-          alt=""
-          aria-hidden="true"
-          sx={{
-            width: imageWidth,
-            height: "auto",
-            objectFit: "contain",
-            opacity: isFemaleCue ? 0.96 : 0.92,
-            filter: isFemaleCue
-              ? "drop-shadow(0 0 12px rgba(255,105,180,0.45)) drop-shadow(0 0 24px rgba(255,105,180,0.22))"
-              : "hue-rotate(-18deg) saturate(2.1) brightness(0.9) drop-shadow(0 0 12px rgba(57,255,20,0.50)) drop-shadow(0 0 24px rgba(57,255,20,0.24))",
-            userSelect: "none",
-            WebkitUserDrag: "none",
-          }}
-        />
-      </Box>
+      />
     </Box>
   );
 }
@@ -793,11 +774,11 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
               <Box
                 sx={{
                   position: "relative",
-                  width: { xs: "min(100%, 320px)", md: "100%" },
+                  width: { xs: "min(100%, 360px)", md: "100%" },
                   mx: "auto",
                   aspectRatio: "3/4",
-                  height: { xs: "min(54svh, 440px)", md: "auto" },
-                  maxHeight: { xs: "54svh", md: "none" },
+                  height: { xs: "min(58svh, 500px)", md: "auto" },
+                  maxHeight: { xs: "58svh", md: "none" },
                   borderRadius: 4,
                   overflow: "hidden",
                   border: "1px solid rgba(120,255,220,0.16)",
@@ -812,7 +793,7 @@ await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: window.matchMedia && window.matchMedia("(max-width: 900px)").matches ? "contain" : "cover",
+                    objectFit: "cover",
                     background: "#000",
                     transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   }}
