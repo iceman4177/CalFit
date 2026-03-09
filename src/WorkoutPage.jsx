@@ -1535,29 +1535,20 @@ setNewExercise({
     <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
       {(showIdle || showGenerating) && renderHeroCard()}
 
-      {showGenerating && (
-        <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 760, mx: 'auto' }}>
-          {showSuggestCard && (
-            <SuggestedWorkoutCard
-              userData={userData}
-              onAccept={handleAcceptSuggested}
-              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={handleSuggestedReady}
-            />
-          )}
-        </Box>
-      )}
-
-      {showSuggested && (
-        <Box ref={suggestRef} sx={{ mt: { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
-          {showSuggestCard && (
-            <SuggestedWorkoutCard
-              userData={userData}
-              onAccept={handleAcceptSuggested}
-              onLoadingChange={(isLoading) => setAiFlowMode((prev) => (isLoading ? 'generating' : prev))}
-              onReady={handleSuggestedReady}
-            />
-          )}
+      {showSuggestCard && (showGenerating || showSuggested) && (
+        <Box ref={suggestRef} sx={{ mt: showGenerating ? 3 : { xs: 1, md: 2 }, maxWidth: 760, mx: 'auto' }}>
+          <SuggestedWorkoutCard
+            userData={userData}
+            onAccept={handleAcceptSuggested}
+            onLoadingChange={(isLoading) => {
+              if (isLoading) {
+                setAiFlowMode('generating');
+                return;
+              }
+              setAiFlowMode((prev) => (prev === 'generating' ? 'suggested' : prev));
+            }}
+            onReady={handleSuggestedReady}
+          />
         </Box>
       )}
 
