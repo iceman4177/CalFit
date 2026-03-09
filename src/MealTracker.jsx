@@ -1021,39 +1021,6 @@ export default function MealTracker({ onMealUpdate }) {
                 </Typography>
               </Box>
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%' }}>
-                <Button
-                  onClick={() => setOpenCustom(true)}
-                  startIcon={<AddCircleOutlineIcon />}
-                  variant="outlined"
-                  size="large"
-                  sx={{
-                    flex: 1,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    borderRadius: 999,
-                    minHeight: 54
-                  }}
-                >
-                  Custom Food
-                </Button>
-                <Button
-                  onClick={() => setOpenBowl(true)}
-                  startIcon={<RestaurantIcon />}
-                  variant="outlined"
-                  size="large"
-                  sx={{
-                    flex: 1,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    borderRadius: 999,
-                    minHeight: 54
-                  }}
-                >
-                  Build a Bowl
-                </Button>
-              </Stack>
-
               <Box
                 sx={{
                   p: { xs: 2, sm: 2.5 },
@@ -1174,17 +1141,38 @@ export default function MealTracker({ onMealUpdate }) {
                     </Alert>
                   )}
 
-                  {customAction && (
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Button
-                        onClick={() => setOpenCustom(true)}
-                        variant="text"
-                        sx={{ textTransform: 'none', fontWeight: 700 }}
-                      >
-                        + Custom Food (macros)
-                      </Button>
-                    </Box>
-                  )}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%' }}>
+                    <Button
+                      onClick={() => setOpenCustom(true)}
+                      startIcon={<AddCircleOutlineIcon />}
+                      variant="outlined"
+                      size="large"
+                      sx={{
+                        flex: 1,
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        borderRadius: 999,
+                        minHeight: 54
+                      }}
+                    >
+                      Custom Food
+                    </Button>
+                    <Button
+                      onClick={() => setOpenBowl(true)}
+                      startIcon={<RestaurantIcon />}
+                      variant="outlined"
+                      size="large"
+                      sx={{
+                        flex: 1,
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        borderRadius: 999,
+                        minHeight: 54
+                      }}
+                    >
+                      Build a Bowl
+                    </Button>
+                  </Stack>
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <Button
