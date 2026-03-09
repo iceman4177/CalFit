@@ -273,6 +273,7 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [showLogHelp, setShowLogHelp] = useState(false);
   const [showShareHelp, setShowShareHelp] = useState(false);
   const [showNewHelp, setShowNewHelp] = useState(false);
+  const [pendingAcceptedScroll, setPendingAcceptedScroll] = useState(false);
 
   // ✅ "Meals-style": show today's logged workouts at the bottom (no need to leave page)
   const [todaySessions, setTodaySessions] = useState([]);
@@ -1281,6 +1282,7 @@ setNewExercise({
     setCumulativeExercises(enriched);
     setShowSuggestCard(false);
     setAiFlowMode('accepted');
+    setPendingAcceptedScroll(true);
   };
 
   useEffect(() => {
@@ -1328,9 +1330,38 @@ setNewExercise({
 
   useEffect(() => {
     if (aiFlowMode === 'accepted' && cumulativeExercises.length > 0) {
-      scheduleWindowScroll(sessionLogRef, { offset: 96, retries: [0, 120, 260] });
+      scheduleWindowScroll(sessionLogRef, { offset: 96, retries: [0, 120, 260, 420, 700] });
     }
   }, [aiFlowMode, cumulativeExercises.length, scheduleWindowScroll]);
+
+  useEffect(() => {
+    if (!pendingAcceptedScroll || aiFlowMode !== 'accepted' || cumulativeExercises.length <= 0) return;
+
+    let cancelled = false;
+    const kick = () => {
+      if (cancelled) return;
+      scheduleWindowScroll(sessionLogRef, { offset: 92, retries: [0, 140, 280, 460, 760] });
+      window.setTimeout(() => {
+        if (!cancelled) setPendingAcceptedScroll(false);
+      }, 820);
+    };
+
+    const raf1 = window.requestAnimationFrame(() => {
+      const raf2 = window.requestAnimationFrame(kick);
+      window.__slimcalAcceptScrollRaf2 = raf2;
+    });
+
+    return () => {
+      cancelled = true;
+      try { window.cancelAnimationFrame(raf1); } catch {}
+      try {
+        if (window.__slimcalAcceptScrollRaf2) {
+          window.cancelAnimationFrame(window.__slimcalAcceptScrollRaf2);
+          delete window.__slimcalAcceptScrollRaf2;
+        }
+      } catch {}
+    };
+  }, [pendingAcceptedScroll, aiFlowMode, cumulativeExercises.length, scheduleWindowScroll]);
 
   // ---- derived UI stats for a compact strip ----
   const sessionTotals = useMemo(() => {
@@ -1498,9 +1529,15 @@ setNewExercise({
     boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
   };
 
+  const centeredSectionSx = {
+    width: '100%',
+    maxWidth: 760,
+    mx: 'auto'
+  };
+
   const renderHeroCard = () => (
-    <Card sx={{ ...surfaceSx, overflow: 'visible' }}>
-      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
+    <Card sx={{ ...surfaceSx, overflow: 'visible', ...centeredSectionSx }}>
+      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center' }}>
         {!isProUser() && showIdle && (
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
@@ -1508,11 +1545,11 @@ setNewExercise({
         )}
 
         <Stack spacing={2}>
-          <Box>
+          <Box sx={{ maxWidth: 620, mx: 'auto' }}>
             <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
               Workout
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560, mx: 'auto' }}>
               Build your workout manually or let AI create one, then review and submit in one smooth flow.
             </Typography>
           </Box>
@@ -1522,7 +1559,7 @@ setNewExercise({
             variant={showSuggestCard ? 'outlined' : 'contained'}
             startIcon={<SmartToyOutlinedIcon />}
             size="large"
-            sx={{ fontWeight: 700, borderRadius: 999, alignSelf: 'flex-start', minWidth: { xs: '100%', sm: 320 } }}
+            sx={{ fontWeight: 700, borderRadius: 999, alignSelf: 'center', minWidth: { xs: '100%', sm: 320 }, maxWidth: 420 }}
           >
             {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
           </Button>
@@ -1533,11 +1570,11 @@ setNewExercise({
 
   // --- main UI ---
   return (
-    <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 }, pb: { xs: 16, md: 12 } }}>
+    <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 }, pb: { xs: 16, md: 12 }, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       {(showIdle || showGenerating || showCurrentSession) && renderHeroCard()}
 
       {showSuggestArea && (
-        <Box ref={suggestRef} sx={{ mt: showGenerating ? 3 : { xs: 1.5, md: 2 }, maxWidth: 760, mx: 'auto' }}>
+        <Box ref={suggestRef} sx={{ mt: showGenerating ? 3 : { xs: 1.5, md: 2 }, ...centeredSectionSx }}>
           <SuggestedWorkoutCard
             userData={userData}
             onAccept={handleAcceptSuggested}
@@ -1548,14 +1585,14 @@ setNewExercise({
       )}
 
       {showExerciseBuilder && (
-        <Box sx={{ mt: 2, maxWidth: 760, mx: 'auto' }}>
+        <Box sx={{ mt: 2, ...centeredSectionSx }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: { xs: 2, md: 2.5 } }}>
             <Stack spacing={2.25}>
-              <Stack spacing={0.5}>
+              <Stack spacing={0.5} sx={{ textAlign: 'center', alignItems: 'center' }}>
                 <Typography variant="h6" sx={{ fontWeight: 800 }}>
                   Build Today&apos;s Workout
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 540 }}>
                   Add exercises below. Your current session updates live as you go.
                 </Typography>
               </Stack>
@@ -1564,7 +1601,7 @@ setNewExercise({
                 fullWidth
                 variant="outlined"
                 onClick={() => setShowTemplate(true)}
-                sx={{ fontWeight: 700, borderRadius: 999 }}
+                sx={{ fontWeight: 700, borderRadius: 999, maxWidth: 520, mx: 'auto' }}
               >
                 Load Past Workout
               </Button>
@@ -1576,7 +1613,10 @@ setNewExercise({
                   borderRadius: 3,
                   border: '1px solid rgba(0,0,0,0.06)',
                   bgcolor: 'rgba(255,255,255,0.86)',
-                  boxShadow: 'none'
+                  boxShadow: 'none',
+                  maxWidth: 620,
+                  mx: 'auto',
+                  width: '100%'
                 }}
               >
                 <ExerciseForm
@@ -1594,7 +1634,7 @@ setNewExercise({
                 <Box ref={sessionLogRef}>
                   <Divider sx={{ my: 0.5 }} />
                   <Stack spacing={1.25} sx={{ pt: 1.25 }}>
-                    <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center' }}>
                       <Box>
                         <Typography variant="h6" sx={{ fontWeight: 800 }}>
                           Current Session Logs
@@ -1603,7 +1643,7 @@ setNewExercise({
                           Review and edit today&apos;s workout below.
                         </Typography>
                       </Box>
-                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="center">
                         <Chip label={`${sessionTotals.exercises} exercises`} sx={{ fontWeight: 700 }} />
                         <Chip label={`${sessionTotals.kcal} cals`} sx={{ fontWeight: 700 }} />
                       </Stack>
@@ -1652,7 +1692,7 @@ setNewExercise({
                 <Button
                   variant="outlined"
                   onClick={() => setShowSaunaSection((s) => !s)}
-                  sx={{ borderRadius: 999, fontWeight: 700 }}
+                  sx={{ borderRadius: 999, fontWeight: 700, display: 'flex', mx: 'auto' }}
                 >
                   {showSaunaSection ? 'Hide Sauna Session' : 'Add Sauna Session'}
                 </Button>
@@ -1697,8 +1737,7 @@ setNewExercise({
             bottom: { xs: 84, sm: 20 },
             zIndex: 20,
             mt: 2,
-            maxWidth: 760,
-            mx: 'auto'
+            ...centeredSectionSx
           }}
         >
           <Paper
