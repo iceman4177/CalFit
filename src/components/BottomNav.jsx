@@ -10,11 +10,13 @@ import RestaurantIcon from '@mui/icons-material/Restaurant';
 import HomeIcon from '@mui/icons-material/Home';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
+import HistoryIcon from '@mui/icons-material/History';
 
 const tabs = [
   { label: 'Home', value: '/', icon: <HomeIcon /> },
   { label: 'Meals', value: '/meals', icon: <RestaurantIcon /> },
   { label: 'Workout', value: '/workout', icon: <FitnessCenterIcon /> },
+  { label: 'History', value: '/history', icon: <HistoryIcon /> },
   { label: 'Scan', value: '/body-scan', icon: <CenterFocusStrongIcon /> },
   { label: 'Verdict', value: '/verdict', icon: <FactCheckIcon /> },
 ];
@@ -61,6 +63,10 @@ export default function BottomNav() {
         maxWidth: '100vw',
         boxSizing: 'border-box',
         overflowX: 'hidden',
+        borderTop: '1px solid rgba(15, 23, 42, 0.08)',
+        backdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        pb: 'env(safe-area-inset-bottom)',
       }}
     >
       <BottomNavigation
@@ -72,15 +78,25 @@ export default function BottomNav() {
           maxWidth: '100vw',
           boxSizing: 'border-box',
           overflowX: 'hidden',
+          backgroundColor: 'transparent',
+          minHeight: 64,
           '& .MuiBottomNavigationAction-root': {
             minWidth: 0,
-            paddingLeft: 0.5,
-            paddingRight: 0.5,
+            paddingLeft: 0.25,
+            paddingRight: 0.25,
+            paddingTop: 0.5,
+            paddingBottom: 0.75,
             flex: 1,
+            minHeight: 64,
           },
           '& .MuiBottomNavigationAction-label': {
-            fontSize: '0.7rem',
+            fontSize: '0.66rem',
             whiteSpace: 'nowrap',
+            mt: 0.15,
+          },
+          '& .Mui-selected': {
+            color: '#2563eb',
+            fontWeight: 800,
           },
         }}
       >

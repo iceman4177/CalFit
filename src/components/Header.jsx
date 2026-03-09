@@ -346,18 +346,18 @@ const [authUser, setAuthUser] = useState(null);
                 <MenuItem
                   onClick={() => {
                     setAccountAnchor(null);
-                    window.location.assign('/history');
-                  }}
-                >
-                  Workout History
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setAccountAnchor(null);
                     window.location.assign('/edit-info');
                   }}
                 >
                   Edit targets
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setAccountAnchor(null);
+                    window.location.assign('/history');
+                  }}
+                >
+                  Workout History
                 </MenuItem>
                 {pro && (
                   <MenuItem
