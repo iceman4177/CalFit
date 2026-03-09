@@ -1346,8 +1346,14 @@ setNewExercise({
       if (cancelled) return;
       const el = suggestRef.current;
       if (el) {
-        const topPadding = window.innerWidth < 700 ? 12 : 24;
-        scrollElementToViewportTop(el, { behavior: 'smooth', topPadding });
+        const rect = el.getBoundingClientRect();
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (rect.height > 0 && rect.height < viewportH * 0.82) {
+          scrollElementToViewportCenter(el, { behavior: 'smooth', offset: 10 });
+        } else {
+          const topPadding = window.innerWidth < 700 ? 12 : 24;
+          scrollElementToViewportTop(el, { behavior: 'smooth', topPadding });
+        }
       }
       attempts += 1;
       if (attempts < 6) {
@@ -1561,6 +1567,7 @@ setNewExercise({
   const suggestedFocus = showSuggestCard && !aiSuggestLoading && flowFocus === 'suggested';
   const acceptedFocus = !showSuggestCard && flowFocus === 'accepted';
   const hideChromeForFocus = showSuggestCard || pendingAcceptedScroll || acceptedFocus;
+  const showLoadPastButton = !showSuggestCard && !pendingAcceptedScroll && !acceptedFocus;
 
   // --- main UI ---
   return (
@@ -1602,17 +1609,19 @@ setNewExercise({
             >
               {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
             </Button>
-            <Button
-              variant="text"
-              onClick={() => setShowTemplate(true)}
-              sx={{
-                fontWeight: 700,
-                alignSelf: { xs: 'flex-start', sm: 'center' },
-                px: { xs: 0.5, sm: 1.5 }
-              }}
-            >
-              Load Past Workout
-            </Button>
+            {showLoadPastButton && (
+              <Button
+                variant="text"
+                onClick={() => setShowTemplate(true)}
+                sx={{
+                  fontWeight: 700,
+                  alignSelf: { xs: 'flex-start', sm: 'center' },
+                  px: { xs: 0.5, sm: 1.5 }
+                }}
+              >
+                Load Past Workout
+              </Button>
+            )}
           </Stack>
         </Box>
 
