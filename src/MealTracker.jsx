@@ -1321,7 +1321,6 @@ export default function MealTracker({ onMealUpdate }) {
               <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" justifyContent="center">
                 <Chip label={`${mealLog.length} ${mealLog.length === 1 ? 'meal' : 'meals'}`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
                 <Chip label={`${total} cals`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
-                <Chip label={`P ${macroTotals.protein_g}g • C ${macroTotals.carbs_g}g • F ${macroTotals.fat_g}g`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
               </Stack>
 
               {mealLog.length === 0 ? (
@@ -1350,6 +1349,18 @@ export default function MealTracker({ onMealUpdate }) {
                             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
                               {Number(m.calories) || 0} cals
                             </Typography>
+                            {(() => {
+                              const protein = normMacro(m?.macros?.protein_g);
+                              const carbs = normMacro(m?.macros?.carbs_g);
+                              const fat = normMacro(m?.macros?.fat_g);
+                              const hasAnyMacros = protein > 0 || carbs > 0 || fat > 0;
+                              if (!hasAnyMacros) return null;
+                              return (
+                                <Typography color="text.secondary" sx={{ mt: 0.75, fontWeight: 700, fontSize: '0.95rem' }}>
+                                  P {protein}g • C {carbs}g • F {fat}g
+                                </Typography>
+                              );
+                            })()}
                           </Box>
                           <IconButton
                             edge="end"
