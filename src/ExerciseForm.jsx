@@ -51,21 +51,23 @@ export default function ExerciseForm({
   const isCardio   = newExercise.exerciseType === 'cardio';
   const isStrength = newExercise.exerciseType && !isCardio;
 
+  const safeExerciseOptions = exerciseOptions || {};
+
   const equipmentTypes = useMemo(
-    () => ['cardio', ...Object.keys(exerciseOptions).filter(k => k !== 'cardio')],
-    [exerciseOptions]
+    () => ['cardio', ...Object.keys(safeExerciseOptions).filter(k => k !== 'cardio')],
+    [safeExerciseOptions]
   );
-  const cardioMachines = exerciseOptions.cardio;
+  const cardioMachines = safeExerciseOptions.cardio || [];
   const muscleGroups   = useMemo(
-    () => (isStrength ? Object.keys(exerciseOptions[newExercise.exerciseType] || {}) : []),
-    [isStrength, exerciseOptions, newExercise.exerciseType]
+    () => (isStrength ? Object.keys(safeExerciseOptions[newExercise.exerciseType] || {}) : []),
+    [isStrength, safeExerciseOptions, newExercise.exerciseType]
   );
   const exercises = useMemo(
     () =>
       isStrength && newExercise.muscleGroup
-        ? exerciseOptions[newExercise.exerciseType][newExercise.muscleGroup]
+        ? (safeExerciseOptions[newExercise.exerciseType]?.[newExercise.muscleGroup] || [])
         : [],
-    [isStrength, exerciseOptions, newExercise.exerciseType, newExercise.muscleGroup]
+    [isStrength, safeExerciseOptions, newExercise.exerciseType, newExercise.muscleGroup]
   );
 
   function weightLabel() {
@@ -177,7 +179,7 @@ export default function ExerciseForm({
     >
       <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center" flexWrap="wrap">
         <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
-          Calories: <b>{Number.isFinite(currentCalories) ? Math.round(currentCalories) : '0'}</b>
+          Calories: <b>{Number.isFinite(currentCalories) ? currentCalories.toFixed(2) : '0.00'}</b>
         </Typography>
         <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {isStrength && (
