@@ -1747,10 +1747,8 @@ setNewExercise({
       {showCurrentSession && (
         <Box
           sx={{
-            position: 'sticky',
-            bottom: { xs: 84, sm: 20 },
-            zIndex: 20,
             mt: 2,
+            mb: { xs: 2, sm: 2.5 },
             ...centeredSectionSx
           }}
         >
@@ -1760,9 +1758,8 @@ setNewExercise({
               p: 1,
               borderRadius: 999,
               border: '1px solid rgba(0,0,0,0.08)',
-              bgcolor: 'rgba(255,255,255,0.88)',
-              backdropFilter: 'blur(14px)',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.10)'
+              bgcolor: 'rgba(255,255,255,0.96)',
+              boxShadow: '0 8px 22px rgba(0,0,0,0.06)'
             }}
           >
             <Button variant="contained" size="large" fullWidth onClick={handleFinish} sx={{ fontWeight: 800, borderRadius: 999 }}>
