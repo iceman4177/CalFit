@@ -27,7 +27,8 @@ import {
   Card,
   CardContent,
   Paper,
-  Stack
+  Stack,
+  Chip
 } from '@mui/material';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import { useHistory } from 'react-router-dom';
@@ -93,7 +94,7 @@ function formatExerciseLine(ex) {
 
   const wt = hasWeight ? ` @ ${weight} lb` : '';
   const name = ex.exerciseName || ex.name || 'Exercise';
-  const kcals = ((+ex.calories) || 0).toFixed(2);
+  const kcals = Math.round((+ex.calories) || 0);
 
   if (!vol && !hasWeight) return `${name} — ${kcals} cals`;
   return `${name} — ${vol}${wt} — ${kcals} cals`;
@@ -267,7 +268,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showSuggestCard, setShowSuggestCard] = useState(false);
-  const [flowMode, setFlowMode] = useState('default'); // default | generating | suggested | accepted
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showBackHelp, setShowBackHelp] = useState(false);
   const [showLogHelp, setShowLogHelp] = useState(false);
@@ -287,20 +287,6 @@ export default function WorkoutPage({ userData, onWorkoutLogged }) {
   // ✅ UI scroll anchors (match Meals AI UX)
   const suggestRef = useRef(null);
   const sessionLogRef = useRef(null);
-
-  const scrollBoxIntoView = useCallback((el, block = 'center') => {
-    try {
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const top = window.scrollY + rect.top;
-      const vh = window.innerHeight || 0;
-      const topPad = 92;
-      const target = block === 'start'
-        ? Math.max(0, top - topPad)
-        : Math.max(0, top - Math.max(24, (vh - rect.height) / 2));
-      window.scrollTo({ top: target, behavior: 'smooth' });
-    } catch {}
-  }, []);
 
 
   // ✅ Rehydrate an in-progress draft when you leave/return to the Workout tab (prevents "it saved then vanished")
@@ -824,10 +810,6 @@ setNewExercise({
   };
 
   // ✅ Sauna logging
-  const handleAddSaunaClick = () => {
-    setShowSaunaSection(s => !s);
-  };
-
   const handleSaveSauna = () => {
     if (saunaTime.trim()) {
       const t = parseFloat(saunaTime) || 0;
@@ -1275,8 +1257,12 @@ setNewExercise({
       };
     });
     setCumulativeExercises(enriched);
-    setShowSuggestCard(false);
-    setFlowMode('accepted');
+
+    setTimeout(() => {
+      try {
+        sessionLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }, 80);
   };
 
   useEffect(() => {
@@ -1305,35 +1291,16 @@ setNewExercise({
         return;
       }
       setShowSuggestCard(true);
-      setFlowMode('generating');
+
+      setTimeout(() => {
+        try {
+          suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch {}
+      }, 50);
       return;
     }
     setShowSuggestCard(false);
-    setFlowMode('default');
   };
-
-
-  useEffect(() => {
-    if (flowMode !== 'accepted' || cumulativeExercises.length === 0) return;
-    const run = () => scrollBoxIntoView(sessionLogRef.current, 'start');
-    const t1 = setTimeout(run, 40);
-    const t2 = setTimeout(run, 220);
-    const t3 = setTimeout(run, 420);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [flowMode, cumulativeExercises.length, scrollBoxIntoView]);
-
-  const handleSuggestedLoadingChange = useCallback((isLoading) => {
-    if (isLoading && showSuggestCard) setFlowMode('generating');
-  }, [showSuggestCard]);
-
-  const handleSuggestionReady = useCallback(() => {
-    setFlowMode('suggested');
-    const run = () => scrollBoxIntoView(suggestRef.current, 'start');
-    const t1 = setTimeout(run, 40);
-    const t2 = setTimeout(run, 220);
-    const t3 = setTimeout(run, 420);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [scrollBoxIntoView]);
 
   // ---- derived UI stats for a compact strip ----
   const sessionTotals = useMemo(() => {
@@ -1351,7 +1318,7 @@ setNewExercise({
     const total = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
     const shareText = `I just logged a workout on ${new Date().toLocaleDateString(
       'en-US'
-    )} with Slimcal.ai: ${cumulativeExercises.length} items, ${total.toFixed(2)} cals! #SlimcalAI`;
+    )} with Slimcal.ai: ${cumulativeExercises.length} items, ${Math.round(total)} cals! #SlimcalAI`;
 
     return (
       <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 } }}>
@@ -1492,7 +1459,7 @@ setNewExercise({
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
 
-{/* ------------------- HERO: Title + AI CTA ------------------- */}
+{/* ------------------- HERO: Title + Single AI CTA (match Meals) ------------------- */}
 <Card
   sx={{
     borderRadius: 3,
@@ -1501,7 +1468,7 @@ setNewExercise({
   }}
 >
   <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible' }}>
-    {!isProUser() && flowMode === 'default' && (
+    {!isProUser() && (
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
         <FeatureUseBadge featureKey="ai_workout" isPro={false} />
       </Box>
@@ -1522,117 +1489,176 @@ setNewExercise({
         </Typography>
       </Box>
 
-      {(flowMode === 'default' || flowMode === 'generating') && (
-        <Button
-          onClick={handleSuggestAIClick}
-          variant={showSuggestCard ? 'outlined' : 'contained'}
-          startIcon={<SmartToyOutlinedIcon />}
-          size="large"
-          sx={{ fontWeight: 700, borderRadius: 999 }}
-        >
-          {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
-        </Button>
-      )}
+      <Button
+        onClick={handleSuggestAIClick}
+        variant={showSuggestCard ? 'outlined' : 'contained'}
+        startIcon={<SmartToyOutlinedIcon />}
+        size="large"
+        sx={{ fontWeight: 700, borderRadius: 999 }}
+      >
+        {showSuggestCard ? 'Hide AI Workout' : 'AI Suggest a Workout'}
+      </Button>
     </Stack>
   </CardContent>
 </Card>
 
-{/* GENERATING focus view */}
-{flowMode === 'generating' && showSuggestCard && (
-  <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 860, mx: 'auto' }}>
-    <SuggestedWorkoutCard
-      userData={userData}
-      onAccept={handleAcceptSuggested}
-      onLoadingChange={handleSuggestedLoadingChange}
-      onSuggestionReady={handleSuggestionReady}
-    />
-  </Box>
-)}
+{/* Slim session stats strip */}
+<Box
+  sx={{
+    mt: 2,
+    mb: 2.5,
+    display: 'flex',
+    justifyContent: 'center',
+    gap: 1,
+    flexWrap: 'wrap'
+  }}
+>
+  <Chip color="primary" label={`${sessionTotals.kcal} kcal`} sx={{ fontWeight: 700 }} />
+  <Chip variant="outlined" label={`${sessionTotals.exercises} exercises`} />
+  <Chip variant="outlined" label={`${sessionTotals.sets} sets`} />
+</Box>
 
-{/* SUGGESTED focus view */}
-{flowMode === 'suggested' && showSuggestCard && (
-  <Box ref={suggestRef} sx={{ mt: 3, maxWidth: 860, mx: 'auto' }}>
-    <SuggestedWorkoutCard
-      userData={userData}
-      onAccept={handleAcceptSuggested}
-      onLoadingChange={handleSuggestedLoadingChange}
-      onSuggestionReady={handleSuggestionReady}
-    />
-  </Box>
-)}
+{/* AI suggested workout results (auto-scroll target) */}
+<Box ref={suggestRef} sx={{ mb: 2 }}>
+  {showSuggestCard && (
+    <SuggestedWorkoutCard userData={userData} onAccept={handleAcceptSuggested} />
+  )}
+</Box>
 
-{/* DEFAULT non-AI view */}
-{flowMode === 'default' && (
-  <Grid container spacing={{ xs: 3, md: 4 }} sx={{ mt: 0.5 }}>
-    <Grid item xs={12} md={4}>
-      <Stack spacing={2}>
-        <Button
-          fullWidth
-          variant="text"
-          onClick={() => setShowTemplate(true)}
-          sx={{ justifyContent: 'flex-start', px: 0, fontWeight: 800, fontSize: '1.125rem' }}
-        >
-          Load Past Workout
-        </Button>
-      </Stack>
-    </Grid>
+<Grid container spacing={{ xs: 3, md: 4 }}>
+        <Grid item xs={12} md={4}>
+          <Stack spacing={2}>
+            <Card
+              variant="outlined"
+              sx={{
+                borderRadius: 2,
+                border: '1px solid rgba(0,0,0,0.06)',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
+              }}
+            >
+              <CardContent>
+                <Button fullWidth variant="outlined" onClick={() => setShowTemplate(true)}>
+                  Load Past Workout
+                </Button>
+                <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1.25 }}>
+                  Welcome! You are {userData?.age} years old and weigh {userData?.weight} lbs.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Grid>
 
-    <Grid item xs={12} md={8}>
-      <Stack spacing={2.5}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 6px 18px rgba(0,0,0,0.04)' }}>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>Log an exercise</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Add manual exercises to today’s workout. Your burned calories stay in sync automatically.
-          </Typography>
-          <ExerciseForm
-            newExercise={newExercise}
-            setNewExercise={setNewExercise}
-            currentStep={currentStep}
-            setCurrentStep={setCurrentStep}
-            currentCalories={currentCalories}
-            setCurrentCalories={setCurrentCalories}
-            onAddExercise={handleAddExercise}
-          />
-        </Paper>
+        <Grid item xs={12} md={8}>
+          <Stack spacing={3}>
+            {cumulativeExercises.length > 0 && (
+              <Paper
+                ref={sessionLogRef}
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
+                }}
+              >
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>
+                  Current Session Logs
+                </Typography>
+                {cumulativeExercises.map((ex, idx) => (
+                  <Box
+                    key={idx}
+                    sx={{
+                      mb: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 2
+                    }}
+                  >
+                    <Typography sx={{ fontWeight: 600 }}>
+                      {formatExerciseLine(ex)}
+                    </Typography>
+                    <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>
+                      Remove
+                    </Button>
+                  </Box>
+                ))}
+              </Paper>
+            )}
 
-        {!showSaunaSection && (
-          <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-            <Button variant="outlined" onClick={handleAddSaunaClick} sx={{ borderRadius: 999, px: 4, py: 1.25, fontWeight: 700 }}>
-              Add Sauna Session
-            </Button>
-          </Box>
-        )}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                border: '1px solid rgba(0,0,0,0.06)',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
+              }}
+            >
+              <ExerciseForm
+                newExercise={newExercise}
+                setNewExercise={setNewExercise}
+                currentCalories={currentCalories}
+                onCalculate={handleCalculate}
+                onAddExercise={handleAddExercise}
+                onDoneWithExercises={handleDoneWithExercises}
+                exerciseOptions={exerciseOptions}
+              />
+            </Paper>
 
-        {showSaunaSection && (
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 6px 18px rgba(0,0,0,0.04)' }}>
-            <SaunaForm saunaTime={saunaTime} saunaTemp={saunaTemp} setSaunaTime={setSaunaTime} setSaunaTemp={setSaunaTemp} />
-            <Box sx={{ display: 'flex', gap: 2, mt: 2, justifyContent: 'center' }}>
-              <Button variant="contained" onClick={handleSaveSauna}>Save Sauna</Button>
-              <Button variant="contained" onClick={handleCancelSaunaForm}>Cancel</Button>
+            <Box textAlign="center">
+              <Button
+                variant="contained"
+                onClick={() => setShowSaunaSection(s => !s)}
+              >
+                {showSaunaSection ? 'Cancel Sauna Session' : 'Add Sauna Session'}
+              </Button>
             </Box>
-          </Paper>
-        )}
-      </Stack>
-    </Grid>
-  </Grid>
-)}
 
-{/* ACCEPTED focus view */}
-{flowMode === 'accepted' && cumulativeExercises.length > 0 && (
-  <Paper ref={sessionLogRef} variant="outlined" sx={{ mt: 3, p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 6px 18px rgba(0,0,0,0.04)', maxWidth: 900, mx: 'auto' }}>
-    <Typography variant="h6" gutterBottom sx={{ fontWeight: 800 }}>Current Session Logs</Typography>
-    {cumulativeExercises.map((ex, idx) => (
-      <Box key={idx} sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
-        <Typography sx={{ fontWeight: 600 }}>{formatExerciseLine(ex)}</Typography>
-        <Button size="small" color="error" onClick={() => handleRemoveExercise(idx)}>Remove</Button>
+            {showSaunaSection && (
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.04)'
+                }}
+              >
+                <SaunaForm
+                  saunaTime={saunaTime}
+                  saunaTemp={saunaTemp}
+                  setSaunaTime={setSaunaTime}
+                  setSaunaTemp={setSaunaTemp}
+                />
+                <Box sx={{ display: 'flex', gap: 2, mt: 2, justifyContent: 'center' }}>
+                  <Button variant="contained" onClick={handleSaveSauna}>
+                    Save Sauna
+                  </Button>
+                  <Button variant="contained" onClick={handleCancelSaunaForm}>
+                    Cancel
+                  </Button>
+                </Box>
+              </Paper>
+            )}
+          </Stack>
+        </Grid>
+      </Grid>
+
+      
+      {/* (Removed) Logged Workouts panel (single source of truth is current session + history) */}
+
+
+      <Box textAlign="center" sx={{ mt: 4 }}>
+        <Button
+          variant="contained"
+          size="large"
+          fullWidth
+          onClick={handleFinish}
+        >
+          SUBMIT WORKOUT
+        </Button>
       </Box>
-    ))}
-    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
-      <Button variant="contained" fullWidth onClick={() => setCurrentStep(3)} sx={{ fontWeight: 800 }}>Submit Workout</Button>
-      <Button variant="outlined" fullWidth onClick={() => setFlowMode('default')}>Edit Workout</Button>
-    </Stack>
-  </Paper>
-)}
 
       <TemplateSelector
         open={showTemplate}
@@ -1647,7 +1673,7 @@ setNewExercise({
           'en-US'
         )} with Slimcal.ai: ${cumulativeExercises.length} items, ${cumulativeExercises
           .reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0)
-          .toFixed(2)} cals! #SlimcalAI`}
+          .toFixed(0)} cals! #SlimcalAI`}
         shareUrl={window.location.href}
       />
 

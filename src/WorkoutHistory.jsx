@@ -583,7 +583,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Typography variant="body2" color="text.secondary">
-                            {(Number(w.total_calories) || 0).toFixed(0)} cals
+                            {Math.round(Number(w.total_calories) || 0)} cals
                           </Typography>
 
                           <span><IconButton

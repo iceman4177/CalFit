@@ -38,7 +38,7 @@ export default function TemplateSelector({ open, onClose, onLoadTemplate }) {
               >
                 <ListItemText
                   primary={`${session.exercises.length} exercises`}
-                  secondary={`${session.date} — ${Math.round(Number(session.totalCalories) || 0)} cals`}
+                  secondary={`${session.date} — ${Math.round(session.totalCalories || 0)} cals`}
                 />
               </ListItemButton>
             ))}
