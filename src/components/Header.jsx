@@ -349,7 +349,7 @@ const [authUser, setAuthUser] = useState(null);
                     window.location.assign('/history');
                   }}
                 >
-                  Workout history
+                  Workout History
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
