@@ -903,12 +903,22 @@ export default function MealTracker({ onMealUpdate }) {
   };
 
   const scrollMealIdeasIntoCenter = useCallback(() => {
-    const el = suggestionBoxRef.current || suggestRef.current;
+    const panelEl = suggestionBoxRef.current;
+    const sectionEl = suggestRef.current;
+    const el = panelEl || sectionEl;
     if (!el) return;
     try {
       const rect = el.getBoundingClientRect();
       const absoluteTop = rect.top + window.scrollY;
-      const target = Math.max(0, absoluteTop - Math.max(24, (window.innerHeight - rect.height) / 2));
+      const mobileHeaderOffset = window.innerWidth < 900 ? 110 : 88;
+      const tallPanel = rect.height > window.innerHeight * 0.62;
+
+      // For the loading / ideas state, prefer showing the top of the ideas panel in full view
+      // instead of trying to vertically center a tall block.
+      const target = tallPanel
+        ? Math.max(0, absoluteTop - mobileHeaderOffset)
+        : Math.max(0, absoluteTop - Math.max(mobileHeaderOffset, (window.innerHeight - rect.height) / 2));
+
       window.scrollTo({ top: target, behavior: 'smooth' });
     } catch {}
   }, []);
@@ -931,7 +941,7 @@ export default function MealTracker({ onMealUpdate }) {
   useEffect(() => {
     if (!showSuggest) return;
 
-    const kicks = [80, 220, 420];
+    const kicks = [0, 120, 280, 520, 820];
     const timers = kicks.map((ms) => setTimeout(() => {
       scrollMealIdeasIntoCenter();
     }, ms));
