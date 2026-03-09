@@ -334,35 +334,37 @@ function BuildBowlDialog({ open, onClose, onConfirm }) {
         </Typography>
         <Stack spacing={1.25} sx={{ mt: 1 }}>
           {rows.map((r, i) => (
-            <Stack
-              key={i}
-              direction={{ xs: 'column', sm: 'row' }}
-              spacing={1}
-              alignItems={{ xs: 'stretch', sm: 'center' }}
-            >
-              <TextField
-                label={`Ingredient ${i + 1}`}
-                value={r.name}
-                onChange={e => update(i, 'name', e.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="Calories"
-                type="number"
-                value={r.calories}
-                onChange={e => update(i, 'calories', e.target.value)}
-                fullWidth
-                sx={{ width: { xs: '100%', sm: 160 } }}
-              />
-              <IconButton
-                aria-label="remove"
-                onClick={() => remove(i)}
-                disabled={rows.length === 1}
-                sx={{ alignSelf: { xs: 'flex-end', sm: 'center' } }}
+            <Box key={i}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                alignItems={{ xs: 'stretch', sm: 'center' }}
               >
-                <DeleteIcon />
-              </IconButton>
-            </Stack>
+                <TextField
+                  label={`Ingredient ${i + 1}`}
+                  value={r.name}
+                  onChange={e => update(i, 'name', e.target.value)}
+                  fullWidth
+                />
+                <TextField
+                  label="Calories"
+                  type="number"
+                  value={r.calories}
+                  onChange={e => update(i, 'calories', e.target.value)}
+                  fullWidth
+                  sx={{ width: { xs: '100%', sm: 170 } }}
+                />
+              </Stack>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+                <IconButton
+                  aria-label="remove"
+                  onClick={() => remove(i)}
+                  disabled={rows.length === 1}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </Box>
+            </Box>
           ))}
           <Button onClick={addRow} startIcon={<AddCircleOutlineIcon />}>
             Add Ingredient
@@ -446,6 +448,7 @@ export default function MealTracker({ onMealUpdate }) {
 
   // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
+  const suggestionBoxRef = useRef(null);
 
   // canonical "today"
   const now = new Date();
@@ -899,6 +902,17 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
+  const scrollMealIdeasIntoCenter = useCallback(() => {
+    const el = suggestionBoxRef.current || suggestRef.current;
+    if (!el) return;
+    try {
+      const rect = el.getBoundingClientRect();
+      const absoluteTop = rect.top + window.scrollY;
+      const target = Math.max(0, absoluteTop - Math.max(24, (window.innerHeight - rect.height) / 2));
+      window.scrollTo({ top: target, behavior: 'smooth' });
+    } catch {}
+  }, []);
+
   // toggle meal ideas panel — like workouts/pose, opening the panel does not consume a use
   const handleToggleMealIdeas = useCallback(() => {
     if (showSuggest) {
@@ -912,13 +926,18 @@ export default function MealTracker({ onMealUpdate }) {
     }
 
     setShowSuggest(true);
-
-    setTimeout(() => {
-      try {
-        suggestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } catch {}
-    }, 50);
   }, [showSuggest]);
+
+  useEffect(() => {
+    if (!showSuggest) return;
+
+    const kicks = [80, 220, 420];
+    const timers = kicks.map((ms) => setTimeout(() => {
+      scrollMealIdeasIntoCenter();
+    }, ms));
+
+    return () => timers.forEach(clearTimeout);
+  }, [showSuggest, scrollMealIdeasIntoCenter]);
 
   useEffect(() => {
     let active = true;
@@ -942,6 +961,11 @@ export default function MealTracker({ onMealUpdate }) {
   }, []);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
+  const macroTotals = useMemo(() => ({
+    protein_g: mealLog.reduce((s, m) => s + (Number(m?.protein_g) || 0), 0),
+    carbs_g: mealLog.reduce((s, m) => s + (Number(m?.carbs_g) || 0), 0),
+    fat_g: mealLog.reduce((s, m) => s + (Number(m?.fat_g) || 0), 0),
+  }), [mealLog]);
 
   // Autocomplete options: foods only (portions handled separately)
   const options = useMemo(() => (Array.isArray(foodData) ? foodData.filter(f => !f.action) : []), []);
@@ -1253,6 +1277,7 @@ export default function MealTracker({ onMealUpdate }) {
 
               {showSuggest && (
                 <Box
+                  ref={suggestionBoxRef}
                   sx={{
                     p: { xs: 2, sm: 2.5 },
                     borderRadius: 4,
@@ -1284,6 +1309,7 @@ export default function MealTracker({ onMealUpdate }) {
               <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" justifyContent="center">
                 <Chip label={`${mealLog.length} ${mealLog.length === 1 ? 'meal' : 'meals'}`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
                 <Chip label={`${total} cals`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
+                <Chip label={`P ${macroTotals.protein_g}g • C ${macroTotals.carbs_g}g • F ${macroTotals.fat_g}g`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
               </Stack>
 
               {mealLog.length === 0 ? (
