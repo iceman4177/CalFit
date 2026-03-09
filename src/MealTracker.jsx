@@ -902,25 +902,18 @@ export default function MealTracker({ onMealUpdate }) {
     syncDailyMetrics(0);
   };
 
-  const scrollMealIdeasIntoCenter = useCallback(() => {
-    const panelEl = suggestionBoxRef.current;
-    const sectionEl = suggestRef.current;
-    const el = panelEl || sectionEl;
-    if (!el) return;
-    try {
-      const rect = el.getBoundingClientRect();
-      const absoluteTop = rect.top + window.scrollY;
-      const mobileHeaderOffset = window.innerWidth < 900 ? 110 : 88;
-      const tallPanel = rect.height > window.innerHeight * 0.62;
-
-      // For the loading / ideas state, prefer showing the top of the ideas panel in full view
-      // instead of trying to vertically center a tall block.
-      const target = tallPanel
-        ? Math.max(0, absoluteTop - mobileHeaderOffset)
-        : Math.max(0, absoluteTop - Math.max(mobileHeaderOffset, (window.innerHeight - rect.height) / 2));
-
-      window.scrollTo({ top: target, behavior: 'smooth' });
-    } catch {}
+  const scheduleMealIdeasScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260] } = {}) => {
+    retries.forEach((delay) => {
+      window.setTimeout(() => {
+        try {
+          const el = ref?.current || suggestRef.current;
+          if (!el) return;
+          const rect = el.getBoundingClientRect();
+          const top = Math.max(0, window.scrollY + rect.top - offset);
+          window.scrollTo({ top, behavior: 'smooth' });
+        } catch {}
+      }, delay);
+    });
   }, []);
 
   // toggle meal ideas panel — like workouts/pose, opening the panel does not consume a use
@@ -940,14 +933,8 @@ export default function MealTracker({ onMealUpdate }) {
 
   useEffect(() => {
     if (!showSuggest) return;
-
-    const kicks = [0, 120, 280, 520, 820];
-    const timers = kicks.map((ms) => setTimeout(() => {
-      scrollMealIdeasIntoCenter();
-    }, ms));
-
-    return () => timers.forEach(clearTimeout);
-  }, [showSuggest, scrollMealIdeasIntoCenter]);
+    scheduleMealIdeasScroll(suggestionBoxRef, { offset: 96, retries: [0, 120, 260] });
+  }, [showSuggest, scheduleMealIdeasScroll]);
 
   useEffect(() => {
     let active = true;
