@@ -541,34 +541,28 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
-      const shareSummary = buildMemoryAwareShareSummary(result, isFemale);
-      const topWins = (Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length
-        ? result.bestDeveloped
-        : (result?.highlights || result?.levers || [])
-      ).slice(0, 3);
-      const progressNotes = [result?.baselineComparison, result?.momentumNote]
-        .map((t) => String(t || "").trim())
-        .filter(Boolean)
-        .filter((v, i, arr) => arr.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i)
-        .slice(0, 2);
+      const latestHistory = readPoseSessionHistory(userId) || [];
+      const priorSameGender = latestHistory.filter((row) => {
+        const rowGender = String(row?.gender || "").toLowerCase();
+        const rowDay = row?.local_day || row?.localDay;
+        return rowGender === gender && rowDay && rowDay !== todayISO;
+      });
+      const mode = priorSameGender.length ? "recheck" : "baseline";
 
       const pngDataUrl = await buildPoseSessionSharePng({
-        headline: isFemale ? "PHYSIQUE CHECK" : "PHYSIQUE CHECK",
-        subhead: isFemale ? "Pretty, polished, and trending up" : "Built, sharp, and trending up",
-        wins: topWins,
-        levers: progressNotes,
-        summary: shareSummary,
+        gender,
+        mode,
         hashtag: "#SlimCalAI",
-        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })), // full res for export
+        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })),
       });
-await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
+      await shareOrDownloadPng(pngDataUrl, `slimcal-pose-session-${gender}-${mode}.png`);
     } catch (e) {
       console.error(e);
       setErrorMsg("Could not generate share card.");
     } finally {
       setShareBusy(false);
     }
-  }, [captures, isFemale, result]);
+  }, [captures, gender, todayISO, userId]);
 
   useEffect(() => {
     const run = () => {
