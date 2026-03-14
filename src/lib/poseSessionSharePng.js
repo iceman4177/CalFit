@@ -44,6 +44,17 @@ function sentenceCase(text = "") {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function ensureSentencePeriod(text = "") {
+  const s = cleanText(text);
+  if (!s) return "";
+  if (/[.!?]$/.test(s)) return s;
+  return `${s}.`;
+}
+
+function ensureSentencePeriods(items = []) {
+  return (items || []).map((item) => ensureSentencePeriod(item)).filter(Boolean);
+}
+
 function splitSentences(text = "") {
   const src = cleanText(text)
     .replace(/\s+/g, " ")
@@ -251,65 +262,65 @@ function pickBodyLayout(ctx, {
 }) {
   const presets = [
     {
-      bulletFont: 26,
-      bulletLineHeight: 35,
+      bulletFont: 29,
+      bulletLineHeight: 38,
       bulletGap: 12,
-      breakdownFont: 24,
-      breakdownLineHeight: 34,
+      breakdownFont: 27,
+      breakdownLineHeight: 37,
       breakdownGap: 14,
-      nextFont: 21,
-      nextLineHeight: 31,
+      nextFont: 24,
+      nextLineHeight: 34,
       nextGap: 14,
-      coachFont: 21,
-      coachLineHeight: 31,
+      coachFont: 24,
+      coachLineHeight: 34,
       coachGap: 14,
       sectionTitleGap: 36,
       sectionSpacer: 14,
     },
     {
-      bulletFont: 25,
-      bulletLineHeight: 34,
+      bulletFont: 27,
+      bulletLineHeight: 36,
       bulletGap: 11,
-      breakdownFont: 23,
-      breakdownLineHeight: 33,
+      breakdownFont: 25,
+      breakdownLineHeight: 35,
       breakdownGap: 13,
-      nextFont: 20,
-      nextLineHeight: 30,
+      nextFont: 22,
+      nextLineHeight: 32,
       nextGap: 13,
-      coachFont: 20,
-      coachLineHeight: 30,
+      coachFont: 22,
+      coachLineHeight: 32,
       coachGap: 13,
       sectionTitleGap: 35,
       sectionSpacer: 13,
     },
     {
-      bulletFont: 24,
-      bulletLineHeight: 33,
+      bulletFont: 25,
+      bulletLineHeight: 34,
       bulletGap: 10,
-      breakdownFont: 22,
-      breakdownLineHeight: 31,
+      breakdownFont: 23,
+      breakdownLineHeight: 32,
       breakdownGap: 12,
-      nextFont: 19,
-      nextLineHeight: 29,
+      nextFont: 20,
+      nextLineHeight: 30,
       nextGap: 12,
-      coachFont: 19,
-      coachLineHeight: 29,
+      coachFont: 20,
+      coachLineHeight: 30,
       coachGap: 12,
       sectionTitleGap: 34,
       sectionSpacer: 12,
     },
     {
-      bulletFont: 22,
-      bulletLineHeight: 29,
+      bulletFont: 23,
+      bulletLineHeight: 31,
       bulletGap: 10,
       breakdownFont: 21,
-      breakdownLineHeight: 29,
+      breakdownLineHeight: 30,
       breakdownGap: 12,
       nextFont: 18,
-      nextLineHeight: 29,
+      nextLineHeight: 28,
       nextGap: 12,
       coachFont: 18,
-      coachLineHeight: 29,
+      coachLineHeight: 28,
       coachGap: 12,
       sectionTitleGap: 34,
       sectionSpacer: 10,
@@ -369,18 +380,18 @@ export async function buildPoseSessionSharePng({
 } = {}) {
   const locked = copy && typeof copy === "object" ? copy : null;
   const resolvedMode = trimTerminalPunctuation(locked?.mode) || inferMode({ mode, subhead, summary });
-  const resolvedHero = trimTerminalPunctuation(locked?.hero) || inferHero({ hero, headline, summary, wins });
-  const resolvedSubread = trimTerminalPunctuation(locked?.subread) || inferSubread({ subread, subhead, summary, hero: resolvedHero });
-  const resolvedBullets = uniqueLines(locked?.bullets || []).length
+  const resolvedHero = ensureSentencePeriod(trimTerminalPunctuation(locked?.hero) || inferHero({ hero, headline, summary, wins }));
+  const resolvedSubread = ensureSentencePeriod(trimTerminalPunctuation(locked?.subread) || inferSubread({ subread, subhead, summary, hero: resolvedHero }));
+  const resolvedBullets = ensureSentencePeriods(uniqueLines(locked?.bullets || []).length
     ? uniqueLines(locked?.bullets || []).slice(0, 3)
-    : inferBullets({ bullets, wins, highlights, summary, mode: resolvedMode });
-  const resolvedBreakdown = uniqueLines(locked?.breakdown || []).length
+    : inferBullets({ bullets, wins, highlights, summary, mode: resolvedMode }));
+  const resolvedBreakdown = ensureSentencePeriods(uniqueLines(locked?.breakdown || []).length
     ? uniqueLines(locked?.breakdown || []).slice(0, 4)
-    : inferBreakdown({ breakdown, summary, hero: resolvedHero, subread: resolvedSubread });
-  const resolvedNextUp = uniqueLines(locked?.nextUp || []).length
+    : inferBreakdown({ breakdown, summary, hero: resolvedHero, subread: resolvedSubread }));
+  const resolvedNextUp = ensureSentencePeriods(uniqueLines(locked?.nextUp || []).length
     ? uniqueLines(locked?.nextUp || []).slice(0, 2)
-    : inferNextUp({ nextUp, levers, summary, mode: resolvedMode });
-  const resolvedCoachNote = uniqueLines(locked?.coachNote || coachNote || []).slice(0, 2);
+    : inferNextUp({ nextUp, levers, summary, mode: resolvedMode }));
+  const resolvedCoachNote = ensureSentencePeriods(uniqueLines(locked?.coachNote || coachNote || []).slice(0, 2));
   const resolvedBulletsLabel = trimTerminalPunctuation(locked?.bulletsLabel || bulletsLabel) || (/re-?check/i.test(resolvedMode) ? "WHAT IMPROVED" : "WHAT STANDS OUT");
   const safeHashtag = trimTerminalPunctuation(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
@@ -488,11 +499,11 @@ export async function buildPoseSessionSharePng({
   ctx.fillText(resolvedMode.toUpperCase(), contentX, y);
 
   y += 54;
-  const heroSize = fitFont(ctx, resolvedHero, contentW, 58, 42, "Georgia, Times New Roman, serif", "700 italic");
+  const heroSize = fitFont(ctx, resolvedHero, contentW, 66, 50, "system-ui, -apple-system, Segoe UI, Roboto", "900");
   ctx.fillStyle = "#f2d3c4";
-  ctx.font = `700 italic ${heroSize}px Georgia, Times New Roman, serif`;
+  ctx.font = `900 ${heroSize}px system-ui, -apple-system, Segoe UI, Roboto`;
   const heroLines = wrapLines(ctx, resolvedHero, contentW, 2);
-  const heroLineHeight = heroSize + 1;
+  const heroLineHeight = heroSize + 2;
   heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * heroLineHeight));
   y += heroLines.length * heroLineHeight + 24;
 
