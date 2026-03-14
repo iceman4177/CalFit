@@ -94,8 +94,9 @@ function formatExerciseLine(ex = {}) {
 
 function buildExerciseLines(exercises = []) {
   const safe = Array.isArray(exercises) ? exercises : [];
-  const visible = safe.slice(0, 4).map(formatExerciseLine);
-  if (safe.length > 4) visible.push(`+${safe.length - 4} more ${safe.length - 4 === 1 ? 'move' : 'moves'}`);
+  const visibleCount = 5;
+  const visible = safe.slice(0, visibleCount).map(formatExerciseLine);
+  if (safe.length > visibleCount) visible.push(`+${safe.length - visibleCount} more ${safe.length - visibleCount === 1 ? 'exercise' : 'exercises'}`);
   return visible;
 }
 
@@ -247,7 +248,6 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   ctx.fillStyle = '#64748b';
   ctx.font = '700 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
   ctx.fillText('#SlimcalAI', cardX, height - 112);
-  ctx.fillText('Built to share', width - 270, height - 112);
 
   return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 1));
 }
