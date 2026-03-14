@@ -1461,7 +1461,7 @@ Output format (use these headings):
       <Box>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
-            Daily Recap Coach
+            Daily Recap
           </Typography>
           <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
           {!embedded && !isPro && (
@@ -1580,7 +1580,7 @@ Output format (use these headings):
                   Coach
                 </Typography>
                 <Typography variant="body1" sx={{ mt: 0.5, color: "rgba(51,65,85,0.88)", fontWeight: 600, maxWidth: 620 }}>
-                  See your AI coach for today, then knock out your plan below.
+                  Ask AI Coach for today, then knock out your plan below.
                 </Typography>
               </Box>
               <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
@@ -1594,7 +1594,7 @@ Output format (use these headings):
                 disabled={aiLoading}
                 sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
               >
-                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Get AI Coach"}
+                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Ask AI Coach"}
               </Button>
               <Typography variant="body2" sx={{ color: "rgba(71,85,105,0.84)", fontWeight: 600 }}>
                 Uses today’s meals, workouts, and progress to call your next best move.
