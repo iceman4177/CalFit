@@ -308,6 +308,25 @@ export default function App() {
   const location     = useLocation();
   // Meal reminders/notifications have been removed (UX request).
 
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      const previous = window.history.scrollRestoration;
+      window.history.scrollRestoration = 'manual';
+      return () => {
+        window.history.scrollRestoration = previous;
+      };
+    }
+    return undefined;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const scrollRoot = document.scrollingElement || document.documentElement || document.body;
+    if (scrollRoot) scrollRoot.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname, location.search]);
+
   useReferral();
 
   // Auth state
