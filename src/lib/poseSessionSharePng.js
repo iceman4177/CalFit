@@ -508,10 +508,10 @@ export async function buildPoseSessionSharePng({
   y += heroLines.length * heroLineHeight + 24;
 
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "600 22px system-ui, -apple-system, Segoe UI, Roboto";
   const subLines = wrapLines(ctx, resolvedSubread, contentW, 4);
-  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 25));
-  y += subLines.length * 25 + 28;
+  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 30));
+  y += subLines.length * 30 + 28;
 
   const imgs = [];
   for (let i = 0; i < 3; i++) {
