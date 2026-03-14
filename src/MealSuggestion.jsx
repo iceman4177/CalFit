@@ -369,7 +369,12 @@ export default function MealSuggestion({ consumedCalories, onAddMeal, onQuotaCha
     // log up in parent
     onAddMeal?.({
       name: meal.name,
-      calories: Math.max(0, Number(meal.calories) || 0)
+      calories: Math.max(0, Number(meal.calories) || 0),
+      macros: {
+        protein_g: Math.max(0, Number(meal?.macros?.p) || 0),
+        carbs_g: Math.max(0, Number(meal?.macros?.c) || 0),
+        fat_g: Math.max(0, Number(meal?.macros?.f) || 0)
+      }
     });
 
     // remove just that meal locally

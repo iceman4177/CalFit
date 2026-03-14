@@ -1326,7 +1326,17 @@ export default function MealTracker({ onMealUpdate }) {
                     consumedCalories={total}
                     onAddMeal={async meal => {
                       const safeCalories = Number.isFinite(meal.calories) ? Number(meal.calories) : 0;
-                      await logOne({ name: meal.name, calories: safeCalories });
+                      await logOne({
+                        name: meal.name,
+                        calories: safeCalories,
+                        macros: meal?.macros
+                          ? {
+                              protein_g: Number(meal.macros.protein_g) || 0,
+                              carbs_g: Number(meal.macros.carbs_g) || 0,
+                              fat_g: Number(meal.macros.fat_g) || 0
+                            }
+                          : undefined
+                      });
                     }}
                   />
                 </Box>
