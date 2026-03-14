@@ -1,5 +1,5 @@
 // src/ShareWorkoutModal.jsx
-import React from 'react';
+import React from "react";
 import {
   Dialog,
   DialogTitle,
@@ -9,241 +9,191 @@ import {
   Stack,
   TextField,
   Typography,
-  Box,
-  Chip,
-  alpha,
-} from '@mui/material';
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded';
-import ShareRoundedIcon from '@mui/icons-material/ShareRounded';
-import FacebookRoundedIcon from '@mui/icons-material/FacebookRounded';
-import InstagramIcon from '@mui/icons-material/Instagram';
-import XIcon from '@mui/icons-material/X';
-import LinkedInIcon from '@mui/icons-material/LinkedIn';
-import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+  Box
+} from "@mui/material";
+import IosShareIcon from "@mui/icons-material/IosShare";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 
-function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [], totalCalories = 0 }) {
-  const builtCaption = React.useMemo(() => {
-    const trimmed = String(shareText || '').trim();
-    if (trimmed) {
-      return /Slimcal/i.test(trimmed)
-        ? trimmed
-        : `${trimmed}\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
-    }
+function buildCaption({ shareText, exercises = [], totalCalories = 0 }) {
+  const cleanExercises = Array.isArray(exercises) ? exercises : [];
 
-    const total = Math.max(0, Math.round(Number(totalCalories) || 0));
-    const header = total > 0
-      ? `🔥 Just crushed my workout — ${total} kcal burned!`
-      : `🔥 Just finished my workout!`;
+  if (cleanExercises.length) {
+    const header = totalCalories > 0
+      ? `🔥 Just crushed my workout — ${Math.round(Number(totalCalories) || 0)} kcal burned.`
+      : `🔥 Just crushed my workout.`;
 
-    const body = Array.isArray(exercises) && exercises.length
-      ? exercises.map((ex) => {
-          const name = ex.exerciseName || ex.name || 'Exercise';
-          const sets = Number(ex.sets) || 0;
-          const reps = ex.reps != null && ex.reps !== '' ? ex.reps : '';
-          const weight = Number(ex.weight) || 0;
-          const calories = Number(ex.calories) || 0;
-          const volume = sets && reps ? `${sets}×${reps}` : sets ? `${sets} sets` : '';
-          const weightText = weight > 0 ? ` @ ${Math.round(weight)} lb` : '';
-          const calText = calories > 0 ? ` — ${Math.round(calories)} kcal` : '';
-          return `• ${name}${volume ? ` — ${volume}` : ''}${weightText}${calText}`;
-        }).join('\n')
-      : '';
+    const body = cleanExercises
+      .map((ex) => {
+        const name = String(ex?.exerciseName || ex?.name || "Exercise").trim() || "Exercise";
+        const sets = Number(ex?.sets) || 0;
+        const reps = ex?.reps != null && String(ex.reps).trim() !== "" ? String(ex.reps).trim() : "";
+        const weight = Number(ex?.weight) || 0;
+        const calories = Number(ex?.calories) || 0;
+        const isSauna = (ex?.exerciseType === "Sauna") || /sauna/i.test(name);
 
-    return `${header}${body ? `\n${body}` : ''}\n\nTracked with Slimcal.ai 💪 #SlimcalAI`.trim();
-  }, [shareText, exercises, totalCalories]);
+        if (isSauna) return `• Sauna session${calories > 0 ? ` — ${Math.round(calories)} cal` : ""}`;
 
-  const pageUrl = shareUrl || (typeof window !== 'undefined' ? window.location.href : 'https://slimcal.ai');
-  const encodedCaption = React.useMemo(() => encodeURIComponent(builtCaption), [builtCaption]);
-  const encodedUrl = React.useMemo(() => encodeURIComponent(pageUrl), [pageUrl]);
-  const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
-  const isMobile = typeof window !== 'undefined'
-    ? window.matchMedia?.('(max-width: 900px)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
-    : false;
+        let volume = "";
+        if (sets && reps) volume = `${sets}x${reps}`;
+        else if (sets) volume = `${sets} sets`;
+        else if (reps) volume = `${reps} reps`;
 
-  const copyCaption = React.useCallback(async () => {
+        const weightText = weight > 0 ? ` @ ${Math.round(weight)} lb` : "";
+        const calText = calories > 0 ? ` (${Math.round(calories)} cal)` : "";
+        return `• ${name}${volume ? ` — ${volume}` : ""}${weightText}${calText}`;
+      })
+      .join("\n");
+
+    return `${header}\n${body}\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
+  }
+
+  if (shareText) {
+    let t = String(shareText).trim();
+    if (!/Slimcal/i.test(t)) t += `\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
+    return t;
+  }
+
+  return "🔥 Just finished my workout.\n\nTracked with Slimcal.ai 💪 #SlimcalAI";
+}
+
+export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories }) {
+  const caption = React.useMemo(
+    () => buildCaption({ shareText, exercises, totalCalories }),
+    [shareText, exercises, totalCalories]
+  );
+
+  const handleCopy = React.useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(builtCaption);
-      return true;
-    } catch {
-      return false;
+      await navigator.clipboard.writeText(caption);
+      alert("Copied caption — paste it into your post.");
+    } catch (e) {
+      alert("Could not copy caption.");
     }
-  }, [builtCaption]);
-
-  const openUrl = React.useCallback((url) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }, []);
+  }, [caption]);
 
   const handleNativeShare = React.useCallback(async () => {
     try {
-      if (!navigator.share) return;
-      await navigator.share({ text: builtCaption, url: pageUrl });
-    } catch {}
-  }, [builtCaption, pageUrl]);
-
-  const openWithPrefill = React.useCallback(async (platform) => {
-    if (canNativeShare && isMobile) {
-      if (platform === 'instagram' || platform === 'facebook') {
-        await copyCaption();
+      if (navigator.share) {
+        await navigator.share({
+          title: "SlimCal Workout",
+          text: caption,
+        });
+        return;
       }
-      await handleNativeShare();
-      return;
+      await handleCopy();
+    } catch (e) {
+      // user cancel = ignore
+      if (e?.name === "AbortError") return;
+      await handleCopy();
     }
-
-    switch (platform) {
-      case 'x':
-        openUrl(`https://twitter.com/intent/tweet?text=${encodedCaption}`);
-        break;
-      case 'linkedin':
-        openUrl(`https://www.linkedin.com/feed/?shareActive=true&text=${encodedCaption}`);
-        break;
-      case 'whatsapp':
-        openUrl(`https://wa.me/?text=${encodeURIComponent(`${builtCaption}\n${pageUrl}`)}`);
-        break;
-      case 'facebook': {
-        await copyCaption();
-        openUrl(`https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`);
-        break;
-      }
-      case 'instagram': {
-        await copyCaption();
-        openUrl('https://www.instagram.com/');
-        break;
-      }
-      default:
-        break;
-    }
-  }, [canNativeShare, isMobile, copyCaption, handleNativeShare, openUrl, encodedCaption, builtCaption, pageUrl, encodedUrl]);
-
-  const socialActions = [
-    { key: 'x', label: 'X', icon: <XIcon />, color: '#111827' },
-    { key: 'linkedin', label: 'LinkedIn', icon: <LinkedInIcon />, color: '#2563eb' },
-    { key: 'whatsapp', label: 'WhatsApp', icon: <WhatsAppIcon />, color: '#16a34a' },
-    { key: 'facebook', label: 'Facebook', icon: <FacebookRoundedIcon />, color: '#2563eb' },
-    { key: 'instagram', label: 'Instagram', icon: <InstagramIcon />, color: '#ec4899' },
-  ];
+  }, [caption, handleCopy]);
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
       fullWidth
-      maxWidth="sm"
+      maxWidth="xs"
       PaperProps={{
         sx: {
-          borderRadius: 4,
-          overflow: 'hidden',
-          background: 'linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)',
-          boxShadow: '0 28px 80px rgba(15, 23, 42, 0.18)',
-          border: '1px solid rgba(37,99,235,0.10)',
-          mx: { xs: 1.5, sm: 0 },
+          borderRadius: 5,
+          p: { xs: 1, sm: 1.5 },
+          overflow: "hidden",
         },
       }}
     >
-      <DialogTitle sx={{ pb: 1.25 }}>
-        <Stack spacing={1}>
-          <Typography variant="h5" sx={{ fontWeight: 900, color: '#0f172a' }}>
-            Share your workout
-          </Typography>
-          <Typography variant="body2" sx={{ color: 'rgba(15,23,42,0.65)' }}>
-            Open a post fast and share your progress with SlimCal style.
-          </Typography>
-        </Stack>
+      <DialogTitle sx={{ pb: 1 }}>
+        <Typography sx={{ fontSize: { xs: 24, sm: 28 }, fontWeight: 900, color: "#0f172a" }}>
+          Share your workout
+        </Typography>
       </DialogTitle>
 
-      <DialogContent sx={{ pt: 1 }}>
-        <Stack spacing={2}>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip label="SlimCal AI" sx={{ fontWeight: 800, bgcolor: alpha('#2563eb', 0.10), color: '#2563eb' }} />
-            <Chip label="#SlimcalAI" sx={{ fontWeight: 800, bgcolor: alpha('#0f172a', 0.06), color: '#0f172a' }} />
-            {Number(totalCalories) > 0 ? (
-              <Chip label={`${Math.round(Number(totalCalories))} kcal`} sx={{ fontWeight: 800, bgcolor: alpha('#22c55e', 0.12), color: '#15803d' }} />
-            ) : null}
-          </Stack>
+      <DialogContent sx={{ pt: 0.5 }}>
+        <Stack spacing={2.25}>
+          <Typography sx={{ color: "#667085", fontSize: { xs: 17, sm: 18 }, lineHeight: 1.55 }}>
+            Open a post fast, keep the caption clean, and show your progress with SlimCal style.
+          </Typography>
 
           <TextField
             multiline
             fullWidth
-            minRows={5}
+            minRows={6}
+            maxRows={10}
             variant="outlined"
-            value={builtCaption}
+            value={caption}
             InputProps={{ readOnly: true }}
             sx={{
               '& .MuiOutlinedInput-root': {
-                borderRadius: 3,
-                bgcolor: '#ffffff',
+                borderRadius: 4,
+                background: '#f8fafc',
                 alignItems: 'flex-start',
+              },
+              '& .MuiOutlinedInput-input': {
+                fontSize: 16,
+                lineHeight: 1.5,
               },
             }}
           />
 
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+          <Stack spacing={1.5}>
             <Button
+              fullWidth
               variant="contained"
-              startIcon={<ContentCopyRoundedIcon />}
-              onClick={copyCaption}
+              startIcon={<ContentCopyIcon />}
+              onClick={handleCopy}
               sx={{
-                flex: 1,
+                py: 1.6,
                 borderRadius: 999,
+                textTransform: 'none',
+                fontSize: 18,
                 fontWeight: 800,
-                py: 1.25,
                 boxShadow: 'none',
+                backgroundColor: '#3367E8',
+                '&:hover': { backgroundColor: '#2c58ca', boxShadow: 'none' },
               }}
             >
               Copy caption
             </Button>
-            {canNativeShare ? (
-              <Button
-                variant="outlined"
-                startIcon={<ShareRoundedIcon />}
-                onClick={handleNativeShare}
-                sx={{ flex: 1, borderRadius: 999, fontWeight: 800, py: 1.25 }}
-              >
-                Share now
-              </Button>
-            ) : null}
+
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<IosShareIcon />}
+              onClick={handleNativeShare}
+              sx={{
+                py: 1.6,
+                borderRadius: 999,
+                textTransform: 'none',
+                fontSize: 18,
+                fontWeight: 800,
+                borderColor: '#9db7ff',
+                color: '#3367E8',
+              }}
+            >
+              Share session
+            </Button>
           </Stack>
 
           <Box
             sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr 1fr 1fr' },
-              gap: 1.25,
+              px: 1,
+              py: 1.25,
+              borderRadius: 3,
+              background: 'linear-gradient(180deg, rgba(235,242,255,0.85) 0%, rgba(247,249,252,0.85) 100%)',
             }}
           >
-            {socialActions.map((action) => (
-              <Button
-                key={action.key}
-                variant="outlined"
-                onClick={() => openWithPrefill(action.key)}
-                sx={{
-                  minHeight: 88,
-                  borderRadius: 3,
-                  px: 1.25,
-                  py: 1.25,
-                  borderColor: alpha(action.color, 0.22),
-                  bgcolor: alpha(action.color, 0.05),
-                  textTransform: 'none',
-                }}
-              >
-                <Stack spacing={0.75} alignItems="center" justifyContent="center" sx={{ width: '100%' }}>
-                  <Box sx={{ color: action.color, display: 'inline-flex', fontSize: 30, lineHeight: 1 }}>
-                    {action.icon}
-                  </Box>
-                  <Typography sx={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.1, textAlign: 'center', fontSize: { xs: 13, sm: 14 } }}>
-                    {action.label}
-                  </Typography>
-                </Stack>
-              </Button>
-            ))}
+            <Typography sx={{ color: '#64748b', fontSize: 14, lineHeight: 1.5 }}>
+              On iPhone, Share session opens the native share sheet like Pose Session. Some apps may still limit true caption prefills, so Copy caption stays here as the clean fallback.
+            </Typography>
           </Box>
         </Stack>
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, pb: 2.5 }}>
-        <Button onClick={onClose} sx={{ fontWeight: 800 }}>Close</Button>
+      <DialogActions sx={{ px: 3, pt: 0.5, pb: 1 }}>
+        <Button onClick={onClose} sx={{ textTransform: 'none', fontWeight: 800, fontSize: 17, color: '#3367E8' }}>
+          Close
+        </Button>
       </DialogActions>
     </Dialog>
   );
 }
-
-export default ShareWorkoutModal;

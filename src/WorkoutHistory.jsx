@@ -19,7 +19,6 @@ import {
   DialogActions
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import ShareRoundedIcon from '@mui/icons-material/ShareRounded';
 
 import { useAuth } from './context/AuthProvider.jsx';
 import { getWorkouts } from './lib/db';
@@ -85,7 +84,7 @@ function calcCaloriesFromSets(sets) {
   return Number.isFinite(vol) ? vol : 0;
 }
 
-function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
+function formatDateTime(iso) { try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }); } catch (e) { return iso; } }
 function formatDateOnly(iso) {
   try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
   catch (e) { return iso; }
@@ -535,29 +534,76 @@ export default function WorkoutHistory({ onHistoryChange }) {
   }, [user, onHistoryChange, localIdx, sumTotals]);
 
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="md" sx={{ py: { xs: 2.5, md: 4 } }}>
       <Paper
         elevation={0}
         sx={{
-          mb: 3.5,
-          borderRadius: 8,
-          px: { xs: 2.5, sm: 4 },
-          py: { xs: 3, sm: 4 },
+          mb: { xs: 2.5, md: 4 },
+          px: { xs: 3, sm: 5 },
+          py: { xs: 4, sm: 4.5 },
+          borderRadius: { xs: 8, md: 10 },
+          background: 'linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)',
+          border: '1px solid rgba(157,183,255,0.18)',
+          boxShadow: '0 12px 36px rgba(15, 23, 42, 0.05)',
           textAlign: 'center',
-          background: 'linear-gradient(180deg, rgba(37,99,235,0.04) 0%, rgba(255,255,255,0.96) 100%)',
-          border: '1px solid rgba(37,99,235,0.08)',
-          boxShadow: '0 18px 50px rgba(15, 23, 42, 0.05)'
         }}
       >
-        <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: '-0.04em', lineHeight: 1, fontSize: { xs: '2.5rem', sm: '4rem' } }}>
+        <Typography
+          sx={{
+            fontWeight: 900,
+            fontSize: { xs: '3rem', sm: '4rem', md: '4.3rem' },
+            lineHeight: 0.98,
+            letterSpacing: '-0.04em',
+            color: '#0f172a',
+          }}
+        >
           Workout History
         </Typography>
-        <Typography sx={{ mt: 1.5, color: 'rgba(15,23,42,0.65)', fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
+
+        <Typography
+          sx={{
+            mt: 1.75,
+            mx: 'auto',
+            maxWidth: 880,
+            color: '#64748b',
+            fontSize: { xs: 18, sm: 21 },
+            lineHeight: 1.55,
+          }}
+        >
           Review recent sessions, see what you completed, and keep your training streak feeling real.
         </Typography>
-        <Stack direction="row" spacing={1.25} justifyContent="center" flexWrap="wrap" useFlexGap sx={{ mt: 2.25 }}>
-          <Chip label={`${totalSessions} sessions logged`} sx={{ fontWeight: 800, bgcolor: 'rgba(37,99,235,0.08)' }} />
-          <Chip label={`${totalCalories.toFixed(0)} calories burned`} sx={{ fontWeight: 800, bgcolor: 'rgba(16,185,129,0.12)' }} />
+
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1.4}
+          justifyContent="center"
+          alignItems="center"
+          sx={{ mt: 2.5 }}
+        >
+          <Chip
+            icon={<span style={{ fontSize: 17 }}>🏋️</span>}
+            label={`${totalSessions} sessions logged`}
+            sx={{
+              height: 42,
+              borderRadius: 999,
+              background: '#eef2ff',
+              color: '#0f172a',
+              fontWeight: 800,
+              '& .MuiChip-label': { px: 2, fontSize: 15 },
+            }}
+          />
+          <Chip
+            icon={<span style={{ fontSize: 17 }}>🔥</span>}
+            label={`${Math.round(totalCalories)} calories burned`}
+            sx={{
+              height: 42,
+              borderRadius: 999,
+              background: '#eaf7f2',
+              color: '#0f172a',
+              fontWeight: 800,
+              '& .MuiChip-label': { px: 2, fontSize: 15 },
+            }}
+          />
         </Stack>
       </Paper>
 
@@ -566,111 +612,183 @@ export default function WorkoutHistory({ onHistoryChange }) {
           <CircularProgress />
         </Box>
       ) : rows.length === 0 ? (
-        <Typography>No workouts yet.</Typography>
+        <Paper
+          elevation={0}
+          sx={{
+            borderRadius: 6,
+            px: 3,
+            py: 5,
+            textAlign: 'center',
+            border: '1px solid rgba(157,183,255,0.18)',
+            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.04)',
+          }}
+        >
+          <Typography sx={{ fontSize: 26, fontWeight: 900, color: '#0f172a' }}>
+            No workouts logged yet
+          </Typography>
+          <Typography sx={{ mt: 1, color: '#64748b', fontSize: 17 }}>
+            Finish a session and it will show up here as part of your training record.
+          </Typography>
+        </Paper>
       ) : (
-        <List sx={{ pt: 0 }}>
+        <Stack spacing={{ xs: 2.25, md: 3 }}>
           {rows.map(w => {
             const exerciseSummary = summarizeExercisesFromSets(w.sets || []);
+            const exerciseCount = exerciseSummary.length || (w.exercisesForShare || []).length || 0;
 
             return (
               <Paper
-                variant="outlined"
-                sx={{
-                  mb: 2.25,
-                  borderRadius: 5,
-                  border: '1px solid rgba(37,99,235,0.08)',
-                  background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
-                  boxShadow: '0 14px 34px rgba(15,23,42,0.045)'
-                }}
                 key={w.id}
+                elevation={0}
+                sx={{
+                  p: { xs: 2.25, sm: 3 },
+                  borderRadius: { xs: 6, md: 7 },
+                  border: '1px solid rgba(157,183,255,0.18)',
+                  boxShadow: '0 12px 34px rgba(15, 23, 42, 0.05)',
+                  background: 'linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)',
+                }}
               >
-                <ListItem alignItems="flex-start" sx={{ alignItems: 'stretch' }}>
-                  <ListItemText
-                    primary={
-                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
-                        <Box>
-                          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: '-0.03em', fontSize: { xs: '2rem', sm: '2.2rem' } }}>
-                            {formatDateOnly(w.started_at)}
-                          </Typography>
-                          <Typography variant="body1" sx={{ mt: 0.25, color: 'rgba(15,23,42,0.62)' }}>
-                            {formatDateTime(w.started_at).replace(/^\d{1,2}\/\d{1,2}\/\d{4},?\s*/, '')}
-                          </Typography>
-                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
-                            <Chip label={`${Math.round(Number(w.total_calories) || 0)} cals`} sx={{ fontWeight: 800, bgcolor: 'rgba(37,99,235,0.08)' }} />
-                            <Chip label={`${exerciseSummary.length} exercises`} variant="outlined" sx={{ fontWeight: 800 }} />
-                          </Stack>
-                        </Box>
+                <Stack spacing={2}>
+                  <Stack
+                    direction="row"
+                    alignItems="flex-start"
+                    justifyContent="space-between"
+                    spacing={1.25}
+                    sx={{ minWidth: 0 }}
+                  >
+                    <Box sx={{ minWidth: 0, flex: 1, pr: 1 }}>
+                      <Typography sx={{ fontWeight: 900, color: '#0f172a', fontSize: { xs: '2.05rem', sm: '2.5rem' }, lineHeight: 0.98 }}>
+                        {formatDateOnly(w.started_at)}
+                      </Typography>
+                      <Typography sx={{ mt: 1, color: '#667085', fontSize: { xs: 16, sm: 18 } }}>
+                        {formatDateTime(w.started_at)}
+                      </Typography>
+                    </Box>
 
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Button
-                            size="large"
-                            variant="outlined"
-                            startIcon={<ShareRoundedIcon />}
-                            onClick={() => openShareFor(w)}
-                            sx={{ borderRadius: 999, fontWeight: 800, px: 2.25, py: 1 }}
-                          >
-                            Share Session
-                          </Button>
+                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0, ml: 'auto' }}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => openShareFor(w)}
+                        startIcon={<span style={{ fontSize: 18, lineHeight: 1 }}>⤴︎</span>}
+                        sx={{
+                          minWidth: 0,
+                          whiteSpace: 'nowrap',
+                          textTransform: 'none',
+                          fontWeight: 800,
+                          color: '#3367E8',
+                          borderColor: '#9db7ff',
+                          borderRadius: 999,
+                          px: { xs: 1.25, sm: 2.1 },
+                          py: { xs: 0.9, sm: 1.1 },
+                          fontSize: { xs: 14, sm: 16 },
+                          lineHeight: 1,
+                          minHeight: { xs: 44, sm: 48 },
+                          '& .MuiButton-startIcon': { mr: { xs: 0.4, sm: 0.75 }, ml: 0 },
+                        }}
+                      >
+                        <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Share</Box>
+                        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Share Session</Box>
+                      </Button>
 
-                          <span><IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => askDeleteRow(w)}
-                                disabled={deleting}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton></span>
-                        </Stack>
-                      </Stack>
-                    }
-                    secondary={
-                      <Box sx={{ mt: 2 }}>
-                        {exerciseSummary.length > 0 ? (
-                          <Stack spacing={1.25}>
-                            {exerciseSummary.map((e, i) => (
-                              <Box
-                                key={i}
-                                sx={{
-                                  px: 2,
-                                  py: 1.4,
-                                  borderRadius: 999,
-                                  border: '1px solid rgba(37,99,235,0.08)',
-                                  bgcolor: 'rgba(37,99,235,0.035)'
-                                }}
-                              >
-                                <Typography variant="body1" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                                  {e.name}
-                                </Typography>
-                                <Typography variant="body1" sx={{ color: 'rgba(15,23,42,0.62)' }}>
-                                  {e.minutes
-                                    ? `${Math.round(e.minutes)} min`
-                                    : `${e.sets} set${e.sets === 1 ? '' : 's'}`}
-                                </Typography>
-                              </Box>
-                            ))}
-                          </Stack>
-                        ) : (
-                          (w.shareLines || []).map((line, i) => (
-                            <Typography key={i} variant="body2">
-                              • {line.replace(/^- /, '')}
-                            </Typography>
-                          ))
-                        )}
-                      </Box>
-                    }
-                  />
-                </ListItem>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => askDeleteRow(w)}
+                        disabled={deleting}
+                        sx={{
+                          flexShrink: 0,
+                          ml: { xs: 0, sm: 0.25 },
+                          '& svg': { fontSize: { xs: 26, sm: 24 } },
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Stack>
+
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip
+                      label={`${Math.round(Number(w.total_calories) || 0)} cals`}
+                      sx={{
+                        height: 38,
+                        borderRadius: 999,
+                        background: '#eef2ff',
+                        color: '#0f172a',
+                        fontWeight: 800,
+                        '& .MuiChip-label': { px: 1.8, fontSize: 14 },
+                      }}
+                    />
+                    <Chip
+                      label={`${exerciseCount} ${exerciseCount === 1 ? 'exercise' : 'exercises'}`}
+                      variant="outlined"
+                      sx={{
+                        height: 38,
+                        borderRadius: 999,
+                        borderColor: 'rgba(15,23,42,0.22)',
+                        color: '#0f172a',
+                        fontWeight: 800,
+                        '& .MuiChip-label': { px: 1.8, fontSize: 14 },
+                      }}
+                    />
+                  </Stack>
+
+                  <Divider />
+
+                  <Stack spacing={1.5}>
+                    {exerciseSummary.length > 0 ? (
+                      exerciseSummary.map((e, i) => (
+                        <Paper
+                          key={i}
+                          elevation={0}
+                          sx={{
+                            px: { xs: 2, sm: 2.5 },
+                            py: { xs: 1.8, sm: 2.05 },
+                            borderRadius: 999,
+                            background: '#f8fbff',
+                            border: '1px solid rgba(157,183,255,0.22)',
+                          }}
+                        >
+                          <Typography sx={{ fontWeight: 900, color: '#0f172a', fontSize: { xs: 18, sm: 19 } }}>
+                            {e.name}
+                          </Typography>
+                          <Typography sx={{ mt: 0.4, color: '#667085', fontSize: { xs: 16, sm: 17 } }}>
+                            {e.minutes
+                              ? `${Math.round(e.minutes)} min`
+                              : `${e.sets} set${e.sets === 1 ? '' : 's'}`}
+                          </Typography>
+                        </Paper>
+                      ))
+                    ) : (
+                      (w.shareLines || []).map((line, i) => (
+                        <Paper
+                          key={i}
+                          elevation={0}
+                          sx={{
+                            px: { xs: 2, sm: 2.5 },
+                            py: { xs: 1.6, sm: 1.85 },
+                            borderRadius: 999,
+                            background: '#f8fbff',
+                            border: '1px solid rgba(157,183,255,0.22)',
+                          }}
+                        >
+                          <Typography sx={{ color: '#0f172a', fontSize: { xs: 16, sm: 17 } }}>
+                            {line.replace(/^- /, '')}
+                          </Typography>
+                        </Paper>
+                      ))
+                    )}
+                  </Stack>
+                </Stack>
               </Paper>
             );
           })}
-        </List>
+        </Stack>
       )}
 
       <ShareWorkoutModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         shareText={shareText}
-        shareUrl={window.location.href}
         exercises={shareExercises}
         totalCalories={shareTotal}
       />
