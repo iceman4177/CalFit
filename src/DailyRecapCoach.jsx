@@ -16,11 +16,7 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import UpgradeModal from "./components/UpgradeModal";
-import FeatureUseBadge, {
-  registerDailyFeatureUse,
-  getDailyRemaining,
-  getFreeDailyLimit,
-} from "./components/FeatureUseBadge.jsx";
+import { getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
@@ -34,6 +30,40 @@ import { readProfileBundle } from "./lib/profileStorage.js";
 import { ensureScopedFromLegacy, readScopedJSON, KEYS } from "./lib/scopedStorage.js";
 
 // ---- Coach-first: XP (localStorage, no backend) -------------------------------
+
+const RECAP_USAGE_KEY_PREFIX = "slimcal:daily_recap_usage:v1";
+
+function getQuotaDateKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function getRecapUsageScope(user) {
+  return String(user?.id || user?.email || "guest");
+}
+
+function readScopedRecapUsage(scope) {
+  try {
+    const raw = localStorage.getItem(`${RECAP_USAGE_KEY_PREFIX}:${scope}`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const today = getQuotaDateKey();
+    if (!parsed || typeof parsed !== "object" || parsed.date !== today) {
+      return { date: today, used: 0 };
+    }
+    return { date: today, used: Math.max(0, Number(parsed.used || 0)) };
+  } catch {
+    return { date: getQuotaDateKey(), used: 0 };
+  }
+}
+
+function writeScopedRecapUsage(scope, used) {
+  try {
+    localStorage.setItem(
+      `${RECAP_USAGE_KEY_PREFIX}:${scope}`,
+      JSON.stringify({ date: getQuotaDateKey(), used: Math.max(0, Number(used || 0)) })
+    );
+  } catch {}
+}
 const XP_KEY = "slimcal:xp:v1";
 
 function clamp(n, a, b) {
@@ -710,20 +740,22 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   // Daily recap limit (Stripe gating stays)
   const freeDailyRecapLimit = getFreeDailyLimit("daily_recap");
+  const recapUsageScope = useMemo(() => getRecapUsageScope(user), [user]);
 
   useEffect(() => {
     if (isPro) {
       setCount(0);
       return;
     }
-    const used = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
-    setCount(used);
-  }, [isPro, todayUS, freeDailyRecapLimit]);
+    const used = readScopedRecapUsage(recapUsageScope).used;
+    setCount(Math.min(freeDailyRecapLimit, used));
+  }, [isPro, recapUsageScope, freeDailyRecapLimit, todayUS]);
 
   const incrementCount = () => {
     if (isPro) return 0;
-    registerDailyFeatureUse("daily_recap");
-    const usedNow = Math.max(0, freeDailyRecapLimit - getDailyRemaining("daily_recap"));
+    const prev = readScopedRecapUsage(recapUsageScope).used;
+    const usedNow = Math.min(freeDailyRecapLimit, prev + 1);
+    writeScopedRecapUsage(recapUsageScope, usedNow);
     setCount(usedNow);
     return usedNow;
   };
@@ -1175,7 +1207,7 @@ Output format (use these headings):
             <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />
           )}
           {!embedded && !isPro && (
-            <FeatureUseBadge featureKey="daily_recap" isPro={false} />
+            <Chip label={`Free: ${Math.max(0, freeDailyRecapLimit - count)}/${freeDailyRecapLimit}`} size="small" variant="outlined" sx={{ fontWeight: 800, borderRadius: 999 }} />
           )}
         </Stack>
 
