@@ -1568,6 +1568,35 @@ Score: ${bundle.derived.score}/100
 
   const topSubtitle = `${bundle.dayUS} • swipe → do steps → win`;
 
+  const heroMeta =
+    view === "checklist"
+      ? {
+          eyebrow: "TODAY'S PLAN",
+          title: "Knock out your next best step",
+          subtitle: "Use today’s quests to stay on track and finish the day stronger.",
+          chips: ["Plan", "Meals", "Workout"],
+        }
+      : view === "coach"
+      ? {
+          eyebrow: "AI COACH",
+          title: "Get your daily verdict",
+          subtitle: "Use what you logged today to get the clearest next move.",
+          chips: ["Coach", "Verdict", "Next step"],
+        }
+      : view === "scoreboard"
+      ? {
+          eyebrow: "DAILY CHECK-IN",
+          title: "See how today is tracking",
+          subtitle: "Your calories, exercise, and macros in one clean read.",
+          chips: ["Status", "Calories", "Macros"],
+        }
+      : {
+          eyebrow: "DAILY CHECK-IN",
+          title: "See how today is going",
+          subtitle: "Check your numbers, see what to do next, then get your daily verdict.",
+          chips: ["Status", "Plan", "Coach"],
+        };
+
   const coachHelper = pro
     ? "Generate your daily verdict (ultra-detailed) for today."
     : `Generate your daily verdict (ultra-detailed) (free: ${Math.max(0, remainingAi)}/${limitAi} today).`;
@@ -1605,6 +1634,89 @@ Score: ${bundle.derived.score}/100
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
+
+      <Box
+        sx={{
+          mt: { xs: 2, sm: 2 },
+          mb: { xs: 1.4, sm: 1.8 },
+          px: { xs: 2, sm: 0 },
+          width: "100%",
+          maxWidth: { xs: "100%", sm: 980 },
+          mx: "auto",
+        }}
+      >
+        <Box
+          sx={{
+            borderRadius: { xs: 4, sm: 5 },
+            px: { xs: 2.2, sm: 3.2 },
+            py: { xs: 2.1, sm: 2.4 },
+            background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.98) 100%)",
+            border: "1px solid rgba(148,163,184,0.12)",
+            boxShadow: "0 18px 50px rgba(15,23,42,0.07)",
+            textAlign: "center",
+          }}
+        >
+          <Typography
+            sx={{
+              color: "#2F5FEF",
+              fontWeight: 950,
+              letterSpacing: 1.6,
+              fontSize: { xs: 13, sm: 14 },
+              mb: 0.8,
+            }}
+          >
+            {heroMeta.eyebrow}
+          </Typography>
+
+          <Typography
+            sx={{
+              fontWeight: 950,
+              letterSpacing: -0.5,
+              fontSize: { xs: 29, sm: 36 },
+              lineHeight: 1.06,
+              color: "rgba(2,6,23,0.98)",
+            }}
+          >
+            {heroMeta.title}
+          </Typography>
+
+          <Typography
+            sx={{
+              mt: 1.1,
+              mx: "auto",
+              maxWidth: 720,
+              fontSize: { xs: 16, sm: 18 },
+              lineHeight: 1.5,
+              fontWeight: 700,
+              color: "rgba(51,65,85,0.92)",
+            }}
+          >
+            {heroMeta.subtitle}
+          </Typography>
+
+          <Stack
+            direction="row"
+            spacing={1}
+            justifyContent="center"
+            alignItems="center"
+            sx={{ mt: 1.5, flexWrap: "wrap", rowGap: 1 }}
+          >
+            {heroMeta.chips.map((chip) => (
+              <Chip
+                key={chip}
+                label={chip}
+                size="small"
+                sx={{
+                  borderRadius: 999,
+                  fontWeight: 900,
+                  background: "rgba(47,95,239,0.10)",
+                  color: "#2F5FEF",
+                }}
+              />
+            ))}
+          </Stack>
+        </Box>
+      </Box>
 {/* Cards */}
         <Box
         sx={{
@@ -1633,7 +1745,7 @@ Score: ${bundle.derived.score}/100
         {(view === "full" || view === "scoreboard") && (
         <CardShell
           title="Today"
-          subtitle="Your scoreboard"
+          subtitle="Your day at a glance"
         >
           <Stack spacing={1.2} alignItems="center">
             {/* Top row: Calories + Exercise */}
@@ -1684,7 +1796,7 @@ Score: ${bundle.derived.score}/100
 
 
         {(view === "full" || view === "checklist") && (
-        <CardShell isSingleView={isSingleView} title="Progress" subtitle="Your quests (5 at a time)">
+        <CardShell isSingleView={isSingleView} title="Today’s Plan" subtitle="What to do next">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
               <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
@@ -1880,7 +1992,7 @@ Score: ${bundle.derived.score}/100
 
 
 {(view === "full" || view === "coach") && (
-        <CardShell isSingleView={isSingleView} title="Coach" subtitle="Your daily verdict">
+        <CardShell isSingleView={isSingleView} title="Coach" subtitle="Your clearest next move">
           <Stack spacing={1.1} alignItems="center">
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
               {coachHelper}
