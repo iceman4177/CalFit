@@ -1,6 +1,5 @@
 // src/DailyRecapCoach.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import {
   Box,
   Button,
@@ -16,9 +15,9 @@ import {
   LinearProgress,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import UpgradeModal from "./components/UpgradeModal";
-import DailyEvaluationHome from "./DailyEvaluationHome";
-import { getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
+import FeatureUseBadge, { canUseDailyFeature, registerDailyFeatureUse, getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
 import {
@@ -653,7 +652,7 @@ function calcCaloriesFromSets(sets) {
 
 // -----------------------------------------------------------------------------
 // Component
-export default function DailyRecapCoach({ embedded = false, initialVerdictOpen = false } = {}) {
+export default function DailyRecapCoach({ embedded = false } = {}) {
   const { user } = useAuth();
   const ent = useEntitlements();
 
@@ -667,14 +666,18 @@ export default function DailyRecapCoach({ embedded = false, initialVerdictOpen =
   const [count, setCount] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
 
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiVerdict, setAiVerdict] = useState("");
+  const [aiError, setAiError] = useState("");
+
   const [savedAt, setSavedAt] = useState(null);
   const [history, setHistory] = useState([]);
-  const [showAiVerdict, setShowAiVerdict] = useState(!!initialVerdictOpen);
 
   const todayUS = useMemo(() => usDay(), []);
   const todayISO = useMemo(() => localISODay(), []);
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
+  const aiVerdictKeyToday = useMemo(() => `coachVerdict:${user?.id || "guest"}:${todayISO}`, [user?.id, todayISO]);
 
   const targets = useMemo(() => getUserTargets(), []);
 
@@ -714,12 +717,17 @@ export default function DailyRecapCoach({ embedded = false, initialVerdictOpen =
     } catch (e) {}
 
     try {
+      const savedVerdict = localStorage.getItem(aiVerdictKeyToday) || "";
+      setAiVerdict(String(savedVerdict || ""));
+    } catch (e) {}
+
+    try {
       const hist = JSON.parse(localStorage.getItem(recapHistoryKey) || "[]");
       setHistory(Array.isArray(hist) ? hist : []);
     } catch (e) {
       setHistory([]);
     }
-  }, [recapKeyToday]);
+  }, [aiVerdictKeyToday, recapKeyToday]);
 
   // Load day context
   useEffect(() => {
@@ -1027,6 +1035,113 @@ for (const v of byEx.values()) {
     } catch (e) {}
   }, [dayCtxLoading, dayCtx, recapKeyToday, targets.dailyGoal, targets.proteinDaily]);
 
+  const saveAiVerdictLocal = (content) => {
+    try {
+      localStorage.setItem(aiVerdictKeyToday, String(content || ""));
+    } catch (e) {}
+  };
+
+  const handleGenerateAiVerdict = async () => {
+    if (aiLoading) return;
+    if (!isPro && !canUseDailyFeature("daily_eval_verdict")) {
+      setModalOpen(true);
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError("");
+
+    try {
+      const ctx = dayCtx || (await buildContext());
+      const consumed = round(ctx?.consumed || 0);
+      const burnedNow = round(ctx?.burned || 0);
+      const netNow = round(consumed - burnedNow);
+      const proteinNow = round(ctx?.macroTotals?.protein_g || 0);
+      const carbsNow = round(ctx?.macroTotals?.carbs_g || 0);
+      const fatNow = round(ctx?.macroTotals?.fat_g || 0);
+      const calorieDelta = round((targets.dailyGoal || 0) - netNow);
+      const proteinDelta = round((targets.proteinDaily || 0) - proteinNow);
+      const timingSummary = computeTimingNotes(ctx?.meals || []);
+
+      const verdictFacts = {
+        date: todayISO,
+        goal_type: targets.goalType || null,
+        diet_preference: targets.dietPreference || null,
+        calorie_goal: round(targets.dailyGoal || 0),
+        protein_goal_g: round(targets.proteinDaily || 0),
+        calories_eaten: consumed,
+        calories_burned: burnedNow,
+        net_calories: netNow,
+        calorie_delta_to_goal: calorieDelta,
+        protein_g: proteinNow,
+        protein_delta_g: proteinDelta,
+        carbs_g: carbsNow,
+        fat_g: fatNow,
+        meals_logged: (ctx?.meals || []).map((m) => ({
+          time: m.time_label || null,
+          title: m.title || "Meal",
+          calories: round(m.total_calories || 0),
+          protein_g: round(m.macros?.protein_g || 0),
+        })),
+        workouts_logged: (ctx?.workouts || []).map((w) => ({
+          exercise: w.exercise_name || "Workout",
+          calories: round(w.calories || 0),
+        })),
+        timing_summary: timingSummary,
+      };
+
+      const system = `You are SlimCal Coach. Write a premium, concise, motivating daily verdict grounded only in the provided data.
+
+Rules:
+- Sound clear, modern, and coach-like.
+- Be flattering first, then actionable.
+- Do not invent meals, workouts, or times.
+- Do not mention breakfast unless a meal before 11:00 AM exists.
+- If data is light, say that briefly and still give the best next move.
+- Keep it tight and easy to scan.
+
+Output exactly with these headings:
+Verdict
+What’s working
+Next move
+`;
+
+      const userMsg = `Use this exact day data:
+
+${JSON.stringify(verdictFacts, null, 2)}`;
+
+      const res = await fetch("/api/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userMsg },
+          ],
+          context: verdictFacts,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API error (${res.status}): ${text}`);
+      }
+
+      const data = await res.json();
+      const msg = data?.choices?.[0]?.message?.content;
+      if (!msg) throw new Error("No message returned from OpenAI.");
+
+      setAiVerdict(msg);
+      saveAiVerdictLocal(msg);
+      if (!isPro) registerDailyFeatureUse("daily_eval_verdict");
+    } catch (err) {
+      console.error("AI verdict error:", err);
+      setAiError(err?.message || "Sorry, I couldn’t generate your AI verdict right now.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleGetRecap = async () => {
     if (!isPro && count >= freeDailyRecapLimit) {
       setModalOpen(true);
@@ -1306,63 +1421,80 @@ Output format (use these headings):
 
   return (
     <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
-      {!embedded && (
-        <Card
-          elevation={0}
-          sx={{
-            mb: 2.2,
-            borderRadius: 5,
-            overflow: "visible",
-            border: "1px solid rgba(2,6,23,0.08)",
-            boxShadow: "0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)",
-          }}
-        >
-          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
-            <Stack spacing={2} alignItems="center" textAlign="center">
-              <Typography
-                variant="h4"
-                sx={{
-                  fontWeight: 800,
-                  lineHeight: 1.08,
-                  letterSpacing: "-0.02em",
-                  fontSize: { xs: "2.15rem", sm: "2.35rem" },
-                }}
-              >
-                Coach
-              </Typography>
-              <Typography
-                variant="body1"
-                color="text.secondary"
-                sx={{ maxWidth: 580, mx: "auto", fontSize: { xs: "1rem", sm: "1.08rem" }, lineHeight: 1.5 }}
-              >
-                Fire off an AI Verdict at the top, then keep the rest of your Coach flow the same with daily quests and your recap underneath.
-              </Typography>
+      <Card
+        elevation={0}
+        sx={{
+          mb: 2.2,
+          borderRadius: 4,
+          border: "1px solid rgba(2,6,23,0.08)",
+          background: "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)",
+          boxShadow: "0 16px 40px rgba(15,23,42,0.06)",
+        }}
+      >
+        <CardContent sx={{ p: { xs: 2.1, sm: 2.5 } }}>
+          <Stack spacing={1.3}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
+              <Box>
+                <Typography variant="h4" sx={{ fontWeight: 1000, letterSpacing: "-0.03em", color: "rgba(15,23,42,0.98)" }}>
+                  Coach
+                </Typography>
+                <Typography variant="body1" sx={{ mt: 0.5, color: "rgba(51,65,85,0.88)", fontWeight: 600, maxWidth: 620 }}>
+                  See your AI verdict for today, then knock out your plan below.
+                </Typography>
+              </Box>
+              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="Verdicts left" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
+            </Stack>
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.1} alignItems={{ xs: "stretch", sm: "center" }}>
               <Button
-                onClick={() => setShowAiVerdict((s) => !s)}
-                variant={showAiVerdict ? "outlined" : "contained"}
-                startIcon={<AutoAwesomeIcon />}
-                size="large"
-                sx={{
-                  width: "100%",
-                  maxWidth: 560,
-                  minHeight: 56,
-                  fontWeight: 700,
-                  fontSize: { xs: "1.05rem", sm: "1.08rem" },
-                  borderRadius: 999,
-                  px: 3,
-                }}
+                variant="contained"
+                startIcon={aiLoading ? null : <AutoAwesomeRoundedIcon />}
+                onClick={handleGenerateAiVerdict}
+                disabled={aiLoading}
+                sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
               >
-                {showAiVerdict ? "Hide AI Verdict" : "AI Verdict"}
+                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Verdict" : "Get AI Verdict"}
               </Button>
+              <Typography variant="body2" sx={{ color: "rgba(71,85,105,0.84)", fontWeight: 600 }}>
+                Uses today’s meals, workouts, and progress to call your next best move.
+              </Typography>
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {(aiLoading || aiError || aiVerdict) && (
+        <Card elevation={0} sx={{ mb: 2.0, border: "1px solid rgba(2,6,23,0.10)", borderRadius: 3, overflow: "hidden", background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,1) 100%)" }}>
+          <CardContent sx={{ p: { xs: 2, sm: 2.3 } }}>
+            <Stack spacing={1.1}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
+                <Box>
+                  <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.98)", fontSize: 22 }}>
+                    Your AI Verdict
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.68)", mt: 0.35 }}>
+                    Fast read on how today is shaping up.
+                  </Typography>
+                </Box>
+                {!aiLoading && <Chip label="AI" size="small" sx={{ fontWeight: 900, borderRadius: 999, color: "white", background: "rgba(59,130,246,0.22)", border: "1px solid rgba(96,165,250,0.30)" }} />}
+              </Stack>
+
+              {aiError ? (
+                <Typography variant="body2" sx={{ color: "rgba(252,165,165,0.96)" }}>
+                  {aiError}
+                </Typography>
+              ) : aiLoading ? (
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
+                  Building your verdict…
+                </Typography>
+              ) : (
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.86)", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
+                  {aiVerdict}
+                </Typography>
+              )}
             </Stack>
           </CardContent>
         </Card>
-      )}
-
-      {showAiVerdict && !embedded && (
-        <Box sx={{ mb: 2.2 }}>
-          <DailyEvaluationHome view="coach" />
-        </Box>
       )}
 
       {roastLine && (
@@ -1427,9 +1559,14 @@ Output format (use these headings):
             justifyContent="space-between"
             sx={{ mb: 1.5 }}
           >
-            <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
-              🎯 Daily Quests
-            </Typography>
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
+                Today’s Plan
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
+                Knock these out to close the day strong.
+              </Typography>
+            </Box>
           </Stack>
 
           <Stack spacing={1.1}>

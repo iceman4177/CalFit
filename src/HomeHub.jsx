@@ -113,13 +113,13 @@ export default function HomeHub() {
               variant="h5"
               sx={{ fontWeight: 1000, letterSpacing: -0.8, color: "rgba(15,23,42,0.96)" }}
             >
-              What are we doing today?
+              Pick your next move
             </Typography>
             <Typography
               variant="subtitle1"
               sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 650 }}
             >
-              Tap an icon to log, scan, or get coached.
+              Log food, train, scan, and get coached — all from one clean home base.
             </Typography>
           </Stack>
 
@@ -173,9 +173,6 @@ export default function HomeHub() {
               alignItems: "start",
               pt: { xs: 0.4, sm: 0.8 },
               mx: "auto",
-              '& > :last-child': {
-                gridColumn: { xs: '1 / -1', sm: '2 / 3' },
-              },
             }}
           >
             <AppIcon

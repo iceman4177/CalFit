@@ -976,17 +976,8 @@ export default function App() {
 
           
 
-          {/* Get Verdict (CTA + output only) */}
-          <Route
-            exact
-            path="/get-verdict"
-            render={() => renderProfileGate("Complete your profile before Get Verdict", "Get Verdict works best when SlimCal knows your body stats, activity level, and goal.") || (
-              <DailyRecapCoach
-                initialVerdictOpen
-                userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
-              />
-            )}
-          />
+          {/* Legacy Get Verdict route now folds into Coach */}
+          <Route exact path="/get-verdict" render={() => <Redirect to="/verdict" />} />
 {/* Daily Verdict (AI coach) */}
           <Route
             exact
