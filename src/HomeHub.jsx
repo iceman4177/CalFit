@@ -95,9 +95,21 @@ export default function HomeHub() {
         background: "radial-gradient(1200px 600px at 50% 0%, rgba(59,130,246,0.10), rgba(255,255,255,0) 55%), radial-gradient(1000px 520px at 50% 60%, rgba(16,185,129,0.08), rgba(255,255,255,0) 60%)",
       }}
     >
-      <Container maxWidth="sm">
-        <Stack spacing={2} sx={{ alignItems: "center" }}>
-          <Stack spacing={0.6} sx={{ width: "100%", textAlign: "left", p: 2, borderRadius: 3, border: "1px solid rgba(148,163,184,0.35)", background: "rgba(255,255,255,0.72)", boxShadow: "0 10px 30px rgba(0,0,0,0.10)" }}>
+      <Container maxWidth="md">
+        <Stack spacing={{ xs: 2, sm: 2.6 }} sx={{ alignItems: "center" }}>
+          <Stack
+            spacing={0.7}
+            sx={{
+              width: "100%",
+              maxWidth: 690,
+              textAlign: "left",
+              p: { xs: 2, sm: 2.4 },
+              borderRadius: 4,
+              border: "1px solid rgba(148,163,184,0.28)",
+              background: "rgba(255,255,255,0.78)",
+              boxShadow: "0 18px 42px rgba(0,0,0,0.08)",
+            }}
+          >
             <Typography
               variant="h5"
               sx={{ fontWeight: 1000, letterSpacing: -0.8, color: "rgba(15,23,42,0.96)" }}
@@ -154,11 +166,17 @@ export default function HomeHub() {
           <Box
             sx={{
               width: "100%",
+              maxWidth: 760,
               display: "grid",
               gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
-              gap: { xs: 2, sm: 2.4 },
+              gap: { xs: 2, sm: 2.6 },
               justifyItems: "center",
-              pt: 1.2,
+              alignItems: "start",
+              pt: { xs: 0.4, sm: 0.8 },
+              mx: "auto",
+              '& > :last-child': {
+                gridColumn: { xs: '1 / -1', sm: '2 / 3' },
+              },
             }}
           >
             <AppIcon
