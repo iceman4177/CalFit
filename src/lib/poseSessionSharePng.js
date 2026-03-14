@@ -225,11 +225,11 @@ function inferNextUp({ nextUp = [], levers = [], summary = "", mode = "Baseline 
 
 function drawSectionTitle(ctx, text, x, y, width) {
   ctx.fillStyle = "#f2c27b";
-  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(text, x, y);
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = "rgba(255,190,120,0.26)";
-  ctx.fillRect(x + tw + 18, y - 10, Math.max(40, width - tw - 18), 2);
+  ctx.fillRect(x + tw + 18, y - 11, Math.max(40, width - tw - 18), 2);
 }
 
 function measureWrappedHeight(ctx, items, maxWidth, lineHeight, itemGap = 0, maxLinesPerItem = 4) {
@@ -380,25 +380,25 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(255,190,120,0.28)";
   ctx.fillRect(contentX, y, contentW, 2);
 
-  y += 34;
+  y += 32;
   ctx.fillStyle = "#f4c66d";
-  ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(resolvedMode.toUpperCase(), contentX, y);
 
-  y += 42;
-  const heroSize = fitFont(ctx, resolvedHero, contentW, 60, 40, "Georgia, Times New Roman, serif", "700 italic");
+  y += 54;
+  const heroSize = fitFont(ctx, resolvedHero, contentW, 58, 42, "Georgia, Times New Roman, serif", "700 italic");
   ctx.fillStyle = "#f2d3c4";
   ctx.font = `700 italic ${heroSize}px Georgia, Times New Roman, serif`;
   const heroLines = wrapLines(ctx, resolvedHero, contentW, 2);
   const heroLineHeight = heroSize + 1;
   heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * heroLineHeight));
-  y += heroLines.length * heroLineHeight + 18;
+  y += heroLines.length * heroLineHeight + 24;
 
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
-  const subLines = wrapLines(ctx, resolvedSubread, contentW, 3);
-  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 22));
-  y += subLines.length * 22 + 24;
+  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  const subLines = wrapLines(ctx, resolvedSubread, contentW, 4);
+  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 25));
+  y += subLines.length * 25 + 28;
 
   const imgs = [];
   for (let i = 0; i < 3; i++) {
@@ -429,57 +429,57 @@ export async function buildPoseSessionSharePng({
     ctx.stroke();
     ctx.restore();
   }
-  y += imgH + 34;
+  y += imgH + 38;
 
   drawSectionTitle(ctx, resolvedBulletsLabel, contentX, y, contentW);
-  y += 30;
+  y += 34;
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
-  const bulletLineHeight = 20;
+  ctx.font = "500 19px system-ui, -apple-system, Segoe UI, Roboto";
+  const bulletLineHeight = 24;
   for (const item of resolvedBullets) {
     ctx.beginPath();
     ctx.fillStyle = "#f2c27b";
     ctx.arc(contentX + 8, y - 6, 4.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "rgba(246,234,224,0.96)";
-    const lines = wrapLines(ctx, item, contentW - 26, 3);
+    const lines = wrapLines(ctx, item, contentW - 26, 4);
     lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * bulletLineHeight));
-    y += lines.length * bulletLineHeight + 8;
+    y += lines.length * bulletLineHeight + 10;
   }
 
-  y += 4;
+  y += 10;
   drawSectionTitle(ctx, "BREAKDOWN", contentX, y, contentW);
-  y += 30;
+  y += 34;
   ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
-  const bodyLineHeight = 20;
+  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  const bodyLineHeight = 24;
   for (const item of resolvedBreakdown.slice(0, 4)) {
+    const lines = wrapLines(ctx, item, contentW, 6);
+    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
+    y += lines.length * bodyLineHeight + 12;
+  }
+
+  y += 10;
+  drawSectionTitle(ctx, "NEXT UP", contentX, y, contentW);
+  y += 34;
+  ctx.fillStyle = "rgba(246,234,224,0.94)";
+  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  for (const item of resolvedNextUp.slice(0, 2)) {
     const lines = wrapLines(ctx, item, contentW, 5);
     lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
-    y += lines.length * bodyLineHeight + 10;
-  }
-
-  y += 2;
-  drawSectionTitle(ctx, "NEXT UP", contentX, y, contentW);
-  y += 30;
-  ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
-  for (const item of resolvedNextUp.slice(0, 2)) {
-    const lines = wrapLines(ctx, item, contentW, 4);
-    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
-    y += lines.length * bodyLineHeight + 10;
+    y += lines.length * bodyLineHeight + 12;
   }
 
   if (resolvedCoachNote.length) {
-    y += 2;
+    y += 10;
     drawSectionTitle(ctx, "COACH NOTE", contentX, y, contentW);
-    y += 30;
+    y += 34;
     ctx.fillStyle = "rgba(246,234,224,0.94)";
-    ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
     for (const item of resolvedCoachNote.slice(0, 2)) {
-      const lines = wrapLines(ctx, item, contentW, 4);
+      const lines = wrapLines(ctx, item, contentW, 5);
       lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
-      y += lines.length * bodyLineHeight + 10;
+      y += lines.length * bodyLineHeight + 12;
     }
   }
 
