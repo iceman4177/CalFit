@@ -181,7 +181,12 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
             Open the workout card fast and keep the caption ready to paste.
           </Typography>
 
-          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <Stack
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}
+          >
             <Chip
               label={`${Math.round(Number(totalCalories) || 0)} cal`}
               sx={{
@@ -274,9 +279,6 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
             </Typography>
           </Box>
 
-          <Typography sx={{ color: "#64748b", fontSize: 12.75, lineHeight: 1.45, px: 0.25 }}>
-            Share workout sends the image card first. Copy caption stays ready because some social apps ignore prefilled text.
-          </Typography>
         </Stack>
       </DialogContent>
 
