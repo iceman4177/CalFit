@@ -118,7 +118,7 @@ export default function HomeHub() {
             sx={{
               width: "100%",
               maxWidth: 720,
-              textAlign: "left",
+              textAlign: "center",
               p: { xs: 2, sm: 2.5 },
               borderRadius: 4,
               border: "1px solid rgba(148,163,184,0.28)",
@@ -144,7 +144,18 @@ export default function HomeHub() {
             >
               Log your food and training, check how today is going, then get a clear next step.
             </Typography>
-            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1, pt: 0.35 }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{
+                flexWrap: "wrap",
+                gap: 1,
+                pt: 0.35,
+                justifyContent: "center",
+                alignItems: "center",
+                width: "100%",
+              }}
+            >
               <Chip label="Log" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(59,130,246,0.10)", color: "rgba(30,64,175,1)" }} />
               <Chip label="Check" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(168,85,247,0.10)", color: "rgba(107,33,168,1)" }} />
               <Chip label="Plan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(245,158,11,0.12)", color: "rgba(146,64,14,1)" }} />
