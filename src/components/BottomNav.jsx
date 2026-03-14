@@ -22,7 +22,7 @@ const tabs = [
   { label: 'Home', value: '/home', route: '/', icon: <HomeIcon /> },
   { label: 'Log', value: '/log', route: null, icon: <AddCircleOutlineIcon /> },
   { label: 'Plan', value: '/plan', route: '/daily-checklist', icon: <EventNoteIcon /> },
-  { label: 'Coach', value: '/coach', route: '/verdict', icon: <PsychologyAltIcon /> },
+  { label: 'Coach', value: '/verdict', route: '/verdict', icon: <PsychologyAltIcon /> },
   { label: 'Scan', value: '/scan', route: '/body-scan/session', icon: <CenterFocusStrongIcon /> },
 ];
 
@@ -32,8 +32,8 @@ function pickActiveTab(pathname) {
   if (pathname === '/workout' || pathname.startsWith('/workout/')) return '/log';
   if (pathname === '/daily-checklist' || pathname.startsWith('/daily-checklist/')) return '/plan';
   if (pathname === '/daily-eval' || pathname.startsWith('/daily-eval/')) return '/plan';
-  if (pathname === '/verdict' || pathname.startsWith('/verdict/')) return '/coach';
-  if (pathname === '/coach' || pathname.startsWith('/coach/')) return '/coach';
+  if (pathname === '/verdict' || pathname.startsWith('/verdict/')) return '/verdict';
+  if (pathname === '/coach' || pathname.startsWith('/coach/')) return '/verdict';
   if (pathname === '/body-scan' || pathname.startsWith('/body-scan/')) return '/scan';
   return '/home';
 }

@@ -4,7 +4,6 @@ import {
   Route,
   Switch,
   Redirect,
-  NavLink,
   useLocation,
   useHistory
 } from 'react-router-dom';
@@ -13,43 +12,19 @@ import { Container,
   Typography,
   Button,
   Stack,
-  Menu,
-  MenuItem,
   Snackbar,
   Alert,
-  Badge,
-  Chip,
   CircularProgress } from '@mui/material';
-import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
-import RestaurantIcon    from '@mui/icons-material/Restaurant';
-import MoreVertIcon      from '@mui/icons-material/MoreVert';
-import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
-import ListIcon          from '@mui/icons-material/List';
-import AssessmentIcon    from '@mui/icons-material/Assessment';
-import InfoIcon          from '@mui/icons-material/Info';
-import ChatIcon          from '@mui/icons-material/Chat';
 
 import ProLandingPage from './ProLandingPage';
 import ProSuccess     from './ProSuccess';
 import AuthCallback   from './AuthCallback';
 
-import useVariableRewards    from './hooks/useVariableRewards';
-
 import useFirstTimeTip       from './hooks/useFirstTimeTip';
-import useReferral           from './hooks/useReferral';
 
 import HealthDataForm    from './HealthDataForm';
-import WorkoutPage       from './WorkoutPage';
-import WorkoutHistory    from './WorkoutHistory';
-import ProgressDashboard from './ProgressDashboard';
-import MealTracker       from './MealTracker';
 import NetCalorieBanner  from './NetCalorieBanner';
-import DailyRecapCoach   from './DailyRecapCoach';
-import HomeHub          from './HomeHub';
-import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
-import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
-import SocialProofBanner from './components/SocialProofBanner';
 
 import UpgradeModal      from './components/UpgradeModal';
 import { logPageView }   from './analytics';
@@ -72,18 +47,23 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
-// Hide Recap Coach from navigation (page remains accessible via direct URL).
-const SHOW_COACH_NAV = false;
+const WorkoutPage = React.lazy(() => import('./WorkoutPage'));
+const WorkoutHistory = React.lazy(() => import('./WorkoutHistory'));
+const ProgressDashboard = React.lazy(() => import('./ProgressDashboard'));
+const MealTracker = React.lazy(() => import('./MealTracker'));
+const DailyRecapCoach = React.lazy(() => import('./DailyRecapCoach'));
+const HomeHub = React.lazy(() => import('./HomeHub'));
+const DailyEvaluationHome = React.lazy(() => import('./DailyEvaluationHome'));
+const PoseSession = React.lazy(() => import('./PoseSession.jsx'));
 
 const routeTips = {
   '/':            'Home: log food, train, scan, and get coached from one clean home base.',
-  '/coach':        'Recap Coach (hidden): legacy page retained for compatibility.',
+  '/verdict':      'Coach: get your clearest next step based on your day, goals, and intake.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
   '/history':      'View your past workouts & meals at a glance.',
-  '/dashboard':    'Dashboard: see trends and invite friends below.',
-  '/recap':        'Coach (legacy route): redirects to Coach tab.',
+  '/dashboard':    'Dashboard: see your trends and how today is tracking.',
 
 };
 
@@ -305,8 +285,6 @@ export default function App() {
   const location     = useLocation();
   // Meal reminders/notifications have been removed (UX request).
 
-  useReferral();
-
   // Auth state
   const [authUser, setAuthUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -359,24 +337,9 @@ export default function App() {
     attachSyncListeners();
   }, []);
 
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
   /* ---------------- Entitlements (context) ---------------- */
-  const { isProActive, status, entitlements } = useEntitlements();
+  const { isProActive, status } = useEntitlements();
   const trialActive = status === 'trialing';
-
-  // Ambassador badge detection (robust to Set/Array/object)
-  const hasAmbassadorBadge = React.useMemo(() => {
-    if (!entitlements) return false;
-    if (typeof entitlements.has === 'function') return entitlements.has('ambassador_badge');
-    if (Array.isArray(entitlements)) return entitlements.includes('ambassador_badge');
-    if (typeof entitlements === 'object') return Boolean(entitlements['ambassador_badge']);
-    return false;
-  }, [entitlements]);
 
   /* --------------- Server-truth Pro check (includes trial eligibility) --------------- */
   const [proCheck, setProCheck] = useState({
@@ -438,11 +401,6 @@ export default function App() {
   const [userData, setUserDataState] = useState(null);
   const [profileResolved, setProfileResolved] = useState(false);
 
-  const workoutsCount = JSON.parse(localStorage.getItem('workoutHistory') || '[]').length;
-  const mealsCount    = JSON.parse(localStorage.getItem('mealHistory')   || '[]')
-    .reduce((sum, e) => sum + (e.meals?.length || 0), 0);
-  useVariableRewards({ workoutsCount, mealsCount });
-
   // (meal reminders removed)
 
   const [burnedCalories, setBurnedCalories]     = useState(0);
@@ -472,9 +430,6 @@ export default function App() {
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
 
-  const [moreAnchor, setMoreAnchor] = useState(null);
-  const openMore  = e => setMoreAnchor(e.currentTarget);
-  const closeMore = () => setMoreAnchor(null);
 
   const minimumProfileStatus = React.useMemo(() => {
     if (!profileResolved) return null;
@@ -721,16 +676,6 @@ export default function App() {
   );
 
   // ===== Coach hint state (pulsing "AI" badge) =====
-  const [showCoachHint, setShowCoachHint] = useState(() => {
-    try { return localStorage.getItem('slimcal:coachHintSeen') !== '1'; } catch (e) { return true; }
-  });
-  useEffect(() => {
-    if (location.pathname === '/coach' && showCoachHint) {
-      try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
-      setShowCoachHint(false);
-    }
-  }, [location.pathname, showCoachHint]);
-
   // === Quick Actions (Acquisition-forward) ===
   // navBar (legacy hero buttons) removed for production launch.
 
@@ -804,10 +749,6 @@ export default function App() {
   }, []);
 
   // ---- CTA logic (fixed): always show upgrade path when logged in and not Pro
-  const effectiveIsPro = (proCheck.isPro || isProActive || localPro);
-  const showLoggedInCta = !!authUser && !proCheck.loading && !effectiveIsPro;
-  const loggedInCtaLabel = proCheck.trialEligible ? "TRY PRO FREE" : "UPGRADE TO PRO";
-
   useEffect(() => {
     const openUpgradeHandler = () => setUpgradeOpen(true);
     const openSigninHandler = () => {
@@ -868,15 +809,29 @@ export default function App() {
           <>
             <NetCalorieBanner burned={burnedCalories} consumed={consumedCalories} />
             <StreakBanner streak={streak} />
-            <SocialProofBanner />
           </>
         )}
 
-        <Switch>
+        <React.Suspense
+          fallback={
+            <Box sx={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}>
+              <CircularProgress size={32} />
+            </Box>
+          }
+        >
+          <Switch>
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
-                    <Route exact path="/body-scan/session" render={() => renderProfileGate("Complete your profile before Pose Session", "Pose Session uses your body stats and goals so the scan feels personal and accurate.") || <PoseSession />} /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
+          <Route
+            exact
+            path="/body-scan/session"
+            render={() => renderProfileGate(
+              "Complete your profile before Pose Session",
+              "Pose Session uses your body stats and goals so the scan feels personal and accurate."
+            ) || <PoseSession />}
+          />
+          <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
           <Route path="/edit-info" render={() =>
             <HealthDataForm setUserData={data => {
@@ -917,7 +872,7 @@ export default function App() {
           <Route path="/summary"      render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ Legacy recap route now redirects to Coach (retention) */}
-          <Route path="/recap" render={() => <Redirect to="/coach" />} />
+          <Route path="/recap" render={() => <Redirect to="/verdict" />} />
 
           <Route path="/waitlist"     render={() => <Redirect to="/dashboard" />} />
 
@@ -956,7 +911,8 @@ export default function App() {
 
           {/* ✅ Retention side: Recap Coach */}
           <Route path="/coach" render={() => <Redirect to="/verdict" />} />
-        </Switch>
+          </Switch>
+        </React.Suspense>
 
         <UpgradeModal
           open={upgradeOpen}
