@@ -5,6 +5,10 @@ import { Container,
   Box,
   TextField,
   Button,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
   Autocomplete,
   Alert,
   IconButton,
@@ -16,11 +20,13 @@ import { Container,
   Card,
   CardContent,
   Chip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   MenuItem,
   Select,
   FormControl,
-  InputLabel,
-  Divider } from '@mui/material';
+  InputLabel } from '@mui/material';
 
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -443,6 +449,7 @@ export default function MealTracker({ onMealUpdate }) {
   // smooth scroll target for suggestions on mobile
   const suggestRef = useRef(null);
   const suggestionBoxRef = useRef(null);
+  const todaysMealsRef = useRef(null);
 
   // canonical "today"
   const now = new Date();
@@ -842,6 +849,7 @@ export default function MealTracker({ onMealUpdate }) {
       setQty('1');
       setCalories('');
       setCaloriesManualOverride(false);
+      scheduleSectionAutoscroll(todaysMealsRef, { offset: 88, retries: [0, 120, 260, 520, 900] });
       return;
     }
 
@@ -860,6 +868,7 @@ export default function MealTracker({ onMealUpdate }) {
     setSelectedPortionId('');
     setQty('1');
     setCaloriesManualOverride(false);
+    scheduleSectionAutoscroll(todaysMealsRef, { offset: 88, retries: [0, 120, 260, 520, 900] });
   };
 
   const handleDeleteMeal = (index) => {
@@ -895,6 +904,27 @@ export default function MealTracker({ onMealUpdate }) {
     onMealUpdate?.(0);
     syncDailyMetrics(0);
   };
+
+  const scheduleSectionAutoscroll = useCallback((ref, { offset = 96, retries = [0, 120, 260, 520, 900] } = {}) => {
+    retries.forEach((delay, idx) => {
+      window.setTimeout(() => {
+        try {
+          const el = ref?.current;
+          if (!el) return;
+
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+          window.requestAnimationFrame(() => {
+            try {
+              const rect = el.getBoundingClientRect();
+              const top = Math.max(0, window.scrollY + rect.top - offset);
+              window.scrollTo({ top, behavior: idx === 0 ? 'auto' : 'smooth' });
+            } catch {}
+          });
+        } catch {}
+      }, delay);
+    });
+  }, []);
 
   const scheduleMealIdeasScroll = useCallback((ref, { offset = 96, retries = [0, 120, 260, 520, 900] } = {}) => {
     retries.forEach((delay, idx) => {
@@ -967,16 +997,6 @@ export default function MealTracker({ onMealUpdate }) {
   }, []);
 
   const total = mealLog.reduce((s, m) => s + (Number(m.calories) || 0), 0);
-  const scrollToTodayMeals = useCallback(() => {
-    try {
-      suggestRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(() => {
-        const cards = document.getElementById('today-meals-card');
-        cards?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-      }, 80);
-    } catch {}
-  }, []);
-
   const macroTotals = useMemo(() => ({
     protein_g: mealLog.reduce((s, m) => s + (Number(m?.protein_g) || 0), 0),
     carbs_g: mealLog.reduce((s, m) => s + (Number(m?.carbs_g) || 0), 0),
@@ -1040,62 +1060,31 @@ export default function MealTracker({ onMealUpdate }) {
                 color="text.secondary"
                 sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.08rem' }, lineHeight: 1.5 }}
               >
-                Log a meal fast, use AI when you want an idea, and keep today’s calories and macros clean.
+                Log meals, keep macros clean, and keep your daily net calories up to date.
               </Typography>
-
-              <Stack
-                direction="row"
-                spacing={1.25}
-                useFlexGap
-                flexWrap="wrap"
-                justifyContent="center"
-                sx={{ width: '100%' }}
+              <Button
+                onClick={handleToggleMealIdeas}
+                variant={showSuggest ? 'outlined' : 'contained'}
+                startIcon={<RestaurantMenuRoundedIcon />}
+                size="large"
+                sx={{
+                  width: '100%',
+                  maxWidth: 560,
+                  minHeight: 56,
+                  fontWeight: 700,
+                  fontSize: { xs: '1.05rem', sm: '1.08rem' },
+                  borderRadius: 999,
+                  px: 3
+                }}
               >
-                <Chip label={`${mealLog.length} ${mealLog.length === 1 ? 'meal' : 'meals'} today`} sx={{ fontWeight: 700, borderRadius: 999, height: 40, px: 1.1 }} />
-                <Chip label={`${total} cals`} sx={{ fontWeight: 700, borderRadius: 999, height: 40, px: 1.1 }} />
-                <Chip label={`P ${macroTotals.protein_g}g • C ${macroTotals.carbs_g}g • F ${macroTotals.fat_g}g`} sx={{ fontWeight: 700, borderRadius: 999, height: 40, px: 1.1 }} />
-              </Stack>
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%', maxWidth: 560 }}>
-                <Button
-                  onClick={handleToggleMealIdeas}
-                  variant={showSuggest ? 'outlined' : 'contained'}
-                  startIcon={<RestaurantMenuRoundedIcon />}
-                  size="large"
-                  sx={{
-                    flex: 1,
-                    minHeight: 56,
-                    fontWeight: 700,
-                    fontSize: { xs: '1.02rem', sm: '1.05rem' },
-                    borderRadius: 999,
-                    px: 3
-                  }}
-                >
-                  {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
-                </Button>
-                <Button
-                  onClick={scrollToTodayMeals}
-                  variant="outlined"
-                  size="large"
-                  sx={{
-                    flex: 1,
-                    minHeight: 56,
-                    fontWeight: 700,
-                    fontSize: { xs: '1rem', sm: '1.02rem' },
-                    borderRadius: 999,
-                    px: 3,
-                    textTransform: 'none'
-                  }}
-                >
-                  Today’s Meals
-                </Button>
-              </Stack>
+                {showSuggest ? 'Hide AI Meals' : 'AI Suggest a Meal'}
+              </Button>
             </Stack>
           </CardContent>
         </Card>
       </Box>
 
-      <Box id="today-meals-card" sx={{ width: '100%', maxWidth: 760 }}>
+      <Box sx={{ width: '100%', maxWidth: 760 }}>
         <Card sx={{ borderRadius: 5, boxShadow: '0 16px 40px rgba(0,0,0,0.04)' }}>
           <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
             <Stack spacing={2.5}>
@@ -1109,14 +1098,14 @@ export default function MealTracker({ onMealUpdate }) {
                     fontSize: { xs: '1.72rem', sm: '1.95rem' }
                   }}
                 >
-                  Log a meal
+                  Meal Builder
                 </Typography>
                 <Typography
                   variant="body1"
                   color="text.secondary"
                   sx={{ mt: 1, maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
-                  Search a food, adjust the portion, and add it. Use Custom Food or Build a Bowl when you need a quick manual entry.
+                  Add meals manually, then review everything you’ve logged for today below.
                 </Typography>
               </Box>
 
@@ -1129,20 +1118,6 @@ export default function MealTracker({ onMealUpdate }) {
                 }}
               >
                 <Stack spacing={2}>
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    useFlexGap
-                    flexWrap="wrap"
-                    justifyContent="center"
-                    alignItems="center"
-                    sx={{ width: '100%' }}
-                  >
-                    <Chip label="Search food" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
-                    <Chip label="Custom Food" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
-                    <Chip label="Build a Bowl" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
-                  </Stack>
-
                   <Autocomplete
                     freeSolo
                     options={options}
@@ -1254,46 +1229,31 @@ export default function MealTracker({ onMealUpdate }) {
                     </Alert>
                   )}
 
-                  <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-                    <Button
-                      onClick={handleAdd}
-                      onFocus={triggerAddTip}
-                      variant="contained"
-                      size="large"
-                      sx={{
-                        minHeight: 56,
-                        borderRadius: 999,
-                        fontWeight: 800,
-                        fontSize: { xs: '1rem', sm: '1.02rem' },
-                        textTransform: 'none',
-                        width: '100%',
-                        maxWidth: 520
-                      }}
-                    >
-                      Add Meal
-                    </Button>
-                  </Box>
-
-                  <Divider flexItem />
-
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={1.5}
+                  <Button
+                    onClick={handleAdd}
+                    onFocus={triggerAddTip}
+                    variant="contained"
+                    size="large"
+                    fullWidth
                     sx={{
-                      width: '100%',
-                      justifyContent: 'center',
-                      alignItems: 'center'
+                      minHeight: 56,
+                      borderRadius: 999,
+                      fontWeight: 800,
+                      fontSize: { xs: '1rem', sm: '1.02rem' },
+                      textTransform: 'none'
                     }}
                   >
+                    Add Meal
+                  </Button>
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%' }}>
                     <Button
                       onClick={() => setOpenCustom(true)}
                       startIcon={<AddCircleOutlineIcon />}
                       variant="outlined"
                       size="large"
                       sx={{
-                        flex: { xs: 'unset', sm: 1 },
-                        width: '100%',
-                        maxWidth: 360,
+                        flex: 1,
                         textTransform: 'none',
                         fontWeight: 700,
                         borderRadius: 999,
@@ -1308,9 +1268,7 @@ export default function MealTracker({ onMealUpdate }) {
                       variant="outlined"
                       size="large"
                       sx={{
-                        flex: { xs: 'unset', sm: 1 },
-                        width: '100%',
-                        maxWidth: 360,
+                        flex: 1,
                         textTransform: 'none',
                         fontWeight: 700,
                         borderRadius: 999,
@@ -1348,15 +1306,16 @@ export default function MealTracker({ onMealUpdate }) {
                       fontSize: { xs: '1.72rem', sm: '1.95rem' }
                     }}
                   >
-                    AI Meals
+                    AI Assist
                   </Typography>
+                  <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 700, height: 28 }} />
                 </Stack>
                 <Typography
                   variant="body1"
                   color="text.secondary"
                   sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
-                  Use AI food lookup when you want faster logging, or generate meal ideas that fit your day.
+                  Use AI food lookup or generate meal ideas without leaving the flow.
                 </Typography>
               </Box>
 
@@ -1427,22 +1386,17 @@ export default function MealTracker({ onMealUpdate }) {
           </CardContent>
         </Card>
       </Box>
-      <Box id="today-meals-card" sx={{ width: '100%', maxWidth: 760 }}>
+      <Box ref={todaysMealsRef} sx={{ width: '100%', maxWidth: 760 }}>
         <Card sx={{ borderRadius: 5, boxShadow: '0 16px 40px rgba(0,0,0,0.04)' }}>
           <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
             <Stack spacing={2.25} alignItems="center" textAlign="center">
               <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                Today’s Meals
-              </Typography>
-
-              <Typography color="text.secondary" sx={{ mt: -0.5 }}>
-                {todayUS}
+                Meals Logged Today ({todayUS})
               </Typography>
 
               <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" justifyContent="center">
                 <Chip label={`${mealLog.length} ${mealLog.length === 1 ? 'meal' : 'meals'}`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
                 <Chip label={`${total} cals`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
-                <Chip label={`P ${macroTotals.protein_g}g • C ${macroTotals.carbs_g}g • F ${macroTotals.fat_g}g`} sx={{ fontWeight: 700, borderRadius: 999, px: 1.25, height: 42 }} />
               </Stack>
 
               {mealLog.length === 0 ? (
