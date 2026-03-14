@@ -1551,34 +1551,49 @@ setNewExercise({
 
   const renderHeroCard = () => (
     <Card sx={{ ...surfaceSx, overflow: 'visible', ...centeredSectionSx }}>
-      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center' }}>
+      <CardContent
+        sx={{
+          pb: 2,
+          pt: 2,
+          px: { xs: 2, sm: 3 },
+          overflow: 'visible',
+          textAlign: 'center',
+          position: 'relative'
+        }}
+      >
         {!isProUser() && showIdle && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <Box sx={{ position: 'absolute', top: { xs: 20, sm: 20 }, right: { xs: 20, sm: 24 } }}>
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
-        <Stack spacing={2}>
-          <Box sx={{ maxWidth: 620, mx: 'auto' }}>
+        <Stack spacing={2} alignItems="center">
+          <Box sx={{ width: '100%', maxWidth: 620, mx: 'auto', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <Typography
               variant="h4"
+              align="center"
               sx={{
+                width: '100%',
                 fontWeight: 800,
                 lineHeight: 1.08,
                 letterSpacing: '-0.02em',
-                fontSize: { xs: '2.15rem', sm: '2.35rem' }
+                fontSize: { xs: '2.15rem', sm: '2.35rem' },
+                textAlign: 'center'
               }}
             >
               Workout
             </Typography>
             <Typography
               variant="body1"
+              align="center"
               color="text.secondary"
               sx={{
+                width: '100%',
                 maxWidth: 560,
                 mx: 'auto',
                 fontSize: { xs: '1rem', sm: '1.08rem' },
-                lineHeight: 1.5
+                lineHeight: 1.5,
+                textAlign: 'center'
               }}
             >
               Build your workout manually or let AI create one, then review and submit in one smooth flow.
@@ -1618,29 +1633,31 @@ setNewExercise({
       {showExerciseBuilder && (
         <Box sx={{ mt: 2, ...centeredSectionSx }}>
           <Paper variant="outlined" sx={{ ...surfaceSx, p: { xs: 2, md: 2.5 } }}>
-            <Stack spacing={2.25} alignItems="center">
-              <Box sx={{ width: '100%', maxWidth: 620, mx: 'auto' }}>
-                <Stack spacing={0.5} sx={{ textAlign: 'center', alignItems: 'center' }}>
-                  <Typography
-                    variant="h5"
-                    sx={{
-                      fontWeight: 800,
-                      lineHeight: 1.12,
-                      letterSpacing: '-0.02em',
-                      fontSize: { xs: '1.72rem', sm: '1.95rem' }
-                    }}
-                  >
-                    Build Today&apos;s Workout
-                  </Typography>
-                  <Typography
-                    variant="body1"
-                    color="text.secondary"
-                    sx={{ maxWidth: 540, fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
-                  >
-                    Add exercises below. Your current session updates live as you go.
-                  </Typography>
-                </Stack>
-              </Box>
+            <Stack spacing={2.25}>
+              <Stack spacing={0.5} sx={{ width: '100%', textAlign: 'center', alignItems: 'center' }}>
+                <Typography
+                  variant="h5"
+                  align="center"
+                  sx={{
+                    width: '100%',
+                    fontWeight: 800,
+                    lineHeight: 1.12,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' },
+                    textAlign: 'center'
+                  }}
+                >
+                  Build Today&apos;s Workout
+                </Typography>
+                <Typography
+                  variant="body1"
+                  align="center"
+                  color="text.secondary"
+                  sx={{ width: '100%', maxWidth: 540, fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5, textAlign: 'center' }}
+                >
+                  Add exercises below. Your current session updates live as you go.
+                </Typography>
+              </Stack>
 
               <Button
                 variant="outlined"
@@ -1658,31 +1675,29 @@ setNewExercise({
                 Load Past Workout
               </Button>
 
-              <Box sx={{ width: '100%', maxWidth: 620, mx: 'auto' }}>
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: { xs: 1.25, md: 1.5 },
-                    borderRadius: 3,
-                    border: '1px solid rgba(0,0,0,0.06)',
-                    bgcolor: 'rgba(255,255,255,0.86)',
-                    boxShadow: 'none',
-                    maxWidth: '100%',
-                    mx: 'auto',
-                    width: '100%'
-                  }}
-                >
-                  <ExerciseForm
-                    newExercise={newExercise}
-                    setNewExercise={setNewExercise}
-                    currentCalories={currentCalories}
-                    onCalculate={handleCalculate}
-                    onAddExercise={handleAddExercise}
-                    onDoneWithExercises={handleDoneWithExercises}
-                    exerciseOptions={exerciseOptions}
-                  />
-                </Paper>
-              </Box>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: { xs: 1.25, md: 1.5 },
+                  borderRadius: 3,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  bgcolor: 'rgba(255,255,255,0.86)',
+                  boxShadow: 'none',
+                  maxWidth: 620,
+                  mx: 'auto',
+                  width: '100%'
+                }}
+              >
+                <ExerciseForm
+                  newExercise={newExercise}
+                  setNewExercise={setNewExercise}
+                  currentCalories={currentCalories}
+                  onCalculate={handleCalculate}
+                  onAddExercise={handleAddExercise}
+                  onDoneWithExercises={handleDoneWithExercises}
+                  exerciseOptions={exerciseOptions}
+                />
+              </Paper>
 
               {showCurrentSession && (
                 <Box ref={sessionLogRef}>
