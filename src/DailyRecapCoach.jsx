@@ -1572,42 +1572,53 @@ Output format (use these headings):
           boxShadow: "0 16px 40px rgba(15,23,42,0.06)",
         }}
       >
-        <CardContent sx={{ p: { xs: 2.1, sm: 2.5 } }}>
-          <Stack spacing={1.3}>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
-              <Box>
-                <Typography variant="h4" sx={{ fontWeight: 1000, letterSpacing: "-0.03em", color: "rgba(15,23,42,0.98)" }}>
-                  Coach
-                </Typography>
-                <Typography variant="body1" sx={{ mt: 0.5, color: "rgba(51,65,85,0.88)", fontWeight: 600, maxWidth: 620 }}>
-                  Ask AI Coach for today, then knock out your plan below.
-                </Typography>
-              </Box>
-              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
-            </Stack>
+        <CardContent sx={{ p: { xs: 2.1, sm: 2.5 }, position: "relative" }}>
+          <Box sx={{ position: { sm: "absolute" }, top: { sm: 20 }, right: { sm: 20 }, display: "flex", justifyContent: "center", mb: { xs: 1.1, sm: 0 } }}>
+            <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" />
+          </Box>
 
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.1} alignItems={{ xs: "stretch", sm: "center" }}>
-              <Button
-                variant="contained"
-                startIcon={aiLoading ? null : <AutoAwesomeRoundedIcon />}
-                onClick={handleGenerateAiVerdict}
-                disabled={aiLoading}
-                sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
-              >
-                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Ask AI Coach"}
-              </Button>
+          <Stack spacing={1.3} sx={{ alignItems: "center", textAlign: "center", pr: { sm: 15 } }}>
+            <Box sx={{ maxWidth: 620, mx: "auto" }}>
               <Typography
-                variant="body2"
+                variant="h4"
                 sx={{
-                  color: "rgba(71,85,105,0.84)",
-                  fontWeight: 600,
-                  textAlign: "center",
-                  width: "100%",
+                  fontWeight: 800,
+                  lineHeight: 1.08,
+                  letterSpacing: "-0.02em",
+                  color: "rgba(15,23,42,0.98)",
+                  fontSize: { xs: "2.15rem", sm: "2.35rem" },
                 }}
               >
-                Uses today’s meals, workouts, and progress to call your next best move.
+                Coach
               </Typography>
-            </Stack>
+              <Typography
+                variant="body1"
+                sx={{
+                  mt: 0.5,
+                  color: "rgba(51,65,85,0.88)",
+                  fontWeight: 600,
+                  maxWidth: 620,
+                  mx: "auto",
+                  fontSize: { xs: "1rem", sm: "1.08rem" },
+                  lineHeight: 1.5,
+                }}
+              >
+                Ask AI Coach for today, then knock out your plan below.
+              </Typography>
+            </Box>
+
+            <Button
+              variant="contained"
+              startIcon={aiLoading ? null : <AutoAwesomeRoundedIcon />}
+              onClick={handleGenerateAiVerdict}
+              disabled={aiLoading}
+              sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
+            >
+              {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Ask AI Coach"}
+            </Button>
+            <Typography variant="body2" sx={{ color: "rgba(71,85,105,0.84)", fontWeight: 600, maxWidth: 720, mx: "auto", textAlign: "center" }}>
+              Uses today’s meals, workouts, and progress to call your next best move.
+            </Typography>
           </Stack>
         </CardContent>
       </Card>
