@@ -30,8 +30,6 @@ import {
   getMealItemsForMealIds,
 } from "./lib/db";
 import { buildMicroQuestSummary } from "./lib/dailyChecklist.js";
-import { ensureScopedFromLegacy, readScopedJSON, KEYS } from "./lib/scopedStorage.js";
-import { readProfileBundle } from "./lib/profileStorage.js";
 
 // ---- Coach-first: XP (localStorage, no backend) -------------------------------
 const XP_KEY = "slimcal:xp:v1";
@@ -356,23 +354,22 @@ function missedBreakfastLine({
 }
 
 // -------------------- User targets -------------------------------------------
-function getUserTargets(userId = null) {
+function getUserTargets() {
   try {
-    const bundle = readProfileBundle(userId);
-    const ud = (bundle?.userData && typeof bundle.userData === "object") ? bundle.userData : {};
+    const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
     const dailyGoal = safeNum(ud.dailyGoal, 0);
-    const goalType = ud.goalType || bundle?.fitnessGoal || localStorage.getItem("fitness_goal") || "";
-    const dietPreference = ud.dietPreference || bundle?.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
+    const goalType = ud.goalType || localStorage.getItem("fitness_goal") || "";
+    const dietPreference = ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
 
     const proteinDaily =
-      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem(userId ? `protein_target_daily_g:${userId}` : "protein_target_daily_g"), 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0);
+      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0);
 
     const proteinMeal =
-      safeNum(ud?.proteinTargets?.per_meal_g, 0) || safeNum(localStorage.getItem(userId ? `protein_target_meal_g:${userId}` : "protein_target_meal_g"), 0) || safeNum(localStorage.getItem("protein_target_meal_g"), 0);
+      safeNum(ud?.proteinTargets?.per_meal_g, 0) || safeNum(localStorage.getItem("protein_target_meal_g"), 0);
 
-    const trainingIntent = ud.trainingIntent || bundle?.trainingIntent || localStorage.getItem("training_intent") || "general";
-    const trainingSplit = ud.trainingSplit || bundle?.trainingSplit || localStorage.getItem("training_split") || "full_body";
-    const lastFocus = ud.lastFocus || bundle?.lastFocus || localStorage.getItem("last_focus") || "upper";
+    const trainingIntent = ud.trainingIntent || localStorage.getItem("training_intent") || "general";
+    const trainingSplit = ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
+    const lastFocus = ud.lastFocus || localStorage.getItem("last_focus") || "upper";
 
     return {
       dailyGoal,
@@ -401,14 +398,10 @@ function getUserTargets(userId = null) {
 }
 
 // -------------------- Local context builder (offline) -------------------------
-function buildLocalContext(todayISO, userId = null) {
+function buildLocalContext(todayISO) {
   const todayUS = usDay();
-  try {
-    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-    ensureScopedFromLegacy(KEYS.mealHistory, userId);
-  } catch (e) {}
-  const wh = readScopedJSON(KEYS.workoutHistory, userId, JSON.parse(localStorage.getItem("workoutHistory") || "[]"));
-  const mh = readScopedJSON(KEYS.mealHistory, userId, JSON.parse(localStorage.getItem("mealHistory") || "[]"));
+  const wh = JSON.parse(localStorage.getItem("workoutHistory") || "[]");
+  const mh = JSON.parse(localStorage.getItem("mealHistory") || "[]");
 
   const todayWorkouts = wh.filter((w) => w.date === todayUS);
   const workouts = [];
@@ -581,12 +574,10 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
 
-  const userId = user?.id || null;
-  const targets = useMemo(() => getUserTargets(userId), [userId]);
+  const targets = useMemo(() => getUserTargets(), []);
 
   const [dayCtx, setDayCtx] = useState(null);
   const [dayCtxLoading, setDayCtxLoading] = useState(true);
-  const [ctxRefreshTick, setCtxRefreshTick] = useState(0);
 
   const [xpState, setXpState] = useState(() =>
     readJsonLS(XP_KEY, { totalXp: 0, lastAwardDay: null, lastEarned: 0 })
@@ -646,37 +637,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, todayISO, ctxRefreshTick, userId]);
-
-  useEffect(() => {
-    const bump = (evt) => {
-      const d = evt?.detail?.date || evt?.detail?.dayISO || null;
-      if (d && d !== todayISO) return;
-      setCtxRefreshTick((x) => x + 1);
-    };
-    const onStorage = (evt) => {
-      if (!evt?.key) return;
-      const watched = [
-        userId ? `mealHistory:${userId}` : "mealHistory",
-        userId ? `workoutHistory:${userId}` : "workoutHistory",
-        userId ? `dailyMetricsCache:${userId}` : "dailyMetricsCache",
-        userId ? `userData:${userId}` : "userData",
-      ];
-      if (watched.includes(evt.key) || evt.key === "mealHistory" || evt.key === "workoutHistory" || evt.key === "userData") {
-        setCtxRefreshTick((x) => x + 1);
-      }
-    };
-    window.addEventListener('slimcal:consumed:update', bump);
-    window.addEventListener('slimcal:burned:update', bump);
-    window.addEventListener('slimcal:workoutHistory:update', bump);
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('slimcal:consumed:update', bump);
-      window.removeEventListener('slimcal:burned:update', bump);
-      window.removeEventListener('slimcal:workoutHistory:update', bump);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, [todayISO, userId]);
+  }, [user, todayISO]);
 
   // Daily recap limit (Stripe gating stays)
   const freeDailyRecapLimit = getFreeDailyLimit("daily_recap");
@@ -724,7 +685,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   async function buildContext() {
     if (!user) {
-      return buildLocalContext(todayISO, userId);
+      return buildLocalContext(todayISO);
     }
 
     let burned = 0;
@@ -827,13 +788,32 @@ for (const v of byEx.values()) {
             qty: it.qty || 1,
             unit: it.unit || "serving",
             calories: round(it.calories),
-            protein: safeNum(it.protein, est.protein_g),
-            carbs: safeNum(it.carbs, est.carbs_g),
-            fat: safeNum(it.fat, est.fat_g),
+            protein: safeNum(it.protein ?? it.protein_g ?? it.macros?.protein_g ?? m.protein_g ?? m.protein, est.protein_g),
+            carbs: safeNum(it.carbs ?? it.carbs_g ?? it.macros?.carbs_g ?? m.carbs_g ?? m.carbs, est.carbs_g),
+            fat: safeNum(it.fat ?? it.fat_g ?? it.macros?.fat_g ?? m.fat_g ?? m.fat, est.fat_g),
           };
         });
 
-        const macros = sumMacros(items);
+        let macros = sumMacros(items);
+        const mealLevelMacros = {
+          protein_g: safeNum(m.protein_g ?? m.protein ?? 0, 0),
+          carbs_g: safeNum(m.carbs_g ?? m.carbs ?? 0, 0),
+          fat_g: safeNum(m.fat_g ?? m.fat ?? 0, 0),
+        };
+
+        if (items.length && macros.protein_g === 0 && macros.carbs_g === 0 && macros.fat_g === 0) {
+          const hasMealLevelMacros =
+            mealLevelMacros.protein_g > 0 || mealLevelMacros.carbs_g > 0 || mealLevelMacros.fat_g > 0;
+          if (hasMealLevelMacros) {
+            items[0] = {
+              ...items[0],
+              protein: mealLevelMacros.protein_g,
+              carbs: mealLevelMacros.carbs_g,
+              fat: mealLevelMacros.fat_g,
+            };
+            macros = sumMacros(items);
+          }
+        }
 
         meals.push({
           id: m.id,
@@ -857,7 +837,7 @@ for (const v of byEx.values()) {
 
     // Merge local unsynced meals
     try {
-      const localCtx = buildLocalContext(todayISO, userId);
+      const localCtx = buildLocalContext(todayISO);
       const localMeals = localCtx?.meals || [];
       if (localMeals.length) {
         const keyOf = (m) => `${m.title}|${round(m.total_calories || 0)}|${m.time_label || ""}`;
@@ -871,25 +851,13 @@ for (const v of byEx.values()) {
           }
         }
 
-        const localWorkouts = Array.isArray(localCtx?.workouts) ? localCtx.workouts : [];
-        if (localWorkouts.length) {
-          const workoutKeys = new Set((workouts || []).map((w) => `${w.exercise_name}|${w.sets ?? 0}|${w.reps ?? 0}|${w.weight ?? 0}`));
-          for (const lw of localWorkouts) {
-            const wk = `${lw.exercise_name}|${lw.sets ?? 0}|${lw.reps ?? 0}|${lw.weight ?? 0}`;
-            if (!workoutKeys.has(wk)) {
-              workoutKeys.add(wk);
-              workouts.push(lw);
-            }
-          }
-        }
-
         consumed = Math.max(consumed || 0, localCtx?.consumed || 0);
         burned = Math.max(burned || 0, localCtx?.burned || 0);
         macroTotals = sumMacros(meals.flatMap((mm) => mm.items || []));
       }
     } catch (e) {}
 
-    return { burned, consumed, meals, workouts, macroTotals, source: "cloud+local" };
+    return { burned, consumed, meals, workouts, macroTotals, source: "cloud" };
   }
 
   function computeTimingNotes(meals = []) {
@@ -1110,11 +1078,7 @@ Output format (use these headings):
   };
 
   // ---- UI --------------------------------------------------------------------
-  const FreeUsageBanner = !isPro ? (
-    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-      Free recaps used today: <strong>{count}</strong>/{freeDailyRecapLimit}
-    </Typography>
-  ) : null;
+  const FreeUsageBanner = null;
 
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
@@ -1209,7 +1173,7 @@ Output format (use these headings):
     </>
   );
 
-  const now = useMemo(() => new Date(), []);
+  const now = new Date();
   const mealsCount = (dayCtx?.meals || []).length;
   const burned = round(dayCtx?.burned || 0);
   const eaten = round(dayCtx?.consumed || 0);
