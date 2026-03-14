@@ -1040,7 +1040,7 @@ export default function MealTracker({ onMealUpdate }) {
             <Stack spacing={2} alignItems="center" textAlign="center">
               {!isProUser() && (
                 <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end', mb: 0.2 }}>
-                  <FeatureUseBadge key={`meal-badge-${mealBadgeTick}`} featureKey="ai_meal" isPro={false} />
+                  <FeatureUseBadge key={`meal-badge-${mealBadgeTick}`} featureKey="ai_meal" isPro={isProUser()} />
                 </Box>
               )}
 
@@ -1295,7 +1295,7 @@ export default function MealTracker({ onMealUpdate }) {
               <Box sx={{ textAlign: 'center', position: 'relative' }}>
                 {!isProUser() && (
                   <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-                    <FeatureUseBadge featureKey="ai_food_lookup" isPro={false} />
+                    <FeatureUseBadge featureKey="ai_food_lookup" isPro={isProUser()} />
                   </Box>
                 )}
                 <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mb: 1 }}>

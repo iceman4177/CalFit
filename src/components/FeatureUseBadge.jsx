@@ -1,6 +1,7 @@
 // src/components/FeatureUseBadge.jsx
 import React, { useEffect, useState } from "react";
 import { Chip } from '@mui/material';
+import { getAIQuotaStatus, getSupabaseUserFromStorage, normalizeQuotaFeature } from "../lib/ai";
 
 // -----------------------------------------------------------------------------
 // Daily Free-tier usage tracking (client-side)
@@ -146,6 +147,31 @@ export default function FeatureUseBadge({ featureKey, isPro, sx = {}, labelPrefi
       window.removeEventListener(QUOTA_EVENT, onQuota);
     };
   }, [featureKey]);
+
+  useEffect(() => {
+    let active = true;
+    const quotaFeature = normalizeQuotaFeature(featureKey);
+    const syncFromServer = async () => {
+      if (isPro) return;
+      const limit = getFreeDailyLimit(featureKey);
+      if (!limit) return;
+      try {
+        const { id } = getSupabaseUserFromStorage();
+        if (!id) return;
+        const q = await getAIQuotaStatus(quotaFeature);
+        if (!active) return;
+        if (typeof q?.remaining === 'number') setDailyRemaining(featureKey, q.remaining);
+      } catch {}
+    };
+    syncFromServer();
+    window.addEventListener('focus', syncFromServer);
+    document.addEventListener('visibilitychange', syncFromServer);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', syncFromServer);
+      document.removeEventListener('visibilitychange', syncFromServer);
+    };
+  }, [featureKey, isPro]);
 
   if (isPro) {
     return (
