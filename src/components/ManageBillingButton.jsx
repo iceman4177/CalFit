@@ -5,8 +5,7 @@ import { openBillingPortal } from '../lib/billing';
 
 function isProActive() {
   try {
-    if (localStorage.getItem('isPro') === 'true') return true;
-    if (localStorage.getItem('trialStart')) return true; // trial counts as Pro for UI
+    return localStorage.getItem('isPro') === 'true';
   } catch {}
   return false;
 }

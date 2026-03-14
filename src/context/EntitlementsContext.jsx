@@ -13,11 +13,19 @@ const EntCtx = createContext(null);
 // Statuses that should count as "active" features on
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
 
+function normalizedStatus(data) {
+  return String(
+    data?.plan_status || data?.effective_status || data?.status || "none"
+  ).toLowerCase();
+}
+
 function toBoolStatus(data) {
-  // Accept either shape: { isProActive } OR { isPro } OR stripe-like { status }
-  const flag = data?.isProActive ?? data?.isPro ?? false;
-  const status = (data?.status || "").toLowerCase();
-  return !!(flag || (status && ACTIVE_STATUSES.has(status)));
+  // Prefer explicit server truth when available. Only fall back to status when
+  // the API did not provide a boolean at all.
+  if (typeof data?.isProActive === "boolean") return data.isProActive;
+  if (typeof data?.isPro === "boolean") return data.isPro;
+  const status = normalizedStatus(data);
+  return !!(status && ACTIVE_STATUSES.has(status));
 }
 
 function toSet(list) {
@@ -126,8 +134,12 @@ export function EntitlementsProvider({ children }) {
           const isProActive = toBoolStatus(j);
           return {
             isProActive,
-            status: j.status || (isProActive ? "active" : "none"),
-            trialEnd: j.trial_end || j.trialEnd || null,
+            status: normalizedStatus({
+              plan_status: j?.plan_status,
+              effective_status: j?.effective_status,
+              status: j?.status || (isProActive ? "active" : "none"),
+            }),
+            trialEnd: j.trial?.end || j.trial_end || j.trialEnd || null,
             currentPeriodEnd: j.current_period_end || j.currentPeriodEnd || null,
             cancelAtPeriodEnd: !!(
               j.cancel_at_period_end ?? j.cancelAtPeriodEnd
@@ -226,6 +238,7 @@ export function EntitlementsProvider({ children }) {
       // local echo for instant UI across tabs
       try {
         localStorage.setItem("isPro", pro.isProActive ? "true" : "false");
+        if (!pro.isProActive) localStorage.removeItem("trialStart");
       } catch {}
 
       setState({
@@ -291,6 +304,7 @@ export function EntitlementsProvider({ children }) {
         ]);
         try {
           localStorage.setItem("isPro", pro.isProActive ? "true" : "false");
+          if (!pro.isProActive) localStorage.removeItem("trialStart");
         } catch {}
         setState((s) => ({
           ...s,

@@ -22,9 +22,7 @@ import { openBillingPortal } from '../lib/billing';
 
 function isProLocal() {
   try {
-    if (localStorage.getItem('isPro') === 'true') return true;
-    // legacy: some older builds set trialStart; keep for backward compatibility
-    if (localStorage.getItem('trialStart')) return true;
+    return localStorage.getItem('isPro') === 'true';
   } catch {}
   return false;
 }
