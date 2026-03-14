@@ -234,6 +234,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [shareText, setShareText] = useState('');
   const [shareExercises, setShareExercises] = useState([]);
   const [shareTotal, setShareTotal] = useState(0);
+  const [shareStartedAt, setShareStartedAt] = useState('');
 
   // delete confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -308,6 +309,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     const body = (row.shareLines || []).join('\n');
     setShareText(`${header}\n\n${body}`);
     setShareTotal(total);
+    setShareStartedAt(date);
     setShareExercises(row.exercisesForShare || []);
     setShareOpen(true);
   }
@@ -650,13 +652,13 @@ export default function WorkoutHistory({ onHistoryChange }) {
               >
                 <Stack spacing={2}>
                   <Stack
-                    direction="row"
-                    alignItems="flex-start"
+                    direction={{ xs: 'column', sm: 'row' }}
+                    alignItems={{ xs: 'stretch', sm: 'flex-start' }}
                     justifyContent="space-between"
-                    spacing={1.25}
+                    spacing={{ xs: 1.4, sm: 1.25 }}
                     sx={{ minWidth: 0 }}
                   >
-                    <Box sx={{ minWidth: 0, flex: 1, pr: 1 }}>
+                    <Box sx={{ minWidth: 0, flex: 1, pr: { xs: 0, sm: 1 } }}>
                       <Typography sx={{ fontWeight: 900, color: '#0f172a', fontSize: { xs: '2.05rem', sm: '2.5rem' }, lineHeight: 0.98 }}>
                         {formatDateOnly(w.started_at)}
                       </Typography>
@@ -665,7 +667,18 @@ export default function WorkoutHistory({ onHistoryChange }) {
                       </Typography>
                     </Box>
 
-                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0, ml: 'auto' }}>
+                    <Stack
+                      direction="row"
+                      spacing={0.75}
+                      alignItems="center"
+                      justifyContent={{ xs: 'space-between', sm: 'flex-end' }}
+                      sx={{
+                        flexShrink: 0,
+                        ml: { xs: 0, sm: 'auto' },
+                        width: { xs: '100%', sm: 'auto' },
+                        maxWidth: '100%',
+                      }}
+                    >
                       <Button
                         variant="outlined"
                         onClick={() => openShareFor(w)}
@@ -678,11 +691,14 @@ export default function WorkoutHistory({ onHistoryChange }) {
                           color: '#3367E8',
                           borderColor: '#9db7ff',
                           borderRadius: 999,
+                          flex: { xs: 1, sm: '0 0 auto' },
+                          justifyContent: 'center',
                           px: { xs: 1.25, sm: 2.1 },
                           py: { xs: 0.9, sm: 1.1 },
                           fontSize: { xs: 14, sm: 16 },
                           lineHeight: 1,
                           minHeight: { xs: 44, sm: 48 },
+                          maxWidth: { xs: 'calc(100% - 52px)', sm: 'none' },
                           '& .MuiButton-startIcon': { mr: { xs: 0.4, sm: 0.75 }, ml: 0 },
                         }}
                       >
@@ -697,8 +713,14 @@ export default function WorkoutHistory({ onHistoryChange }) {
                         disabled={deleting}
                         sx={{
                           flexShrink: 0,
-                          ml: { xs: 0, sm: 0.25 },
-                          '& svg': { fontSize: { xs: 26, sm: 24 } },
+                          alignSelf: 'center',
+                          width: 44,
+                          height: 44,
+                          ml: 0,
+                          borderRadius: 999,
+                          border: '1px solid rgba(239,68,68,0.18)',
+                          background: 'rgba(254,242,242,0.92)',
+                          '& svg': { fontSize: { xs: 23, sm: 22 } },
                         }}
                       >
                         <DeleteIcon fontSize="small" />
@@ -791,6 +813,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
         shareText={shareText}
         exercises={shareExercises}
         totalCalories={shareTotal}
+        startedAt={shareStartedAt}
       />
 
       {/* ✅ Delete confirm dialog */}

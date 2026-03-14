@@ -366,6 +366,14 @@ const [authUser, setAuthUser] = useState(null);
                 >
                   Workout History
                 </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setAccountAnchor(null);
+                    window.location.assign('/dashboard');
+                  }}
+                >
+                  Dashboard
+                </MenuItem>
                 {pro && (
                   <MenuItem
                     onClick={async () => {

@@ -16,6 +16,7 @@ import PsychologyAltIcon from '@mui/icons-material/PsychologyAlt';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
+import DashboardIcon from '@mui/icons-material/Dashboard';
 
 const tabs = [
   { label: 'Home', value: '/home', route: '/', icon: <HomeIcon /> },
@@ -156,6 +157,12 @@ export default function BottomNav() {
             <RestaurantIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText primary="Meals" />
+        </MenuItem>
+        <MenuItem onClick={() => goTo('/dashboard')}>
+          <ListItemIcon>
+            <DashboardIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Dashboard" />
         </MenuItem>
       </Menu>
     </>

@@ -1,5 +1,7 @@
 // src/ShareWorkoutModal.jsx
 import React from "react";
+import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
+import { makeWorkoutShareCardBlob } from "./lib/workoutShareCard.js";
 import {
   Dialog,
   DialogTitle,
@@ -9,7 +11,8 @@ import {
   Stack,
   TextField,
   Typography,
-  Box
+  Box,
+  Chip
 } from "@mui/material";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
@@ -56,7 +59,7 @@ function buildCaption({ shareText, exercises = [], totalCalories = 0 }) {
   return "🔥 Just finished my workout.\n\nTracked with Slimcal.ai 💪 #SlimcalAI";
 }
 
-export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories }) {
+export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories, startedAt }) {
   const caption = React.useMemo(
     () => buildCaption({ shareText, exercises, totalCalories }),
     [shareText, exercises, totalCalories]
@@ -71,8 +74,23 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
     }
   }, [caption]);
 
+  const [shareBusy, setShareBusy] = React.useState(false);
+
   const handleNativeShare = React.useCallback(async () => {
     try {
+      setShareBusy(true);
+      const blob = await makeWorkoutShareCardBlob({
+        exercises,
+        totalCalories,
+        shareText: caption,
+        startedAt,
+      });
+
+      if (blob) {
+        await shareOrDownloadPng(blob, "slimcal-workout-share.png", caption);
+        return;
+      }
+
       if (navigator.share) {
         await navigator.share({
           title: "SlimCal Workout",
@@ -80,13 +98,15 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
         });
         return;
       }
+
       await handleCopy();
     } catch (e) {
-      // user cancel = ignore
       if (e?.name === "AbortError") return;
       await handleCopy();
+    } finally {
+      setShareBusy(false);
     }
-  }, [caption, handleCopy]);
+  }, [caption, exercises, handleCopy, startedAt, totalCalories]);
 
   return (
     <Dialog
@@ -110,9 +130,14 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
 
       <DialogContent sx={{ pt: 0.5 }}>
         <Stack spacing={2.25}>
-          <Typography sx={{ color: "#667085", fontSize: { xs: 17, sm: 18 }, lineHeight: 1.55 }}>
-            Open a post fast, keep the caption clean, and show your progress with SlimCal style.
+          <Typography sx={{ color: "#667085", fontSize: { xs: 16, sm: 17 }, lineHeight: 1.55 }}>
+            Share a clean workout post fast with a SlimCal card plus a ready caption.
           </Typography>
+
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip label={`${Math.round(Number(totalCalories) || 0)} cal`} sx={{ borderRadius: 999, fontWeight: 800, background: "#eef2ff", color: "#0f172a" }} />
+            <Chip label={`${Array.isArray(exercises) ? exercises.length : 0} ${(Array.isArray(exercises) ? exercises.length : 0) === 1 ? "exercise" : "exercises"}`} variant="outlined" sx={{ borderRadius: 999, fontWeight: 800 }} />
+          </Stack>
 
           <TextField
             multiline
@@ -152,7 +177,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
                 '&:hover': { backgroundColor: '#2c58ca', boxShadow: 'none' },
               }}
             >
-              Copy caption
+              Copy Caption
             </Button>
 
             <Button
@@ -160,6 +185,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
               variant="outlined"
               startIcon={<IosShareIcon />}
               onClick={handleNativeShare}
+              disabled={shareBusy}
               sx={{
                 py: 1.6,
                 borderRadius: 999,
@@ -170,22 +196,13 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
                 color: '#3367E8',
               }}
             >
-              Share session
+              {shareBusy ? "Preparing…" : "Share Post"}
             </Button>
           </Stack>
 
-          <Box
-            sx={{
-              px: 1,
-              py: 1.25,
-              borderRadius: 3,
-              background: 'linear-gradient(180deg, rgba(235,242,255,0.85) 0%, rgba(247,249,252,0.85) 100%)',
-            }}
-          >
-            <Typography sx={{ color: '#64748b', fontSize: 14, lineHeight: 1.5 }}>
-              On iPhone, Share session opens the native share sheet like Pose Session. Some apps may still limit true caption prefills, so Copy caption stays here as the clean fallback.
-            </Typography>
-          </Box>
+          <Typography sx={{ color: "#64748b", fontSize: 13.5, lineHeight: 1.45, px: 0.5 }}>
+            Share Post opens the phone’s native share sheet with a workout card. Copy Caption stays as the fallback for apps that don’t accept text prefills.
+          </Typography>
         </Stack>
       </DialogContent>
 
