@@ -27,7 +27,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import IosShareIcon from "@mui/icons-material/IosShare";
 
 import UpgradeModal from "./components/UpgradeModal";
-import FeatureUseBadge, {
+import {
   canUseDailyFeature,
   registerDailyFeatureUse,
   getDailyRemaining,
@@ -1627,9 +1627,6 @@ Score: ${bundle.derived.score}/100
           </Typography>
         </Stack>
 
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap", position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)" }}>
-          <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
-        </Stack>
       </Stack>
 
       <Box
