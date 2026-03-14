@@ -42,10 +42,7 @@ import HealthDataForm    from './HealthDataForm';
 import WorkoutPage       from './WorkoutPage';
 import WorkoutHistory    from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
-import Achievements      from './Achievements';
 import MealTracker       from './MealTracker';
-import CalorieHistory    from './CalorieHistory';
-import CalorieSummary    from './CalorieSummary';
 import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
 import HomeHub          from './HomeHub';
@@ -53,7 +50,6 @@ import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition
 import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
-import WaitlistSignup    from './components/WaitlistSignup';
 
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
@@ -64,8 +60,7 @@ import { useEntitlements } from './context/EntitlementsContext.jsx';
 import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
-import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy, ensureScopedProfileFromLegacy } from './lib/profileStorage';
-import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
 import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
 import ProfileSetupGate from './components/ProfileSetupGate';
 
@@ -91,11 +86,7 @@ const routeTips = {
   '/meals':        'Track your meals here: search foods or add calories manually.',
   '/history':      'View your past workouts & meals at a glance.',
   '/dashboard':    'Dashboard: see trends and invite friends below.',
-  '/achievements': 'Achievements: hit milestones to unlock badges!',
-  '/calorie-log':  'Calorie Log: detailed daily breakdown of intake vs burn.',
-  '/summary':      'Summary: quick overview of today’s net calories.',
   '/recap':        'Coach (legacy route): redirects to Coach tab.',
-  '/waitlist':     'Join our waitlist for early access to new features!',
 
 };
 
@@ -218,73 +209,47 @@ async function heartbeatNow(session) {
 }
 
 // ---- LOCAL-FIRST OFFLINE SAFETY HELPERS --------------------------------
-function normalizeLocalData(userId = null) {
+function normalizeLocalData() {
   const clientId = getOrCreateClientId();
 
-  if (userId) {
-    ensureScopedProfileFromLegacy(userId);
-    ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-    ensureScopedFromLegacy(KEYS.mealHistory, userId);
-    ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
-  }
-
-  const normalizeWorkouts = (arr) => (Array.isArray(arr) ? arr : []).map((w) => ({
+  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
+  const whNorm = wh.map(w => ({
     ...w,
     clientId: w.clientId || clientId,
     localId: w.localId || `w_${clientId}_${w.createdAt ? Date.parse(w.createdAt) : Date.now()}`,
     createdAt: w.createdAt || new Date().toISOString(),
     uploaded: typeof w.uploaded === 'boolean' ? w.uploaded : false,
   }));
+  localStorage.setItem('workoutHistory', JSON.stringify(whNorm));
 
-  const normalizeMeals = (arr) => (Array.isArray(arr) ? arr : []).map((day) => ({
+  const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+  const mhNorm = mh.map(day => ({
     ...day,
     clientId: day.clientId || clientId,
     localId: day.localId || `m_${clientId}_${day.date || Date.now()}`,
     createdAt: day.createdAt || new Date().toISOString(),
     uploaded: typeof day.uploaded === 'boolean' ? day.uploaded : false,
   }));
-
-  if (userId) {
-    const whNorm = normalizeWorkouts(readScopedJSON(KEYS.workoutHistory, userId, []));
-    writeScopedJSON(KEYS.workoutHistory, userId, whNorm);
-
-    const mhNorm = normalizeMeals(readScopedJSON(KEYS.mealHistory, userId, []));
-    writeScopedJSON(KEYS.mealHistory, userId, mhNorm);
-    return;
-  }
-
-  const whNorm = normalizeWorkouts(JSON.parse(localStorage.getItem('workoutHistory') || '[]'));
-  localStorage.setItem('workoutHistory', JSON.stringify(whNorm));
-
-  const mhNorm = normalizeMeals(JSON.parse(localStorage.getItem('mealHistory') || '[]'));
   localStorage.setItem('mealHistory', JSON.stringify(mhNorm));
 }
 
-function dedupLocalWorkouts(userId = null) {
-  const read = () => userId
-    ? readScopedJSON(KEYS.workoutHistory, userId, [])
-    : JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-
-  const write = (value) => {
-    if (userId) writeScopedJSON(KEYS.workoutHistory, userId, value);
-    else localStorage.setItem('workoutHistory', JSON.stringify(value));
-  };
-
-  const wh = read();
+function dedupLocalWorkouts() {
+  const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
   if (!Array.isArray(wh) || wh.length === 0) return;
 
   const map = new Map();
   for (const w of wh) {
-    const kcal = Math.round(Number(w.totalCalories ?? w.total_calories) || 0);
-    const day = w.local_day || w.date || '';
-    const key = [day, w.name || w.title || '', kcal].join('|');
+    const kcal = Math.round(Number(w.totalCalories) || 0);
+    const key = [w.date, w.name, kcal].join('|');
     const prev = map.get(key);
-    if (!prev || new Date(w.createdAt || w.created_at || 0) > new Date(prev.createdAt || prev.created_at || 0)) {
+    if (!prev || new Date(w.createdAt || 0) > new Date(prev.createdAt || 0)) {
       map.set(key, w);
     }
   }
   const dedup = Array.from(map.values());
-  if (dedup.length !== wh.length) write(dedup);
+  if (dedup.length !== wh.length) {
+    localStorage.setItem('workoutHistory', JSON.stringify(dedup));
+  }
 }
 
 function recomputeTodayBanners(setBurned, setConsumed, uid) {
@@ -674,8 +639,8 @@ export default function App() {
 
   useEffect(() => {
     const run = () => {
-      normalizeLocalData(authUser?.id || null);
-      dedupLocalWorkouts(authUser?.id || null);
+      normalizeLocalData();
+      dedupLocalWorkouts();
       recomputeTodayBanners(setBurnedCalories, setConsumedCalories, authUser?.id || null);
     };
     run();
@@ -994,8 +959,8 @@ export default function App() {
   setBurnedCalories(workouts.filter(w => w?.date === todayUS).reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0));
   setConsumedCalories(todayRec ? (todayRec.meals || []).reduce((s, m) => s + (Number(m?.calories) || 0), 0) : 0);
 
-  normalizeLocalData(authUser?.id || null);
-  dedupLocalWorkouts(authUser?.id || null);
+  normalizeLocalData();
+  dedupLocalWorkouts();
   updateStreak();
 }}
 />
@@ -1036,20 +1001,20 @@ export default function App() {
   setBurnedCalories(workouts.filter(w => w?.date === todayUS).reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0));
   setConsumedCalories(todayRec ? (todayRec.meals || []).reduce((s, m) => s + (Number(m?.calories) || 0), 0) : 0);
 
-  normalizeLocalData(authUser?.id || null);
+  normalizeLocalData();
 }}
 />
           }/>
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
-          <Route path="/achievements" component={Achievements} />
-          <Route path="/calorie-log"  component={CalorieHistory} />
-          <Route path="/summary"      component={CalorieSummary} />
+          <Route exact path="/achievements" render={() => <Redirect to="/dashboard" />} />
+          <Route exact path="/calorie-log"  render={() => <Redirect to="/dashboard" />} />
+          <Route exact path="/summary"      render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ Legacy recap route now redirects to Coach (retention) */}
           <Route path="/recap" render={() => <Redirect to="/coach" />} />
 
-          <Route path="/waitlist"     component={WaitlistSignup} />
+          <Route exact path="/waitlist" render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={HomeHub} />
