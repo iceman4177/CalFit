@@ -222,7 +222,7 @@ const LOCKED_POSE_COPY = {
       bulletsLabel: "WHAT IMPROVED",
       bullets: ["More polished overall shape", "Better definition through the waist and back", "Stronger, more confident presentation"],
       breakdown: [
-        "Your physique looks more refined than before, especially through the waist, back, and overall silhouette.",
+        "Your physique looks more refined than before, especially through the waist, back, and overall shape.",
         "There’s a tighter, cleaner feel to the scan now, which makes the whole look come across more toned and more intentional.",
         "Your shoulders and upper back are reading with better definition, and the lower body shape feels more connected to the full look.",
         "Compared to the last scan, this feels more dialed and more obviously athletic.",
