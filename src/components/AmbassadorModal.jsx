@@ -73,7 +73,7 @@ export default function AmbassadorModal({ open, onClose, user, streak }) {
       localStorage.setItem('userData', JSON.stringify(data));
 
       onClose();
-      // Launch cleanup: send users back to an active in-app surface instead of the retired waitlist page.
+      // Navigate to the success/waitlist page
       window.location.assign('/dashboard');
     } catch (err) {
       console.error('[AmbassadorModal] submit failed:', err);

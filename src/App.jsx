@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, Suspense, lazy } from 'react';
 import {
   Route,
   Switch,
@@ -29,25 +29,12 @@ import AssessmentIcon    from '@mui/icons-material/Assessment';
 import InfoIcon          from '@mui/icons-material/Info';
 import ChatIcon          from '@mui/icons-material/Chat';
 
-import ProLandingPage from './ProLandingPage';
-import ProSuccess     from './ProSuccess';
-import AuthCallback   from './AuthCallback';
 
 import useVariableRewards    from './hooks/useVariableRewards';
 
 import useFirstTimeTip       from './hooks/useFirstTimeTip';
 import useReferral           from './hooks/useReferral';
 
-import HealthDataForm    from './HealthDataForm';
-import WorkoutPage       from './WorkoutPage';
-import WorkoutHistory    from './WorkoutHistory';
-import ProgressDashboard from './ProgressDashboard';
-import MealTracker       from './MealTracker';
-import NetCalorieBanner  from './NetCalorieBanner';
-import DailyRecapCoach   from './DailyRecapCoach';
-import HomeHub          from './HomeHub';
-import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
-import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
 
@@ -75,6 +62,20 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
+const ProLandingPage = lazy(() => import('./ProLandingPage'));
+const ProSuccess = lazy(() => import('./ProSuccess'));
+const AuthCallback = lazy(() => import('./AuthCallback'));
+const HealthDataForm = lazy(() => import('./HealthDataForm'));
+const WorkoutPage = lazy(() => import('./WorkoutPage'));
+const WorkoutHistory = lazy(() => import('./WorkoutHistory'));
+const ProgressDashboard = lazy(() => import('./ProgressDashboard'));
+const MealTracker = lazy(() => import('./MealTracker'));
+const DailyRecapCoach = lazy(() => import('./DailyRecapCoach'));
+const HomeHub = lazy(() => import('./HomeHub'));
+const DailyEvaluationHome = lazy(() => import('./DailyEvaluationHome'));
+const PoseSession = lazy(() => import('./PoseSession.jsx'));
+
+
 // Hide Recap Coach from navigation (page remains accessible via direct URL).
 const SHOW_COACH_NAV = false;
 
@@ -89,6 +90,17 @@ const routeTips = {
   '/recap':        'Coach (legacy route): redirects to Coach tab.',
 
 };
+
+function RouteLoader() {
+  return (
+    <Box sx={{ minHeight: '50vh', display: 'grid', placeItems: 'center' }}>
+      <Stack spacing={1.5} alignItems="center">
+        <CircularProgress size={28} />
+        <Typography variant="body2" color="text.secondary">Loading…</Typography>
+      </Stack>
+    </Box>
+  );
+}
 
 function PageTracker() {
   const location = useLocation();
@@ -903,6 +915,7 @@ export default function App() {
           </>
         )}
 
+        <Suspense fallback={<RouteLoader />}>
         <Switch>
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
@@ -1007,14 +1020,14 @@ export default function App() {
           }/>
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
-          <Route exact path="/achievements" render={() => <Redirect to="/dashboard" />} />
-          <Route exact path="/calorie-log"  render={() => <Redirect to="/dashboard" />} />
-          <Route exact path="/summary"      render={() => <Redirect to="/dashboard" />} />
+          <Route path="/achievements" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/calorie-log" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/summary" render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ Legacy recap route now redirects to Coach (retention) */}
           <Route path="/recap" render={() => <Redirect to="/coach" />} />
 
-          <Route exact path="/waitlist" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/waitlist" render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={HomeHub} />
@@ -1052,6 +1065,7 @@ export default function App() {
           {/* ✅ Retention side: Recap Coach */}
           <Route path="/coach" render={() => <Redirect to="/verdict" />} />
         </Switch>
+        </Suspense>
 
         <UpgradeModal
           open={upgradeOpen}
