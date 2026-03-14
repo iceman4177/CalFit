@@ -201,7 +201,7 @@ export default function ExerciseForm({
   );
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 560, mx: 'auto' }}>
+    <Box>
       <EquipTip />
       {isCardio   && <CardioTip />}
       {isStrength && <MuscleTip />}
@@ -216,7 +216,14 @@ export default function ExerciseForm({
       <AddTip />
       <DoneTip />
 
-      <FormControl fullWidth sx={{ mb: 2 }}>
+      <FormControl
+        fullWidth
+        sx={{
+          mb: 2,
+          maxWidth: { xs: '100%', md: 760 },
+          mx: 'auto'
+        }}
+      >
         <InputLabel id="equip-label">Equipment Type</InputLabel>
         <MuiSelect
           labelId="equip-label"
