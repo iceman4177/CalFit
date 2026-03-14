@@ -52,8 +52,13 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
     return `${header}${body ? `\n${body}` : ''}\n\nTracked with Slimcal.ai 💪 #SlimcalAI`.trim();
   }, [shareText, exercises, totalCalories]);
 
+  const pageUrl = shareUrl || (typeof window !== 'undefined' ? window.location.href : 'https://slimcal.ai');
   const encodedCaption = React.useMemo(() => encodeURIComponent(builtCaption), [builtCaption]);
-  const encodedUrl = React.useMemo(() => encodeURIComponent(shareUrl || window.location.href), [shareUrl]);
+  const encodedUrl = React.useMemo(() => encodeURIComponent(pageUrl), [pageUrl]);
+  const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
+  const isMobile = typeof window !== 'undefined'
+    ? window.matchMedia?.('(max-width: 900px)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+    : false;
 
   const copyCaption = React.useCallback(async () => {
     try {
@@ -71,11 +76,19 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
   const handleNativeShare = React.useCallback(async () => {
     try {
       if (!navigator.share) return;
-      await navigator.share({ text: builtCaption, url: shareUrl || window.location.href });
+      await navigator.share({ text: builtCaption, url: pageUrl });
     } catch {}
-  }, [builtCaption, shareUrl]);
+  }, [builtCaption, pageUrl]);
 
   const openWithPrefill = React.useCallback(async (platform) => {
+    if (canNativeShare && isMobile) {
+      if (platform === 'instagram' || platform === 'facebook') {
+        await copyCaption();
+      }
+      await handleNativeShare();
+      return;
+    }
+
     switch (platform) {
       case 'x':
         openUrl(`https://twitter.com/intent/tweet?text=${encodedCaption}`);
@@ -84,7 +97,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
         openUrl(`https://www.linkedin.com/feed/?shareActive=true&text=${encodedCaption}`);
         break;
       case 'whatsapp':
-        openUrl(`https://wa.me/?text=${encodeURIComponent(`${builtCaption}\n${shareUrl || window.location.href}`)}`);
+        openUrl(`https://wa.me/?text=${encodeURIComponent(`${builtCaption}\n${pageUrl}`)}`);
         break;
       case 'facebook': {
         await copyCaption();
@@ -99,14 +112,14 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
       default:
         break;
     }
-  }, [builtCaption, shareUrl, encodedCaption, encodedUrl, copyCaption, openUrl]);
+  }, [canNativeShare, isMobile, copyCaption, handleNativeShare, openUrl, encodedCaption, builtCaption, pageUrl, encodedUrl]);
 
   const socialActions = [
-    { key: 'x', label: 'X', icon: <XIcon />, helper: 'Opens with caption', color: '#111827' },
-    { key: 'linkedin', label: 'LinkedIn', icon: <LinkedInIcon />, helper: 'Opens with caption', color: '#2563eb' },
-    { key: 'whatsapp', label: 'WhatsApp', icon: <WhatsAppIcon />, helper: 'Opens with caption', color: '#16a34a' },
-    { key: 'facebook', label: 'Facebook', icon: <FacebookRoundedIcon />, helper: 'Caption copied first', color: '#2563eb' },
-    { key: 'instagram', label: 'Instagram', icon: <InstagramIcon />, helper: 'Caption copied first', color: '#ec4899' },
+    { key: 'x', label: 'X', icon: <XIcon />, color: '#111827' },
+    { key: 'linkedin', label: 'LinkedIn', icon: <LinkedInIcon />, color: '#2563eb' },
+    { key: 'whatsapp', label: 'WhatsApp', icon: <WhatsAppIcon />, color: '#16a34a' },
+    { key: 'facebook', label: 'Facebook', icon: <FacebookRoundedIcon />, color: '#2563eb' },
+    { key: 'instagram', label: 'Instagram', icon: <InstagramIcon />, color: '#ec4899' },
   ];
 
   return (
@@ -122,6 +135,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
           background: 'linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)',
           boxShadow: '0 28px 80px rgba(15, 23, 42, 0.18)',
           border: '1px solid rgba(37,99,235,0.10)',
+          mx: { xs: 1.5, sm: 0 },
         },
       }}
     >
@@ -131,7 +145,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
             Share your workout
           </Typography>
           <Typography variant="body2" sx={{ color: 'rgba(15,23,42,0.65)' }}>
-            Open a post faster, keep your caption clean, and show your progress with SlimCal style.
+            Open a post fast and share your progress with SlimCal style.
           </Typography>
         </Stack>
       </DialogTitle>
@@ -149,7 +163,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
           <TextField
             multiline
             fullWidth
-            minRows={7}
+            minRows={5}
             variant="outlined"
             value={builtCaption}
             InputProps={{ readOnly: true }}
@@ -157,6 +171,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
               '& .MuiOutlinedInput-root': {
                 borderRadius: 3,
                 bgcolor: '#ffffff',
+                alignItems: 'flex-start',
               },
             }}
           />
@@ -176,14 +191,14 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
             >
               Copy caption
             </Button>
-            {navigator.share ? (
+            {canNativeShare ? (
               <Button
                 variant="outlined"
                 startIcon={<ShareRoundedIcon />}
                 onClick={handleNativeShare}
                 sx={{ flex: 1, borderRadius: 999, fontWeight: 800, py: 1.25 }}
               >
-                Open share sheet
+                Share now
               </Button>
             ) : null}
           </Stack>
@@ -191,7 +206,7 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr' },
+              gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr 1fr 1fr' },
               gap: 1.25,
             }}
           >
@@ -201,33 +216,26 @@ function ShareWorkoutModal({ open, onClose, shareText, shareUrl, exercises = [],
                 variant="outlined"
                 onClick={() => openWithPrefill(action.key)}
                 sx={{
+                  minHeight: 88,
                   borderRadius: 3,
                   px: 1.25,
                   py: 1.25,
                   borderColor: alpha(action.color, 0.22),
                   bgcolor: alpha(action.color, 0.05),
-                  justifyContent: 'flex-start',
                   textTransform: 'none',
                 }}
               >
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ textAlign: 'left' }}>
-                  <Box sx={{ color: action.color, display: 'inline-flex' }}>{action.icon}</Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.15 }}>
-                      {action.label}
-                    </Typography>
-                    <Typography sx={{ fontSize: 12, color: 'rgba(15,23,42,0.62)', lineHeight: 1.15 }}>
-                      {action.helper}
-                    </Typography>
+                <Stack spacing={0.75} alignItems="center" justifyContent="center" sx={{ width: '100%' }}>
+                  <Box sx={{ color: action.color, display: 'inline-flex', fontSize: 30, lineHeight: 1 }}>
+                    {action.icon}
                   </Box>
+                  <Typography sx={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.1, textAlign: 'center', fontSize: { xs: 13, sm: 14 } }}>
+                    {action.label}
+                  </Typography>
                 </Stack>
               </Button>
             ))}
           </Box>
-
-          <Typography variant="body2" sx={{ textAlign: 'center', color: 'rgba(15,23,42,0.62)' }}>
-            X, LinkedIn, and WhatsApp support prefilled text. Instagram and Facebook don’t reliably allow caption prefills, so SlimCal copies your caption first and opens the platform for a quick paste.
-          </Typography>
         </Stack>
       </DialogContent>
 
