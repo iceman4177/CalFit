@@ -17,7 +17,6 @@ import { readScopedJSON, KEYS } from "./lib/scopedStorage.js";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
-/* ---------------- Local-day helpers (stable, no UTC drift) ------------- */
 function localDayISO(d = new Date()) {
   const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   return ld.toISOString().slice(0, 10);
@@ -50,7 +49,6 @@ function lastNDaysISO(n = 7, end = new Date()) {
   return out;
 }
 
-/* ---------------- Canonical local-first day totals --------------------- */
 function buildMealTotalsByDay(userId) {
   const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
   const byDay = new Map();
@@ -154,7 +152,7 @@ export default function WeeklyTrend() {
   const { user } = useAuth();
   const uid = user?.id || null;
 
-  const [rows, setRows] = useState([]); // [{dayISO, net}]
+  const [rows, setRows] = useState([]);
 
   const recompute = useCallback(() => {
     const days = lastNDaysISO(7);
@@ -173,41 +171,58 @@ export default function WeeklyTrend() {
     recompute();
   }, [recompute]);
 
-  const chart = useMemo(() => {
-    return {
-      labels: rows.map((r) => isoToUS(r.dayISO)),
-      datasets: [
-        {
-          label: "Net Calories",
-          data: rows.map((r) => Number(r.net) || 0),
-          tension: 0.25,
-          borderColor: "rgba(99, 102, 241, 0.95)",
-          backgroundColor: "rgba(99, 102, 241, 0.18)",
-          pointBackgroundColor: "rgba(99, 102, 241, 0.95)",
-          pointBorderColor: "#ffffff",
-          pointRadius: 3,
-          fill: true,
-        },
-      ],
-    };
-  }, [rows]);
+  const chart = useMemo(() => ({
+    labels: rows.map((r) => isoToUS(r.dayISO)),
+    datasets: [
+      {
+        label: "Net Calories",
+        data: rows.map((r) => Number(r.net) || 0),
+        tension: 0.25,
+        borderColor: "rgba(99, 102, 241, 0.95)",
+        backgroundColor: "rgba(99, 102, 241, 0.18)",
+        pointBackgroundColor: "rgba(99, 102, 241, 0.95)",
+        pointBorderColor: "#ffffff",
+        pointRadius: 3,
+        fill: true,
+      },
+    ],
+  }), [rows]);
 
   const options = useMemo(
     () => ({
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.06)' } }, x: { grid: { display: false } } },
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: false, grid: { color: "rgba(255,255,255,0.08)" }, ticks: { color: "rgba(255,255,255,0.72)" } },
+        x: { grid: { display: false }, ticks: { color: "rgba(255,255,255,0.72)" } },
+      },
     }),
     []
   );
 
   return (
-    <Paper elevation={3} sx={{ p: 3, borderRadius: 3, mt: 3 }}>
-      <Typography variant="h6" sx={{ mb: 2 }}>
-        7-Day Net Calorie Trend
+    <Paper
+      elevation={0}
+      sx={{
+        p: { xs: 2.25, md: 3 },
+        borderRadius: 4,
+        mt: 3,
+        border: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
+        background: "rgba(255,255,255,0.02)",
+      }}
+    >
+      <Typography variant="overline" sx={{ display: "block", textAlign: "center", opacity: 0.65, letterSpacing: 1.3 }}>
+        Net trend
       </Typography>
-      <Box sx={{ height: 260 }}>
+      <Typography variant="h6" sx={{ mt: 0.25, mb: 0.75, fontWeight: 800, textAlign: "center" }}>
+        7-day net calorie trend
+      </Typography>
+      <Typography variant="body2" sx={{ textAlign: "center", opacity: 0.72 }}>
+        Track how your intake versus burn is trending across the week.
+      </Typography>
+      <Box sx={{ height: 260, mt: 2 }}>
         <Line data={chart} options={options} />
       </Box>
     </Paper>
