@@ -167,7 +167,7 @@ const LOCKED_POSE_COPY = {
       ],
       nextUp: [
         "You’re already looking lean and athletic, and you’re well on your way to looking even more built and dialed.",
-        "A little more upper-body size, especially through the chest, delts, and arms, would make this hit even harder.",
+        "Bringing more fullness through the chest, delts, and arms would make the strong look that’s already there read even bigger.",
       ],
       coachNote: [
         "This is a strong baseline because you’re not starting from zero.",
@@ -211,7 +211,7 @@ const LOCKED_POSE_COPY = {
       ],
       nextUp: [
         "You’re already looking lean and polished, and you’re well on your way to looking even more sculpted.",
-        "A little more shape through the glutes and lower body would make this pop even more while keeping the same clean toned look.",
+        "Bringing a little more shape through the glutes and lower body would make this already polished look pop even harder.",
       ],
       coachNote: [
         "This is a really strong baseline because the shape is already there.",
