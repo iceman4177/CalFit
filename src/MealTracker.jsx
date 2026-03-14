@@ -1246,52 +1246,46 @@ export default function MealTracker({ onMealUpdate }) {
                     </Alert>
                   )}
 
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ width: '100%' }}>
+                  <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
                     <Button
                       onClick={handleAdd}
                       onFocus={triggerAddTip}
                       variant="contained"
                       size="large"
-                      fullWidth
                       sx={{
                         minHeight: 56,
                         borderRadius: 999,
                         fontWeight: 800,
                         fontSize: { xs: '1rem', sm: '1.02rem' },
                         textTransform: 'none',
-                        flex: 1.15
+                        width: '100%',
+                        maxWidth: 520
                       }}
                     >
                       Add Meal
                     </Button>
-
-                    <Button
-                      onClick={handleClear}
-                      variant="text"
-                      size="large"
-                      disabled={mealLog.length === 0}
-                      sx={{
-                        minHeight: 56,
-                        borderRadius: 999,
-                        fontWeight: 700,
-                        textTransform: 'none',
-                        flex: 0.85
-                      }}
-                    >
-                      Clear Today
-                    </Button>
-                  </Stack>
+                  </Box>
 
                   <Divider flexItem />
 
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%' }}>
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1.5}
+                    sx={{
+                      width: '100%',
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                  >
                     <Button
                       onClick={() => setOpenCustom(true)}
                       startIcon={<AddCircleOutlineIcon />}
                       variant="outlined"
                       size="large"
                       sx={{
-                        flex: 1,
+                        flex: { xs: 'unset', sm: 1 },
+                        width: '100%',
+                        maxWidth: 360,
                         textTransform: 'none',
                         fontWeight: 700,
                         borderRadius: 999,
@@ -1306,7 +1300,9 @@ export default function MealTracker({ onMealUpdate }) {
                       variant="outlined"
                       size="large"
                       sx={{
-                        flex: 1,
+                        flex: { xs: 'unset', sm: 1 },
+                        width: '100%',
+                        maxWidth: 360,
                         textTransform: 'none',
                         fontWeight: 700,
                         borderRadius: 999,
