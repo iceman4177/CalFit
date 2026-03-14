@@ -22,7 +22,7 @@ const tabs = [
   { label: 'Home', value: '/home', route: '/', icon: <HomeIcon /> },
   { label: 'Log', value: '/log', route: null, icon: <AddCircleOutlineIcon /> },
   { label: 'Plan', value: '/plan', route: '/daily-checklist', icon: <EventNoteIcon /> },
-  { label: 'Coach', value: '/coach', route: '/coach', icon: <PsychologyAltIcon /> },
+  { label: 'Coach', value: '/coach', route: '/verdict', icon: <PsychologyAltIcon /> },
   { label: 'Scan', value: '/scan', route: '/body-scan/session', icon: <CenterFocusStrongIcon /> },
 ];
 

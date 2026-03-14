@@ -4,70 +4,38 @@ import {
   Route,
   Switch,
   Redirect,
-  NavLink,
   useLocation,
-  useHistory
+  useHistory,
 } from 'react-router-dom';
-import { Container,
+import {
+  Container,
   Box,
   Typography,
   Button,
   Stack,
-  Menu,
-  MenuItem,
   Snackbar,
   Alert,
-  Badge,
-  Chip,
-  CircularProgress } from '@mui/material';
-import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
-import RestaurantIcon    from '@mui/icons-material/Restaurant';
-import MoreVertIcon      from '@mui/icons-material/MoreVert';
-import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
-import ListIcon          from '@mui/icons-material/List';
-import AssessmentIcon    from '@mui/icons-material/Assessment';
-import InfoIcon          from '@mui/icons-material/Info';
-import ChatIcon          from '@mui/icons-material/Chat';
+  CircularProgress,
+} from '@mui/material';
 
-import ProLandingPage from './ProLandingPage';
-import ProSuccess     from './ProSuccess';
-import AuthCallback   from './AuthCallback';
-
-import useVariableRewards    from './hooks/useVariableRewards';
-
-import useFirstTimeTip       from './hooks/useFirstTimeTip';
-import useReferral           from './hooks/useReferral';
-
-import HealthDataForm    from './HealthDataForm';
-import WorkoutPage       from './WorkoutPage';
-import WorkoutHistory    from './WorkoutHistory';
-import ProgressDashboard from './ProgressDashboard';
-import MealTracker       from './MealTracker';
-import NetCalorieBanner  from './NetCalorieBanner';
-import DailyRecapCoach   from './DailyRecapCoach';
-import HomeHub          from './HomeHub';
-import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
-import PoseSession from './PoseSession.jsx';
-import StreakBanner      from './components/StreakBanner';
+import useVariableRewards from './hooks/useVariableRewards';
+import useFirstTimeTip from './hooks/useFirstTimeTip';
+import useReferral from './hooks/useReferral';
+import NetCalorieBanner from './NetCalorieBanner';
+import StreakBanner from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
-
-import UpgradeModal      from './components/UpgradeModal';
-import AmbassadorModal   from './components/AmbassadorModal';
-  // (Invite/Referral modal removed)
-import { logPageView }   from './analytics';
-
+import UpgradeModal from './components/UpgradeModal';
+import AmbassadorModal from './components/AmbassadorModal';
+import { logPageView } from './analytics';
 import { useEntitlements } from './context/EntitlementsContext.jsx';
-import { supabase }        from './lib/supabaseClient';
-
+import { supabase } from './lib/supabaseClient';
 import { attachSyncListeners } from './lib/sync';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
 import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
 import { getTodayBurnedFromWorkoutHistory } from './lib/workoutHistoryTotals.js';
 import ProfileSetupGate from './components/ProfileSetupGate';
-
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
-
 import {
   shouldShowAmbassadorOnce,
   markAmbassadorShown,
@@ -76,18 +44,30 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
-// Hide Recap Coach from navigation (page remains accessible via direct URL).
-const SHOW_COACH_NAV = false;
+
+const ProLandingPage = React.lazy(() => import('./ProLandingPage'));
+const ProSuccess = React.lazy(() => import('./ProSuccess'));
+const AuthCallback = React.lazy(() => import('./AuthCallback'));
+const HealthDataForm = React.lazy(() => import('./HealthDataForm'));
+const WorkoutPage = React.lazy(() => import('./WorkoutPage'));
+const WorkoutHistory = React.lazy(() => import('./WorkoutHistory'));
+const ProgressDashboard = React.lazy(() => import('./ProgressDashboard'));
+const MealTracker = React.lazy(() => import('./MealTracker'));
+const DailyRecapCoach = React.lazy(() => import('./DailyRecapCoach'));
+const HomeHub = React.lazy(() => import('./HomeHub'));
+const DailyEvaluationHome = React.lazy(() => import('./DailyEvaluationHome'));
+const PoseSession = React.lazy(() => import('./PoseSession.jsx'));
 
 const routeTips = {
   '/':            'Home: log food, train, scan, and get coached from one clean home base.',
-  '/coach':        'Recap Coach (hidden): legacy page retained for compatibility.',
+  '/coach':        'Coach: redirects to the live AI Coach page for compatibility.',
+  '/verdict':      'Coach: get your clearest AI-guided next step based on today.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
   '/meals':        'Track your meals here: search foods or add calories manually.',
   '/history':      'View your past workouts & meals at a glance.',
   '/dashboard':    'Dashboard: see trends and invite friends below.',
-  '/recap':        'Coach (legacy route): redirects to Coach tab.',
+  '/recap':        'Coach (legacy route): redirects to the live Coach page.',
 
 };
 
@@ -97,6 +77,14 @@ function PageTracker() {
     logPageView(location.pathname + location.search);
   }, [location]);
   return null;
+}
+
+function RouteLoader() {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+      <CircularProgress size={32} />
+    </Box>
+  );
 }
 
 function isScrollable(node) {
@@ -477,10 +465,6 @@ export default function App() {
 
   const [ambassadorOpen, setAmbassadorOpen] = useState(false);
 
-  const [moreAnchor, setMoreAnchor] = useState(null);
-  const openMore  = e => setMoreAnchor(e.currentTarget);
-  const closeMore = () => setMoreAnchor(null);
-
   const minimumProfileStatus = React.useMemo(() => {
     if (!profileResolved) return null;
     return getMinimumProfileStatusFromData(userData || {});
@@ -494,7 +478,7 @@ export default function App() {
       return (
         <Box sx={{ minHeight: 'calc(100vh - 160px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
-            <CircularProgress size={32} />
+            <RouteLoader />
             <Typography variant="body2" color="text.secondary">
               Loading your profile…
             </Typography>
@@ -739,7 +723,7 @@ export default function App() {
     try { return localStorage.getItem('slimcal:coachHintSeen') !== '1'; } catch (e) { return true; }
   });
   useEffect(() => {
-    if (location.pathname === '/coach' && showCoachHint) {
+    if ((location.pathname === '/coach' || location.pathname === '/verdict') && showCoachHint) {
       try { localStorage.setItem('slimcal:coachHintSeen', '1'); } catch (e) {}
       setShowCoachHint(false);
     }
@@ -897,91 +881,112 @@ export default function App() {
           </>
         )}
 
-        <Switch>
-          <Route path="/auth/callback" component={AuthCallback} />
-          <Route path="/pro" component={ProLandingPage} />
-          <Route path="/pro-success" component={ProSuccess} />
-                    <Route exact path="/body-scan/session" render={() => renderProfileGate("Complete your profile before Pose Session", "Pose Session uses your body stats and goals so the scan feels personal and accurate.") || <PoseSession />} /><Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
+        <React.Suspense fallback={<RouteLoader />}>
+          <Switch>
+            <Route path="/auth/callback" component={AuthCallback} />
+            <Route path="/pro" component={ProLandingPage} />
+            <Route path="/pro-success" component={ProSuccess} />
+            <Route
+              exact
+              path="/body-scan/session"
+              render={() =>
+                renderProfileGate(
+                  "Complete your profile before Pose Session",
+                  "Pose Session uses your body stats and goals so the scan feels personal and accurate.",
+                ) || <PoseSession />
+              }
+            />
+            <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
-          <Route path="/edit-info" render={() =>
-            <HealthDataForm setUserData={data => {
-              const bundle = readProfileBundle(authUser?.id || null);
-              const prev = bundle.userData || {};
-              const next = { ...prev, ...data, isPremium: (proCheck.isPro || isProActive || localPro) };
-              writeProfileBundle(authUser?.id || null, next);
-              if (authUser?.id) mirrorProfileToLegacy(authUser.id, next);
-              else localStorage.setItem('userData', JSON.stringify(next));
-              setUserDataState(next);
-              history.push('/');
-            }} />
-          }/>
-          <Route path="/workout" render={() =>
-            <WorkoutPage
-              userData={userData}
-              profileResolved={profileResolved}
-              onWorkoutLogged={() => {
-  refreshCalories();
-  normalizeLocalData();
-  dedupLocalWorkouts();
-  updateStreak();
-}}
-/>
-          }/>
-          <Route path="/meals" render={() =>
-            <MealTracker
-              onMealUpdate={() => {
-  refreshCalories();
-  normalizeLocalData();
-}}
-/>
-          }/>
-          <Route path="/history" component={WorkoutHistory} />
-          <Route path="/dashboard" component={ProgressDashboard} />
-          <Route path="/achievements" render={() => <Redirect to="/dashboard" />} />
-          <Route path="/calorie-log"  render={() => <Redirect to="/dashboard" />} />
-          <Route path="/summary"      render={() => <Redirect to="/dashboard" />} />
-
-          {/* ✅ Legacy recap route now redirects to Coach (retention) */}
-          <Route path="/recap" render={() => <Redirect to="/coach" />} />
-
-          <Route path="/waitlist"     render={() => <Redirect to="/dashboard" />} />
-
-          {/* ✅ NEW: Acquisition home is Daily Evaluation */}
-          <Route exact path="/" component={HomeHub} />
-
-          {/* Daily Eval (scoreboard only) */}
-          <Route
-            exact
-            path="/daily-eval"
-            render={() => renderProfileGate("Complete your profile before Daily Check-In", "Daily Check-In uses your profile to judge your day against the right calorie and goal targets.") || <DailyEvaluationHome view="scoreboard" />}
-          />
-
-          {/* Daily Checklist (quests only) */}
-          <Route
-            exact
-            path="/daily-checklist"
-            render={() => renderProfileGate("Complete your profile before Today's Plan", "Today's Plan needs your profile so your targets and progress cues are based on you.") || <DailyEvaluationHome view="checklist" />}
-          />
-
-          
-
-          {/* Legacy Get Verdict route now folds into Coach */}
-          <Route exact path="/get-verdict" render={() => <Redirect to="/verdict" />} />
-{/* Daily Verdict (AI coach) */}
-          <Route
-            exact
-            path="/verdict"
-            render={() => renderProfileGate("Complete your profile before Coach", "Coach uses your profile to generate calorie-aware and goal-aware guidance.") || (
-              <DailyRecapCoach
-                userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
-              />
-            )}
-          />
-
-
-          {/* ✅ Retention side: Recap Coach */}
-          <Route path="/coach" render={() => <Redirect to="/verdict" />} />
-        </Switch>
+            <Route
+              path="/edit-info"
+              render={() => (
+                <HealthDataForm
+                  setUserData={(data) => {
+                    const bundle = readProfileBundle(authUser?.id || null);
+                    const prev = bundle.userData || {};
+                    const next = { ...prev, ...data, isPremium: (proCheck.isPro || isProActive || localPro) };
+                    writeProfileBundle(authUser?.id || null, next);
+                    if (authUser?.id) mirrorProfileToLegacy(authUser.id, next);
+                    else localStorage.setItem('userData', JSON.stringify(next));
+                    setUserDataState(next);
+                    history.push('/');
+                  }}
+                />
+              )}
+            />
+            <Route
+              path="/workout"
+              render={() => (
+                <WorkoutPage
+                  userData={userData}
+                  profileResolved={profileResolved}
+                  onWorkoutLogged={() => {
+                    refreshCalories();
+                    normalizeLocalData();
+                    dedupLocalWorkouts();
+                    updateStreak();
+                  }}
+                />
+              )}
+            />
+            <Route
+              path="/meals"
+              render={() => (
+                <MealTracker
+                  onMealUpdate={() => {
+                    refreshCalories();
+                    normalizeLocalData();
+                  }}
+                />
+              )}
+            />
+            <Route path="/history" component={WorkoutHistory} />
+            <Route path="/dashboard" component={ProgressDashboard} />
+            <Route path="/achievements" render={() => <Redirect to="/dashboard" />} />
+            <Route path="/calorie-log" render={() => <Redirect to="/dashboard" />} />
+            <Route path="/summary" render={() => <Redirect to="/dashboard" />} />
+            <Route path="/recap" render={() => <Redirect to="/verdict" />} />
+            <Route path="/waitlist" render={() => <Redirect to="/dashboard" />} />
+            <Route exact path="/" component={HomeHub} />
+            <Route
+              exact
+              path="/daily-eval"
+              render={() =>
+                renderProfileGate(
+                  "Complete your profile before Daily Check-In",
+                  "Daily Check-In uses your profile to judge your day against the right calorie and goal targets.",
+                ) || <DailyEvaluationHome view="scoreboard" />
+              }
+            />
+            <Route
+              exact
+              path="/daily-checklist"
+              render={() =>
+                renderProfileGate(
+                  "Complete your profile before Today's Plan",
+                  "Today's Plan needs your profile so your targets and progress cues are based on you.",
+                ) || <DailyEvaluationHome view="checklist" />
+              }
+            />
+            <Route exact path="/get-verdict" render={() => <Redirect to="/verdict" />} />
+            <Route
+              exact
+              path="/verdict"
+              render={() =>
+                renderProfileGate(
+                  "Complete your profile before Coach",
+                  "Coach uses your profile to generate calorie-aware and goal-aware guidance.",
+                ) || (
+                  <DailyRecapCoach
+                    userData={{ ...userData, isPremium: (proCheck.isPro || isProActive || localPro) }}
+                  />
+                )
+              }
+            />
+            <Route path="/coach" render={() => <Redirect to="/verdict" />} />
+          </Switch>
+        </React.Suspense>
 
         <UpgradeModal
           open={upgradeOpen}
