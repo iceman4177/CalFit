@@ -251,12 +251,12 @@ export default function ProgressDashboard() {
     []
   );
 
-  const summaryChips = [
+  const topSummaryChips = [
     `Workout days: ${summary.nonZeroDays}`,
     `Burned today: ${Math.round(burnedToday)}`,
     `Consumed today: ${Math.round(consumedToday)}`,
-    `Net today: ${fmtKcal(netToday)}`,
   ];
+  const netTodayChip = `Net today: ${fmtKcal(netToday)}`;
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
@@ -288,19 +288,35 @@ export default function ProgressDashboard() {
           <Typography sx={{ maxWidth: 760, fontSize: { xs: 18, md: 22 }, color: "#667085", lineHeight: 1.45 }}>
             {todayStatus}
           </Typography>
-          <Box
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 1.25,
-              justifyContent: "center",
-              pt: 0.5,
-            }}
-          >
-            {summaryChips.map((label) => (
+          <Stack spacing={1.25} alignItems="center" sx={{ pt: 0.5, width: "100%" }}>
+            <Box
+              sx={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 1.25,
+                justifyContent: "center",
+              }}
+            >
+              {topSummaryChips.map((label) => (
+                <Chip
+                  key={label}
+                  label={label}
+                  sx={{
+                    px: 0.75,
+                    height: 38,
+                    borderRadius: 999,
+                    bgcolor: "#f8fafc",
+                    border: "1px solid rgba(15,23,42,0.08)",
+                    fontWeight: 800,
+                    color: "#0f172a",
+                    fontSize: 15,
+                  }}
+                />
+              ))}
+            </Box>
+            <Box sx={{ display: "flex", justifyContent: "center", width: "100%" }}>
               <Chip
-                key={label}
-                label={label}
+                label={netTodayChip}
                 sx={{
                   px: 0.75,
                   height: 38,
@@ -312,8 +328,8 @@ export default function ProgressDashboard() {
                   fontSize: 15,
                 }}
               />
-            ))}
-          </Box>
+            </Box>
+          </Stack>
         </Stack>
       </Paper>
 
