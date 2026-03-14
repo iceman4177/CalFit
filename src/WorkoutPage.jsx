@@ -1570,7 +1570,7 @@ setNewExercise({
               mb: 0.2
             }}
           >
-            <FeatureUseBadge featureKey="ai_workout" isPro={isProUser()} />
+            <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
@@ -1624,7 +1624,7 @@ setNewExercise({
   // --- main UI ---
   return (
     <Container maxWidth="md" sx={{ py: { xs: 3, md: 4 }, pb: { xs: 16, md: 12 }, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      {(showIdle || showGenerating || showCurrentSession) && renderHeroCard()}
+      {(showIdle || showGenerating || showSuggested || showCurrentSession) && renderHeroCard()}
 
       {showSuggestArea && (
         <Box ref={suggestRef} sx={{ mt: showGenerating ? 3 : { xs: 1.5, md: 2 }, ...centeredSectionSx }}>
