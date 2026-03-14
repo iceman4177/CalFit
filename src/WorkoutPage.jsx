@@ -1581,7 +1581,7 @@ setNewExercise({
                 lineHeight: 1.5
               }}
             >
-              Build your workout manually or let AI create one, then review and submit in one smooth flow.
+              Build or generate your session, review it, then submit it in one smooth flow.
             </Typography>
           </Box>
 
@@ -1629,14 +1629,14 @@ setNewExercise({
                     fontSize: { xs: '1.72rem', sm: '1.95rem' }
                   }}
                 >
-                  Build Today&apos;s Workout
+                  Log a workout
                 </Typography>
                 <Typography
                   variant="body1"
                   color="text.secondary"
                   sx={{ maxWidth: 540, fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
-                  Add exercises below. Your current session updates live as you go.
+                  Add exercises below or load a past workout to start faster. Your current session updates live as you go.
                 </Typography>
               </Stack>
 
@@ -1698,7 +1698,7 @@ setNewExercise({
                           Current Session Logs
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                          Review and edit today&apos;s workout below.
+                          Review today&apos;s workout and make any quick edits below.
                         </Typography>
                       </Box>
                       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="center">
@@ -1752,7 +1752,7 @@ setNewExercise({
                   onClick={() => setShowSaunaSection((s) => !s)}
                   sx={{ borderRadius: 999, fontWeight: 700, display: 'flex', mx: 'auto' }}
                 >
-                  {showSaunaSection ? 'Hide Sauna Session' : 'Add Sauna Session'}
+                  {showSaunaSection ? 'Hide Sauna' : 'Add Sauna (optional)'}
                 </Button>
               </Box>
 
