@@ -42,10 +42,7 @@ import HealthDataForm    from './HealthDataForm';
 import WorkoutPage       from './WorkoutPage';
 import WorkoutHistory    from './WorkoutHistory';
 import ProgressDashboard from './ProgressDashboard';
-import Achievements      from './Achievements';
 import MealTracker       from './MealTracker';
-import CalorieHistory    from './CalorieHistory';
-import CalorieSummary    from './CalorieSummary';
 import NetCalorieBanner  from './NetCalorieBanner';
 import DailyRecapCoach   from './DailyRecapCoach';
 import HomeHub          from './HomeHub';
@@ -53,7 +50,6 @@ import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition
 import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
-import WaitlistSignup    from './components/WaitlistSignup';
 
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
@@ -65,7 +61,6 @@ import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
-import { showAppToast } from './lib/appToast';
 import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
 import ProfileSetupGate from './components/ProfileSetupGate';
 
@@ -91,11 +86,7 @@ const routeTips = {
   '/meals':        'Track your meals here: search foods or add calories manually.',
   '/history':      'View your past workouts & meals at a glance.',
   '/dashboard':    'Dashboard: see trends and invite friends below.',
-  '/achievements': 'Achievements: hit milestones to unlock badges!',
-  '/calorie-log':  'Calorie Log: detailed daily breakdown of intake vs burn.',
-  '/summary':      'Summary: quick overview of today’s net calories.',
   '/recap':        'Coach (legacy route): redirects to Coach tab.',
-  '/waitlist':     'Join our waitlist for early access to new features!',
 
 };
 
@@ -371,6 +362,11 @@ export default function App() {
     attachSyncListeners();
   }, []);
 
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   /* ---------------- Entitlements (context) ---------------- */
   const { isProActive, status, entitlements } = useEntitlements();
@@ -858,18 +854,6 @@ export default function App() {
     });
   };
 
-
-  useEffect(() => {
-    const onToast = (event) => {
-      const message = String(event?.detail?.message || '').trim();
-      const severity = event?.detail?.severity || 'info';
-      if (!message) return;
-      setAppSnack({ open: true, message, severity });
-    };
-    window.addEventListener('slimcal:toast', onToast);
-    return () => window.removeEventListener('slimcal:toast', onToast);
-  }, []);
-
   return (
     <>
       <Header logoSrc="/slimcal-logo.svg" showBeta={false} />
@@ -1023,14 +1007,14 @@ export default function App() {
           }/>
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
-          <Route path="/achievements" component={Achievements} />
-          <Route path="/calorie-log"  component={CalorieHistory} />
-          <Route path="/summary"      component={CalorieSummary} />
+          <Route path="/achievements" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/calorie-log"  render={() => <Redirect to="/dashboard" />} />
+          <Route path="/summary"      render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ Legacy recap route now redirects to Coach (retention) */}
           <Route path="/recap" render={() => <Redirect to="/coach" />} />
 
-          <Route path="/waitlist"     component={WaitlistSignup} />
+          <Route path="/waitlist"     render={() => <Redirect to="/dashboard" />} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={HomeHub} />
@@ -1087,10 +1071,6 @@ export default function App() {
           {netSnack.type === 'online'
             ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
             : <Alert onClose={closeNetSnack} severity="warning" variant="filled">You’re offline. Entries are saved locally.</Alert>}
-        </Snackbar>
-
-        <Snackbar open={appSnack.open} autoHideDuration={2600} onClose={closeAppSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
-          <Alert onClose={closeAppSnack} severity={appSnack.severity || 'info'} variant="filled">{appSnack.message}</Alert>
         </Snackbar>
       </Container>
 
