@@ -187,16 +187,16 @@ export default function HomeHub() {
               Log your food and training, check how today is going, then get a clear next step.
             </Typography>
 
-            <Box
+            <Stack
+              direction="row"
+              spacing={{ xs: 0.55, sm: 1 }}
               sx={{
-                pt: 0.4,
                 width: "100%",
-                display: "grid",
-                gridTemplateColumns: { xs: "repeat(3, max-content)", sm: "repeat(5, max-content)" },
+                maxWidth: { xs: 420, sm: 560 },
                 justifyContent: "center",
-                justifyItems: "center",
-                columnGap: { xs: 1, sm: 1 },
-                rowGap: { xs: 1, sm: 0 },
+                alignItems: "center",
+                flexWrap: "nowrap",
+                pt: 0.4,
               }}
             >
               {heroChips.map((chip) => (
@@ -204,26 +204,25 @@ export default function HomeHub() {
                   key={chip.label}
                   label={chip.label}
                   sx={{
+                    flex: 1,
+                    minWidth: 0,
+                    width: "100%",
                     bgcolor: chip.bg,
                     color: chip.color,
                     fontWeight: 900,
                     borderRadius: 999,
-                    fontSize: { xs: "1rem", sm: "0.95rem" },
-                    height: { xs: 42, sm: 38 },
-                    px: { xs: 0.6, sm: 0.2 },
-                    minWidth: { xs: chip.label === "Coach" ? 132 : 104, sm: "unset" },
+                    fontSize: { xs: "0.78rem", sm: "0.95rem" },
+                    height: { xs: 36, sm: 38 },
+                    px: 0,
                     '& .MuiChip-label': {
-                      px: { xs: 1.1, sm: 1.25 },
-                      whiteSpace: "nowrap",
-                    },
-                    gridColumn: {
-                      xs: chip.label === "Scan" ? "1 / span 1" : chip.label === "Coach" ? "2 / span 1" : "auto",
-                      sm: "auto",
+                      px: { xs: 0.7, sm: 1.25 },
+                      overflow: 'visible',
+                      whiteSpace: 'nowrap',
                     },
                   }}
                 />
               ))}
-            </Box>
+            </Stack>
           </Stack>
 
           {user && !profileStatus.isComplete && (
