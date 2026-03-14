@@ -1,6 +1,6 @@
 // src/lib/poseSessionSharePng.js
 // Warm premium Pose Session share card generator.
-// Fixed to avoid duplicate wording, header collisions, and removes the fake SHARE button.
+// Uses locked Pose Session copy when provided and expands body text into the available card space.
 
 function cleanText(text = "") {
   return String(text || "")
@@ -213,11 +213,20 @@ function inferNextUp({ nextUp = [], levers = [], summary = "", mode = "Baseline 
 
 function drawSectionTitle(ctx, text, x, y, width) {
   ctx.fillStyle = "#f2c27b";
-  ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "900 24px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(text, x, y);
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = "rgba(255,190,120,0.26)";
   ctx.fillRect(x + tw + 18, y - 10, Math.max(40, width - tw - 18), 2);
+}
+
+function measureWrappedHeight(ctx, items, maxWidth, lineHeight, itemGap = 0, maxLinesPerItem = 4) {
+  let total = 0;
+  for (const item of items || []) {
+    const lines = wrapLines(ctx, item, maxWidth, maxLinesPerItem);
+    total += lines.length * lineHeight + itemGap;
+  }
+  return total;
 }
 
 export async function buildPoseSessionSharePng({
@@ -241,25 +250,24 @@ export async function buildPoseSessionSharePng({
   thumbs = [],
   poseImages = [],
   poseTitles = [],
+  gender = "male",
   copy = null,
 } = {}) {
   const locked = copy && typeof copy === "object" ? copy : null;
-  const resolvedMode = cleanText(locked?.mode) || inferMode({ mode, subhead, summary });
+  const resolvedMode = trimTerminalPunctuation(locked?.mode) || inferMode({ mode, subhead, summary });
   const resolvedHero = trimTerminalPunctuation(locked?.hero) || inferHero({ hero, headline, summary, wins });
   const resolvedSubread = trimTerminalPunctuation(locked?.subread) || inferSubread({ subread, subhead, summary, hero: resolvedHero });
-  const resolvedBullets = Array.isArray(locked?.bullets) && locked.bullets.length
-    ? uniqueLines(locked.bullets).slice(0, 3)
+  const resolvedBullets = uniqueLines(locked?.bullets || []).length
+    ? uniqueLines(locked?.bullets || []).slice(0, 3)
     : inferBullets({ bullets, wins, highlights, summary, mode: resolvedMode });
-  const resolvedBreakdown = Array.isArray(locked?.breakdown) && locked.breakdown.length
-    ? uniqueLines(locked.breakdown).slice(0, 4)
+  const resolvedBreakdown = uniqueLines(locked?.breakdown || []).length
+    ? uniqueLines(locked?.breakdown || []).slice(0, 4)
     : inferBreakdown({ breakdown, summary, hero: resolvedHero, subread: resolvedSubread });
-  const resolvedNextUp = Array.isArray(locked?.nextUp) && locked.nextUp.length
-    ? uniqueLines(locked.nextUp).slice(0, 2)
+  const resolvedNextUp = uniqueLines(locked?.nextUp || []).length
+    ? uniqueLines(locked?.nextUp || []).slice(0, 2)
     : inferNextUp({ nextUp, levers, summary, mode: resolvedMode });
-  const resolvedCoachNote = Array.isArray(locked?.coachNote) && locked.coachNote.length
-    ? uniqueLines(locked.coachNote).slice(0, 2)
-    : uniqueLines(coachNote).slice(0, 2);
-  const resolvedBulletsLabel = cleanText(locked?.bulletsLabel) || bulletsLabel || (/re-?check/i.test(resolvedMode) ? "WHAT IMPROVED" : "WHAT STANDS OUT");
+  const resolvedCoachNote = uniqueLines(locked?.coachNote || coachNote || []).slice(0, 2);
+  const resolvedBulletsLabel = trimTerminalPunctuation(locked?.bulletsLabel || bulletsLabel) || (/re-?check/i.test(resolvedMode) ? "WHAT IMPROVED" : "WHAT STANDS OUT");
   const safeHashtag = trimTerminalPunctuation(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
@@ -365,19 +373,20 @@ export async function buildPoseSessionSharePng({
   ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(resolvedMode.toUpperCase(), contentX, y);
 
-  y += 28;
-  const heroSize = fitFont(ctx, resolvedHero, contentW, 78, 50, "Georgia, Times New Roman, serif", "700 italic");
+  y += 42;
+  const heroSize = fitFont(ctx, resolvedHero, contentW, 60, 40, "Georgia, Times New Roman, serif", "700 italic");
   ctx.fillStyle = "#f2d3c4";
   ctx.font = `700 italic ${heroSize}px Georgia, Times New Roman, serif`;
   const heroLines = wrapLines(ctx, resolvedHero, contentW, 2);
-  heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * (heroSize + 4)));
-  y += heroLines.length * (heroSize + 4) + 12;
+  const heroLineHeight = heroSize + 1;
+  heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * heroLineHeight));
+  y += heroLines.length * heroLineHeight + 18;
 
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
-  const subLines = wrapLines(ctx, resolvedSubread, contentW, 4);
-  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 24));
-  y += subLines.length * 24 + 24;
+  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
+  const subLines = wrapLines(ctx, resolvedSubread, contentW, 3);
+  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 22));
+  y += subLines.length * 22 + 24;
 
   const imgs = [];
   for (let i = 0; i < 3; i++) {
@@ -391,7 +400,7 @@ export async function buildPoseSessionSharePng({
 
   const imgGap = 14;
   const imgW = Math.floor((contentW - imgGap * 2) / 3);
-  const imgH = 250;
+  const imgH = 232;
   for (let i = 0; i < 3; i++) {
     const x = contentX + i * (imgW + imgGap);
     ctx.save();
@@ -411,59 +420,61 @@ export async function buildPoseSessionSharePng({
   y += imgH + 34;
 
   drawSectionTitle(ctx, resolvedBulletsLabel, contentX, y, contentW);
-  y += 34;
+  y += 30;
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
+  const bulletLineHeight = 20;
   for (const item of resolvedBullets) {
     ctx.beginPath();
     ctx.fillStyle = "#f2c27b";
-    ctx.arc(contentX + 8, y - 6, 5, 0, Math.PI * 2);
+    ctx.arc(contentX + 8, y - 6, 4.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "rgba(246,234,224,0.96)";
-    const lines = wrapLines(ctx, item, contentW - 26, 2);
-    lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * 22));
-    y += lines.length * 22 + 10;
-  }
-
-  y += 10;
-  drawSectionTitle(ctx, "BREAKDOWN", contentX, y, contentW);
-  y += 34;
-  ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
-  for (const item of resolvedBreakdown.slice(0, 4)) {
-    const lines = wrapLines(ctx, item, contentW, 4);
-    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 21));
-    y += lines.length * 21 + 11;
+    const lines = wrapLines(ctx, item, contentW - 26, 3);
+    lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * bulletLineHeight));
+    y += lines.length * bulletLineHeight + 8;
   }
 
   y += 4;
-  drawSectionTitle(ctx, "NEXT UP", contentX, y, contentW);
-  y += 32;
+  drawSectionTitle(ctx, "BREAKDOWN", contentX, y, contentW);
+  y += 30;
   ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
+  const bodyLineHeight = 20;
+  for (const item of resolvedBreakdown.slice(0, 4)) {
+    const lines = wrapLines(ctx, item, contentW, 5);
+    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
+    y += lines.length * bodyLineHeight + 10;
+  }
+
+  y += 2;
+  drawSectionTitle(ctx, "NEXT UP", contentX, y, contentW);
+  y += 30;
+  ctx.fillStyle = "rgba(246,234,224,0.94)";
+  ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
   for (const item of resolvedNextUp.slice(0, 2)) {
     const lines = wrapLines(ctx, item, contentW, 4);
-    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 21));
-    y += lines.length * 21 + 11;
+    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
+    y += lines.length * bodyLineHeight + 10;
   }
 
   if (resolvedCoachNote.length) {
     y += 2;
     drawSectionTitle(ctx, "COACH NOTE", contentX, y, contentW);
-    y += 32;
+    y += 30;
     ctx.fillStyle = "rgba(246,234,224,0.94)";
-    ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto";
     for (const item of resolvedCoachNote.slice(0, 2)) {
       const lines = wrapLines(ctx, item, contentW, 4);
-      lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 21));
-      y += lines.length * 21 + 11;
+      lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
+      y += lines.length * bodyLineHeight + 10;
     }
   }
 
   // Footer branding only — no fake share button inside the exported share card.
-  const footerY = cardY + cardH - 72;
+  const footerY = cardY + cardH - 58;
   ctx.fillStyle = "#f0e3d7";
-  ctx.font = "700 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "700 26px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(String(title || "SlimCal").slice(0, 16), contentX, footerY);
   const footerTitleW = ctx.measureText(String(title || "SlimCal").slice(0, 16)).width;
   ctx.font = "800 18px system-ui, -apple-system, Segoe UI, Roboto";
@@ -480,7 +491,7 @@ export async function buildPoseSessionSharePng({
   ctx.restore();
 
   ctx.fillStyle = "rgba(245,232,220,0.9)";
-  ctx.font = "600 15px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "600 16px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(safeHashtag, contentX, footerY + 26);
 
   ctx.fillStyle = "rgba(244,170,190,0.55)";
