@@ -759,6 +759,9 @@ const readTodaySessionsFromLocal = useCallback(() => {
       setCumulativeExercises(next);
       instantPersistWorkoutDraftToBanner(next);
       debouncedUpsertWorkoutToCloud(next);
+      window.setTimeout(() => {
+        scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 140, 300, 520, 820] });
+      }, 0);
 setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
       setCurrentCalories(0);
       return;
@@ -779,6 +782,9 @@ setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
     setCumulativeExercises(next);
     instantPersistWorkoutDraftToBanner(next);
       debouncedUpsertWorkoutToCloud(next);
+      window.setTimeout(() => {
+        scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 140, 300, 520, 820] });
+      }, 0);
 
 setNewExercise({
       exerciseType: '',
