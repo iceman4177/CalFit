@@ -24,9 +24,12 @@ export const FREE_DAILY_LIMITS = {
   pose_session: 3,
 };
 
-function getTodayISO() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+function getTodayISO(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function safeParseJSON(val, fallback) {

@@ -32,8 +32,22 @@ async function readJson(req) {
   }
 }
 
+function normalizeDayKey(raw) {
+  const s = String(raw || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 function dayKeyUTC(date = new Date()) {
   return date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+}
+
+function resolveQuotaDayKey(req, body = null, date = new Date()) {
+  const hinted =
+    normalizeDayKey(body?.localDay) ||
+    normalizeDayKey(body?.local_day) ||
+    normalizeDayKey(req?.headers?.['x-local-day']);
+  if (hinted) return hinted;
+  return dayKeyUTC(date);
 }
 
 function headerClientId(req) {
@@ -631,9 +645,9 @@ function quotaIdentity({ clientId, userId, feature }) {
   return userId ? `u:${userId}:${qf}` : `c:${clientId}:${qf}`;
 }
 
-function memRead({ clientId, userId, feature }) {
+function memRead({ clientId, userId, feature, dayKey = dayKeyUTC() }) {
   const key = quotaIdentity({ clientId, userId, feature });
-  const today = dayKeyUTC();
+  const today = dayKey;
   const limit = getFreeLimitForFeature(quotaFeatureKey(feature));
   const rec = freeMem.get(key);
   if (!rec || rec.day !== today) return { used: 0, remaining: limit, limit, day: today };
@@ -641,23 +655,23 @@ function memRead({ clientId, userId, feature }) {
   return { used, remaining: Math.max(0, limit - used), limit, day: today };
 }
 
-function memConsume({ clientId, userId, feature }) {
+function memConsume({ clientId, userId, feature, dayKey = dayKeyUTC() }) {
   const key = quotaIdentity({ clientId, userId, feature });
-  const snap = memRead({ clientId, userId, feature });
+  const snap = memRead({ clientId, userId, feature, dayKey });
   if (snap.used >= snap.limit) return { allowed: false, remaining: 0, used: snap.used, limit: snap.limit };
   const nextUsed = snap.used + 1;
   freeMem.set(key, { used: nextUsed, day: snap.day });
   return { allowed: true, remaining: Math.max(0, snap.limit - nextUsed), used: nextUsed, limit: snap.limit };
 }
 
-async function dbQuotaStatus(clientId, feature, userId) {
+async function dbQuotaStatus(clientId, feature, userId, dayKey = dayKeyUTC()) {
   const qf = quotaFeatureKey(feature);
   if (!supabaseAdmin) {
-    const snap = memRead({ clientId, userId, feature: qf });
+    const snap = memRead({ clientId, userId, feature: qf, dayKey });
     return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
   }
   try {
-    const today = dayKeyUTC();
+    const today = dayKey;
     const limit = getFreeLimitForFeature(qf);
 
     if (userId) {
@@ -669,7 +683,7 @@ async function dbQuotaStatus(clientId, feature, userId) {
         .eq('day', today)
         .maybeSingle();
       if (error && error.code !== 'PGRST116') {
-        const snap = memRead({ clientId, userId, feature: qf });
+        const snap = memRead({ clientId, userId, feature: qf, dayKey });
         return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
       }
       const used = Math.max(0, Number(data?.count || 0));
@@ -684,24 +698,24 @@ async function dbQuotaStatus(clientId, feature, userId) {
       .eq('day_key', today)
       .maybeSingle();
     if (error && error.code !== 'PGRST116') {
-      const snap = memRead({ clientId, userId, feature: qf });
+      const snap = memRead({ clientId, userId, feature: qf, dayKey });
       return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
     }
     const used = Math.max(0, Number(data?.uses || 0));
     return { remaining: Math.max(0, limit - used), used, limit };
   } catch {
-    const snap = memRead({ clientId, userId, feature: qf });
+    const snap = memRead({ clientId, userId, feature: qf, dayKey });
     return { remaining: snap.remaining, used: snap.used, limit: snap.limit };
   }
 }
 
-async function dbConsume(clientId, feature, userId) {
+async function dbConsume(clientId, feature, userId, dayKey = dayKeyUTC()) {
   const qf = quotaFeatureKey(feature);
-  if (!supabaseAdmin) return memConsume({ clientId, userId, feature: qf });
+  if (!supabaseAdmin) return memConsume({ clientId, userId, feature: qf, dayKey });
   try {
-    const today = dayKeyUTC();
+    const today = dayKey;
     const limit = getFreeLimitForFeature(qf);
-    const status = await dbQuotaStatus(clientId, qf, userId);
+    const status = await dbQuotaStatus(clientId, qf, userId, dayKey);
     if (status.used >= limit) return { allowed: false, remaining: 0, used: status.used, limit };
 
     const nextUsed = status.used + 1;
@@ -715,7 +729,7 @@ async function dbConsume(clientId, feature, userId) {
         .eq('day', today)
         .maybeSingle();
 
-      if (selectError && selectError.code !== 'PGRST116') return memConsume({ clientId, userId, feature: qf });
+      if (selectError && selectError.code !== 'PGRST116') return memConsume({ clientId, userId, feature: qf, dayKey });
 
       let error = null;
       if (existing) {
@@ -730,7 +744,7 @@ async function dbConsume(clientId, feature, userId) {
           .from('ai_usage')
           .insert([{ user_id: userId, feature: qf, day: today, count: nextUsed }]));
       }
-      if (error) return memConsume({ clientId, userId, feature: qf });
+      if (error) return memConsume({ clientId, userId, feature: qf, dayKey });
     } else {
       const { data: existing, error: selectError } = await supabaseAdmin
         .from('ai_free_passes')
@@ -740,7 +754,7 @@ async function dbConsume(clientId, feature, userId) {
         .eq('day_key', today)
         .maybeSingle();
 
-      if (selectError && selectError.code !== 'PGRST116') return memConsume({ clientId, userId, feature: qf });
+      if (selectError && selectError.code !== 'PGRST116') return memConsume({ clientId, userId, feature: qf, dayKey });
 
       let error = null;
       if (existing) {
@@ -755,23 +769,25 @@ async function dbConsume(clientId, feature, userId) {
           .from('ai_free_passes')
           .insert([{ client_id: clientId, user_id: null, feature: qf, day_key: today, uses: nextUsed }]));
       }
-      if (error) return memConsume({ clientId, userId, feature: qf });
+      if (error) return memConsume({ clientId, userId, feature: qf, dayKey });
     }
 
     return { allowed: true, remaining: Math.max(0, limit - nextUsed), used: nextUsed, limit };
   } catch {
-    return memConsume({ clientId, userId, feature: qf });
+    return memConsume({ clientId, userId, feature: qf, dayKey });
   }
 }
 
-async function freeFeatureStatus({ req, feature, userId }) {
+async function freeFeatureStatus({ req, body, feature, userId }) {
   const clientId = idKey(req, userId);
-  return dbQuotaStatus(clientId, feature, userId);
+  const dayKey = resolveQuotaDayKey(req, body);
+  return dbQuotaStatus(clientId, feature, userId, dayKey);
 }
 
-async function allowFreeFeature({ req, feature, userId }) {
+async function allowFreeFeature({ req, body, feature, userId }) {
   const clientId = idKey(req, userId);
-  return dbConsume(clientId, feature, userId);
+  const dayKey = resolveQuotaDayKey(req, body);
+  return dbConsume(clientId, feature, userId, dayKey);
 }
 
 // -------------------- VERDICT FALLBACK --------------------
@@ -1498,7 +1514,7 @@ const freeBypass =
       res.status(200).json({ remaining: null, used: 0, limit: null, pro: false, bypass: true });
       return;
     }
-    const status = await freeFeatureStatus({ req, feature, userId: resolvedUserId });
+    const status = await freeFeatureStatus({ req, body, feature, userId: resolvedUserId });
     res.status(200).json({ ...status, pro: false });
     return;
   }
@@ -1506,7 +1522,7 @@ const freeBypass =
   // 2) If not Pro/Trial → per-feature free-pass
   let freePass = null;
   if (!pro && !freeBypass) {
-    freePass = await allowFreeFeature({ req, feature, userId: resolvedUserId });
+    freePass = await allowFreeFeature({ req, body, feature, userId: resolvedUserId });
     if (!freePass.allowed) {
       res.status(402).json({ error: "Upgrade required", reason: "limit_reached", remaining: 0, limit: freePass.limit ?? getFreeLimitForFeature(feature) });
       return;

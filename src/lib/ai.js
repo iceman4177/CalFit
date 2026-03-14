@@ -56,8 +56,28 @@ export function getSupabaseUserFromStorage() {
   };
 }
 
+export function getLocalDayISO(date = new Date()) {
+  try {
+    const d = date instanceof Date ? date : new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  } catch {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+}
+
 export function getAuthHeaders() {
-  const headers = { 'Content-Type': 'application/json', 'X-Client-Id': getClientId() };
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Client-Id': getClientId(),
+    'X-Local-Day': getLocalDayISO(),
+  };
   const tok = getSupabaseJWTFromStorage();
   const { id, email } = getSupabaseUserFromStorage();
   if (tok) headers['Authorization'] = `Bearer ${tok}`;
@@ -70,10 +90,16 @@ export function getAuthHeaders() {
 // Central POST to AI gateway
 //
 export async function postAI(feature, body = {}) {
+  const localDay = String(body?.localDay || body?.local_day || getLocalDayISO()).slice(0, 10);
   const resp = await fetch('/api/ai/generate', {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ ...body, feature: normalizeQuotaFeature(body?.feature || feature) }),
+    body: JSON.stringify({
+      ...body,
+      localDay,
+      local_day: localDay,
+      feature: normalizeQuotaFeature(body?.feature || feature),
+    }),
   });
 
   if (resp.status === 402) {
