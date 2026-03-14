@@ -5,36 +5,44 @@ function clean(text = '') {
 function wrapLines(ctx, text, maxWidth, maxLines = 6) {
   const words = clean(text).split(' ').filter(Boolean);
   if (!words.length) return [];
+
   const lines = [];
   let current = '';
 
-  for (let i = 0; i < words.length; i += 1) {
-    const next = current ? `${current} ${words[i]}` : words[i];
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
     if (ctx.measureText(next).width <= maxWidth) {
       current = next;
       continue;
     }
 
     if (!current) {
-      current = words[i];
+      current = word;
       continue;
     }
 
     lines.push(current);
-    current = words[i];
+    current = word;
+
     if (lines.length >= maxLines - 1) break;
   }
 
-  const remainingStart = Math.min(words.length, lines.join(' ').split(' ').filter(Boolean).length);
-  const remaining = words.slice(remainingStart).join(' ');
-  const tail = current || remaining;
+  const consumed = lines.join(' ');
+  const consumedCount = consumed ? consumed.split(' ').filter(Boolean).length : 0;
+  const remaining = words.slice(consumedCount);
+  let tail = current || '';
+  if (remaining.length > 1) {
+    tail = [tail, ...remaining.slice(1)].filter(Boolean).join(' ');
+  }
+
   if (tail && lines.length < maxLines) {
     let clipped = tail;
+    let wasClipped = false;
     while (clipped.length > 4 && ctx.measureText(clipped).width > maxWidth) {
       clipped = clipped.slice(0, -1).trim();
+      wasClipped = true;
     }
-    const allUsed = remainingStart >= words.length;
-    lines.push(!allUsed && clipped !== tail ? `${clipped}…` : clipped);
+    lines.push(wasClipped ? `${clipped}…` : clipped);
   }
 
   return lines.slice(0, maxLines).filter(Boolean);
@@ -59,7 +67,6 @@ function formatExerciseLine(ex = {}) {
   const name = clean(ex?.exerciseName || ex?.name || 'Exercise');
   const sets = Number(ex?.sets) || 0;
   const reps = ex?.reps != null && String(ex.reps).trim() !== '' ? String(ex.reps).trim() : '';
-  const weight = Number(ex?.weight) || 0;
   const calories = Number(ex?.calories) || 0;
   const isSauna = (ex?.exerciseType === 'Sauna') || /sauna/i.test(name);
 
@@ -70,8 +77,16 @@ function formatExerciseLine(ex = {}) {
   else if (sets) detail = `${sets} sets`;
   else if (reps) detail = `${reps} reps`;
 
-  const weightText = weight > 0 ? ` · ${Math.round(weight)} lb` : '';
-  return `${name}${detail ? ` · ${detail}` : ''}${weightText}`;
+  return `${name}${detail ? ` · ${detail}` : ''}${calories > 0 ? ` (${Math.round(calories)} cal)` : ''}`;
+}
+
+function buildExerciseLines(exercises = []) {
+  const safe = Array.isArray(exercises) ? exercises : [];
+  const visible = safe.slice(0, 4).map(formatExerciseLine);
+  if (safe.length > 4) {
+    visible.push(`+${safe.length - 4} more ${safe.length - 4 === 1 ? 'move' : 'moves'}`);
+  }
+  return visible;
 }
 
 export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories = 0, shareText = '', startedAt = '' } = {}) {
@@ -100,6 +115,7 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   ctx.restore();
 
   const cardX = 82;
+  const cardW = width - (cardX * 2);
   let y = 118;
 
   ctx.fillStyle = '#2563eb';
@@ -143,36 +159,45 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   ctx.font = '900 34px system-ui, -apple-system, Segoe UI, Roboto, Arial';
   ctx.fillText('Session breakdown', cardX, y);
 
-  y += 30;
-  const lines = (Array.isArray(exercises) && exercises.length
-    ? exercises.map(formatExerciseLine)
-    : String(shareText || '').split('\n').map((line) => line.replace(/^[-•]\s*/, '').trim()).filter(Boolean)
-  ).slice(0, 7);
+  y += 26;
+  const exerciseLines = buildExerciseLines(exercises);
+  const fallbackLines = String(shareText || '')
+    .split('\n')
+    .map((line) => line.replace(/^[-•]\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  const lines = (exerciseLines.length ? exerciseLines : fallbackLines).slice(0, 5);
 
-  lines.forEach((line) => {
-    y += 34;
-    roundRect(ctx, cardX, y, width - (cardX * 2), 98, 28);
+  ctx.font = '700 26px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  for (const line of lines) {
+    const wrapped = wrapLines(ctx, line, cardW - 82, 2);
+    const lineCount = Math.max(1, wrapped.length);
+    const rowH = lineCount === 1 ? 72 : 100;
+    y += 16;
+    roundRect(ctx, cardX, y, cardW, rowH, 24);
     ctx.fillStyle = '#f8fbff';
-    ctx.strokeStyle = 'rgba(157, 183, 255, 0.25)';
+    ctx.strokeStyle = 'rgba(157, 183, 255, 0.28)';
     ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
 
     ctx.fillStyle = '#2563eb';
     ctx.beginPath();
-    ctx.arc(cardX + 28, y + 49, 7, 0, Math.PI * 2);
+    ctx.arc(cardX + 28, y + (rowH / 2), 7, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#0f172a';
-    ctx.font = '700 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-    const wrapped = wrapLines(ctx, line, width - (cardX * 2) - 82, 2);
+    ctx.font = '700 26px system-ui, -apple-system, Segoe UI, Roboto, Arial';
     wrapped.forEach((wrappedLine, idx) => {
       ctx.fillText(wrappedLine, cardX + 52, y + 41 + (idx * 30));
     });
-  });
 
-  y += 148;
-  roundRect(ctx, cardX, y, width - (cardX * 2), 196, 32);
+    y += rowH;
+  }
+
+  y += 44;
+  const captionBoxH = 170;
+  roundRect(ctx, cardX, y, cardW, captionBoxH, 32);
   ctx.fillStyle = 'rgba(37, 99, 235, 0.06)';
   ctx.fill();
 
@@ -185,8 +210,8 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   const captionPreview = wrapLines(
     ctx,
     clean(shareText) || 'Just crushed another workout with SlimCal AI. #SlimcalAI',
-    width - (cardX * 2) - 56,
-    4,
+    cardW - 56,
+    3,
   );
   captionPreview.forEach((line, idx) => {
     ctx.fillText(line, cardX + 28, y + 88 + (idx * 34));
