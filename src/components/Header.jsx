@@ -45,7 +45,6 @@ export default function Header({ logoSrc = '/slimcal-logo.svg', showBeta = false
   const [accountAnchor, setAccountAnchor] = useState(null);
   const accountOpen = Boolean(accountAnchor);
 const [authUser, setAuthUser] = useState(null);
-  const [localPro, setLocalPro] = useState(isProLocal());
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -62,18 +61,9 @@ const [authUser, setAuthUser] = useState(null);
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  useEffect(() => {
-    const syncLocalPro = () => setLocalPro(isProLocal());
-    syncLocalPro();
-    window.addEventListener('storage', syncLocalPro);
-    window.addEventListener('slimcal:pro-changed', syncLocalPro);
-    return () => {
-      window.removeEventListener('storage', syncLocalPro);
-      window.removeEventListener('slimcal:pro-changed', syncLocalPro);
-    };
-  }, []);
-
-  const pro = isProActive || localPro;
+  // For signed-in users, trust server-backed entitlements only.
+  // Local storage fallback is allowed only before auth resolves or for signed-out states.
+  const pro = authUser ? !!isProActive : (!!isProActive || isProLocal());
 
   // --- Trial eligibility (server truth) ---
   const [trialEligible, setTrialEligible] = useState(true);
