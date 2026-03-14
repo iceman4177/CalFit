@@ -131,7 +131,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
       <DialogContent sx={{ pt: 0.5 }}>
         <Stack spacing={2.25}>
           <Typography sx={{ color: "#667085", fontSize: { xs: 16, sm: 17 }, lineHeight: 1.55 }}>
-            Share a clean workout post fast with a SlimCal card plus a ready caption.
+            Share a polished workout card with a clean caption ready to paste.
           </Typography>
 
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -201,7 +201,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
           </Stack>
 
           <Typography sx={{ color: "#64748b", fontSize: 13.5, lineHeight: 1.45, px: 0.5 }}>
-            Share Post opens the phone’s native share sheet with a workout card. Copy Caption stays as the fallback for apps that don’t accept text prefills.
+            Share Post opens your phone’s share sheet with the workout card image. Copy Caption is the clean fallback when an app ignores prefills.
           </Typography>
         </Stack>
       </DialogContent>

@@ -2,52 +2,6 @@ function clean(text = '') {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
-function wrapLines(ctx, text, maxWidth, maxLines = 6) {
-  const words = clean(text).split(' ').filter(Boolean);
-  if (!words.length) return [];
-
-  const lines = [];
-  let current = '';
-
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (ctx.measureText(next).width <= maxWidth) {
-      current = next;
-      continue;
-    }
-
-    if (!current) {
-      current = word;
-      continue;
-    }
-
-    lines.push(current);
-    current = word;
-
-    if (lines.length >= maxLines - 1) break;
-  }
-
-  const consumed = lines.join(' ');
-  const consumedCount = consumed ? consumed.split(' ').filter(Boolean).length : 0;
-  const remaining = words.slice(consumedCount);
-  let tail = current || '';
-  if (remaining.length > 1) {
-    tail = [tail, ...remaining.slice(1)].filter(Boolean).join(' ');
-  }
-
-  if (tail && lines.length < maxLines) {
-    let clipped = tail;
-    let wasClipped = false;
-    while (clipped.length > 4 && ctx.measureText(clipped).width > maxWidth) {
-      clipped = clipped.slice(0, -1).trim();
-      wasClipped = true;
-    }
-    lines.push(wasClipped ? `${clipped}…` : clipped);
-  }
-
-  return lines.slice(0, maxLines).filter(Boolean);
-}
-
 function roundRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -61,6 +15,64 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + rr);
   ctx.quadraticCurveTo(x, y, x + rr, y);
   ctx.closePath();
+}
+
+function wrapLines(ctx, text, maxWidth, maxLines = 3) {
+  const words = clean(text).split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+
+  const lines = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    if (current) {
+      lines.push(current);
+      current = '';
+    }
+  };
+
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i];
+    const test = current ? `${current} ${word}` : word;
+
+    if (ctx.measureText(test).width <= maxWidth) {
+      current = test;
+      continue;
+    }
+
+    if (!current) {
+      current = word;
+      pushCurrent();
+      continue;
+    }
+
+    if (lines.length === maxLines - 1) {
+      const tailWords = [current, ...words.slice(i)].join(' ').trim();
+      let tail = tailWords;
+      while (tail.length > 3 && ctx.measureText(`${tail}…`).width > maxWidth) {
+        tail = tail.slice(0, -1).trim();
+      }
+      lines.push(`${tail}${tail !== tailWords ? '…' : ''}`);
+      return lines;
+    }
+
+    pushCurrent();
+    current = word;
+  }
+
+  pushCurrent();
+  return lines.slice(0, maxLines);
+}
+
+function ellipsize(ctx, text, maxWidth) {
+  const src = clean(text);
+  if (!src) return '';
+  if (ctx.measureText(src).width <= maxWidth) return src;
+  let out = src;
+  while (out.length > 3 && ctx.measureText(`${out}…`).width > maxWidth) {
+    out = out.slice(0, -1).trim();
+  }
+  return `${out}…`;
 }
 
 function formatExerciseLine(ex = {}) {
@@ -83,10 +95,23 @@ function formatExerciseLine(ex = {}) {
 function buildExerciseLines(exercises = []) {
   const safe = Array.isArray(exercises) ? exercises : [];
   const visible = safe.slice(0, 4).map(formatExerciseLine);
-  if (safe.length > 4) {
-    visible.push(`+${safe.length - 4} more ${safe.length - 4 === 1 ? 'move' : 'moves'}`);
-  }
+  if (safe.length > 4) visible.push(`+${safe.length - 4} more ${safe.length - 4 === 1 ? 'move' : 'moves'}`);
   return visible;
+}
+
+function buildCardSummary({ totalCalories = 0, exerciseCount = 0, startedAt = '' }) {
+  const cal = Math.round(Number(totalCalories) || 0);
+  const count = Math.max(0, Number(exerciseCount) || 0);
+  if (cal > 0 && count > 0) {
+    return `Crushed ${count} ${count === 1 ? 'exercise' : 'exercises'} and burned ${cal} cal.`;
+  }
+  if (count > 0) {
+    return `Logged ${count} ${count === 1 ? 'exercise' : 'exercises'} with SlimCal AI.`;
+  }
+  if (startedAt) {
+    return `Session logged ${startedAt}.`;
+  }
+  return 'Workout logged with SlimCal AI.';
 }
 
 export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories = 0, shareText = '', startedAt = '' } = {}) {
@@ -99,24 +124,24 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   if (!ctx) return null;
 
   const gradient = ctx.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, '#eff6ff');
-  gradient.addColorStop(0.52, '#f8fafc');
+  gradient.addColorStop(0, '#edf4ff');
+  gradient.addColorStop(0.45, '#f8fbff');
   gradient.addColorStop(1, '#eef2ff');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
   ctx.save();
-  roundRect(ctx, 50, 50, width - 100, height - 100, 44);
+  roundRect(ctx, 42, 42, width - 84, height - 84, 42);
   ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = 'rgba(37, 99, 235, 0.14)';
-  ctx.shadowBlur = 50;
-  ctx.shadowOffsetY = 18;
+  ctx.shadowColor = 'rgba(37, 99, 235, 0.12)';
+  ctx.shadowBlur = 42;
+  ctx.shadowOffsetY = 16;
   ctx.fill();
   ctx.restore();
 
   const cardX = 82;
   const cardW = width - (cardX * 2);
-  let y = 118;
+  let y = 122;
 
   ctx.fillStyle = '#2563eb';
   ctx.font = '900 42px system-ui, -apple-system, Segoe UI, Roboto, Arial';
@@ -127,23 +152,22 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
   ctx.font = '900 70px system-ui, -apple-system, Segoe UI, Roboto, Arial';
   ctx.fillText('Workout Complete', cardX, y);
 
-  y += 48;
+  y += 46;
   ctx.fillStyle = '#64748b';
   ctx.font = '600 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-  const subtitle = startedAt ? `Logged ${startedAt}` : 'Logged with SlimCal';
-  ctx.fillText(subtitle, cardX, y);
+  ctx.fillText(startedAt ? `Logged ${startedAt}` : 'Logged with SlimCal', cardX, y);
 
-  y += 64;
-  roundRect(ctx, cardX, y, 265, 86, 43);
+  y += 60;
+  roundRect(ctx, cardX, y, 258, 82, 41);
   ctx.fillStyle = '#dbeafe';
   ctx.fill();
   ctx.fillStyle = '#0f172a';
   ctx.font = '900 40px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-  ctx.fillText(`${Math.round(Number(totalCalories) || 0)} cal`, cardX + 30, y + 56);
+  ctx.fillText(`${Math.round(Number(totalCalories) || 0)} cal`, cardX + 28, y + 54);
 
-  if (Array.isArray(exercises) && exercises.length) {
-    const countLabel = `${exercises.length} ${exercises.length === 1 ? 'exercise' : 'exercises'}`;
-    roundRect(ctx, cardX + 285, y, 290, 86, 43);
+  const exerciseCount = Array.isArray(exercises) ? exercises.length : 0;
+  if (exerciseCount > 0) {
+    roundRect(ctx, cardX + 278, y, 300, 82, 41);
     ctx.fillStyle = '#f8fafc';
     ctx.strokeStyle = 'rgba(15, 23, 42, 0.12)';
     ctx.lineWidth = 2;
@@ -151,29 +175,30 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
     ctx.stroke();
     ctx.fillStyle = '#0f172a';
     ctx.font = '800 34px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-    ctx.fillText(countLabel, cardX + 314, y + 54);
+    ctx.fillText(`${exerciseCount} ${exerciseCount === 1 ? 'exercise' : 'exercises'}`, cardX + 308, y + 52);
   }
 
-  y += 136;
+  y += 138;
   ctx.fillStyle = '#0f172a';
   ctx.font = '900 34px system-ui, -apple-system, Segoe UI, Roboto, Arial';
   ctx.fillText('Session breakdown', cardX, y);
 
   y += 26;
-  const exerciseLines = buildExerciseLines(exercises);
-  const fallbackLines = String(shareText || '')
+  const list = buildExerciseLines(exercises);
+  const fallback = String(shareText || '')
     .split('\n')
     .map((line) => line.replace(/^[-•]\s*/, '').trim())
     .filter(Boolean)
     .slice(0, 4);
-  const lines = (exerciseLines.length ? exerciseLines : fallbackLines).slice(0, 5);
+  const lines = (list.length ? list : fallback).slice(0, 5);
 
   ctx.font = '700 26px system-ui, -apple-system, Segoe UI, Roboto, Arial';
   for (const line of lines) {
-    const wrapped = wrapLines(ctx, line, cardW - 82, 2);
-    const lineCount = Math.max(1, wrapped.length);
-    const rowH = lineCount === 1 ? 72 : 100;
+    const wrapped = wrapLines(ctx, line, cardW - 84, 2);
+    const isMulti = wrapped.length > 1;
+    const rowH = isMulti ? 96 : 72;
     y += 16;
+
     roundRect(ctx, cardX, y, cardW, rowH, 24);
     ctx.fillStyle = '#f8fbff';
     ctx.strokeStyle = 'rgba(157, 183, 255, 0.28)';
@@ -188,32 +213,34 @@ export async function makeWorkoutShareCardBlob({ exercises = [], totalCalories =
 
     ctx.fillStyle = '#0f172a';
     ctx.font = '700 26px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-    wrapped.forEach((wrappedLine, idx) => {
-      ctx.fillText(wrappedLine, cardX + 52, y + 41 + (idx * 30));
-    });
+    if (isMulti) {
+      const top = y + 36;
+      wrapped.forEach((row, idx) => {
+        const text = idx === wrapped.length - 1 ? ellipsize(ctx, row, cardW - 84) : row;
+        ctx.fillText(text, cardX + 52, top + (idx * 30));
+      });
+    } else {
+      ctx.fillText(ellipsize(ctx, wrapped[0] || line, cardW - 84), cardX + 52, y + 45);
+    }
 
     y += rowH;
   }
 
-  y += 44;
-  const captionBoxH = 170;
-  roundRect(ctx, cardX, y, cardW, captionBoxH, 32);
+  y += 46;
+  const noteH = 142;
+  roundRect(ctx, cardX, y, cardW, noteH, 30);
   ctx.fillStyle = 'rgba(37, 99, 235, 0.06)';
   ctx.fill();
 
   ctx.fillStyle = '#2563eb';
   ctx.font = '900 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-  ctx.fillText('Post caption', cardX + 28, y + 42);
+  ctx.fillText('Share note', cardX + 28, y + 42);
 
   ctx.fillStyle = '#0f172a';
-  ctx.font = '700 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-  const captionPreview = wrapLines(
-    ctx,
-    clean(shareText) || 'Just crushed another workout with SlimCal AI. #SlimcalAI',
-    cardW - 56,
-    3,
-  );
-  captionPreview.forEach((line, idx) => {
+  ctx.font = '700 30px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  const summary = buildCardSummary({ totalCalories, exerciseCount, startedAt });
+  const summaryLines = wrapLines(ctx, summary, cardW - 56, 2);
+  summaryLines.forEach((line, idx) => {
     ctx.fillText(line, cardX + 28, y + 88 + (idx * 34));
   });
 
