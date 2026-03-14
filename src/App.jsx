@@ -106,32 +106,13 @@ function PageTracker() {
   return null;
 }
 
-
-function scrollPageToTop() {
-  const targets = [
-    window,
-    document.scrollingElement,
-    document.documentElement,
-    document.body,
-    document.getElementById('root'),
-  ].filter(Boolean);
-
-  targets.forEach((target) => {
-    try {
-      if (typeof target.scrollTo === 'function') {
-        target.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-      }
-    } catch (e) {
-      try {
-        target.scrollTop = 0;
-        target.scrollLeft = 0;
-      } catch (_) {}
-    }
-
-    try { target.scrollTop = 0; } catch (e) {}
-    try { target.scrollLeft = 0; } catch (e) {}
-  });
+function isScrollable(node) {
+  if (!node || node === document.body || node === document.documentElement) return false;
+  const style = window.getComputedStyle(node);
+  const overflowY = style.overflowY;
+  return (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') && node.scrollHeight > node.clientHeight;
 }
+
 
 function getOrCreateClientId() {
   let cid = localStorage.getItem('clientId');
@@ -783,6 +764,64 @@ export default function App() {
 
 
 
+  const topSnapRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    try {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+    } catch (e) {}
+
+    const snapToTop = () => {
+      try { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); } catch (e) { window.scrollTo(0, 0); }
+      try { document.documentElement.scrollTop = 0; } catch (e) {}
+      try { document.body.scrollTop = 0; } catch (e) {}
+
+      try {
+        if (topSnapRef.current) {
+          topSnapRef.current.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+        }
+      } catch (e) {}
+
+      try {
+        const routeRoot = document.getElementById('slimcal-route-top');
+        let parent = routeRoot?.parentElement || null;
+        while (parent) {
+          if (isScrollable(parent)) {
+            parent.scrollTop = 0;
+          }
+          parent = parent.parentElement;
+        }
+      } catch (e) {}
+
+      try {
+        document
+          .querySelectorAll('[data-slimcal-scroll-root], main, [role=main], .MuiContainer-root')
+          .forEach((el) => {
+            if (el && typeof el.scrollTop === 'number') el.scrollTop = 0;
+          });
+      } catch (e) {}
+    };
+
+    snapToTop();
+    const raf1 = requestAnimationFrame(snapToTop);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(snapToTop));
+    const t1 = window.setTimeout(snapToTop, 80);
+    const t2 = window.setTimeout(snapToTop, 220);
+    const t3 = window.setTimeout(snapToTop, 420);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [location.pathname, location.search]);
+
   const [localPro, setLocalPro] = useState(localStorage.getItem('isPro') === 'true');
   useEffect(() => {
     const onStorage = (e) => {
@@ -827,7 +866,8 @@ export default function App() {
     <>
       <Header logoSrc="/slimcal-logo.svg" showBeta={false} />
 
-      <Container maxWidth="md" sx={{ pt: { xs: 2, md: 4 }, pb: { xs: 10, md: 4 } }}>
+      <Container maxWidth="md" data-slimcal-scroll-root sx={{ pt: { xs: 2, md: 4 }, pb: { xs: 10, md: 4 } }}>
+        <Box id="slimcal-route-top" ref={topSnapRef} sx={{ position: 'relative', top: 0, height: 0, overflow: 'hidden' }} />
         <PageTracker />
         {message && <PageTip />}
 
