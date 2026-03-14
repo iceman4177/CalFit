@@ -30,6 +30,8 @@ import {
   getMealItemsForMealIds,
 } from "./lib/db";
 import { buildMicroQuestSummary } from "./lib/dailyChecklist.js";
+import { readProfileBundle } from "./lib/profileStorage.js";
+import { ensureScopedFromLegacy, readScopedJSON, KEYS } from "./lib/scopedStorage.js";
 
 // ---- Coach-first: XP (localStorage, no backend) -------------------------------
 const XP_KEY = "slimcal:xp:v1";
@@ -235,20 +237,30 @@ function sumMacros(items = []) {
   return totals;
 }
 
-function rowMacroTotals(row = {}) {
+function mealRowMacros(row = null) {
   return {
-    protein_g: Math.round(safeNum(row?.protein_g ?? row?.protein ?? 0, 0)),
-    carbs_g: Math.round(safeNum(row?.carbs_g ?? row?.carbs ?? 0, 0)),
-    fat_g: Math.round(safeNum(row?.fat_g ?? row?.fat ?? 0, 0)),
+    protein_g: round(row?.protein_g ?? row?.protein ?? 0),
+    carbs_g: round(row?.carbs_g ?? row?.carbs ?? 0),
+    fat_g: round(row?.fat_g ?? row?.fat ?? 0),
   };
 }
 
-function hasMeaningfulMacros(macros = {}) {
-  return (
-    safeNum(macros?.protein_g ?? macros?.protein ?? 0, 0) > 0 ||
-    safeNum(macros?.carbs_g ?? macros?.carbs ?? 0, 0) > 0 ||
-    safeNum(macros?.fat_g ?? macros?.fat ?? 0, 0) > 0
-  );
+function hasAnyMacros(m = null) {
+  return !!(Number(m?.protein_g) || Number(m?.carbs_g) || Number(m?.fat_g));
+}
+
+function recapSignature(ctx = {}, targets = {}) {
+  return JSON.stringify({
+    eaten: round(ctx?.consumed || 0),
+    burned: round(ctx?.burned || 0),
+    protein_g: round(ctx?.macroTotals?.protein_g || 0),
+    carbs_g: round(ctx?.macroTotals?.carbs_g || 0),
+    fat_g: round(ctx?.macroTotals?.fat_g || 0),
+    meals: Array.isArray(ctx?.meals) ? ctx.meals.length : 0,
+    workouts: Array.isArray(ctx?.workouts) ? ctx.workouts.length : 0,
+    dailyGoal: round(targets?.dailyGoal || 0),
+    proteinTarget: round(targets?.proteinDaily || 0),
+  });
 }
 
 // -------------------- Quests (FREE) -------------------------------------------
@@ -259,8 +271,8 @@ function buildQuestPool({ proteinTarget }) {
     {
       id: "breakfast_before_11",
       label: "Log breakfast before 11am",
-      progress: ({ breakfastLogged }) => ({ value: breakfastLogged ? 1 : 0, goal: 1 }),
-      complete: ({ breakfastLogged }) => breakfastLogged,
+      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
+      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
     },
     {
       id: "protein_by_lunch",
@@ -370,22 +382,27 @@ function missedBreakfastLine({
 }
 
 // -------------------- User targets -------------------------------------------
-function getUserTargets() {
+function getUserTargets(userId = null) {
   try {
-    const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
-    const dailyGoal = safeNum(ud.dailyGoal, 0) || safeNum(localStorage.getItem("dailyGoal"), 0);
-    const goalType = ud.goalType || localStorage.getItem("fitness_goal") || "";
-    const dietPreference = ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
+    const scoped = readProfileBundle(userId);
+    const ud = scoped?.userData || JSON.parse(localStorage.getItem("userData") || "{}") || {};
+    const dailyGoal = safeNum(ud.dailyGoal, 0);
+    const goalType = ud.goalType || scoped?.fitnessGoal || localStorage.getItem("fitness_goal") || "";
+    const dietPreference = ud.dietPreference || scoped?.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
 
     const proteinDaily =
-      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0) || (goalType === "cut" ? 140 : 120);
+      safeNum(ud?.proteinTargets?.daily_g, 0) ||
+      safeNum(localStorage.getItem(userId ? `protein_target_daily_g:${userId}` : "protein_target_daily_g"), 0) ||
+      safeNum(localStorage.getItem("protein_target_daily_g"), 0);
 
     const proteinMeal =
-      safeNum(ud?.proteinTargets?.per_meal_g, 0) || safeNum(localStorage.getItem("protein_target_meal_g"), 0);
+      safeNum(ud?.proteinTargets?.per_meal_g, 0) ||
+      safeNum(localStorage.getItem(userId ? `protein_target_meal_g:${userId}` : "protein_target_meal_g"), 0) ||
+      safeNum(localStorage.getItem("protein_target_meal_g"), 0);
 
-    const trainingIntent = ud.trainingIntent || localStorage.getItem("training_intent") || "general";
-    const trainingSplit = ud.trainingSplit || localStorage.getItem("training_split") || "full_body";
-    const lastFocus = ud.lastFocus || localStorage.getItem("last_focus") || "upper";
+    const trainingIntent = ud.trainingIntent || scoped?.trainingIntent || localStorage.getItem("training_intent") || "general";
+    const trainingSplit = ud.trainingSplit || scoped?.trainingSplit || localStorage.getItem("training_split") || "full_body";
+    const lastFocus = ud.lastFocus || scoped?.lastFocus || localStorage.getItem("last_focus") || "upper";
 
     return {
       dailyGoal,
@@ -414,10 +431,12 @@ function getUserTargets() {
 }
 
 // -------------------- Local context builder (offline) -------------------------
-function buildLocalContext(todayISO) {
+function buildLocalContext(todayISO, userId = null) {
   const todayUS = usDay();
-  const wh = JSON.parse(localStorage.getItem("workoutHistory") || "[]");
-  const mh = JSON.parse(localStorage.getItem("mealHistory") || "[]");
+  ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+  ensureScopedFromLegacy(KEYS.mealHistory, userId);
+  const wh = readScopedJSON(KEYS.workoutHistory, userId, JSON.parse(localStorage.getItem("workoutHistory") || "[]"));
+  const mh = readScopedJSON(KEYS.mealHistory, userId, JSON.parse(localStorage.getItem("mealHistory") || "[]"));
 
   const todayWorkouts = wh.filter((w) => w.date === todayUS);
   const workouts = [];
@@ -590,7 +609,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
 
-  const targets = getUserTargets();
+  const targets = useMemo(() => getUserTargets(), []);
 
   const [dayCtx, setDayCtx] = useState(null);
   const [dayCtxLoading, setDayCtxLoading] = useState(true);
@@ -615,7 +634,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayISO, targets.proteinDaily]);
+  }, [todayISO]);
 
   // Load saved recap + history
   useEffect(() => {
@@ -675,12 +694,13 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
     return usedNow;
   };
 
-  const saveRecapLocal = (content) => {
+  const saveRecapLocal = (content, meta = null) => {
     const entry = {
       dateISO: todayISO,
       dateUS: todayUS,
       content: String(content || ""),
       createdAt: new Date().toISOString(),
+      meta: meta || null,
     };
 
     try {
@@ -701,7 +721,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   async function buildContext() {
     if (!user) {
-      return buildLocalContext(todayISO);
+      return buildLocalContext(todayISO, null);
     }
 
     let burned = 0;
@@ -776,42 +796,23 @@ for (const v of byEx.values()) {
       for (const m of mealsAll) {
         const itemsRaw = (itemsMap?.[m.id] || []).filter(Boolean);
 
-        const rowMacros = rowMacroTotals(m);
-        const itemMacroTotals = sumMacros(itemsRaw.map((it) => ({
-          protein: it?.protein,
-          carbs: it?.carbs,
-          fat: it?.fat,
-        })));
-
-        const shouldUseRowMacroFallback =
-          hasMeaningfulMacros(rowMacros) &&
-          (!itemsRaw.length || !hasMeaningfulMacros(itemMacroTotals));
-
-        const baseItems = shouldUseRowMacroFallback
-          ? [
+        const rowMacros = mealRowMacros(m);
+        const baseItems = itemsRaw.length
+          ? itemsRaw
+          : [
               {
                 food_name: m.title || "Meal",
-                qty: 1,
-                unit: "serving",
+                qty: Number(m.qty) || 1,
+                unit: m.unit || m.portion_label || "serving",
                 calories: m.total_calories,
-                protein: rowMacros.protein_g,
-                carbs: rowMacros.carbs_g,
-                fat: rowMacros.fat_g,
+                protein: hasAnyMacros(rowMacros) ? rowMacros.protein_g : null,
+                carbs: hasAnyMacros(rowMacros) ? rowMacros.carbs_g : null,
+                fat: hasAnyMacros(rowMacros) ? rowMacros.fat_g : null,
+                protein_g: hasAnyMacros(rowMacros) ? rowMacros.protein_g : null,
+                carbs_g: hasAnyMacros(rowMacros) ? rowMacros.carbs_g : null,
+                fat_g: hasAnyMacros(rowMacros) ? rowMacros.fat_g : null,
               },
-            ]
-          : itemsRaw.length
-            ? itemsRaw
-            : [
-                {
-                  food_name: m.title || "Meal",
-                  qty: 1,
-                  unit: "serving",
-                  calories: m.total_calories,
-                  protein: null,
-                  carbs: null,
-                  fat: null,
-                },
-              ];
+            ];
 
         const items = baseItems.map((it) => {
           const est = estimateMacrosForFood({
@@ -827,15 +828,14 @@ for (const v of byEx.values()) {
             qty: it.qty || 1,
             unit: it.unit || "serving",
             calories: round(it.calories),
-            protein: safeNum(it.protein, est.protein_g),
-            carbs: safeNum(it.carbs, est.carbs_g),
-            fat: safeNum(it.fat, est.fat_g),
+            protein: safeNum(it.protein ?? it.protein_g, est.protein_g),
+            carbs: safeNum(it.carbs ?? it.carbs_g, est.carbs_g),
+            fat: safeNum(it.fat ?? it.fat_g, est.fat_g),
           };
         });
 
-        const macros = hasMeaningfulMacros(rowMacros) && !hasMeaningfulMacros(sumMacros(items))
-          ? rowMacros
-          : sumMacros(items);
+        const itemMacros = sumMacros(items);
+        const macros = hasAnyMacros(itemMacros) ? itemMacros : rowMacros;
 
         meals.push({
           id: m.id,
@@ -859,7 +859,7 @@ for (const v of byEx.values()) {
 
     // Merge local unsynced meals
     try {
-      const localCtx = buildLocalContext(todayISO);
+      const localCtx = buildLocalContext(todayISO, user.id);
       const localMeals = localCtx?.meals || [];
       if (localMeals.length) {
         const keyOf = (m) => `${m.title}|${round(m.total_calories || 0)}|${m.time_label || ""}`;
@@ -942,6 +942,21 @@ for (const v of byEx.values()) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro, recapKeyToday, dayCtxLoading]);
+  useEffect(() => {
+    if (dayCtxLoading) return;
+    if (!dayCtx) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(recapKeyToday) || "null");
+      if (!saved?.content) return;
+      const nextSig = recapSignature(dayCtx, targets);
+      const savedSig = saved?.meta?.signature || null;
+      if ((!savedSig && (Array.isArray(dayCtx?.meals) ? dayCtx.meals.length : 0) > 0) || (savedSig && savedSig !== nextSig)) {
+        localStorage.removeItem(recapKeyToday);
+        setRecap("");
+        setSavedAt("");
+      }
+    } catch (e) {}
+  }, [dayCtxLoading, dayCtx, recapKeyToday, targets.dailyGoal, targets.proteinDaily]);
 
   const handleGetRecap = async () => {
     if (!isPro && count >= freeDailyRecapLimit) {
@@ -1090,7 +1105,7 @@ Output format (use these headings):
       const msg = data.choices?.[0]?.message?.content;
       if (!msg) throw new Error("No message returned from OpenAI.");
       setRecap(msg);
-      saveRecapLocal(msg);
+      saveRecapLocal(msg, { signature: recapSignature(ctx, targets) });
     } catch (err) {
       console.error("Recap error:", err);
       setError(err.message || "Sorry, I couldn’t generate your daily recap right now.");
@@ -1100,6 +1115,12 @@ Output format (use these headings):
   };
 
   // ---- UI --------------------------------------------------------------------
+  const FreeUsageBanner = !isPro ? (
+    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+      Free recaps used today: <strong>{count}</strong>/{freeDailyRecapLimit}
+    </Typography>
+  ) : null;
+
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
   const RecapHeader = (
@@ -1174,7 +1195,8 @@ Output format (use these headings):
   const Inner = (
     <>
       {RecapHeader}
-      
+      {FreeUsageBanner}
+
       {error && (
         <Typography color="error" sx={{ mt: 2 }}>
           {error}
@@ -1293,15 +1315,8 @@ Output format (use these headings):
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
-              const breakfastLogged = (dayCtx?.meals || []).some((m) => {
-                const raw = m?.eaten_at || m?.eatenAt || m?.createdAt || null;
-                if (!raw) return false;
-                const d = new Date(raw);
-                const hr = d.getHours();
-                return Number.isFinite(hr) && hr < 11;
-              });
-              const prog = q.progress({ mealsCount, burned, proteinSoFar, now, breakfastLogged });
-              const done = q.complete({ mealsCount, burned, proteinSoFar, now, breakfastLogged });
+              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
+              const done = q.complete({ mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
 
               return (
