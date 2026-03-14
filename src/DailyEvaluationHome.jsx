@@ -1566,21 +1566,21 @@ Score: ${bundle.derived.score}/100
     }
   };
 
-  const topSubtitle = `${bundle.dayUS} • swipe → do steps → win`;
+  const topSubtitle = `${bundle.dayUS} • check your numbers, follow the plan, get your verdict`;
 
   const heroMeta =
     view === "checklist"
       ? {
           eyebrow: "TODAY'S PLAN",
-          title: "Knock out your next best step",
-          subtitle: "Use today’s quests to stay on track and finish the day stronger.",
+          title: "Knock out your next best move",
+          subtitle: "Use today's plan to stay on track and finish the day stronger.",
           chips: ["Plan", "Meals", "Workout"],
         }
       : view === "coach"
       ? {
           eyebrow: "AI COACH",
-          title: "Get your daily verdict",
-          subtitle: "Use what you logged today to get the clearest next move.",
+          title: "Get your clearest next step",
+          subtitle: "Use what you logged today to get a sharper read on what to do next.",
           chips: ["Coach", "Verdict", "Next step"],
         }
       : view === "scoreboard"
@@ -1592,8 +1592,8 @@ Score: ${bundle.derived.score}/100
         }
       : {
           eyebrow: "DAILY CHECK-IN",
-          title: "See how today is going",
-          subtitle: "Check your numbers, see what to do next, then get your daily verdict.",
+          title: "See how today is tracking",
+          subtitle: "Check your numbers, see what to do next, then get your clearest next step.",
           chips: ["Status", "Plan", "Coach"],
         };
 
@@ -1617,20 +1617,20 @@ Score: ${bundle.derived.score}/100
       <Stack
         direction={{ xs: "column", sm: "row" }}
         spacing={1}
-        alignItems={{ xs: "flex-start", sm: "center" }}
-        justifyContent="space-between"
-        sx={{ display: { xs: "none", sm: "flex" }, width: "100%", maxWidth: 980, mx: "auto" }}
+        alignItems="center"
+        justifyContent="center"
+        sx={{ display: { xs: "none", sm: "flex" }, width: "100%", maxWidth: 980, mx: "auto", position: "relative" }}
       >
-        <Box>
+        <Stack spacing={0.2} alignItems="center" sx={{ textAlign: "center" }}>
           <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(2,6,23,0.98)" }}>
             {pageTitle}
           </Typography>
           <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
             {topSubtitle}
           </Typography>
-        </Box>
+        </Stack>
 
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap", position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)" }}>
           <FeatureUseBadge featureKey={FEATURE_KEY} isPro={pro} labelPrefix="Coach" />
         </Stack>
       </Stack>
@@ -1745,7 +1745,7 @@ Score: ${bundle.derived.score}/100
         {(view === "full" || view === "scoreboard") && (
         <CardShell
           title="Today"
-          subtitle="Your day at a glance"
+          subtitle="Your numbers at a glance"
         >
           <Stack spacing={1.2} alignItems="center">
             {/* Top row: Calories + Exercise */}
@@ -1796,13 +1796,13 @@ Score: ${bundle.derived.score}/100
 
 
         {(view === "full" || view === "checklist") && (
-        <CardShell isSingleView={isSingleView} title="Today’s Plan" subtitle="What to do next">
+        <CardShell isSingleView={isSingleView} title="Today’s Plan" subtitle="Your clearest move right now">
           <Stack spacing={1.1} alignItems="center">
             <Stack spacing={0.6} alignItems="center" sx={{ width: "100%" }}>
-              <Typography sx={{ fontWeight: 950 }}>What to fix next</Typography>
+              <Typography sx={{ fontWeight: 950 }}>Next up</Typography>
               <Stack direction="row" spacing={1.2} alignItems="center" justifyContent="center" sx={{ width: "100%", flexWrap: "wrap" }}>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", textAlign: "center" }}>
-                  {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You’re done for now ✅"}
+                  {nextStep ? `${nextStep.title} — ${nextStep.subtitle}` : "You're good for now ✅"}
                 </Typography>
                 {nextStep?.action ? (
                   <Button
@@ -1811,7 +1811,7 @@ Score: ${bundle.derived.score}/100
                     onClick={() => history.push(nextStep.action)}
                     sx={{ borderRadius: 999, fontWeight: 950, px: 2.2, textTransform: "none" }}
                   >
-                    {nextStep.action === "/meals" ? "Meals" : nextStep.action === "/workout" ? "Workout" : "Go"}
+                    {nextStep.action === "/meals" ? "Log meals" : nextStep.action === "/workout" ? "Log workout" : "Open"}
                   </Button>
                 ) : null}
               </Stack>
