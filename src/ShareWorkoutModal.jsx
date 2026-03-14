@@ -1,5 +1,6 @@
 // src/ShareWorkoutModal.jsx
 import React from "react";
+import { makeWorkoutShareCardBlob } from "./lib/workoutShareCard.js";
 import {
   Dialog,
   DialogTitle,
@@ -8,6 +9,7 @@ import {
   Button,
   Stack,
   Typography,
+  Chip,
   Box
 } from "@mui/material";
 import IosShareIcon from "@mui/icons-material/IosShare";
@@ -55,62 +57,100 @@ function buildCaption({ shareText, exercises = [], totalCalories = 0 }) {
   return "🔥 Just finished my workout.\n\nTracked with Slimcal.ai 💪 #SlimcalAI";
 }
 
-function StatChip({ children, filled = false }) {
-  return (
-    <Box
-      sx={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        px: 2.1,
-        py: 1.05,
-        minWidth: 132,
-        borderRadius: 999,
-        border: filled ? "1px solid transparent" : "1.5px solid #d1d5db",
-        background: filled ? "#eef2ff" : "#ffffff",
-        color: "#0f172a",
-        fontSize: { xs: 16, sm: 17 },
-        fontWeight: 900,
-        lineHeight: 1,
-      }}
-    >
-      {children}
-    </Box>
-  );
+function compactPreview(text = "", maxLines = 5) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, maxLines)
+    .join("\n");
 }
 
-export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories }) {
+async function copyTextQuiet(text) {
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function downloadBlob(blob, fileName) {
+  if (!(blob instanceof Blob)) return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1200);
+}
+
+export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories, startedAt }) {
   const caption = React.useMemo(
     () => buildCaption({ shareText, exercises, totalCalories }),
     [shareText, exercises, totalCalories]
   );
 
+  const previewText = React.useMemo(() => compactPreview(caption, 5), [caption]);
   const exerciseCount = Array.isArray(exercises) ? exercises.length : 0;
+  const [shareBusy, setShareBusy] = React.useState(false);
 
   const handleCopy = React.useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(caption);
-      alert("Copied caption — paste it into your post.");
-    } catch (e) {
-      alert("Could not copy caption.");
-    }
+    const ok = await copyTextQuiet(caption);
+    alert(ok ? "Copied caption — paste it into your post." : "Could not copy caption.");
   }, [caption]);
 
   const handleNativeShare = React.useCallback(async () => {
     try {
-      if (navigator.share) {
+      setShareBusy(true);
+
+      const blob = await makeWorkoutShareCardBlob({
+        exercises,
+        totalCalories,
+        shareText: caption,
+        startedAt,
+      });
+
+      if (blob) {
+        const copied = await copyTextQuiet(caption);
+        const file = new File([blob], "slimcal-workout-share.png", { type: "image/png" });
+
+        if (navigator?.share && navigator?.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file] });
+          if (copied) {
+            setTimeout(() => {
+              try { alert("Workout card shared. Caption is already copied for paste."); } catch {}
+            }, 180);
+          }
+          return;
+        }
+
+        await downloadBlob(blob, "slimcal-workout-share.png");
+        if (copied) {
+          alert("Workout card saved/downloaded. Caption is copied and ready to paste.");
+        }
+        return;
+      }
+
+      if (navigator?.share) {
         await navigator.share({
           title: "SlimCal Workout",
           text: caption,
         });
         return;
       }
+
       await handleCopy();
     } catch (e) {
       if (e?.name === "AbortError") return;
       await handleCopy();
+    } finally {
+      setShareBusy(false);
     }
-  }, [caption, handleCopy]);
+  }, [caption, exercises, handleCopy, startedAt, totalCalories]);
 
   return (
     <Dialog
@@ -121,51 +161,69 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
       PaperProps={{
         sx: {
           borderRadius: 5,
-          px: { xs: 1.5, sm: 2 },
-          py: { xs: 1, sm: 1.5 },
+          px: { xs: 1.25, sm: 1.5 },
+          pt: { xs: 1, sm: 1.25 },
+          pb: 0.5,
           overflow: "hidden",
-          maxHeight: "calc(100dvh - 28px)",
-          m: { xs: 1.25, sm: 2 },
+          mx: 1.5,
         },
       }}
     >
-      <DialogTitle sx={{ pb: 0.75, pt: 0.75 }}>
-        <Typography sx={{ fontSize: { xs: 22, sm: 26 }, fontWeight: 900, color: "#0f172a", lineHeight: 1.05 }}>
+      <DialogTitle sx={{ pb: 0.5 }}>
+        <Typography sx={{ fontSize: { xs: 25, sm: 29 }, fontWeight: 900, color: "#0f172a", lineHeight: 1.05 }}>
           Share your workout
         </Typography>
       </DialogTitle>
 
-      <DialogContent sx={{ pt: 0.25, pb: 0.5 }}>
-        <Stack spacing={1.5}>
+      <DialogContent sx={{ pt: 0.5, pb: 0 }}>
+        <Stack spacing={2}>
           <Typography sx={{ color: "#667085", fontSize: { xs: 15, sm: 16 }, lineHeight: 1.45 }}>
-            Open a polished post fast and keep the caption ready to paste.
+            Open the workout card fast and keep the caption ready to paste.
           </Typography>
 
-          {(Number(totalCalories) > 0 || exerciseCount > 0) && (
-            <Stack direction="row" spacing={1.2} sx={{ flexWrap: "wrap", rowGap: 1.2 }}>
-              {Number(totalCalories) > 0 && <StatChip filled>{Math.round(Number(totalCalories) || 0)} cal</StatChip>}
-              {exerciseCount > 0 && <StatChip>{exerciseCount} exercises</StatChip>}
-            </Stack>
-          )}
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+            <Chip
+              label={`${Math.round(Number(totalCalories) || 0)} cal`}
+              sx={{
+                borderRadius: 999,
+                fontWeight: 800,
+                fontSize: 15,
+                height: 42,
+                background: "#eef2ff",
+                color: "#0f172a",
+              }}
+            />
+            <Chip
+              label={`${exerciseCount} ${exerciseCount === 1 ? "exercise" : "exercises"}`}
+              variant="outlined"
+              sx={{
+                borderRadius: 999,
+                fontWeight: 800,
+                fontSize: 15,
+                height: 42,
+              }}
+            />
+          </Stack>
 
-          <Stack spacing={1.15}>
+          <Stack spacing={1.25}>
             <Button
               fullWidth
               variant="contained"
               startIcon={<IosShareIcon />}
               onClick={handleNativeShare}
+              disabled={shareBusy}
               sx={{
                 py: 1.45,
                 borderRadius: 999,
                 textTransform: "none",
-                fontSize: { xs: 19, sm: 18 },
-                fontWeight: 900,
+                fontSize: 18,
+                fontWeight: 800,
                 boxShadow: "none",
                 backgroundColor: "#3367E8",
-                '&:hover': { backgroundColor: '#2c58ca', boxShadow: 'none' },
+                "&:hover": { backgroundColor: "#2c58ca", boxShadow: "none" },
               }}
             >
-              Share workout
+              {shareBusy ? "Preparing…" : "Share workout"}
             </Button>
 
             <Button
@@ -174,14 +232,14 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
               startIcon={<ContentCopyIcon />}
               onClick={handleCopy}
               sx={{
-                py: 1.35,
+                py: 1.45,
                 borderRadius: 999,
                 textTransform: "none",
-                fontSize: { xs: 18, sm: 17 },
+                fontSize: 18,
                 fontWeight: 800,
-                borderColor: "#b7c8ff",
+                borderWidth: 2,
+                borderColor: "#c7d2fe",
                 color: "#3367E8",
-                backgroundColor: "#ffffff",
               }}
             >
               Copy caption
@@ -190,39 +248,39 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
 
           <Box
             sx={{
-              p: 1.4,
               borderRadius: 4,
+              border: "1.5px solid #dbe4ff",
               background: "#f8fafc",
-              border: "1px solid #e6ecf5",
+              px: 2,
+              py: 1.5,
             }}
           >
-            <Typography sx={{ color: "#3367E8", fontSize: 15, fontWeight: 900, mb: 0.7 }}>
+            <Typography sx={{ color: "#2563eb", fontWeight: 900, fontSize: 15.5, mb: 0.75 }}>
               Caption preview
             </Typography>
-            <Box
+            <Typography
               sx={{
-                maxHeight: { xs: 170, sm: 200 },
-                overflowY: "auto",
-                pr: 0.75,
+                color: "#0f172a",
+                fontSize: 15,
+                lineHeight: 1.45,
+                display: "-webkit-box",
+                WebkitLineClamp: 5,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                whiteSpace: "pre-line",
               }}
             >
-              <Typography
-                sx={{
-                  color: "#0f172a",
-                  fontSize: { xs: 14, sm: 15 },
-                  lineHeight: 1.45,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                {caption}
-              </Typography>
-            </Box>
+              {previewText}
+            </Typography>
           </Box>
+
+          <Typography sx={{ color: "#64748b", fontSize: 12.75, lineHeight: 1.45, px: 0.25 }}>
+            Share workout sends the image card first. Copy caption stays ready because some social apps ignore prefilled text.
+          </Typography>
         </Stack>
       </DialogContent>
 
-      <DialogActions sx={{ px: 2.5, pt: 0.25, pb: 0.5 }}>
+      <DialogActions sx={{ px: 2.5, pt: 0.5, pb: 0.75 }}>
         <Button onClick={onClose} sx={{ textTransform: "none", fontWeight: 800, fontSize: 17, color: "#3367E8" }}>
           Close
         </Button>
