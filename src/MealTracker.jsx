@@ -1036,32 +1036,34 @@ export default function MealTracker({ onMealUpdate }) {
             boxShadow: '0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)'
           }}
         >
-          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+          <CardContent sx={{ pt: { xs: 2, sm: 2.2 }, pb: { xs: 2.2, sm: 2.5 }, px: { xs: 3, sm: 4 } }}>
             <Stack spacing={2} alignItems="center" textAlign="center">
               {!isProUser() && (
-                <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end', mb: -0.5 }}>
+                <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end', mb: 0.2 }}>
                   <FeatureUseBadge key={`meal-badge-${mealBadgeTick}`} featureKey="ai_meal" isPro={false} />
                 </Box>
               )}
 
-              <Typography
-                variant="h4"
-                sx={{
-                  fontWeight: 800,
-                  lineHeight: 1.08,
-                  letterSpacing: '-0.02em',
-                  fontSize: { xs: '2.15rem', sm: '2.35rem' }
-                }}
-              >
-                Meals
-              </Typography>
-              <Typography
-                variant="body1"
-                color="text.secondary"
-                sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.08rem' }, lineHeight: 1.5 }}
-              >
-                Log meals, keep macros clean, and keep your daily net calories up to date.
-              </Typography>
+              <Box sx={{ maxWidth: 620, mx: 'auto' }}>
+                <Typography
+                  variant="h4"
+                  sx={{
+                    fontWeight: 800,
+                    lineHeight: 1.08,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '2.15rem', sm: '2.35rem' }
+                  }}
+                >
+                  Meals
+                </Typography>
+                <Typography
+                  variant="body1"
+                  color="text.secondary"
+                  sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.08rem' }, lineHeight: 1.5 }}
+                >
+                  Log meals, keep macros clean, and keep your daily net calories up to date.
+                </Typography>
+              </Box>
               <Button
                 onClick={handleToggleMealIdeas}
                 variant={showSuggest ? 'outlined' : 'contained'}
