@@ -140,7 +140,7 @@ export default function HomeHub() {
                 Personalize SlimCal in under 30 seconds
               </Typography>
               <Typography variant="body2" sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 600 }}>
-                Complete your profile to unlock accurate AI calories, Daily Eval, Pose Session, and Verdict outputs.
+                Complete your profile to unlock accurate AI calories, Daily Check-In, Today’s Plan, Pose Session, and Coach outputs.
               </Typography>
               <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
                 <Typography variant="caption" sx={{ fontWeight: 900, color: "primary.main" }}>
@@ -189,13 +189,13 @@ export default function HomeHub() {
             />
 
             <AppIcon
-              label="Daily Eval"
+              label="Daily Check-In"
               grad="linear-gradient(180deg, rgba(168,85,247,0.92) 0%, rgba(88,28,135,0.98) 100%)"
               icon={<DonutLargeIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/daily-eval")}
             />
             <AppIcon
-              label="Checklist"
+              label="Today's Plan"
               grad="linear-gradient(180deg, rgba(245,158,11,0.92) 0%, rgba(180,83,9,0.98) 100%)"
               icon={<ChecklistIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/daily-checklist")}

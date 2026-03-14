@@ -204,12 +204,12 @@ export default function HealthDataForm({ setUserData }) {
   // First-time tips
   const [AgeTip, triggerAgeTip] = useFirstTimeTip(
     'tip_age_v1',
-    'Your age helps personalize targets and Daily Evaluation context.',
+    'Your age helps personalize targets and Daily Check-In context.',
     { auto: false }
   );
   const [GenderTip, triggerGenderTip] = useFirstTimeTip(
     'tip_gender_v1',
-    'Gender is used for BMR (baseline calories) and more accurate Daily Evaluation guidance.',
+    'Gender is used for BMR (baseline calories) and more accurate Daily Check-In guidance.',
     { auto: false }
   );
   const [WeightTip, triggerWeightTip] = useFirstTimeTip(
@@ -249,7 +249,7 @@ export default function HealthDataForm({ setUserData }) {
   );
   const [TrainingIntentTip, triggerTrainingIntentTip] = useFirstTimeTip(
     'tip_trainingintent_v1',
-    'Training intent helps Daily Evaluation interpret workout signal.',
+    'Training intent helps Daily Check-In interpret workout signal.',
     { auto: false }
   );
 
@@ -421,7 +421,7 @@ export default function HealthDataForm({ setUserData }) {
               label="Age (years)"
               type="number"
               inputProps={{ min: 13, max: 99, step: 1 }}
-              helperText="Used for calorie/protein targets and Daily Evaluation context."
+              helperText="Used for calorie/protein targets and Daily Check-In context."
               value={age}
               onFocus={triggerAgeTip}
               onChange={e => setAge(e.target.value)}

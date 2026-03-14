@@ -83,7 +83,7 @@ import {
 const SHOW_COACH_NAV = false;
 
 const routeTips = {
-  '/':            'Daily Evaluation: swipe cards for verdict → stakes → diagnosis → insight.',
+  '/':            'Home: log food, train, scan, and get coached from one clean home base.',
   '/coach':        'Recap Coach (hidden): legacy page retained for compatibility.',
   '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
   '/workout':      'This is your Workout page: log exercises & calories burned.',
@@ -964,14 +964,14 @@ export default function App() {
           <Route
             exact
             path="/daily-eval"
-            render={() => renderProfileGate("Complete your profile before Daily Eval", "Daily Eval uses your profile to judge your day against the right calorie and goal targets.") || <DailyEvaluationHome view="scoreboard" />}
+            render={() => renderProfileGate("Complete your profile before Daily Check-In", "Daily Check-In uses your profile to judge your day against the right calorie and goal targets.") || <DailyEvaluationHome view="scoreboard" />}
           />
 
           {/* Daily Checklist (quests only) */}
           <Route
             exact
             path="/daily-checklist"
-            render={() => renderProfileGate("Complete your profile before Checklist", "Checklist needs your profile so your targets and progress cues are based on you.") || <DailyEvaluationHome view="checklist" />}
+            render={() => renderProfileGate("Complete your profile before Today's Plan", "Today's Plan needs your profile so your targets and progress cues are based on you.") || <DailyEvaluationHome view="checklist" />}
           />
 
           

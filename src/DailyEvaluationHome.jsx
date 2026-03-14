@@ -706,7 +706,7 @@ export default function DailyEvaluationHome({ view = "full" } = {}) {
   const showChecklist = view === "full" || view === "checklist";
   const history = useHistory();
 
-  const pageTitle = view === "checklist" ? "Daily Checklist" : view === "scoreboard" ? "Daily Eval" : "Daily Evaluation";
+  const pageTitle = view === "checklist" ? "Today's Plan" : view === "scoreboard" ? "Daily Check-In" : "Daily Check-In";
   const { isProActive } = useEntitlements();
   const pro = !!isProActive || localStorage.getItem("isPro") === "true";
 
