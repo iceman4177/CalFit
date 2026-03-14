@@ -1,7 +1,5 @@
 // src/ShareWorkoutModal.jsx
 import React from "react";
-import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
-import { makeWorkoutShareCardBlob } from "./lib/workoutShareCard.js";
 import {
   Dialog,
   DialogTitle,
@@ -9,10 +7,8 @@ import {
   DialogActions,
   Button,
   Stack,
-  TextField,
   Typography,
-  Box,
-  Chip
+  Box
 } from "@mui/material";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
@@ -59,11 +55,37 @@ function buildCaption({ shareText, exercises = [], totalCalories = 0 }) {
   return "🔥 Just finished my workout.\n\nTracked with Slimcal.ai 💪 #SlimcalAI";
 }
 
-export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories, startedAt }) {
+function StatChip({ children, filled = false }) {
+  return (
+    <Box
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        px: 2.1,
+        py: 1.05,
+        minWidth: 132,
+        borderRadius: 999,
+        border: filled ? "1px solid transparent" : "1.5px solid #d1d5db",
+        background: filled ? "#eef2ff" : "#ffffff",
+        color: "#0f172a",
+        fontSize: { xs: 16, sm: 17 },
+        fontWeight: 900,
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+export default function ShareWorkoutModal({ open, onClose, shareText, exercises, totalCalories }) {
   const caption = React.useMemo(
     () => buildCaption({ shareText, exercises, totalCalories }),
     [shareText, exercises, totalCalories]
   );
+
+  const exerciseCount = Array.isArray(exercises) ? exercises.length : 0;
 
   const handleCopy = React.useCallback(async () => {
     try {
@@ -74,23 +96,8 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
     }
   }, [caption]);
 
-  const [shareBusy, setShareBusy] = React.useState(false);
-
   const handleNativeShare = React.useCallback(async () => {
     try {
-      setShareBusy(true);
-      const blob = await makeWorkoutShareCardBlob({
-        exercises,
-        totalCalories,
-        shareText: caption,
-        startedAt,
-      });
-
-      if (blob) {
-        await shareOrDownloadPng(blob, "slimcal-workout-share.png", caption);
-        return;
-      }
-
       if (navigator.share) {
         await navigator.share({
           title: "SlimCal Workout",
@@ -98,15 +105,12 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
         });
         return;
       }
-
       await handleCopy();
     } catch (e) {
       if (e?.name === "AbortError") return;
       await handleCopy();
-    } finally {
-      setShareBusy(false);
     }
-  }, [caption, exercises, handleCopy, startedAt, totalCalories]);
+  }, [caption, handleCopy]);
 
   return (
     <Dialog
@@ -117,97 +121,109 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
       PaperProps={{
         sx: {
           borderRadius: 5,
-          p: { xs: 1, sm: 1.5 },
+          px: { xs: 1.5, sm: 2 },
+          py: { xs: 1, sm: 1.5 },
           overflow: "hidden",
+          maxHeight: "calc(100dvh - 28px)",
+          m: { xs: 1.25, sm: 2 },
         },
       }}
     >
-      <DialogTitle sx={{ pb: 1 }}>
-        <Typography sx={{ fontSize: { xs: 24, sm: 28 }, fontWeight: 900, color: "#0f172a" }}>
+      <DialogTitle sx={{ pb: 0.75, pt: 0.75 }}>
+        <Typography sx={{ fontSize: { xs: 22, sm: 26 }, fontWeight: 900, color: "#0f172a", lineHeight: 1.05 }}>
           Share your workout
         </Typography>
       </DialogTitle>
 
-      <DialogContent sx={{ pt: 0.5 }}>
-        <Stack spacing={2.25}>
-          <Typography sx={{ color: "#667085", fontSize: { xs: 16, sm: 17 }, lineHeight: 1.55 }}>
-            Share a polished workout card with a clean caption ready to paste.
+      <DialogContent sx={{ pt: 0.25, pb: 0.5 }}>
+        <Stack spacing={1.5}>
+          <Typography sx={{ color: "#667085", fontSize: { xs: 15, sm: 16 }, lineHeight: 1.45 }}>
+            Open a polished post fast and keep the caption ready to paste.
           </Typography>
 
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip label={`${Math.round(Number(totalCalories) || 0)} cal`} sx={{ borderRadius: 999, fontWeight: 800, background: "#eef2ff", color: "#0f172a" }} />
-            <Chip label={`${Array.isArray(exercises) ? exercises.length : 0} ${(Array.isArray(exercises) ? exercises.length : 0) === 1 ? "exercise" : "exercises"}`} variant="outlined" sx={{ borderRadius: 999, fontWeight: 800 }} />
-          </Stack>
+          {(Number(totalCalories) > 0 || exerciseCount > 0) && (
+            <Stack direction="row" spacing={1.2} sx={{ flexWrap: "wrap", rowGap: 1.2 }}>
+              {Number(totalCalories) > 0 && <StatChip filled>{Math.round(Number(totalCalories) || 0)} cal</StatChip>}
+              {exerciseCount > 0 && <StatChip>{exerciseCount} exercises</StatChip>}
+            </Stack>
+          )}
 
-          <TextField
-            multiline
-            fullWidth
-            minRows={6}
-            maxRows={10}
-            variant="outlined"
-            value={caption}
-            InputProps={{ readOnly: true }}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                borderRadius: 4,
-                background: '#f8fafc',
-                alignItems: 'flex-start',
-              },
-              '& .MuiOutlinedInput-input': {
-                fontSize: 16,
-                lineHeight: 1.5,
-              },
-            }}
-          />
-
-          <Stack spacing={1.5}>
+          <Stack spacing={1.15}>
             <Button
               fullWidth
               variant="contained"
-              startIcon={<ContentCopyIcon />}
-              onClick={handleCopy}
+              startIcon={<IosShareIcon />}
+              onClick={handleNativeShare}
               sx={{
-                py: 1.6,
+                py: 1.45,
                 borderRadius: 999,
-                textTransform: 'none',
-                fontSize: 18,
-                fontWeight: 800,
-                boxShadow: 'none',
-                backgroundColor: '#3367E8',
+                textTransform: "none",
+                fontSize: { xs: 19, sm: 18 },
+                fontWeight: 900,
+                boxShadow: "none",
+                backgroundColor: "#3367E8",
                 '&:hover': { backgroundColor: '#2c58ca', boxShadow: 'none' },
               }}
             >
-              Copy Caption
+              Share workout
             </Button>
 
             <Button
               fullWidth
               variant="outlined"
-              startIcon={<IosShareIcon />}
-              onClick={handleNativeShare}
-              disabled={shareBusy}
+              startIcon={<ContentCopyIcon />}
+              onClick={handleCopy}
               sx={{
-                py: 1.6,
+                py: 1.35,
                 borderRadius: 999,
-                textTransform: 'none',
-                fontSize: 18,
+                textTransform: "none",
+                fontSize: { xs: 18, sm: 17 },
                 fontWeight: 800,
-                borderColor: '#9db7ff',
-                color: '#3367E8',
+                borderColor: "#b7c8ff",
+                color: "#3367E8",
+                backgroundColor: "#ffffff",
               }}
             >
-              {shareBusy ? "Preparing…" : "Share Post"}
+              Copy caption
             </Button>
           </Stack>
 
-          <Typography sx={{ color: "#64748b", fontSize: 13.5, lineHeight: 1.45, px: 0.5 }}>
-            Share Post opens your phone’s share sheet with the workout card image. Copy Caption is the clean fallback when an app ignores prefills.
-          </Typography>
+          <Box
+            sx={{
+              p: 1.4,
+              borderRadius: 4,
+              background: "#f8fafc",
+              border: "1px solid #e6ecf5",
+            }}
+          >
+            <Typography sx={{ color: "#3367E8", fontSize: 15, fontWeight: 900, mb: 0.7 }}>
+              Caption preview
+            </Typography>
+            <Box
+              sx={{
+                maxHeight: { xs: 170, sm: 200 },
+                overflowY: "auto",
+                pr: 0.75,
+              }}
+            >
+              <Typography
+                sx={{
+                  color: "#0f172a",
+                  fontSize: { xs: 14, sm: 15 },
+                  lineHeight: 1.45,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {caption}
+              </Typography>
+            </Box>
+          </Box>
         </Stack>
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, pt: 0.5, pb: 1 }}>
-        <Button onClick={onClose} sx={{ textTransform: 'none', fontWeight: 800, fontSize: 17, color: '#3367E8' }}>
+      <DialogActions sx={{ px: 2.5, pt: 0.25, pb: 0.5 }}>
+        <Button onClick={onClose} sx={{ textTransform: "none", fontWeight: 800, fontSize: 17, color: "#3367E8" }}>
           Close
         </Button>
       </DialogActions>
