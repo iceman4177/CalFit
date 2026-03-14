@@ -62,6 +62,7 @@ import { supabase }        from './lib/supabaseClient';
 import { attachSyncListeners } from './lib/sync';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
 import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
+import { getTodayBurnedFromWorkoutHistory } from './lib/workoutHistoryTotals.js';
 import ProfileSetupGate from './components/ProfileSetupGate';
 
 import Header from './components/Header';
@@ -711,14 +712,7 @@ export default function App() {
       return Array.isArray(legacy) ? legacy : [];
     })();
 
-    const burnedLocal = whLocal
-      .filter((w) => {
-        const day = dayISOFromAny(
-          w.local_day || w.__local_day || w.day || w.date || w.started_at || w.createdAt || w.created_at
-        );
-        return day === todayISO;
-      })
-      .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories ?? w.calories ?? 0) || 0), 0);
+    const burnedLocal = getTodayBurnedFromWorkoutHistory(uid, todayISO);
 
     const eatenLocal = mhLocal
       .filter((m) => {
@@ -926,39 +920,7 @@ export default function App() {
               userData={userData}
               profileResolved={profileResolved}
               onWorkoutLogged={() => {
-  const uid = authUser?.id || null;
-  const todayUS = new Date().toLocaleDateString('en-US');
-  const readJSON = (key, fallback) => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch (e) {
-      return fallback;
-    }
-  };
-
-  const workouts = (() => {
-    if (uid) {
-      const scoped = readJSON(`workoutHistory:${uid}`, []);
-      return Array.isArray(scoped) ? scoped : [];
-    }
-    const legacy = readJSON('workoutHistory', []);
-    return Array.isArray(legacy) ? legacy : [];
-  })();
-
-  const meals = (() => {
-    if (uid) {
-      const scoped = readJSON(`mealHistory:${uid}`, []);
-      return Array.isArray(scoped) ? scoped : [];
-    }
-    const legacy = readJSON('mealHistory', []);
-    return Array.isArray(legacy) ? legacy : [];
-  })();
-
-  const todayRec = meals.find(m => m?.date === todayUS);
-  setBurnedCalories(workouts.filter(w => w?.date === todayUS).reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0));
-  setConsumedCalories(todayRec ? (todayRec.meals || []).reduce((s, m) => s + (Number(m?.calories) || 0), 0) : 0);
-
+  refreshCalories();
   normalizeLocalData();
   dedupLocalWorkouts();
   updateStreak();
@@ -968,39 +930,7 @@ export default function App() {
           <Route path="/meals" render={() =>
             <MealTracker
               onMealUpdate={() => {
-  const uid = authUser?.id || null;
-  const todayUS = new Date().toLocaleDateString('en-US');
-  const readJSON = (key, fallback) => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch (e) {
-      return fallback;
-    }
-  };
-
-  const workouts = (() => {
-    if (uid) {
-      const scoped = readJSON(`workoutHistory:${uid}`, []);
-      return Array.isArray(scoped) ? scoped : [];
-    }
-    const legacy = readJSON('workoutHistory', []);
-    return Array.isArray(legacy) ? legacy : [];
-  })();
-
-  const meals = (() => {
-    if (uid) {
-      const scoped = readJSON(`mealHistory:${uid}`, []);
-      return Array.isArray(scoped) ? scoped : [];
-    }
-    const legacy = readJSON('mealHistory', []);
-    return Array.isArray(legacy) ? legacy : [];
-  })();
-
-  const todayRec = meals.find(m => m?.date === todayUS);
-  setBurnedCalories(workouts.filter(w => w?.date === todayUS).reduce((s, w) => s + (Number(w?.totalCalories ?? w?.total_calories) || 0), 0));
-  setConsumedCalories(todayRec ? (todayRec.meals || []).reduce((s, m) => s + (Number(m?.calories) || 0), 0) : 0);
-
+  refreshCalories();
   normalizeLocalData();
 }}
 />

@@ -25,7 +25,7 @@ import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
-import { ensureScopedProfileFromLegacy } from './lib/profileStorage.js';
+import { getTodayBurnedFromWorkoutHistory, localDayISO, safeNum } from './lib/workoutHistoryTotals.js';
 
 
 
@@ -92,28 +92,14 @@ function formatDateOnly(iso) {
 }
 function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch (e) { return iso; } }
 
-// ---- local-day helpers (avoid UTC drift) ----
-function localDayISO(d = new Date()) {
-  try {
-    const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    return ld.toISOString().slice(0, 10);
-  } catch (e) {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
 
-function safeNum(v, d = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-}
-
-function readTodayConsumedFromLocal(userId = null) {
+function readTodayConsumedFromLocal() {
   const todayUS = new Date().toLocaleDateString('en-US');
   const todayISO = localDayISO(new Date());
 
   // prefer dailyMetricsCache if present
   try {
-    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[todayISO];
     if (row) {
       const consumed =
@@ -126,7 +112,7 @@ function readTodayConsumedFromLocal(userId = null) {
 
   // fallback to mealHistory
   try {
-    const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
+    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]') || [];
     const rec = mh.find(m => m?.date === todayUS || m?.date === todayISO);
     if (!rec?.meals?.length) return 0;
     return rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
@@ -135,16 +121,16 @@ function readTodayConsumedFromLocal(userId = null) {
   return 0;
 }
 
-function writeDailyMetricsCache(userId, dayISO, consumed, burned) {
+function writeDailyMetricsCache(dayISO, consumed, burned) {
   try {
-    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
+    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     cache[dayISO] = {
       eaten: safeNum(consumed, 0),
       burned: safeNum(burned, 0),
       net: safeNum(consumed, 0) - safeNum(burned, 0),
       updated_at: new Date().toISOString()
     };
-    writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
+    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
   } catch (e) {}
 }
 
@@ -214,10 +200,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
   const readWorkoutHistory = useCallback(() => {
     try {
-      ensureScopedProfileFromLegacy(userId);
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
-      ensureScopedFromLegacy(KEYS.mealHistory, userId);
-      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       const list = readScopedJSON(KEYS.workoutHistory, userId, []);
       return Array.isArray(list) ? list : [];
     } catch (e) {
@@ -270,16 +253,10 @@ export default function WorkoutHistory({ onHistoryChange }) {
     const todayUS = new Date().toLocaleDateString('en-US');
     const todayISO = localDayISO(new Date());
 
-    // burned today from local history (source of truth for UI)
-    let burnedToday = 0;
-    try {
-      const wh = readWorkoutHistory();
-      burnedToday = (wh || [])
-        .filter(w => w?.date === todayUS || w?.date === todayISO)
-        .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-    } catch (e) {}
+    // burned today from workout history helper (source of truth shared with banner/dashboard)
+    const burnedToday = getTodayBurnedFromWorkoutHistory(user?.id || null, todayISO);
 
-    const consumedToday = readTodayConsumedFromLocal(userId);
+    const consumedToday = readTodayConsumedFromLocal();
 
     // write caches so banner updates instantly
     writeDailyMetricsCache(todayISO, consumedToday, burnedToday);
