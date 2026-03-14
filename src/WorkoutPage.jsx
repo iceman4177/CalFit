@@ -1570,7 +1570,7 @@ setNewExercise({
               mb: 0.2
             }}
           >
-            <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+            <FeatureUseBadge featureKey="ai_workout" isPro={isProUser()} />
           </Box>
         )}
 

@@ -30,7 +30,8 @@
     "dev": "vite",
     "start": "vite",
     "build": "vite build",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "check": "node --check api/stripe-webhook.js && node --check api/create-checkout-session.js && node --check api/portal.js && node --check api/me/pro-status.js"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.14",

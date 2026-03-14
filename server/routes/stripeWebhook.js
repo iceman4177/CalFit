@@ -1,4 +1,7 @@
 // server/routes/stripeWebhook.js
+// LEGACY / DEV-ONLY webhook path.
+// Canonical production webhook logic lives in ../api/stripe-webhook.js for Vercel/serverless deploys.
+// Keep this file only for local Express development so billing logic does not drift across multiple handlers.
 // Stripe Webhook handler for Slimcal.ai
 //
 // Expects RAW BODY (set in server/index.js) and the following env vars:
@@ -24,6 +27,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
  *   app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook)
  */
 module.exports = (req, res) => {
+  console.warn('[Stripe Webhook] Using legacy Express webhook route. Production source of truth is /api/stripe-webhook.');
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
