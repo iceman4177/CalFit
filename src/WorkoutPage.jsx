@@ -1566,14 +1566,11 @@ setNewExercise({
             sx={{
               width: '100%',
               display: 'flex',
-              justifyContent: { xs: 'center', sm: 'flex-end' },
-              mb: { xs: 0.5, sm: 0 },
-              pr: { sm: 0.5 }
+              justifyContent: 'flex-end',
+              mb: 0.2
             }}
           >
-            <Box sx={{ position: { xs: 'static', sm: 'absolute' }, top: { sm: 20 }, right: { sm: 24 } }}>
-              <FeatureUseBadge featureKey="ai_workout" isPro={false} />
-            </Box>
+            <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
