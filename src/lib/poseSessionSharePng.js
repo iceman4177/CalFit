@@ -109,30 +109,42 @@ function fitFont(ctx, text, maxWidth, start, min, fontFamily, style = "700 itali
 function wrapLines(ctx, text, maxWidth, maxLines = 3) {
   const src = cleanText(text);
   if (!src) return [];
-  const words = src.split(" ");
+
+  const words = src.split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
+  let current = "";
+  let i = 0;
+
+  while (i < words.length) {
+    const word = words[i];
+    const test = current ? `${current} ${word}` : word;
+
     if (ctx.measureText(test).width <= maxWidth) {
-      line = test;
+      current = test;
+      i += 1;
       continue;
     }
-    if (line) lines.push(line);
-    line = word;
-    if (lines.length === maxLines - 1) break;
-  }
-  const usedWords = lines.join(" ").split(" ").filter(Boolean).length;
-  const remaining = words.slice(usedWords);
-  const last = line || remaining.shift() || "";
-  if (last) lines.push(last);
-  if (remaining.length && lines.length) {
-    let tail = `${lines[lines.length - 1]} ${remaining.join(" ")}`.trim();
-    while (tail.length > 3 && ctx.measureText(tail + "…").width > maxWidth) {
-      tail = tail.slice(0, -1).trim();
+
+    if (!current) {
+      current = word;
+      i += 1;
     }
-    lines[lines.length - 1] = tail + "…";
+
+    if (lines.length === maxLines - 1) {
+      const tailWords = [current, ...words.slice(i)].join(" ").trim();
+      let tail = tailWords;
+      while (tail.length > 3 && ctx.measureText(tail + "…").width > maxWidth) {
+        tail = tail.slice(0, -1).trim();
+      }
+      lines.push(tail + (tail !== tailWords ? "…" : (i < words.length ? "…" : "")));
+      return lines;
+    }
+
+    lines.push(current);
+    current = "";
   }
+
+  if (current) lines.push(current);
   return lines.slice(0, maxLines);
 }
 
