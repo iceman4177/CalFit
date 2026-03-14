@@ -235,6 +235,22 @@ function sumMacros(items = []) {
   return totals;
 }
 
+function rowMacroTotals(row = {}) {
+  return {
+    protein_g: Math.round(safeNum(row?.protein_g ?? row?.protein ?? 0, 0)),
+    carbs_g: Math.round(safeNum(row?.carbs_g ?? row?.carbs ?? 0, 0)),
+    fat_g: Math.round(safeNum(row?.fat_g ?? row?.fat ?? 0, 0)),
+  };
+}
+
+function hasMeaningfulMacros(macros = {}) {
+  return (
+    safeNum(macros?.protein_g ?? macros?.protein ?? 0, 0) > 0 ||
+    safeNum(macros?.carbs_g ?? macros?.carbs ?? 0, 0) > 0 ||
+    safeNum(macros?.fat_g ?? macros?.fat ?? 0, 0) > 0
+  );
+}
+
 // -------------------- Quests (FREE) -------------------------------------------
 function buildQuestPool({ proteinTarget }) {
   const lunchProtein = Math.min(60, Math.max(30, Math.round((proteinTarget || 0) * 0.35 || 40)));
@@ -243,8 +259,8 @@ function buildQuestPool({ proteinTarget }) {
     {
       id: "breakfast_before_11",
       label: "Log breakfast before 11am",
-      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
-      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+      progress: ({ breakfastLogged }) => ({ value: breakfastLogged ? 1 : 0, goal: 1 }),
+      complete: ({ breakfastLogged }) => breakfastLogged,
     },
     {
       id: "protein_by_lunch",
@@ -357,12 +373,12 @@ function missedBreakfastLine({
 function getUserTargets() {
   try {
     const ud = JSON.parse(localStorage.getItem("userData") || "{}") || {};
-    const dailyGoal = safeNum(ud.dailyGoal, 0);
+    const dailyGoal = safeNum(ud.dailyGoal, 0) || safeNum(localStorage.getItem("dailyGoal"), 0);
     const goalType = ud.goalType || localStorage.getItem("fitness_goal") || "";
     const dietPreference = ud.dietPreference || localStorage.getItem("diet_preference") || "omnivore";
 
     const proteinDaily =
-      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0);
+      safeNum(ud?.proteinTargets?.daily_g, 0) || safeNum(localStorage.getItem("protein_target_daily_g"), 0) || (goalType === "cut" ? 140 : 120);
 
     const proteinMeal =
       safeNum(ud?.proteinTargets?.per_meal_g, 0) || safeNum(localStorage.getItem("protein_target_meal_g"), 0);
@@ -574,7 +590,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
   const recapKeyToday = useMemo(() => `dailyRecap:${todayISO}`, [todayISO]);
   const recapHistoryKey = "dailyRecapHistory";
 
-  const targets = useMemo(() => getUserTargets(), []);
+  const targets = getUserTargets();
 
   const [dayCtx, setDayCtx] = useState(null);
   const [dayCtxLoading, setDayCtxLoading] = useState(true);
@@ -599,7 +615,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayISO]);
+  }, [todayISO, targets.proteinDaily]);
 
   // Load saved recap + history
   useEffect(() => {
@@ -760,19 +776,42 @@ for (const v of byEx.values()) {
       for (const m of mealsAll) {
         const itemsRaw = (itemsMap?.[m.id] || []).filter(Boolean);
 
-        const baseItems = itemsRaw.length
-          ? itemsRaw
-          : [
+        const rowMacros = rowMacroTotals(m);
+        const itemMacroTotals = sumMacros(itemsRaw.map((it) => ({
+          protein: it?.protein,
+          carbs: it?.carbs,
+          fat: it?.fat,
+        })));
+
+        const shouldUseRowMacroFallback =
+          hasMeaningfulMacros(rowMacros) &&
+          (!itemsRaw.length || !hasMeaningfulMacros(itemMacroTotals));
+
+        const baseItems = shouldUseRowMacroFallback
+          ? [
               {
                 food_name: m.title || "Meal",
                 qty: 1,
                 unit: "serving",
                 calories: m.total_calories,
-                protein: null,
-                carbs: null,
-                fat: null,
+                protein: rowMacros.protein_g,
+                carbs: rowMacros.carbs_g,
+                fat: rowMacros.fat_g,
               },
-            ];
+            ]
+          : itemsRaw.length
+            ? itemsRaw
+            : [
+                {
+                  food_name: m.title || "Meal",
+                  qty: 1,
+                  unit: "serving",
+                  calories: m.total_calories,
+                  protein: null,
+                  carbs: null,
+                  fat: null,
+                },
+              ];
 
         const items = baseItems.map((it) => {
           const est = estimateMacrosForFood({
@@ -788,32 +827,15 @@ for (const v of byEx.values()) {
             qty: it.qty || 1,
             unit: it.unit || "serving",
             calories: round(it.calories),
-            protein: safeNum(it.protein ?? it.protein_g ?? it.macros?.protein_g ?? m.protein_g ?? m.protein, est.protein_g),
-            carbs: safeNum(it.carbs ?? it.carbs_g ?? it.macros?.carbs_g ?? m.carbs_g ?? m.carbs, est.carbs_g),
-            fat: safeNum(it.fat ?? it.fat_g ?? it.macros?.fat_g ?? m.fat_g ?? m.fat, est.fat_g),
+            protein: safeNum(it.protein, est.protein_g),
+            carbs: safeNum(it.carbs, est.carbs_g),
+            fat: safeNum(it.fat, est.fat_g),
           };
         });
 
-        let macros = sumMacros(items);
-        const mealLevelMacros = {
-          protein_g: safeNum(m.protein_g ?? m.protein ?? 0, 0),
-          carbs_g: safeNum(m.carbs_g ?? m.carbs ?? 0, 0),
-          fat_g: safeNum(m.fat_g ?? m.fat ?? 0, 0),
-        };
-
-        if (items.length && macros.protein_g === 0 && macros.carbs_g === 0 && macros.fat_g === 0) {
-          const hasMealLevelMacros =
-            mealLevelMacros.protein_g > 0 || mealLevelMacros.carbs_g > 0 || mealLevelMacros.fat_g > 0;
-          if (hasMealLevelMacros) {
-            items[0] = {
-              ...items[0],
-              protein: mealLevelMacros.protein_g,
-              carbs: mealLevelMacros.carbs_g,
-              fat: mealLevelMacros.fat_g,
-            };
-            macros = sumMacros(items);
-          }
-        }
+        const macros = hasMeaningfulMacros(rowMacros) && !hasMeaningfulMacros(sumMacros(items))
+          ? rowMacros
+          : sumMacros(items);
 
         meals.push({
           id: m.id,
@@ -1078,8 +1100,6 @@ Output format (use these headings):
   };
 
   // ---- UI --------------------------------------------------------------------
-  const FreeUsageBanner = null;
-
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
   const RecapHeader = (
@@ -1154,8 +1174,7 @@ Output format (use these headings):
   const Inner = (
     <>
       {RecapHeader}
-      {FreeUsageBanner}
-
+      
       {error && (
         <Typography color="error" sx={{ mt: 2 }}>
           {error}
@@ -1173,7 +1192,7 @@ Output format (use these headings):
     </>
   );
 
-  const now = new Date();
+  const now = useMemo(() => new Date(), []);
   const mealsCount = (dayCtx?.meals || []).length;
   const burned = round(dayCtx?.burned || 0);
   const eaten = round(dayCtx?.consumed || 0);
@@ -1274,8 +1293,15 @@ Output format (use these headings):
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
-              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
-              const done = q.complete({ mealsCount, burned, proteinSoFar, now });
+              const breakfastLogged = (dayCtx?.meals || []).some((m) => {
+                const raw = m?.eaten_at || m?.eatenAt || m?.createdAt || null;
+                if (!raw) return false;
+                const d = new Date(raw);
+                const hr = d.getHours();
+                return Number.isFinite(hr) && hr < 11;
+              });
+              const prog = q.progress({ mealsCount, burned, proteinSoFar, now, breakfastLogged });
+              const done = q.complete({ mealsCount, burned, proteinSoFar, now, breakfastLogged });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
 
               return (

@@ -130,20 +130,6 @@ export function inferMealBucketsPST(mealsArr, now = new Date()) {
 
   const nowHourPST = getHourInTimeZone(now, "America/Los_Angeles");
 
-  // UX rule: If it's past breakfast time (>= 12pm) and the user logged *a* meal but none were in the breakfast window,
-  // treat their first logged meal as "breakfast" so the checklist stays intuitive.
-  if (nowHourPST != null && nowHourPST >= 12 && nowHourPST < 16 && bucketCounts.breakfast === 0 && mealEvents.length > 0) {
-    const firstEvt = mealEvents[0];
-    const firstHour = Number(firstEvt?.hourPST);
-    const firstLooksBreakfast = isBreakfastLikeText(firstEvt?.text);
-    // Only apply when it's plausibly breakfast/early-day.
-    if (firstLooksBreakfast || (Number.isFinite(firstHour) && firstHour <= 15)) {
-      if (bucketCounts.lunch > 0) bucketCounts.lunch -= 1;
-      else if (bucketCounts.dinner > 0) bucketCounts.dinner -= 1;
-      else if (bucketCounts.late > 0) bucketCounts.late -= 1;
-      bucketCounts.breakfast = 1;
-    }
-  }
 
   const mealBuckets = {
     breakfast: bucketCounts.breakfast > 0,
@@ -220,7 +206,7 @@ function buildChecklist({
     window: "morning",
     title: "Log breakfast (2 min)",
     subtitle: goalType === "bulk" ? "Protein + carbs (yogurt + oats)" : "Protein-first (25–35g)",
-    done: hasB || ((Number(mealsCount) || 0) >= 1 && hour <= 10),
+    done: hasB,
     action: "/meals",
     priority: 2,
     hiddenWhenDone: false,

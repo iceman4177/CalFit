@@ -208,7 +208,7 @@ export async function getMeals(userId, { from, to, limit = 500 } = {}) {
   if (!userId) return [];
   let q = supabase
     .from("meals")
-    .select("id, eaten_at, title, total_calories")
+    .select("id, eaten_at, title, total_calories, protein_g, carbs_g, fat_g")
     .eq("user_id", userId)
     .order("eaten_at", { ascending: false })
     .limit(limit);
