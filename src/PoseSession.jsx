@@ -1,4 +1,3 @@
-// src/PoseSession.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useHistory } from "react-router-dom";
 import {
@@ -13,7 +12,6 @@ import {
   CircularProgress,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import IosShareIcon from "@mui/icons-material/IosShare";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import FlipCameraAndroidIcon from "@mui/icons-material/FlipCameraAndroid";
 import maleFrontDoubleBicep from "./assets/poseGhosts/male_front_double_bicep.png";
@@ -29,7 +27,6 @@ import { shareOrDownloadPng } from "./lib/frameCheckSharePng.js";
 import FeatureUseBadge, {
   canUseDailyFeature,
   registerDailyFeatureUse,
-  getDailyRemaining,
   setDailyRemaining,
 } from "./components/FeatureUseBadge.jsx";
 import {
@@ -53,7 +50,7 @@ const FEMALE_POSES = [
   { key: "back_scan", title: "Back Scan", subtitle: "Turn around · stand tall · keep shoulders relaxed" },
 ];
 
-const CAPTURE_DELAY_MS = 5000; // selfie timer (simple + reliable)
+const CAPTURE_DELAY_MS = 5000;
 const OUTLINE_PULSE_MS = 2000;
 
 const ALL_OUTLINE_ASSETS = [
@@ -104,17 +101,6 @@ function readStoredIsPro() {
   return false;
 }
 
-function getOrCreateClientId() {
-  try {
-    let id = localStorage.getItem("slimcal_client_id");
-    if (id) return id;
-    id = (globalThis.crypto?.randomUUID?.() || `slimcal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-    localStorage.setItem("slimcal_client_id", id);
-    return id;
-  } catch {}
-  return `slimcal-${Date.now()}`;
-}
-
 function firstNonEmpty(...vals) {
   for (const v of vals) {
     const s = String(v || "").trim();
@@ -132,20 +118,26 @@ function buildMemoryAwareShareSummary(result, isFemale = false) {
 
   const momentum = String(result?.momentumNote || "").trim();
   const baseline = String(result?.baselineComparison || "").trim();
-  const summary = String(result?.report || "").split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean)[0] || "";
+  const summary =
+    String(result?.report || "")
+      .split(/\n\s*\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)[0] || "";
 
   const softStrongest = strongest
-    ? (isFemale ? `Today your ${strongest} reads especially polished.` : `Today your ${strongest} reads especially strong.`)
-    : (isFemale ? "Today your overall look reads polished and athletic." : "Today your overall look reads muscular and athletic.");
+    ? isFemale
+      ? `Today your ${strongest} reads especially polished.`
+      : `Today your ${strongest} reads especially strong.`
+    : isFemale
+      ? "Today your overall look reads polished and athletic."
+      : "Today your overall look reads muscular and athletic.";
 
   const lead = firstNonEmpty(momentum, baseline, summary, softStrongest)
     .replace(/\s+/g, " ")
     .replace(/Compared with \d+ recent checks?,?/i, "Compared with your recent baseline,")
     .trim();
 
-  const closer = firstNonEmpty(baseline, softStrongest)
-    .replace(/\s+/g, " ")
-    .trim();
+  const closer = firstNonEmpty(baseline, softStrongest).replace(/\s+/g, " ").trim();
 
   const joined = [lead, closer]
     .filter(Boolean)
@@ -156,6 +148,101 @@ function buildMemoryAwareShareSummary(result, isFemale = false) {
   return joined.slice(0, 240);
 }
 
+const LOCKED_POSE_COPY = {
+  male: {
+    baseline: {
+      mode: "Baseline Read",
+      hero: "You look like you train.",
+      subread: "You’ve already got a strong upper-body look, and the base is clearly there for an even more standout physique.",
+      bulletsLabel: "WHAT STANDS OUT",
+      bullets: ["Broad shoulders", "Solid upper-body presence", "Lean, athletic base"],
+      breakdown: [
+        "Your shoulders read first, which gives you that trained look right away.",
+        "Your upper body already has solid shape, and there’s enough structure there that it doesn’t look random or undeveloped.",
+        "Your arms and upper torso are starting to come together nicely, and your frame gives off a clean athletic look already.",
+        "From the back, there’s a good starting outline through the shoulders and upper back, which makes the physique feel more put together overall.",
+      ],
+      nextUp: [
+        "You’re already looking lean and athletic, and you’re well on your way to looking even more built and dialed.",
+        "A little more upper-body size, especially through the chest, delts, and arms, would make this hit even harder.",
+      ],
+      coachNote: [
+        "This is a strong baseline because you’re not starting from zero.",
+        "You already look like someone who trains, and if you keep stacking size while staying lean, this can turn into a seriously sharp physique.",
+      ],
+    },
+    recheck: {
+      mode: "Re-Check",
+      hero: "Cleaner and more dialed.",
+      subread: "This looks sharper than last time. The physique is tightening up, and the overall look feels more complete.",
+      bulletsLabel: "WHAT IMPROVED",
+      bullets: ["More upper-body definition", "Better shoulder pop", "Cleaner overall presentation"],
+      breakdown: [
+        "Your upper body looks more dialed than before, especially through the shoulders and arms.",
+        "There’s a cleaner look through the torso now, which makes the physique read sharper right away.",
+        "Your back and shoulder area feel a little more developed, and the overall presentation comes across more confident and more trained.",
+        "Compared to the last scan, this doesn’t just look similar — it looks more refined.",
+      ],
+      nextUp: [
+        "You’re already looking fit and sculpted, and this is clearly moving toward an even more standout build.",
+        "Keep pushing size in the upper body while holding onto the leanness that’s already showing, and this will separate fast.",
+      ],
+      coachNote: [
+        "The big win here is that the progress is visible without needing to force it.",
+        "You’re already carrying a sharper look, and if you keep the same consistency, the next jump should be even easier to notice.",
+      ],
+    },
+  },
+  female: {
+    baseline: {
+      mode: "Baseline Read",
+      hero: "You’re looking toned.",
+      subread: "Your shape already looks clean and put together, and the overall look is trending toward even more polished.",
+      bulletsLabel: "WHAT STANDS OUT",
+      bullets: ["Balanced, toned shape", "Lean waist", "Strong, put-together look"],
+      breakdown: [
+        "Your physique already reads toned, especially through the waist and overall shape.",
+        "There’s a clean athletic look here that feels balanced instead of forced, which makes the result come across polished.",
+        "Your back and shoulders show nice definition, and the way your shape carries on camera gives the whole scan a confident feel.",
+        "Your lower body also gives a strong foundation to the look, so overall this already feels like a fit, put-together baseline.",
+      ],
+      nextUp: [
+        "You’re already looking lean and polished, and you’re well on your way to looking even more sculpted.",
+        "A little more shape through the glutes and lower body would make this pop even more while keeping the same clean toned look.",
+      ],
+      coachNote: [
+        "This is a really strong baseline because the shape is already there.",
+        "You don’t need a complete transformation to look good — you already do — and the next phase is just about making the strengths show even more.",
+      ],
+    },
+    recheck: {
+      mode: "Re-Check",
+      hero: "Sharper than last time.",
+      subread: "This looks cleaner, more dialed, and more complete than your last scan.",
+      bulletsLabel: "WHAT IMPROVED",
+      bullets: ["More polished overall shape", "Better definition through the waist and back", "Stronger, more confident presentation"],
+      breakdown: [
+        "Your physique looks more refined than before, especially through the waist, back, and overall silhouette.",
+        "There’s a tighter, cleaner feel to the scan now, which makes the whole look come across more toned and more intentional.",
+        "Your shoulders and upper back are reading with better definition, and the lower body shape feels more connected to the full look.",
+        "Compared to the last scan, this feels more dialed and more obviously athletic.",
+      ],
+      nextUp: [
+        "You’re already looking strong and toned, and this is clearly heading toward an even more sculpted version of the same look.",
+        "Keep building shape where it counts while holding onto the polished look that’s already showing.",
+      ],
+      coachNote: [
+        "What’s nice here is that the progress feels real and visible, not forced.",
+        "You already had a good base, and now it’s starting to look more refined in a way people will actually notice.",
+      ],
+    },
+  },
+};
+
+function getLockedPoseCopy(gender = "male", hasPriorSameGender = false) {
+  const g = gender === "female" ? "female" : "male";
+  return LOCKED_POSE_COPY[g][hasPriorSameGender ? "recheck" : "baseline"];
+}
 
 function PoseGhostOverlay({ poseKey, mirrored = false, active = false }) {
   const isFemaleCue = /_scan$/.test(String(poseKey || ""));
@@ -223,18 +310,7 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, x));
 }
 
-function dataUrlToBlob(dataUrl) {
-  const [hdr, b64] = String(dataUrl || "").split(",");
-  const m = /data:([^;]+);base64/.exec(hdr || "");
-  const mime = m?.[1] || "image/jpeg";
-  const bin = atob(b64 || "");
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
 async function makeThumbDataUrl(dataUrl, maxW = 720, quality = 0.72) {
-  // Keep it simple: draw into canvas and export JPEG.
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -262,33 +338,52 @@ export default function PoseSession() {
   const goalType = useMemo(() => readStoredGoalType(), []);
   const isFemale = gender === "female";
   const activePoses = useMemo(() => (isFemale ? FEMALE_POSES : MALE_POSES), [isFemale]);
-  const outlineColor = isFemale ? "rgba(255, 105, 180, 0.95)" : "rgba(57, 255, 20, 0.95)";
 
-  const [stage, setStage] = useState("intro"); // intro | capture | scanning | results
+  const [stage, setStage] = useState("intro");
   const [poseIdx, setPoseIdx] = useState(0);
   const [facingMode, setFacingMode] = useState("user");
-
   const [countdownMs, setCountdownMs] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const pageTopRef = useRef(null);
-
-  const [captures, setCaptures] = useState([]); // { poseKey, title, fullDataUrl, thumbDataUrl }
+  const [captures, setCaptures] = useState([]);
   const [result, setResult] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [isPro, setIsPro] = useState(() => readStoredIsPro());
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [scanHasPriorSameGender, setScanHasPriorSameGender] = useState(false);
 
+  const pageTopRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const countdownRef = useRef(null);
 
   const pose = activePoses[poseIdx] || activePoses[0];
-
   const todayISO = useMemo(() => localDayISO(), []);
-  const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId]);
+
+  const priorHistory = useMemo(() => readPoseSessionHistory(userId) || [], [userId, historyVersion]);
+  const priorSameGenderHistory = useMemo(
+    () => priorHistory.filter((entry) => String(entry?.gender || "").toLowerCase() === gender),
+    [priorHistory, gender]
+  );
+  const liveHasPriorSameGender = priorSameGenderHistory.length > 0;
+  const previousSameGenderSession = priorSameGenderHistory[0] || null;
+  const olderSameGenderSession = priorSameGenderHistory[1] || null;
   const recentScanContext = useMemo(() => buildRecentPoseContext(priorHistory, 3), [priorHistory]);
-  const deltas = useMemo(() => computeDeltasPositiveOnly(priorHistory), [priorHistory]);
+  const deltas = useMemo(
+    () => computeDeltasPositiveOnly(olderSameGenderSession, previousSameGenderSession),
+    [olderSameGenderSession, previousSameGenderSession]
+  );
+  const lockedCopy = useMemo(
+    () => getLockedPoseCopy(gender, scanHasPriorSameGender),
+    [gender, scanHasPriorSameGender]
+  );
+
+  useEffect(() => {
+    if (stage === "intro") {
+      setScanHasPriorSameGender(liveHasPriorSameGender);
+    }
+  }, [stage, liveHasPriorSameGender]);
 
   useEffect(() => {
     let active = true;
@@ -385,7 +480,6 @@ export default function PoseSession() {
     const ctx = c.getContext("2d");
     ctx.drawImage(v, 0, 0, w, h);
 
-    // Full-res stored locally for share PNG export.
     const fullDataUrl = c.toDataURL("image/jpeg", 0.92);
     const thumbDataUrl = await makeThumbDataUrl(fullDataUrl, 720, 0.72);
     return { fullDataUrl, thumbDataUrl };
@@ -414,19 +508,13 @@ export default function PoseSession() {
         { poseKey: pose.key, title: pose.title, fullDataUrl: snap.fullDataUrl, thumbDataUrl: snap.thumbDataUrl },
       ]);
 
-      // Advance pose
-      if (poseIdx < activePoses.length - 1) {
-        setPoseIdx((i) => i + 1);
-      } else {
-        setStage("scanning");
-      }
+      if (poseIdx < activePoses.length - 1) setPoseIdx((i) => i + 1);
+      else setStage("scanning");
     }, CAPTURE_DELAY_MS);
-  }, [cameraReady, pose.key, pose.title, poseIdx, takeSnapshot]);
+  }, [activePoses.length, cameraReady, pose.key, pose.title, poseIdx, takeSnapshot]);
 
-  // Auto start the timer when camera is ready (no manual actions)
   useEffect(() => {
-    if (stage !== "capture") return;
-    if (!cameraReady) return;
+    if (stage !== "capture" || !cameraReady) return undefined;
     beginTimedCapture();
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -441,7 +529,6 @@ export default function PoseSession() {
   }, []);
 
   const retakePose = useCallback(() => {
-    // Remove last capture for current pose and re-open capture stage
     setCaptures((prev) => prev.filter((c) => c.poseKey !== pose.key));
     setStage("capture");
   }, [pose.key]);
@@ -452,21 +539,27 @@ export default function PoseSession() {
     setResult(null);
     setPoseIdx(0);
     setStage("intro");
+    setHistoryVersion((v) => v + 1);
   }, []);
 
   const startScan = useCallback(() => {
     if (!isPro && !canUseDailyFeature("pose_session")) {
       setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
-      try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-      try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+      try {
+        sessionStorage.setItem("pose_session_force_upgrade", "1");
+      } catch {}
+      try {
+        window.dispatchEvent(new Event("slimcal:pose-session-upgrade"));
+      } catch {}
       return;
     }
+    setScanHasPriorSameGender(liveHasPriorSameGender);
     setErrorMsg("");
     setCaptures([]);
     setResult(null);
     setPoseIdx(0);
     setStage("capture");
-  }, [isPro]);
+  }, [isPro, liveHasPriorSameGender]);
 
   const callAI = useCallback(async () => {
     if (captures.length < activePoses.length) return;
@@ -483,9 +576,9 @@ export default function PoseSession() {
         poses: captures.map((c) => ({
           poseKey: c.poseKey,
           title: c.title,
-          imageDataUrl: c.thumbDataUrl, // keep payload small
+          imageDataUrl: c.thumbDataUrl,
         })),
-        deltas, // optional; app uses positive-only deltas
+        deltas,
         recentScans: recentScanContext,
       };
 
@@ -496,10 +589,9 @@ export default function PoseSession() {
         else registerDailyFeatureUse("pose_session");
       }
 
-      // Persist a small record for deltas
       try {
         appendPoseSession(userId, {
-          id: `pose-${todayISO}`,
+          id: `pose-${todayISO}-${Date.now()}`,
           local_day: todayISO,
           created_at: Date.now(),
           gender,
@@ -513,6 +605,7 @@ export default function PoseSession() {
           strongestFeature: session?.physiqueSnapshot?.summary_seed?.strongest_feature || session?.bestDeveloped?.[0] || "",
           physiqueSnapshot: session?.physiqueSnapshot || null,
         });
+        setHistoryVersion((v) => v + 1);
       } catch {}
 
       setResult(session);
@@ -522,15 +615,19 @@ export default function PoseSession() {
       if (e?.code === 402) {
         setErrorMsg("Free limit reached (Pose Session: 3/day). Upgrade for unlimited scans.");
         setStage("intro");
-        try { sessionStorage.setItem("pose_session_force_upgrade", "1"); } catch {}
-        try { window.dispatchEvent(new Event("slimcal:pose-session-upgrade")); } catch {}
+        try {
+          sessionStorage.setItem("pose_session_force_upgrade", "1");
+        } catch {}
+        try {
+          window.dispatchEvent(new Event("slimcal:pose-session-upgrade"));
+        } catch {}
         return;
       }
       setErrorMsg("AI analysis failed. Please try again.");
       setStage("results");
       setResult(null);
     }
-  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, user?.id, userId]);
+  }, [activePoses.length, captures, deltas, gender, goalType, isFemale, isPro, recentScanContext, todayISO, userId]);
 
   useEffect(() => {
     if (stage !== "scanning") return;
@@ -541,8 +638,12 @@ export default function PoseSession() {
     if (!captures.length) return;
     setShareBusy(true);
     try {
+      const shareSummary = buildMemoryAwareShareSummary(result, isFemale);
       const pngDataUrl = await buildPoseSessionSharePng({
-        shareTemplate: lockedCopy,
+        mode: scanHasPriorSameGender ? "recheck" : "baseline",
+        gender,
+        copy: lockedCopy,
+        summary: shareSummary,
         hashtag: "#SlimCalAI",
         thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })),
       });
@@ -553,7 +654,7 @@ export default function PoseSession() {
     } finally {
       setShareBusy(false);
     }
-  }, [captures, lockedCopy]);
+  }, [captures, gender, isFemale, lockedCopy, result, scanHasPriorSameGender]);
 
   useEffect(() => {
     const run = () => {
@@ -579,511 +680,481 @@ export default function PoseSession() {
           <Box key={src} component="img" src={src} alt="" sx={{ width: 1, height: 1 }} />
         ))}
       </Box>
-      <Box ref={pageTopRef} sx={{ minHeight: "100svh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 0.5, md: 4 } }}>
-      <Card
-        sx={{
-          width: "min(980px, 100%)",
-          bgcolor: "#0c1218",
-          borderRadius: "28px",
-          border: "1px solid rgba(120,255,220,0.18)",
-          boxShadow: "0 0 24px rgba(0,0,0,0.45)",
-          overflow: "hidden",
-          minHeight: { xs: "100svh", md: "auto" },
-        }}
+
+      <Box
+        ref={pageTopRef}
+        sx={{ minHeight: "100svh", bgcolor: "#0b0f14", display: "flex", justifyContent: "center", p: { xs: 0.5, md: 4 } }}
       >
-        <CardContent sx={{ p: { xs: 1, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: { xs: 1, md: 2 } }}>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => history.goBack()}
-              sx={{ color: bodyColor, textTransform: "none" }}
-            >
-              Back
-            </Button>
-
-            <Stack direction="row" spacing={1} alignItems="center">
-              {stage === "capture" && (
-                <Button
-                  startIcon={<FlipCameraAndroidIcon />}
-                  onClick={flipCamera}
-                  sx={{
-                    color: bodyColor,
-                    textTransform: "none",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    borderRadius: 999,
-                    px: 1.6,
-                  }}
-                >
-                  Flip
-                </Button>
-              )}
-              {stage === "results" && (
-                <Button
-                  variant="outlined"
-                  onClick={goToIntro}
-                  sx={{
-                    color: bodyColor,
-                    textTransform: "none",
-                    borderColor: "rgba(120,255,220,0.35)",
-                    borderRadius: 999,
-                  }}
-                >
-                  New Scan
-                </Button>
-              )}
-            </Stack>
-          </Stack>
-
-          {errorMsg ? (
-            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: "rgba(255,80,80,0.08)", border: "1px solid rgba(255,80,80,0.18)" }}>
-              <Typography sx={{ color: "rgba(255,200,200,0.95)", fontSize: 14 }}>{errorMsg}</Typography>
-            </Box>
-          ) : null}
-
-          {stage === "intro" && (
-            <Stack spacing={{ xs: 0.9, md: 2.2 }} sx={{ flex: 1, minHeight: 0 }}>
-              <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
-                AI Physique Tracker
-              </Typography>
-              <Stack spacing={1}>
-                <Typography sx={{ color: bodyColor }}>
-                  3 guided scans · 15 seconds · shareable results
-                </Typography>
-                <Box>
-                  <FeatureUseBadge
-                    featureKey="pose_session"
-                    isPro={isPro}
-                    labelPrefix="Free"
-                    sx={{
-                      color: "rgba(220,235,245,0.92)",
-                      borderColor: "rgba(120,255,220,0.28)",
-                      bgcolor: "rgba(255,255,255,0.02)",
-                      '& .MuiChip-label': {
-                        px: 1.1,
-                        color: "rgba(220,235,245,0.92)",
-                      },
-                    }}
-                  />
-                </Box>
-              </Stack>
-
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                {activePoses.map((p) => (
-                  <Box
-                    key={p.key}
-                    sx={{
-                      flex: 1,
-                      borderRadius: 3,
-                      border: "1px solid rgba(120,255,220,0.18)",
-                      bgcolor: "rgba(0,0,0,0.22)",
-                      p: { xs: 1.25, md: 2 },
-                      textAlign: "center",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        height: { xs: 52, md: 120 },
-                        borderRadius: 3,
-                        bgcolor: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.06)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        mb: 1.2,
-                      }}
-                    >
-                      <Typography sx={{ color: "rgba(120,255,220,0.7)", fontWeight: 800 }}>
-                        {p.title}
-                      </Typography>
-                    </Box>
-                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, lineHeight: 1.35 }}>{p.subtitle}</Typography>
-                  </Box>
-                ))}
-              </Stack>
-
-              <Stack spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip label="Auto-captures after a short timer" size="small" sx={{ bgcolor: "rgba(120,255,220,0.12)", color: bodyColor, border: "1px solid rgba(120,255,220,0.18)" }} />
-                  <Chip label="Private — you control sharing" size="small" sx={{ bgcolor: "rgba(255,255,255,0.06)", color: bodyColor, border: "1px solid rgba(255,255,255,0.10)" }} />
-                </Stack>
-              </Stack>
-
-              <Button
-                variant="contained"
-                onClick={startScan}
-                startIcon={<CameraAltIcon />}
-                sx={{
-                  mt: { xs: 0.5, md: 1 },
-                  borderRadius: 999,
-                  py: 1.4,
-                  fontWeight: 800,
-                  textTransform: "none",
-                  bgcolor: "rgba(40, 220, 190, 0.95)",
-                  color: "#061014",
-                  boxShadow: "0 10px 28px rgba(40,220,190,0.22)",
-                  "&:hover": { bgcolor: "rgba(40, 220, 190, 1)" },
-                }}
-              >
-                Start Scan
+        <Card
+          sx={{
+            width: "min(980px, 100%)",
+            bgcolor: "#0c1218",
+            borderRadius: "28px",
+            border: "1px solid rgba(120,255,220,0.18)",
+            boxShadow: "0 0 24px rgba(0,0,0,0.45)",
+            overflow: "hidden",
+            minHeight: { xs: "100svh", md: "auto" },
+          }}
+        >
+          <CardContent
+            sx={{ p: { xs: 1, md: 3 }, minHeight: { xs: "100svh", md: "auto" }, display: "flex", flexDirection: "column" }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: { xs: 1, md: 2 } }}>
+              <Button startIcon={<ArrowBackIcon />} onClick={() => history.goBack()} sx={{ color: bodyColor, textTransform: "none" }}>
+                Back
               </Button>
-              <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: { xs: 11, md: 12 } }}>
-                Tip: step back so your full body shape is easy to read in frame.
-              </Typography>
-            </Stack>
-          )}
 
-          <Box
-            sx={{
-              "@keyframes matrixPulse": {
-                "0%": { opacity: 0.45, transform: "scale(0.985)" },
-                "50%": { opacity: 1, transform: "scale(1)" },
-                "100%": { opacity: 0.5, transform: "scale(0.99)" },
-              },
-            }}
-          />
-
-          {stage === "capture" && (
-            <Stack spacing={{ xs: 0.75, md: 2 }} sx={{ flex: 1, minHeight: 0 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography sx={{ color: titleColor, fontWeight: 800 }}>
-                  Pose {poseIdx + 1} of {activePoses.length}
-                </Typography>
-                <Button
-                  onClick={retakePose}
-                  sx={{ color: bodyColor, textTransform: "none", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 999 }}
-                >
-                  Retake
-                </Button>
-              </Stack>
-
-              <Box
-                sx={{
-                  position: "relative",
-                  width: { xs: "min(100%, 360px)", md: "100%" },
-                  mx: "auto",
-                  aspectRatio: "3/4",
-                  height: { xs: "min(58svh, 500px)", md: "auto" },
-                  maxHeight: { xs: "58svh", md: "none" },
-                  borderRadius: 4,
-                  overflow: "hidden",
-                  border: "1px solid rgba(120,255,220,0.16)",
-                  bgcolor: "#000",
-                  flexShrink: 1,
-                }}
-              >
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    background: "#000",
-                    transform: facingMode === "user" ? "scaleX(-1)" : "none",
-                  }}
-                />
-                {/* Temporary matrix pose silhouette (no tracking) */}
-                <PoseGhostOverlay
-                  poseKey={pose.key}
-                  mirrored={facingMode === "user"}
-                  active={outlinePulseActive}
-                  color={outlineColor}
-                />
-
-                {/* Minimal “fancy” prompt overlay (no tracking) */}
-                <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                  <Box
+              <Stack direction="row" spacing={1} alignItems="center">
+                {stage === "capture" && (
+                  <Button
+                    startIcon={<FlipCameraAndroidIcon />}
+                    onClick={flipCamera}
                     sx={{
-                      position: "absolute",
-                      left: 10,
-                      right: 10,
-                      bottom: 10,
-                      p: { xs: 1.35, md: 2 },
-                      borderRadius: 3,
-                      bgcolor: "rgba(0,0,0,0.55)",
-                      border: "1px solid rgba(120,255,220,0.20)",
-                      backdropFilter: "blur(6px)",
+                      color: bodyColor,
+                      textTransform: "none",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      borderRadius: 999,
+                      px: 1.6,
                     }}
                   >
-                    <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>
-                      {pose.title}
-                    </Typography>
-                    <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, mt: 0.4, lineHeight: 1.35 }}>
-                      {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
-                    </Typography>
-
-                    <Divider sx={{ my: { xs: 0.9, md: 1.2 }, borderColor: "rgba(255,255,255,0.08)" }} />
-
-                    <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 11, md: 12 } }}>
-                      Auto-capturing in{" "}
-                      <b style={{ color: "rgba(120,255,220,0.95)" }}>
-                        {Math.max(0, Math.ceil(countdownMs / 1000))}
-                      </b>{" "}
-                      …
-                    </Typography>
-                  </Box>
-                </Box>
-              </Box>
-
-              <Box
-                sx={{
-                  px: { xs: 1.1, md: 2 },
-                  py: { xs: 0.8, md: 1.4 },
-                  borderRadius: 999,
-                  border: "1px solid rgba(120,255,220,0.18)",
-                  bgcolor: "rgba(0,0,0,0.22)",
-                }}
-              >
-                <Typography sx={{ color: "rgba(120,255,220,0.9)", fontWeight: 900, textAlign: "center", letterSpacing: 2, fontSize: { xs: 11, md: 12 } }}>
-                  LOCK-ON
-                </Typography>
-                <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <Box
-                    sx={{
-                      height: "100%",
-                      width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
-                      bgcolor: "rgba(120,255,220,0.85)",
-                      boxShadow: "0 0 18px rgba(120,255,220,0.25)",
-                    }}
-                  />
-                </Box>
-                <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
-<Chip label="Centered" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                  <Chip label="Far enough" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                  <Chip label="Hold still" size="small" sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }} />
-                </Stack>
-              </Box>
-            </Stack>
-          )}
-
-          {stage === "scanning" && (
-            <Stack spacing={2} alignItems="center" sx={{ py: 6 }}>
-              <CircularProgress />
-              <Typography sx={{ color: titleColor, fontWeight: 800 }}>Scanning poses…</Typography>
-              <Typography sx={{ color: bodyColor, textAlign: "center", maxWidth: 520 }}>
-                Generating your private physique breakdown.
-              </Typography>
-            </Stack>
-          )}
-
-          {stage === "results" && (
-            <Stack spacing={2}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900 }}>
-                  {String(result?.tierLabel || result?.tier || "BASELINE LOCKED").toUpperCase()}
-                </Typography>
-                <Chip
-                  label={`AESTHETIC: ${clamp(result?.aesthetic_score ?? result?.aestheticScore ?? (result?.build_arc ?? 70), 0, 10).toFixed?.(1) || 7}/10`}
-                  sx={{ bgcolor: "rgba(120,255,220,0.14)", color: titleColor, border: "1px solid rgba(120,255,220,0.22)" }}
-                />
-              </Stack>
-
-              <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-
-              {(result?.momentumNote || result?.baselineComparison) ? (
-                <Box
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 3,
-                    bgcolor: "rgba(120,255,220,0.08)",
-                    border: "1px solid rgba(120,255,220,0.18)",
-                  }}
-                >
-                  <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.4, mb: 0.5 }}>
-                    MOMENTUM
-                  </Typography>
-                  {result?.momentumNote ? (
-                    <Typography sx={{ color: bodyColor, lineHeight: 1.5 }}>
-                      {String(result.momentumNote)}
-                    </Typography>
-                  ) : null}
-                  {result?.baselineComparison ? (
-                    <Typography sx={{ color: "rgba(220,235,245,0.72)", lineHeight: 1.45, mt: result?.momentumNote ? 0.9 : 0 }}>
-                      {String(result.baselineComparison)}
-                    </Typography>
-                  ) : null}
-                </Box>
-              ) : null}
-
-              <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                WHAT’S POPPING
-              </Typography>
-
-              <Stack spacing={0.8}>
-                {(result?.highlights || result?.levers || []).slice(0, 6).map((t, i) => (
-                  <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                    • {String(t)}
-                  </Typography>
-                ))}
-              </Stack>
-
-              
-              {/* Long-form detailed report */}
-              {typeof result?.report === "string" && result.report.trim() ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    DETAILED PHYSIQUE REPORT
-                  </Typography>
-                  <Stack spacing={1}>
-                    {String(result.report)
-                      .split(/\n\s*\n/)
-                      .map((p) => p.trim())
-                      .filter(Boolean)
-                      .slice(0, 12)
-                      .map((p, i) => (
-                        <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.5 }}>
-                          {p}
-                        </Typography>
-                      ))}
-                  </Stack>
-
-                  {(Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length) ||
-                  (Array.isArray(result?.biggestOpportunity) && result.biggestOpportunity.length) ||
-                  (Array.isArray(result?.poseNotes) && result.poseNotes.length) ? (
-                    <Box sx={{ mt: 1 }}>
-                      {Array.isArray(result?.bestDeveloped) && result.bestDeveloped.length ? (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                            Best Developed
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.bestDeveloped.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-
-                      {Array.isArray(result?.biggestOpportunity) && result.biggestOpportunity.length ? (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography sx={{ color: "rgba(255,210,120,0.92)", fontWeight: 900 }}>
-                            Biggest Opportunity
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.biggestOpportunity.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-
-                      {Array.isArray(result?.poseNotes) && result.poseNotes.length ? (
-                        <Box>
-                          <Typography sx={{ color: "rgba(160,180,255,0.92)", fontWeight: 900 }}>
-                            Pose Notes
-                          </Typography>
-                          <Stack spacing={0.6}>
-                            {result.poseNotes.slice(0, 4).map((t, i) => (
-                              <Typography key={i} sx={{ color: bodyColor, lineHeight: 1.35 }}>
-                                • {String(t)}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </Box>
-                      ) : null}
-                    </Box>
-                  ) : null}
-                </>
-              ) : null}
-
-{/* Detailed muscle-by-muscle breakdown */}
-              {Array.isArray(result?.muscleBreakdown) && result.muscleBreakdown.length ? (
-                <>
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                  <Typography sx={{ color: titleColor, fontWeight: 900, letterSpacing: 0.4 }}>
-                    MUSCLE BREAKDOWN
-                  </Typography>
-                  <Stack spacing={1}>
-                    {result.muscleBreakdown.slice(0, 10).map((row, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          p: 1.4,
-                          borderRadius: 2,
-                          bgcolor: "rgba(255,255,255,0.04)",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <Typography sx={{ color: "rgba(120,255,220,0.92)", fontWeight: 900 }}>
-                          {row.group}
-                        </Typography>
-                        <Typography sx={{ color: bodyColor, mt: 0.3 }}>
-                          {row.note}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </>
-              ) : null}
-
-              <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
-                <Stack direction="row" spacing={1.2} sx={{ overflowX: "auto", pb: 0.5 }}>
-                  {captures.map((c) => (
-                    <Box key={c.poseKey} sx={{ minWidth: 140 }}>
-                      <Box
-                        sx={{
-                          width: 140,
-                          height: 170,
-                          borderRadius: 3,
-                          overflow: "hidden",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                          bgcolor: "rgba(255,255,255,0.04)",
-                        }}
-                      >
-                        <img src={c.fullDataUrl} alt={c.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </Box>
-                      <Typography sx={{ color: "rgba(190,220,230,0.75)", fontSize: 12, mt: 0.6, textAlign: "center" }}>
-                        {c.title}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Stack>
-
-                <Stack direction="row" spacing={1.2}>
+                    Flip
+                  </Button>
+                )}
+                {stage === "results" && (
                   <Button
                     variant="outlined"
                     onClick={goToIntro}
                     sx={{
                       color: bodyColor,
                       textTransform: "none",
-                      borderColor: "rgba(255,255,255,0.14)",
-                      borderRadius: 2.5,
-                      px: 2,
+                      borderColor: "rgba(120,255,220,0.35)",
+                      borderRadius: 999,
+                    }}
+                  >
+                    New Scan
+                  </Button>
+                )}
+              </Stack>
+            </Stack>
+
+            {errorMsg ? (
+              <Box
+                sx={{
+                  mb: 2,
+                  p: 1.5,
+                  borderRadius: 2,
+                  bgcolor: "rgba(255,80,80,0.08)",
+                  border: "1px solid rgba(255,80,80,0.18)",
+                }}
+              >
+                <Typography sx={{ color: "rgba(255,200,200,0.95)", fontSize: 14 }}>{errorMsg}</Typography>
+              </Box>
+            ) : null}
+
+            {stage === "intro" && (
+              <Stack spacing={{ xs: 0.9, md: 2.2 }} sx={{ flex: 1, minHeight: 0 }}>
+                <Typography variant="h4" sx={{ color: titleColor, fontWeight: 800, letterSpacing: 0.2 }}>
+                  AI Physique Tracker
+                </Typography>
+                <Stack spacing={1}>
+                  <Typography sx={{ color: bodyColor }}>3 guided scans · 15 seconds · shareable results</Typography>
+                  <Box>
+                    <FeatureUseBadge
+                      featureKey="pose_session"
+                      isPro={isPro}
+                      labelPrefix="Free"
+                      sx={{
+                        color: "rgba(220,235,245,0.92)",
+                        borderColor: "rgba(120,255,220,0.28)",
+                        bgcolor: "rgba(255,255,255,0.02)",
+                        "& .MuiChip-label": {
+                          px: 1.1,
+                          color: "rgba(220,235,245,0.92)",
+                        },
+                      }}
+                    />
+                  </Box>
+                </Stack>
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  {activePoses.map((p) => (
+                    <Box
+                      key={p.key}
+                      sx={{
+                        flex: 1,
+                        borderRadius: 3,
+                        border: "1px solid rgba(120,255,220,0.18)",
+                        bgcolor: "rgba(0,0,0,0.22)",
+                        p: { xs: 1.25, md: 2 },
+                        textAlign: "center",
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          height: { xs: 52, md: 120 },
+                          borderRadius: 3,
+                          bgcolor: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.06)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          mb: 1.2,
+                        }}
+                      >
+                        <Typography sx={{ color: "rgba(120,255,220,0.7)", fontWeight: 800 }}>{p.title}</Typography>
+                      </Box>
+                      <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, lineHeight: 1.35 }}>{p.subtitle}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
+
+                <Stack spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip
+                      label="Auto-captures after a short timer"
+                      size="small"
+                      sx={{ bgcolor: "rgba(120,255,220,0.12)", color: bodyColor, border: "1px solid rgba(120,255,220,0.18)" }}
+                    />
+                    <Chip
+                      label="Private — you control sharing"
+                      size="small"
+                      sx={{ bgcolor: "rgba(255,255,255,0.06)", color: bodyColor, border: "1px solid rgba(255,255,255,0.10)" }}
+                    />
+                  </Stack>
+                </Stack>
+
+                <Button
+                  variant="contained"
+                  onClick={startScan}
+                  startIcon={<CameraAltIcon />}
+                  sx={{
+                    mt: { xs: 0.5, md: 1 },
+                    borderRadius: 999,
+                    py: 1.4,
+                    fontWeight: 800,
+                    textTransform: "none",
+                    bgcolor: "rgba(40, 220, 190, 0.95)",
+                    color: "#061014",
+                    boxShadow: "0 10px 28px rgba(40,220,190,0.22)",
+                    "&:hover": { bgcolor: "rgba(40, 220, 190, 1)" },
+                  }}
+                >
+                  Start Scan
+                </Button>
+                <Typography sx={{ color: "rgba(180,220,230,0.6)", textAlign: "center", fontSize: { xs: 11, md: 12 } }}>
+                  Tip: step back so your full body shape is easy to read in frame.
+                </Typography>
+              </Stack>
+            )}
+
+            <Box
+              sx={{
+                "@keyframes matrixPulse": {
+                  "0%": { opacity: 0.45, transform: "scale(0.985)" },
+                  "50%": { opacity: 1, transform: "scale(1)" },
+                  "100%": { opacity: 0.5, transform: "scale(0.99)" },
+                },
+              }}
+            />
+
+            {stage === "capture" && (
+              <Stack spacing={{ xs: 0.75, md: 2 }} sx={{ flex: 1, minHeight: 0 }}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                  <Typography sx={{ color: titleColor, fontWeight: 800 }}>
+                    Pose {poseIdx + 1} of {activePoses.length}
+                  </Typography>
+                  <Button
+                    onClick={retakePose}
+                    sx={{ color: bodyColor, textTransform: "none", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 999 }}
+                  >
+                    Retake
+                  </Button>
+                </Stack>
+
+                <Box
+                  sx={{
+                    position: "relative",
+                    width: { xs: "min(100%, 360px)", md: "100%" },
+                    mx: "auto",
+                    aspectRatio: "3/4",
+                    height: { xs: "min(58svh, 500px)", md: "auto" },
+                    maxHeight: { xs: "58svh", md: "none" },
+                    borderRadius: 4,
+                    overflow: "hidden",
+                    border: "1px solid rgba(120,255,220,0.16)",
+                    bgcolor: "#000",
+                    flexShrink: 1,
+                  }}
+                >
+                  <video
+                    ref={videoRef}
+                    muted
+                    playsInline
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      background: "#000",
+                      transform: facingMode === "user" ? "scaleX(-1)" : "none",
+                    }}
+                  />
+
+                  <PoseGhostOverlay poseKey={pose.key} mirrored={facingMode === "user"} active={outlinePulseActive} />
+
+                  <Box sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                    <Box
+                      sx={{
+                        position: "absolute",
+                        left: 10,
+                        right: 10,
+                        bottom: 10,
+                        p: { xs: 1.35, md: 2 },
+                        borderRadius: 3,
+                        bgcolor: "rgba(0,0,0,0.55)",
+                        border: "1px solid rgba(120,255,220,0.20)",
+                        backdropFilter: "blur(6px)",
+                      }}
+                    >
+                      <Typography sx={{ color: "rgba(120,255,220,0.95)", fontWeight: 900, letterSpacing: 0.5 }}>{pose.title}</Typography>
+                      <Typography sx={{ color: bodyColor, fontSize: { xs: 12, md: 13 }, mt: 0.4, lineHeight: 1.35 }}>
+                        {outlinePulseActive ? `Match this outline for a second, then lock in. ${pose.subtitle}` : pose.subtitle}
+                      </Typography>
+
+                      <Divider sx={{ my: { xs: 0.9, md: 1.2 }, borderColor: "rgba(255,255,255,0.08)" }} />
+
+                      <Typography sx={{ color: "rgba(245,250,255,0.88)", fontSize: { xs: 11, md: 12 } }}>
+                        Auto-capturing in <b style={{ color: "rgba(120,255,220,0.95)" }}>{Math.max(0, Math.ceil(countdownMs / 1000))}</b> …
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+
+                <Box
+                  sx={{
+                    px: { xs: 1.1, md: 2 },
+                    py: { xs: 0.8, md: 1.4 },
+                    borderRadius: 999,
+                    border: "1px solid rgba(120,255,220,0.18)",
+                    bgcolor: "rgba(0,0,0,0.22)",
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      color: "rgba(120,255,220,0.9)",
+                      fontWeight: 900,
+                      textAlign: "center",
+                      letterSpacing: 2,
+                      fontSize: { xs: 11, md: 12 },
+                    }}
+                  >
+                    LOCK-ON
+                  </Typography>
+                  <Box sx={{ mt: 0.8, height: 7, borderRadius: 999, bgcolor: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <Box
+                      sx={{
+                        height: "100%",
+                        width: `${clamp(100 - (countdownMs / CAPTURE_DELAY_MS) * 100, 0, 100)}%`,
+                        bgcolor: "rgba(120,255,220,0.85)",
+                        boxShadow: "0 0 18px rgba(120,255,220,0.25)",
+                      }}
+                    />
+                  </Box>
+                  <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ mt: 0.75, flexWrap: "wrap" }}>
+                    <Chip
+                      label="Centered"
+                      size="small"
+                      sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }}
+                    />
+                    <Chip
+                      label="Far enough"
+                      size="small"
+                      sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }}
+                    />
+                    <Chip
+                      label="Hold still"
+                      size="small"
+                      sx={{ color: bodyColor, bgcolor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", height: { xs: 22, md: 32 }, fontSize: { xs: 11, md: 13 } }}
+                    />
+                  </Stack>
+                </Box>
+              </Stack>
+            )}
+
+            {stage === "scanning" && (
+              <Stack spacing={2} alignItems="center" sx={{ py: 6 }}>
+                <CircularProgress />
+                <Typography sx={{ color: titleColor, fontWeight: 800 }}>Scanning poses…</Typography>
+                <Typography sx={{ color: bodyColor, textAlign: "center", maxWidth: 520 }}>
+                  Generating your private physique breakdown.
+                </Typography>
+              </Stack>
+            )}
+
+            {stage === "results" && (
+              <Stack spacing={2.2}>
+                <Stack spacing={0.6}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
+                    <Stack spacing={0.15}>
+                      <Typography sx={{ color: "#f7efe6", fontSize: { xs: 14, md: 16 }, fontWeight: 900, letterSpacing: 0.3 }}>
+                        SlimCal AI
+                      </Typography>
+                      <Typography sx={{ color: "rgba(245,226,205,0.92)", fontSize: { xs: 12, md: 13 }, fontWeight: 800, letterSpacing: 1.1 }}>
+                        POSE SESSION
+                      </Typography>
+                    </Stack>
+                    <Chip
+                      label={lockedCopy.mode}
+                      sx={{
+                        bgcolor: "rgba(255,190,120,0.12)",
+                        color: "#ffd8a8",
+                        border: "1px solid rgba(255,190,120,0.28)",
+                        fontWeight: 800,
+                      }}
+                    />
+                  </Stack>
+                  <Divider sx={{ borderColor: "rgba(255,190,120,0.18)" }} />
+                </Stack>
+
+                <Stack spacing={0.8}>
+                  <Typography
+                    sx={{
+                      color: "#f6d8c1",
+                      fontSize: { xs: 34, md: 42 },
+                      lineHeight: 1,
+                      fontWeight: 700,
+                      fontStyle: "italic",
+                      letterSpacing: -0.4,
+                    }}
+                  >
+                    {lockedCopy.hero}
+                  </Typography>
+                  <Typography sx={{ color: "rgba(245,235,225,0.9)", lineHeight: 1.45, fontSize: { xs: 14, md: 15 } }}>
+                    {lockedCopy.subread}
+                  </Typography>
+                </Stack>
+
+                <Stack direction="row" spacing={1.2} sx={{ overflowX: "auto", pb: 0.5 }}>
+                  {captures.map((c) => (
+                    <Box key={c.poseKey} sx={{ minWidth: { xs: 108, md: 150 }, flex: 1 }}>
+                      <Box
+                        sx={{
+                          width: "100%",
+                          aspectRatio: "0.82 / 1",
+                          borderRadius: 3,
+                          overflow: "hidden",
+                          border: "1px solid rgba(255,190,120,0.35)",
+                          bgcolor: "rgba(255,255,255,0.04)",
+                          boxShadow: "0 0 22px rgba(255,170,90,0.12)",
+                        }}
+                      >
+                        <img src={c.fullDataUrl} alt={c.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+
+                <Stack spacing={0.8}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography sx={{ color: "#f2c27b", fontWeight: 900, letterSpacing: 0.8, fontSize: { xs: 14, md: 15 } }}>
+                      {lockedCopy.bulletsLabel}
+                    </Typography>
+                    <Box sx={{ flex: 1, height: 1, bgcolor: "rgba(255,190,120,0.18)" }} />
+                  </Stack>
+                  <Stack spacing={0.65}>
+                    {lockedCopy.bullets.map((item) => (
+                      <Typography key={item} sx={{ color: "rgba(246,236,226,0.94)", lineHeight: 1.4 }}>
+                        • {item}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Stack>
+
+                <Stack spacing={0.8}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography sx={{ color: "#f2c27b", fontWeight: 900, letterSpacing: 0.8, fontSize: { xs: 14, md: 15 } }}>
+                      BREAKDOWN
+                    </Typography>
+                    <Box sx={{ flex: 1, height: 1, bgcolor: "rgba(255,190,120,0.18)" }} />
+                  </Stack>
+                  <Stack spacing={0.75}>
+                    {lockedCopy.breakdown.map((item) => (
+                      <Typography key={item} sx={{ color: "rgba(246,236,226,0.92)", lineHeight: 1.5 }}>
+                        {item}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Stack>
+
+                <Stack spacing={0.8}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography sx={{ color: "#f2c27b", fontWeight: 900, letterSpacing: 0.8, fontSize: { xs: 14, md: 15 } }}>
+                      NEXT UP
+                    </Typography>
+                    <Box sx={{ flex: 1, height: 1, bgcolor: "rgba(255,190,120,0.18)" }} />
+                  </Stack>
+                  <Stack spacing={0.75}>
+                    {lockedCopy.nextUp.map((item) => (
+                      <Typography key={item} sx={{ color: "rgba(246,236,226,0.92)", lineHeight: 1.5 }}>
+                        {item}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Stack>
+
+                <Stack spacing={0.8}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography sx={{ color: "#f2c27b", fontWeight: 900, letterSpacing: 0.8, fontSize: { xs: 14, md: 15 } }}>
+                      COACH NOTE
+                    </Typography>
+                    <Box sx={{ flex: 1, height: 1, bgcolor: "rgba(255,190,120,0.18)" }} />
+                  </Stack>
+                  <Stack spacing={0.75}>
+                    {lockedCopy.coachNote.map((item) => (
+                      <Typography key={item} sx={{ color: "rgba(246,236,226,0.92)", lineHeight: 1.5 }}>
+                        {item}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Stack>
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1.2}>
+                  <Button
+                    variant="outlined"
+                    onClick={goToIntro}
+                    sx={{
+                      color: "rgba(246,236,226,0.9)",
+                      textTransform: "none",
+                      borderColor: "rgba(255,190,120,0.3)",
+                      borderRadius: 999,
+                      py: 1.2,
+                      fontWeight: 800,
                     }}
                   >
                     Retake
                   </Button>
                   <Button
-                    variant="contained"
+                    variant="outlined"
                     onClick={onShare}
-                    startIcon={<IosShareIcon />}
                     disabled={shareBusy}
                     sx={{
+                      flex: 1,
+                      color: "#f2c27b",
                       textTransform: "none",
-                      borderRadius: 2.5,
-                      px: 2.6,
-                      bgcolor: "rgba(40, 220, 190, 0.95)",
-                      color: "#061014",
+                      borderColor: "rgba(255,190,120,0.5)",
+                      borderWidth: "2px",
+                      borderRadius: 999,
+                      py: 1.2,
                       fontWeight: 900,
-                      "&:hover": { bgcolor: "rgba(40, 220, 190, 1)" },
+                      letterSpacing: 0.8,
                     }}
                   >
-                    {shareBusy ? "Preparing…" : "Share Card"}
+                    {shareBusy ? "Preparing…" : "SHARE"}
                   </Button>
                 </Stack>
               </Stack>
-            </Stack>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
       </Box>
     </>
   );
