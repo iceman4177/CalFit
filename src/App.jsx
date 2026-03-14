@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Route,
   Switch,
@@ -104,6 +104,33 @@ function PageTracker() {
     logPageView(location.pathname + location.search);
   }, [location]);
   return null;
+}
+
+
+function scrollPageToTop() {
+  const targets = [
+    window,
+    document.scrollingElement,
+    document.documentElement,
+    document.body,
+    document.getElementById('root'),
+  ].filter(Boolean);
+
+  targets.forEach((target) => {
+    try {
+      if (typeof target.scrollTo === 'function') {
+        target.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      }
+    } catch (e) {
+      try {
+        target.scrollTop = 0;
+        target.scrollLeft = 0;
+      } catch (_) {}
+    }
+
+    try { target.scrollTop = 0; } catch (e) {}
+    try { target.scrollLeft = 0; } catch (e) {}
+  });
 }
 
 function getOrCreateClientId() {
@@ -307,25 +334,6 @@ export default function App() {
   const history      = useHistory();
   const location     = useLocation();
   // Meal reminders/notifications have been removed (UX request).
-
-  useEffect(() => {
-    if ('scrollRestoration' in window.history) {
-      const previous = window.history.scrollRestoration;
-      window.history.scrollRestoration = 'manual';
-      return () => {
-        window.history.scrollRestoration = previous;
-      };
-    }
-    return undefined;
-  }, []);
-
-  React.useLayoutEffect(() => {
-    const scrollRoot = document.scrollingElement || document.documentElement || document.body;
-    if (scrollRoot) scrollRoot.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [location.pathname, location.search]);
 
   useReferral();
 
