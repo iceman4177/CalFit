@@ -1008,11 +1008,11 @@ export default function PoseSession() {
                     letterSpacing: 0.2,
                   }}
                 >
-                  AI Physique Tracker
+                  Pose Session
                 </Typography>
                 <Stack spacing={1}>
                   <Typography sx={{ color: bodyColor }}>
-                    3 guided scans · 15 seconds · shareable results
+                    3 guided poses · quick scan · shareable results
                   </Typography>
                   <Box>
                     <FeatureUseBadge
@@ -1033,50 +1033,93 @@ export default function PoseSession() {
                 </Stack>
 
                 <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                  {activePoses.map((p) => (
-                    <Box
-                      key={p.key}
-                      sx={{
-                        flex: 1,
-                        borderRadius: 3,
-                        border: "1px solid rgba(120,255,220,0.18)",
-                        bgcolor: "rgba(0,0,0,0.22)",
-                        p: { xs: 1.25, md: 2 },
-                        textAlign: "center",
-                      }}
-                    >
+                  {activePoses.map((p) => {
+                    const imageMap = {
+                      front_double_bi: maleFrontDoubleBicep,
+                      lat_spread: maleFrontLatSpread,
+                      back_double_bi: maleBackDoubleBicep,
+                      front_scan: femaleFrontPose,
+                      side_scan: femaleSidePose,
+                      back_scan: femaleBackPose,
+                    };
+                    const accent = /_scan$/.test(String(p.key || ""))
+                      ? "rgba(255,105,180,0.22)"
+                      : "rgba(120,255,220,0.22)";
+                    return (
                       <Box
+                        key={p.key}
                         sx={{
-                          height: { xs: 52, md: 120 },
-                          borderRadius: 3,
-                          bgcolor: "rgba(255,255,255,0.03)",
-                          border: "1px solid rgba(255,255,255,0.06)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          mb: 1.2,
+                          flex: 1,
+                          borderRadius: 3.5,
+                          border: "1px solid rgba(120,255,220,0.18)",
+                          bgcolor: "rgba(0,0,0,0.22)",
+                          p: { xs: 1.25, md: 1.8 },
+                          textAlign: "center",
+                          boxShadow: "0 0 0 1px rgba(255,255,255,0.02) inset",
                         }}
                       >
+                        <Box
+                          sx={{
+                            height: { xs: 84, md: 132 },
+                            borderRadius: 3,
+                            bgcolor: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.06)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            mb: 1.15,
+                            overflow: "hidden",
+                            position: "relative",
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              position: "absolute",
+                              inset: 0,
+                              background: `radial-gradient(circle at 50% 40%, ${accent}, rgba(255,255,255,0) 66%)`,
+                            }}
+                          />
+                          <Box
+                            component="img"
+                            src={imageMap[p.key]}
+                            alt=""
+                            aria-hidden="true"
+                            sx={{
+                              position: "relative",
+                              width: "58%",
+                              maxHeight: "86%",
+                              objectFit: "contain",
+                              filter: /_scan$/.test(String(p.key || ""))
+                                ? "drop-shadow(0 0 10px rgba(255,105,180,0.22))"
+                                : "drop-shadow(0 0 10px rgba(120,255,220,0.18))",
+                              opacity: 0.94,
+                            }}
+                          />
+                        </Box>
                         <Typography
                           sx={{
-                            color: "rgba(120,255,220,0.7)",
+                            color: titleColor,
                             fontWeight: 800,
+                            fontSize: { xs: 14, md: 16 },
+                            mb: 0.55,
                           }}
                         >
                           {p.title}
                         </Typography>
+                        <Typography
+                          sx={{
+                            color: bodyColor,
+                            fontSize: { xs: 12, md: 13 },
+                            lineHeight: 1.38,
+                            maxWidth: 240,
+                            mx: "auto",
+                          }}
+                        >
+                          {p.subtitle}
+                        </Typography>
                       </Box>
-                      <Typography
-                        sx={{
-                          color: bodyColor,
-                          fontSize: { xs: 12, md: 13 },
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {p.subtitle}
-                      </Typography>
-                    </Box>
-                  ))}
+                    );
+                  })}
                 </Stack>
 
                 <Stack spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
@@ -1127,8 +1170,7 @@ export default function PoseSession() {
                     fontSize: { xs: 11, md: 12 },
                   }}
                 >
-                  Tip: step back so your full body shape is easy to read in
-                  frame.
+                  Tip: step back enough for your full shape to read cleanly in frame.
                 </Typography>
               </Stack>
             )}
@@ -1153,9 +1195,19 @@ export default function PoseSession() {
                   alignItems="center"
                   justifyContent="space-between"
                 >
-                  <Typography sx={{ color: titleColor, fontWeight: 800 }}>
-                    Pose {poseIdx + 1} of {activePoses.length}
-                  </Typography>
+                  <Stack spacing={0.15}>
+                    <Typography sx={{ color: titleColor, fontWeight: 800 }}>
+                      Pose {poseIdx + 1} of {activePoses.length}
+                    </Typography>
+                    <Typography
+                      sx={{
+                        color: "rgba(180,220,230,0.68)",
+                        fontSize: { xs: 11, md: 12 },
+                      }}
+                    >
+                      Hold the outline, stay still, and let the timer do the rest.
+                    </Typography>
+                  </Stack>
                   <Button
                     onClick={retakePose}
                     sx={{
@@ -1165,7 +1217,7 @@ export default function PoseSession() {
                       borderRadius: 999,
                     }}
                   >
-                    Retake
+                    New Scan
                   </Button>
                 </Stack>
 
@@ -1241,7 +1293,7 @@ export default function PoseSession() {
                         }}
                       >
                         {outlinePulseActive
-                          ? `Match this outline for a second, then lock in. ${pose.subtitle}`
+                          ? `Match the outline and hold still. ${pose.subtitle}`
                           : pose.subtitle}
                       </Typography>
 
@@ -1354,7 +1406,7 @@ export default function PoseSession() {
               <Stack spacing={2} alignItems="center" sx={{ py: 6 }}>
                 <CircularProgress />
                 <Typography sx={{ color: titleColor, fontWeight: 800 }}>
-                  Scanning poses…
+                  Building your Pose Session…
                 </Typography>
                 <Box
                   sx={{
@@ -1396,21 +1448,21 @@ export default function PoseSession() {
                     <Typography
                       sx={{ color: "rgba(180,220,230,0.72)", fontSize: 12 }}
                     >
-                      Building your results
+                      Finalizing your read
                     </Typography>
                   </Stack>
                 </Box>
                 <Typography
                   sx={{ color: bodyColor, textAlign: "center", maxWidth: 520 }}
                 >
-                  Generating your private physique breakdown.
+                  Pulling everything together into your private physique breakdown.
                 </Typography>
               </Stack>
             )}
 
             {stage === "results" && (
-              <Stack spacing={2.2}>
-                <Stack spacing={0.6}>
+              <Stack spacing={{ xs: 2.2, md: 2.6 }}>
+                <Stack spacing={{ xs: 0.75, md: 0.9 }}>
                   <Stack
                     direction="row"
                     alignItems="center"
@@ -1452,7 +1504,7 @@ export default function PoseSession() {
                   <Divider sx={{ borderColor: "rgba(255,190,120,0.18)" }} />
                 </Stack>
 
-                <Stack spacing={0.8}>
+                <Stack spacing={{ xs: 0.9, md: 1.05 }}>
                   <Typography
                     sx={{
                       color: "#f6d8c1",
@@ -1479,7 +1531,7 @@ export default function PoseSession() {
                 <Stack
                   direction="row"
                   spacing={1.2}
-                  sx={{ overflowX: "auto", pb: 0.5 }}
+                  sx={{ overflowX: "auto", pb: 0.8, pt: 0.15 }}
                 >
                   {captures.map((c) => (
                     <Box
@@ -1511,7 +1563,7 @@ export default function PoseSession() {
                   ))}
                 </Stack>
 
-                <Stack spacing={0.8}>
+                <Stack spacing={{ xs: 0.95, md: 1.05 }}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <Typography
                       sx={{
@@ -1546,7 +1598,7 @@ export default function PoseSession() {
                   </Stack>
                 </Stack>
 
-                <Stack spacing={0.8}>
+                <Stack spacing={{ xs: 0.95, md: 1.05 }}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <Typography
                       sx={{
@@ -1581,7 +1633,7 @@ export default function PoseSession() {
                   </Stack>
                 </Stack>
 
-                <Stack spacing={0.8}>
+                <Stack spacing={{ xs: 0.95, md: 1.05 }}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <Typography
                       sx={{
@@ -1616,7 +1668,7 @@ export default function PoseSession() {
                   </Stack>
                 </Stack>
 
-                <Stack spacing={0.8}>
+                <Stack spacing={{ xs: 0.95, md: 1.05 }}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <Typography
                       sx={{
@@ -1682,7 +1734,7 @@ export default function PoseSession() {
                       letterSpacing: 0.8,
                     }}
                   >
-                    {shareBusy ? "Preparing…" : "SHARE"}
+                    {shareBusy ? "Preparing…" : "Share Card"}
                   </Button>
                 </Stack>
               </Stack>
