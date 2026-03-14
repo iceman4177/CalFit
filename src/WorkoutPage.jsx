@@ -1551,23 +1551,15 @@ setNewExercise({
 
   const renderHeroCard = () => (
     <Card sx={{ ...surfaceSx, overflow: 'visible', ...centeredSectionSx }}>
-      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center', position: 'relative' }}>
+      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center' }}>
         {!isProUser() && showIdle && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 16,
-              right: 16,
-              display: 'flex',
-              justifyContent: 'flex-end'
-            }}
-          >
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
-        <Stack spacing={2} alignItems="center">
-          <Box sx={{ maxWidth: 620, mx: 'auto', width: '100%' }}>
+        <Stack spacing={2}>
+          <Box sx={{ maxWidth: 620, mx: 'auto' }}>
             <Typography
               variant="h4"
               sx={{
@@ -1637,14 +1629,14 @@ setNewExercise({
                     fontSize: { xs: '1.72rem', sm: '1.95rem' }
                   }}
                 >
-                  Log a workout
+                  Build Today&apos;s Workout
                 </Typography>
                 <Typography
                   variant="body1"
                   color="text.secondary"
                   sx={{ maxWidth: 540, fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
-                  Add exercises below or load a past workout to start faster. Your current session updates live as you go.
+                  Add exercises below. Your current session updates live as you go.
                 </Typography>
               </Stack>
 
@@ -1672,9 +1664,10 @@ setNewExercise({
                   border: '1px solid rgba(0,0,0,0.06)',
                   bgcolor: 'rgba(255,255,255,0.86)',
                   boxShadow: 'none',
-                  maxWidth: 620,
+                  width: '100%',
+                  maxWidth: { xs: '100%', md: 540 },
                   mx: 'auto',
-                  width: '100%'
+                  alignSelf: 'center'
                 }}
               >
                 <ExerciseForm
