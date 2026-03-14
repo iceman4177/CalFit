@@ -187,14 +187,14 @@ export default function HomeHub() {
               Log your food and training, check how today is going, then get a clear next step.
             </Typography>
 
-            <Stack
-              direction="row"
-              spacing={{ xs: 0.8, sm: 1 }}
+            <Box
               sx={{
-                justifyContent: "center",
+                width: "100%",
+                maxWidth: 560,
+                display: "grid",
+                gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+                gap: { xs: 0.75, sm: 1 },
                 alignItems: "center",
-                flexWrap: "wrap",
-                rowGap: 0.8,
                 pt: 0.4,
               }}
             >
@@ -203,17 +203,22 @@ export default function HomeHub() {
                   key={chip.label}
                   label={chip.label}
                   sx={{
+                    width: "100%",
                     bgcolor: chip.bg,
                     color: chip.color,
                     fontWeight: 900,
                     borderRadius: 999,
-                    fontSize: { xs: "0.9rem", sm: "0.95rem" },
+                    justifyContent: "center",
+                    fontSize: { xs: "0.78rem", sm: "0.95rem" },
                     height: { xs: 40, sm: 38 },
-                    px: { xs: 0.35, sm: 0.2 },
+                    '& .MuiChip-label': {
+                      px: { xs: 0.8, sm: 1.4 },
+                      whiteSpace: "nowrap",
+                    },
                   }}
                 />
               ))}
-            </Stack>
+            </Box>
           </Stack>
 
           {user && !profileStatus.isComplete && (
@@ -307,15 +312,13 @@ export default function HomeHub() {
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan/session")}
             />
-            <Box sx={{ gridColumn: { xs: "1 / -1", sm: "auto" }, display: "flex", justifyContent: "center", width: "100%" }}>
-              <AppIcon
-                label="Coach"
-                desc="Get your clearest next step."
-                grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
-                icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
-                onClick={() => history.push("/verdict")}
-              />
-            </Box>
+            <AppIcon
+              label="Coach"
+              desc="Get your clearest next step."
+              grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
+              icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
+              onClick={() => history.push("/verdict")}
+            />
           </Box>
         </Stack>
       </Container>
