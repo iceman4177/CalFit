@@ -1580,10 +1580,10 @@ Output format (use these headings):
                   Coach
                 </Typography>
                 <Typography variant="body1" sx={{ mt: 0.5, color: "rgba(51,65,85,0.88)", fontWeight: 600, maxWidth: 620 }}>
-                  See your AI verdict for today, then knock out your plan below.
+                  See your AI coach for today, then knock out your plan below.
                 </Typography>
               </Box>
-              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="Verdicts left" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
+              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
             </Stack>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.1} alignItems={{ xs: "stretch", sm: "center" }}>
@@ -1594,7 +1594,7 @@ Output format (use these headings):
                 disabled={aiLoading}
                 sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
               >
-                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Verdict" : "Get AI Verdict"}
+                {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Get AI Coach"}
               </Button>
               <Typography variant="body2" sx={{ color: "rgba(71,85,105,0.84)", fontWeight: 600 }}>
                 Uses today’s meals, workouts, and progress to call your next best move.
@@ -1611,7 +1611,7 @@ Output format (use these headings):
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
                 <Box>
                   <Typography sx={{ fontWeight: 950, color: "rgba(255,255,255,0.98)", fontSize: 22 }}>
-                    Your AI Verdict
+                    Your AI Coach
                   </Typography>
                   <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.68)", mt: 0.35 }}>
                     Fast read on how today is shaping up.
@@ -1626,7 +1626,7 @@ Output format (use these headings):
                 </Typography>
               ) : aiLoading ? (
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)" }}>
-                  Building your verdict…
+                  Building your AI coach…
                 </Typography>
               ) : (
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.86)", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
