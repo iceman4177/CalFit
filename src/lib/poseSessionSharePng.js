@@ -1,6 +1,6 @@
 // src/lib/poseSessionSharePng.js
 // Warm premium Pose Session share card generator.
-// Fixed to avoid duplicate wording, header collisions, and removes the fake SHARE button.
+// Uses locked Pose Session copy when provided and expands body text into the available card space.
 
 function cleanText(text = "") {
   return String(text || "")
@@ -109,30 +109,42 @@ function fitFont(ctx, text, maxWidth, start, min, fontFamily, style = "700 itali
 function wrapLines(ctx, text, maxWidth, maxLines = 3) {
   const src = cleanText(text);
   if (!src) return [];
-  const words = src.split(" ");
+
+  const words = src.split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
+  let current = "";
+  let i = 0;
+
+  while (i < words.length) {
+    const word = words[i];
+    const test = current ? `${current} ${word}` : word;
+
     if (ctx.measureText(test).width <= maxWidth) {
-      line = test;
+      current = test;
+      i += 1;
       continue;
     }
-    if (line) lines.push(line);
-    line = word;
-    if (lines.length === maxLines - 1) break;
-  }
-  const usedWords = lines.join(" ").split(" ").filter(Boolean).length;
-  const remaining = words.slice(usedWords);
-  const last = line || remaining.shift() || "";
-  if (last) lines.push(last);
-  if (remaining.length && lines.length) {
-    let tail = `${lines[lines.length - 1]} ${remaining.join(" ")}`.trim();
-    while (tail.length > 3 && ctx.measureText(tail + "…").width > maxWidth) {
-      tail = tail.slice(0, -1).trim();
+
+    if (!current) {
+      current = word;
+      i += 1;
     }
-    lines[lines.length - 1] = tail + "…";
+
+    if (lines.length === maxLines - 1) {
+      const tailWords = [current, ...words.slice(i)].join(" ").trim();
+      let tail = tailWords;
+      while (tail.length > 3 && ctx.measureText(tail + "…").width > maxWidth) {
+        tail = tail.slice(0, -1).trim();
+      }
+      lines.push(tail + (tail !== tailWords ? "…" : (i < words.length ? "…" : "")));
+      return lines;
+    }
+
+    lines.push(current);
+    current = "";
   }
+
+  if (current) lines.push(current);
   return lines.slice(0, maxLines);
 }
 
@@ -213,11 +225,122 @@ function inferNextUp({ nextUp = [], levers = [], summary = "", mode = "Baseline 
 
 function drawSectionTitle(ctx, text, x, y, width) {
   ctx.fillStyle = "#f2c27b";
-  ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(text, x, y);
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = "rgba(255,190,120,0.26)";
-  ctx.fillRect(x + tw + 18, y - 10, Math.max(40, width - tw - 18), 2);
+  ctx.fillRect(x + tw + 18, y - 11, Math.max(40, width - tw - 18), 2);
+}
+
+function measureWrappedHeight(ctx, items, maxWidth, lineHeight, itemGap = 0, maxLinesPerItem = 4) {
+  let total = 0;
+  for (const item of items || []) {
+    const lines = wrapLines(ctx, item, maxWidth, maxLinesPerItem);
+    total += lines.length * lineHeight + itemGap;
+  }
+  return total;
+}
+
+function pickBodyLayout(ctx, {
+  availableHeight = 0,
+  bulletItems = [],
+  breakdownItems = [],
+  nextUpItems = [],
+  coachNoteItems = [],
+  width = 0,
+}) {
+  const presets = [
+    {
+      bulletFont: 26,
+      bulletLineHeight: 35,
+      bulletGap: 12,
+      breakdownFont: 24,
+      breakdownLineHeight: 34,
+      breakdownGap: 14,
+      nextFont: 21,
+      nextLineHeight: 31,
+      nextGap: 14,
+      coachFont: 21,
+      coachLineHeight: 31,
+      coachGap: 14,
+      sectionTitleGap: 36,
+      sectionSpacer: 14,
+    },
+    {
+      bulletFont: 25,
+      bulletLineHeight: 34,
+      bulletGap: 11,
+      breakdownFont: 23,
+      breakdownLineHeight: 33,
+      breakdownGap: 13,
+      nextFont: 20,
+      nextLineHeight: 30,
+      nextGap: 13,
+      coachFont: 20,
+      coachLineHeight: 30,
+      coachGap: 13,
+      sectionTitleGap: 35,
+      sectionSpacer: 13,
+    },
+    {
+      bulletFont: 24,
+      bulletLineHeight: 33,
+      bulletGap: 10,
+      breakdownFont: 22,
+      breakdownLineHeight: 31,
+      breakdownGap: 12,
+      nextFont: 19,
+      nextLineHeight: 29,
+      nextGap: 12,
+      coachFont: 19,
+      coachLineHeight: 29,
+      coachGap: 12,
+      sectionTitleGap: 34,
+      sectionSpacer: 12,
+    },
+    {
+      bulletFont: 22,
+      bulletLineHeight: 29,
+      bulletGap: 10,
+      breakdownFont: 21,
+      breakdownLineHeight: 29,
+      breakdownGap: 12,
+      nextFont: 18,
+      nextLineHeight: 29,
+      nextGap: 12,
+      coachFont: 18,
+      coachLineHeight: 29,
+      coachGap: 12,
+      sectionTitleGap: 34,
+      sectionSpacer: 10,
+    },
+  ];
+
+  for (const preset of presets) {
+    let total = 0;
+
+    total += preset.sectionTitleGap;
+    ctx.font = `500 ${preset.bulletFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+    total += measureWrappedHeight(ctx, bulletItems, width - 96, preset.bulletLineHeight, preset.bulletGap, 7);
+
+    total += preset.sectionSpacer + preset.sectionTitleGap;
+    ctx.font = `500 ${preset.breakdownFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+    total += measureWrappedHeight(ctx, breakdownItems, width - 64, preset.breakdownLineHeight, preset.breakdownGap, 9);
+
+    total += preset.sectionSpacer + preset.sectionTitleGap;
+    ctx.font = `500 ${preset.nextFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+    total += measureWrappedHeight(ctx, nextUpItems, width - 64, preset.nextLineHeight, preset.nextGap, 8);
+
+    if (coachNoteItems.length) {
+      total += preset.sectionSpacer + preset.sectionTitleGap;
+      ctx.font = `500 ${preset.coachFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+      total += measureWrappedHeight(ctx, coachNoteItems, width - 64, preset.coachLineHeight, preset.coachGap, 8);
+    }
+
+    if (total <= availableHeight) return preset;
+  }
+
+  return presets[presets.length - 1];
 }
 
 export async function buildPoseSessionSharePng({
@@ -230,6 +353,7 @@ export async function buildPoseSessionSharePng({
   bullets = [],
   breakdown = [],
   nextUp = [],
+  coachNote = [],
   headline = "",
   subhead = "",
   wins = [],
@@ -240,14 +364,24 @@ export async function buildPoseSessionSharePng({
   thumbs = [],
   poseImages = [],
   poseTitles = [],
+  gender = "male",
+  copy = null,
 } = {}) {
-  const resolvedMode = inferMode({ mode, subhead, summary });
-  const resolvedHero = inferHero({ hero, headline, summary, wins });
-  const resolvedSubread = inferSubread({ subread, subhead, summary, hero: resolvedHero });
-  const resolvedBullets = inferBullets({ bullets, wins, highlights, summary, mode: resolvedMode });
-  const resolvedBreakdown = inferBreakdown({ breakdown, summary, hero: resolvedHero, subread: resolvedSubread });
-  const resolvedNextUp = inferNextUp({ nextUp, levers, summary, mode: resolvedMode });
-  const resolvedBulletsLabel = bulletsLabel || (/re-?check/i.test(resolvedMode) ? "WHAT IMPROVED" : "WHAT STANDS OUT");
+  const locked = copy && typeof copy === "object" ? copy : null;
+  const resolvedMode = trimTerminalPunctuation(locked?.mode) || inferMode({ mode, subhead, summary });
+  const resolvedHero = trimTerminalPunctuation(locked?.hero) || inferHero({ hero, headline, summary, wins });
+  const resolvedSubread = trimTerminalPunctuation(locked?.subread) || inferSubread({ subread, subhead, summary, hero: resolvedHero });
+  const resolvedBullets = uniqueLines(locked?.bullets || []).length
+    ? uniqueLines(locked?.bullets || []).slice(0, 3)
+    : inferBullets({ bullets, wins, highlights, summary, mode: resolvedMode });
+  const resolvedBreakdown = uniqueLines(locked?.breakdown || []).length
+    ? uniqueLines(locked?.breakdown || []).slice(0, 4)
+    : inferBreakdown({ breakdown, summary, hero: resolvedHero, subread: resolvedSubread });
+  const resolvedNextUp = uniqueLines(locked?.nextUp || []).length
+    ? uniqueLines(locked?.nextUp || []).slice(0, 2)
+    : inferNextUp({ nextUp, levers, summary, mode: resolvedMode });
+  const resolvedCoachNote = uniqueLines(locked?.coachNote || coachNote || []).slice(0, 2);
+  const resolvedBulletsLabel = trimTerminalPunctuation(locked?.bulletsLabel || bulletsLabel) || (/re-?check/i.test(resolvedMode) ? "WHAT IMPROVED" : "WHAT STANDS OUT");
   const safeHashtag = trimTerminalPunctuation(hashtag || "#SlimCalAI") || "#SlimCalAI";
 
   const normalizedThumbs = Array.isArray(thumbs) && thumbs.length
@@ -348,24 +482,25 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(255,190,120,0.28)";
   ctx.fillRect(contentX, y, contentW, 2);
 
-  y += 34;
+  y += 32;
   ctx.fillStyle = "#f4c66d";
-  ctx.font = "800 22px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "800 20px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(resolvedMode.toUpperCase(), contentX, y);
 
-  y += 28;
-  const heroSize = fitFont(ctx, resolvedHero, contentW, 78, 50, "Georgia, Times New Roman, serif", "700 italic");
+  y += 54;
+  const heroSize = fitFont(ctx, resolvedHero, contentW, 58, 42, "Georgia, Times New Roman, serif", "700 italic");
   ctx.fillStyle = "#f2d3c4";
   ctx.font = `700 italic ${heroSize}px Georgia, Times New Roman, serif`;
   const heroLines = wrapLines(ctx, resolvedHero, contentW, 2);
-  heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * (heroSize + 4)));
-  y += heroLines.length * (heroSize + 4) + 12;
+  const heroLineHeight = heroSize + 1;
+  heroLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * heroLineHeight));
+  y += heroLines.length * heroLineHeight + 24;
 
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 21px system-ui, -apple-system, Segoe UI, Roboto";
-  const subLines = wrapLines(ctx, resolvedSubread, contentW, 3);
-  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 24));
-  y += subLines.length * 24 + 28;
+  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
+  const subLines = wrapLines(ctx, resolvedSubread, contentW, 4);
+  subLines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 25));
+  y += subLines.length * 25 + 28;
 
   const imgs = [];
   for (let i = 0; i < 3; i++) {
@@ -379,7 +514,7 @@ export async function buildPoseSessionSharePng({
 
   const imgGap = 14;
   const imgW = Math.floor((contentW - imgGap * 2) / 3);
-  const imgH = 270;
+  const imgH = 232;
   for (let i = 0; i < 3; i++) {
     const x = contentX + i * (imgW + imgGap);
     ctx.save();
@@ -396,47 +531,69 @@ export async function buildPoseSessionSharePng({
     ctx.stroke();
     ctx.restore();
   }
-  y += imgH + 44;
+  y += imgH + 38;
+
+  const footerY = cardY + cardH - 58;
+  const bodyLayout = pickBodyLayout(ctx, {
+    availableHeight: footerY - 34 - y,
+    bulletItems: resolvedBullets,
+    breakdownItems: resolvedBreakdown.slice(0, 4),
+    nextUpItems: resolvedNextUp.slice(0, 2),
+    coachNoteItems: resolvedCoachNote.slice(0, 2),
+    width: contentW,
+  });
 
   drawSectionTitle(ctx, resolvedBulletsLabel, contentX, y, contentW);
-  y += 34;
+  y += bodyLayout.sectionTitleGap;
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 21px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = `500 ${bodyLayout.bulletFont}px system-ui, -apple-system, Segoe UI, Roboto`;
   for (const item of resolvedBullets) {
     ctx.beginPath();
     ctx.fillStyle = "#f2c27b";
-    ctx.arc(contentX + 8, y - 6, 5, 0, Math.PI * 2);
+    ctx.arc(contentX + 8, y - 8, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "rgba(246,234,224,0.96)";
-    const lines = wrapLines(ctx, item, contentW - 26, 2);
-    lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * 22));
-    y += lines.length * 22 + 10;
+    const lines = wrapLines(ctx, item, contentW - 96, 7);
+    lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * bodyLayout.bulletLineHeight));
+    y += lines.length * bodyLayout.bulletLineHeight + bodyLayout.bulletGap;
   }
 
-  y += 10;
+  y += bodyLayout.sectionSpacer;
   drawSectionTitle(ctx, "BREAKDOWN", contentX, y, contentW);
-  y += 34;
+  y += bodyLayout.sectionTitleGap;
   ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 17px system-ui, -apple-system, Segoe UI, Roboto";
-  for (const item of resolvedBreakdown.slice(0, 3)) {
-    const lines = wrapLines(ctx, item, contentW, 3);
-    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 22));
-    y += lines.length * 22 + 14;
+  ctx.font = `500 ${bodyLayout.breakdownFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+  for (const item of resolvedBreakdown.slice(0, 4)) {
+    const lines = wrapLines(ctx, item, contentW - 64, 9);
+    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLayout.breakdownLineHeight));
+    y += lines.length * bodyLayout.breakdownLineHeight + bodyLayout.breakdownGap;
   }
 
-  y += 8;
+  y += bodyLayout.sectionSpacer;
   drawSectionTitle(ctx, "NEXT UP", contentX, y, contentW);
-  y += 34;
+  y += bodyLayout.sectionTitleGap;
   ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 17px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = `500 ${bodyLayout.nextFont}px system-ui, -apple-system, Segoe UI, Roboto`;
   for (const item of resolvedNextUp.slice(0, 2)) {
-    const lines = wrapLines(ctx, item, contentW, 3);
-    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * 22));
-    y += lines.length * 22 + 14;
+    const lines = wrapLines(ctx, item, contentW - 64, 8);
+    lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLayout.nextLineHeight));
+    y += lines.length * bodyLayout.nextLineHeight + bodyLayout.nextGap;
+  }
+
+  if (resolvedCoachNote.length) {
+    y += bodyLayout.sectionSpacer;
+    drawSectionTitle(ctx, "COACH NOTE", contentX, y, contentW);
+    y += bodyLayout.sectionTitleGap;
+    ctx.fillStyle = "rgba(246,234,224,0.94)";
+    ctx.font = `500 ${bodyLayout.coachFont}px system-ui, -apple-system, Segoe UI, Roboto`;
+    for (const item of resolvedCoachNote.slice(0, 2)) {
+      const lines = wrapLines(ctx, item, contentW - 64, 8);
+      lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLayout.coachLineHeight));
+      y += lines.length * bodyLayout.coachLineHeight + bodyLayout.coachGap;
+    }
   }
 
   // Footer branding only — no fake share button inside the exported share card.
-  const footerY = cardY + cardH - 64;
   ctx.fillStyle = "#f0e3d7";
   ctx.font = "700 26px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(String(title || "SlimCal").slice(0, 16), contentX, footerY);
