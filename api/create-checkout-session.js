@@ -22,6 +22,94 @@ function absUrl(pathOrUrl, base) {
   catch { return new URL(pathOrUrl, base).toString(); }
 }
 function nowIso() { return new Date().toISOString(); }
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+async function getLatestTrialSignals(supabaseAdmin, { user_id, email }) {
+  const normalizedEmail = normalizeEmail(email);
+  const customerIds = new Set();
+
+  if (user_id) {
+    const { data: customerRows } = await supabaseAdmin
+      .from("app_stripe_customers")
+      .select("customer_id")
+      .eq("user_id", user_id)
+      .limit(20);
+    (customerRows || []).forEach((row) => row?.customer_id && customerIds.add(row.customer_id));
+  }
+
+  if (normalizedEmail) {
+    const { data: emailCustomerRows } = await supabaseAdmin
+      .from("app_stripe_customers")
+      .select("customer_id")
+      .ilike("email", normalizedEmail)
+      .limit(20);
+    (emailCustomerRows || []).forEach((row) => row?.customer_id && customerIds.add(row.customer_id));
+  }
+
+  let appUserTrial = null;
+  if (user_id) {
+    const { data } = await supabaseAdmin
+      .from("app_users")
+      .select("trial_start, trial_end")
+      .eq("user_id", user_id)
+      .maybeSingle();
+    appUserTrial = data || null;
+  }
+
+  let directSubRows = [];
+  if (user_id) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("status, trial_start, trial_end, user_id, stripe_customer_id, customer_id, updated_at")
+      .eq("user_id", user_id)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    directSubRows = data || [];
+  }
+
+  const customerSubRows = [];
+  for (const customerId of customerIds) {
+    const { data } = await supabaseAdmin
+      .from("app_subscriptions")
+      .select("status, trial_start, trial_end, user_id, stripe_customer_id, customer_id, updated_at")
+      .or(`stripe_customer_id.eq.${customerId},customer_id.eq.${customerId}`)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    (data || []).forEach((row) => customerSubRows.push(row));
+  }
+
+  const allSubRows = [];
+  const seen = new Set();
+  for (const row of [...(directSubRows || []), ...(customerSubRows || [])]) {
+    if (!row) continue;
+    const key = JSON.stringify([
+      row.user_id || null,
+      row.stripe_customer_id || null,
+      row.customer_id || null,
+      row.trial_start || null,
+      row.trial_end || null,
+      row.status || null,
+      row.updated_at || null,
+    ]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    allSubRows.push(row);
+  }
+
+  let sawAnyTrialSignal = !!(appUserTrial?.trial_start || appUserTrial?.trial_end);
+  if (!sawAnyTrialSignal) {
+    sawAnyTrialSignal = allSubRows.some((row) => {
+      const status = String(row?.status || "").toLowerCase();
+      return !!(row?.trial_start || row?.trial_end || status === "trialing");
+    });
+  }
+
+  return {
+    sawAnyTrialSignal,
+    customerIds: [...customerIds],
+  };
+}
 
 /* ------------------------------- handler -------------------------------- */
 export default async function handler(req, res) {
@@ -88,16 +176,12 @@ export default async function handler(req, res) {
 
     // ---- ONE-TRIAL-ONLY ENFORCEMENT (server-side) -------------------------
     let trialEligibleServer = true;
+    let knownCustomerIds = [];
 
     if (supabaseAdmin) {
-      const { data: userRow } = await supabaseAdmin
-        .from("app_users")
-        .select("trial_start, trial_end")
-        .eq("user_id", user_id)
-        .maybeSingle();
-
-      const trialUsed = !!(userRow?.trial_start || userRow?.trial_end);
-      trialEligibleServer = !trialUsed;
+      const trialSignals = await getLatestTrialSignals(supabaseAdmin, { user_id, email });
+      trialEligibleServer = !trialSignals.sawAnyTrialSignal;
+      knownCustomerIds = trialSignals.customerIds || [];
     }
 
     // Default trialDays from env, but only apply if eligible
@@ -109,7 +193,7 @@ export default async function handler(req, res) {
     const trialEligible =
       supabaseAdmin ? trialEligibleServer : !!trialEligibleHint;
 
-    // Try to find an existing Stripe customer mapping for this user.
+    // Try to find an existing Stripe customer mapping for this user first, then email-linked history.
     let stripeCustomerId = null;
     if (supabaseAdmin) {
       const { data: rows, error: selectErr } = await supabaseAdmin
@@ -122,7 +206,7 @@ export default async function handler(req, res) {
       if (selectErr && selectErr.code !== "PGRST116") {
         console.warn("[checkout] supabase app_stripe_customers select error:", selectErr);
       }
-      stripeCustomerId = rows?.[0]?.customer_id || null;
+      stripeCustomerId = rows?.[0]?.customer_id || knownCustomerIds?.[0] || null;
     }
 
     if (stripeCustomerId) {
