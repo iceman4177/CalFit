@@ -19,19 +19,21 @@ import FactCheckIcon from "@mui/icons-material/FactCheck";
 import DonutLargeIcon from "@mui/icons-material/DonutLarge";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 
-function AppIcon({ icon, label, helper, onClick, grad }) {
+function AppIcon({ icon, label, desc, onClick, grad }) {
   return (
-    <Stack spacing={1.05} sx={{ alignItems: "center", width: "100%", maxWidth: 168 }}>
+    <Stack spacing={1.2} sx={{ alignItems: "center", width: "100%", maxWidth: 220 }}>
       <ButtonBase
         onClick={onClick}
         sx={{
-          width: { xs: 124, sm: 132 },
-          height: { xs: 124, sm: 132 },
+          width: { xs: 132, sm: 140 },
+          height: { xs: 132, sm: 140 },
           borderRadius: 999,
           border: "1px solid rgba(148,163,184,0.18)",
-          background: grad || "linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(2,6,23,0.92) 100%)",
+          background:
+            grad ||
+            "linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(2,6,23,0.92) 100%)",
           color: "rgba(255,255,255,0.96)",
-          boxShadow: "0 18px 40px rgba(0,0,0,0.35)",
+          boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
           position: "relative",
           overflow: "hidden",
           display: "flex",
@@ -42,12 +44,12 @@ function AppIcon({ icon, label, helper, onClick, grad }) {
           py: 1.2,
           textAlign: "center",
           transform: "translateZ(0)",
-          transition: "transform 140ms ease, box-shadow 180ms ease",
           "&:before": {
             content: '""',
             position: "absolute",
             inset: -2,
-            background: "radial-gradient(600px 220px at 50% 0%, rgba(255,255,255,0.22), rgba(0,0,0,0))",
+            background:
+              "radial-gradient(600px 220px at 50% 0%, rgba(255,255,255,0.22), rgba(0,0,0,0))",
             opacity: 0.75,
             pointerEvents: "none",
           },
@@ -55,14 +57,23 @@ function AppIcon({ icon, label, helper, onClick, grad }) {
             content: '""',
             position: "absolute",
             inset: 0,
-            background: "radial-gradient(260px 260px at 50% 35%, rgba(255,255,255,0.10), rgba(0,0,0,0) 60%)",
+            background:
+              "radial-gradient(260px 260px at 50% 35%, rgba(255,255,255,0.10), rgba(0,0,0,0) 60%)",
             pointerEvents: "none",
           },
-          "&:hover": { transform: "translateY(-2px)", boxShadow: "0 22px 46px rgba(0,0,0,0.38)" },
+          "&:hover": { transform: "translateY(-2px)" },
           "&:active": { transform: "translateY(0px) scale(0.99)" },
         }}
       >
-        <Box sx={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Box
+          sx={{
+            position: "relative",
+            zIndex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           {icon}
         </Box>
         <Typography
@@ -71,101 +82,139 @@ function AppIcon({ icon, label, helper, onClick, grad }) {
             position: "relative",
             zIndex: 1,
             fontWeight: 950,
-            letterSpacing: 0.25,
+            letterSpacing: 0.15,
             lineHeight: 1.1,
             textShadow: "0 6px 18px rgba(0,0,0,0.45)",
             color: "rgba(255,255,255,0.98)",
+            fontSize: { xs: "1rem", sm: "1.1rem" },
           }}
         >
           {label}
         </Typography>
       </ButtonBase>
+
       <Typography
-        variant="caption"
+        variant="body2"
         sx={{
-          minHeight: 32,
-          px: 0.5,
+          width: "100%",
+          maxWidth: { xs: 170, sm: 190 },
           textAlign: "center",
-          color: "rgba(51,65,85,0.82)",
+          color: "rgba(51,65,85,0.86)",
           fontWeight: 700,
-          lineHeight: 1.25,
+          lineHeight: 1.2,
+          fontSize: { xs: "0.95rem", sm: "1rem" },
+          minHeight: { xs: 44, sm: 48 },
         }}
       >
-        {helper}
+        {desc}
       </Typography>
     </Stack>
   );
 }
 
-export default function HomeHub() {
+const heroChips = [
+  { label: "Log", bg: "rgba(59,130,246,0.10)", color: "#2563eb" },
+  { label: "Check", bg: "rgba(168,85,247,0.10)", color: "#7e22ce" },
+  { label: "Plan", bg: "rgba(245,158,11,0.12)", color: "#b45309" },
+  { label: "Scan", bg: "rgba(236,72,153,0.10)", color: "#be185d" },
+  { label: "Coach", bg: "rgba(14,165,233,0.10)", color: "#0369a1" },
+];
 
+export default function HomeHub() {
   const history = useHistory();
   const { user } = useAuth();
-  const profileStatus = useMemo(() => getMinimumProfileStatus(user?.id || null), [user?.id]);
+  const profileStatus = useMemo(
+    () => getMinimumProfileStatus(user?.id || null),
+    [user?.id]
+  );
 
   return (
     <Box
       sx={{
         minHeight: "calc(100vh - 64px)",
         py: { xs: 2.5, sm: 3 },
-        background: "radial-gradient(1200px 600px at 50% 0%, rgba(59,130,246,0.10), rgba(255,255,255,0) 55%), radial-gradient(1000px 520px at 50% 60%, rgba(16,185,129,0.08), rgba(255,255,255,0) 60%)",
+        background:
+          "radial-gradient(1200px 600px at 50% 0%, rgba(59,130,246,0.10), rgba(255,255,255,0) 55%), radial-gradient(1000px 520px at 50% 60%, rgba(16,185,129,0.08), rgba(255,255,255,0) 60%)",
       }}
     >
       <Container maxWidth="md">
         <Stack spacing={{ xs: 2, sm: 2.6 }} sx={{ alignItems: "center" }}>
           <Stack
-            spacing={1.15}
+            spacing={1}
             sx={{
               width: "100%",
-              maxWidth: 720,
+              maxWidth: 760,
+              alignItems: "center",
               textAlign: "center",
-              p: { xs: 1.8, sm: 2.5 },
-              borderRadius: 4,
-              border: "1px solid rgba(148,163,184,0.28)",
-              background: "rgba(255,255,255,0.82)",
+              p: { xs: 2.25, sm: 2.8 },
+              borderRadius: { xs: 5, sm: 6 },
+              border: "1px solid rgba(148,163,184,0.22)",
+              background: "rgba(255,255,255,0.80)",
               boxShadow: "0 18px 42px rgba(0,0,0,0.08)",
             }}
           >
             <Typography
-              variant="overline"
-              sx={{ fontWeight: 900, letterSpacing: { xs: 0.9, sm: 1.2 }, color: "primary.main", lineHeight: 1, fontSize: { xs: "0.72rem", sm: "0.78rem" } }}
+              sx={{
+                fontWeight: 1000,
+                letterSpacing: 2.2,
+                color: "#2563eb",
+                fontSize: { xs: "0.95rem", sm: "1rem" },
+              }}
             >
-              SlimCal Home
+              SLIMCAL HOME
             </Typography>
             <Typography
-              variant="h5"
-              sx={{ fontWeight: 1000, letterSpacing: { xs: -0.4, sm: -0.8 }, color: "rgba(15,23,42,0.96)", fontSize: { xs: "2rem", sm: undefined }, lineHeight: { xs: 1.05, sm: 1.1 } }}
+              variant="h4"
+              sx={{
+                fontWeight: 1000,
+                letterSpacing: -1.1,
+                color: "rgba(15,23,42,0.98)",
+                fontSize: { xs: "2rem", sm: "2.35rem" },
+                lineHeight: 1.05,
+              }}
             >
               Pick your next move
             </Typography>
             <Typography
-              variant="subtitle1"
-              sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 650, fontSize: { xs: "0.98rem", sm: "1rem" }, maxWidth: { xs: 330, sm: 620 }, mx: "auto" }}
+              sx={{
+                color: "rgba(51,65,85,0.82)",
+                fontWeight: 700,
+                lineHeight: 1.45,
+                fontSize: { xs: "1rem", sm: "1.2rem" },
+                maxWidth: 640,
+              }}
             >
               Log your food and training, check how today is going, then get a clear next step.
             </Typography>
+
             <Stack
               direction="row"
+              spacing={{ xs: 0.8, sm: 1 }}
               sx={{
-                flexWrap: { xs: "nowrap", sm: "wrap" },
-                gap: { xs: 0.65, sm: 1 },
-                pt: 0.35,
                 justifyContent: "center",
                 alignItems: "center",
-                width: "100%",
-                overflowX: { xs: "auto", sm: "visible" },
-                scrollbarWidth: "none",
-                "&::-webkit-scrollbar": { display: "none" },
+                flexWrap: "wrap",
+                rowGap: 0.8,
+                pt: 0.4,
               }}
             >
-              <Chip label="Log" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(59,130,246,0.10)", color: "rgba(30,64,175,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
-              <Chip label="Check" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(168,85,247,0.10)", color: "rgba(107,33,168,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
-              <Chip label="Plan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(245,158,11,0.12)", color: "rgba(146,64,14,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
-              <Chip label="Scan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(236,72,153,0.10)", color: "rgba(157,23,77,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
-              <Chip label="Coach" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(14,165,233,0.10)", color: "rgba(3,105,161,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
+              {heroChips.map((chip) => (
+                <Chip
+                  key={chip.label}
+                  label={chip.label}
+                  sx={{
+                    bgcolor: chip.bg,
+                    color: chip.color,
+                    fontWeight: 900,
+                    borderRadius: 999,
+                    fontSize: { xs: "0.9rem", sm: "0.95rem" },
+                    height: { xs: 40, sm: 38 },
+                    px: { xs: 0.35, sm: 0.2 },
+                  }}
+                />
+              ))}
             </Stack>
           </Stack>
-
 
           {user && !profileStatus.isComplete && (
             <Stack
@@ -175,14 +224,18 @@ export default function HomeHub() {
                 p: 2,
                 borderRadius: 3,
                 border: "1px solid rgba(59,130,246,0.22)",
-                background: "linear-gradient(180deg, rgba(239,246,255,0.96) 0%, rgba(255,255,255,0.95) 100%)",
+                background:
+                  "linear-gradient(180deg, rgba(239,246,255,0.96) 0%, rgba(255,255,255,0.95) 100%)",
                 boxShadow: "0 10px 30px rgba(59,130,246,0.10)",
               }}
             >
               <Typography sx={{ fontWeight: 1000, color: "rgba(15,23,42,0.96)" }}>
                 Personalize SlimCal in under 30 seconds
               </Typography>
-              <Typography variant="body2" sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 600 }}>
+              <Typography
+                variant="body2"
+                sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 600 }}
+              >
                 Complete your profile to unlock accurate AI calories, Daily Check-In, Today’s Plan, Pose Session, and Coach outputs.
               </Typography>
               <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -190,7 +243,7 @@ export default function HomeHub() {
                   {profileStatus.completedCount}/{profileStatus.totalCount} core fields complete
                 </Typography>
                 <ButtonBase
-                  onClick={() => history.push('/edit-info')}
+                  onClick={() => history.push("/edit-info")}
                   sx={{
                     px: 1.5,
                     py: 0.75,
@@ -205,13 +258,14 @@ export default function HomeHub() {
               </Stack>
             </Stack>
           )}
+
           <Box
             sx={{
               width: "100%",
               maxWidth: 760,
               display: "grid",
               gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
-              gap: { xs: 2, sm: 2.6 },
+              gap: { xs: 2.3, sm: 2.8 },
               justifyItems: "center",
               alignItems: "start",
               pt: { xs: 0.4, sm: 0.8 },
@@ -220,46 +274,44 @@ export default function HomeHub() {
           >
             <AppIcon
               label="Workout"
+              desc="Build or log a workout."
               grad="linear-gradient(180deg, rgba(59,130,246,0.95) 0%, rgba(30,64,175,0.98) 100%)"
               icon={<FitnessCenterIcon sx={{ fontSize: 44 }} />}
-              helper="Build or log your training session."
               onClick={() => history.push("/workout")}
             />
             <AppIcon
               label="Meals"
+              desc="Log meals and track macros."
               grad="linear-gradient(180deg, rgba(16,185,129,0.92) 0%, rgba(4,120,87,0.98) 100%)"
               icon={<DinnerDiningIcon sx={{ fontSize: 44 }} />}
-              helper="Add meals, macros, or get AI ideas."
               onClick={() => history.push("/meals")}
             />
-
             <AppIcon
               label="Daily Check-In"
+              desc="See how today is tracking."
               grad="linear-gradient(180deg, rgba(168,85,247,0.92) 0%, rgba(88,28,135,0.98) 100%)"
               icon={<DonutLargeIcon sx={{ fontSize: 44 }} />}
-              helper="See how today is tracking so far."
               onClick={() => history.push("/daily-eval")}
             />
             <AppIcon
               label="Today's Plan"
+              desc="Know what to do next."
               grad="linear-gradient(180deg, rgba(245,158,11,0.92) 0%, rgba(180,83,9,0.98) 100%)"
               icon={<ChecklistIcon sx={{ fontSize: 44 }} />}
-              helper="Know exactly what to knock out next."
               onClick={() => history.push("/daily-checklist")}
             />
             <AppIcon
               label="Pose Session"
+              desc="Run your 3-pose scan."
               grad="linear-gradient(180deg, rgba(236,72,153,0.92) 0%, rgba(131,24,67,0.98) 100%)"
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
-              helper="Run your 3-pose physique scan."
               onClick={() => history.push("/body-scan/session")}
             />
-            
             <AppIcon
               label="Coach"
+              desc="Get your clearest next step."
               grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
               icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
-              helper="Get your personalized AI guidance."
               onClick={() => history.push("/verdict")}
             />
           </Box>
