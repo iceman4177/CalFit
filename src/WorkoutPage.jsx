@@ -1551,15 +1551,23 @@ setNewExercise({
 
   const renderHeroCard = () => (
     <Card sx={{ ...surfaceSx, overflow: 'visible', ...centeredSectionSx }}>
-      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center' }}>
+      <CardContent sx={{ pb: 2, pt: 2, overflow: 'visible', textAlign: 'center', position: 'relative' }}>
         {!isProUser() && showIdle && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              display: 'flex',
+              justifyContent: 'flex-end'
+            }}
+          >
             <FeatureUseBadge featureKey="ai_workout" isPro={false} />
           </Box>
         )}
 
-        <Stack spacing={2}>
-          <Box sx={{ maxWidth: 620, mx: 'auto' }}>
+        <Stack spacing={2} alignItems="center">
+          <Box sx={{ maxWidth: 620, mx: 'auto', width: '100%' }}>
             <Typography
               variant="h4"
               sx={{
@@ -1681,7 +1689,7 @@ setNewExercise({
               </Paper>
 
               {showCurrentSession && (
-                <Box ref={sessionLogRef} sx={{ maxWidth: 620, mx: 'auto', width: '100%' }}>
+                <Box ref={sessionLogRef}>
                   <Divider sx={{ my: 0.5 }} />
                   <Stack spacing={1.25} sx={{ pt: 1.25 }}>
                     <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center' }}>
@@ -1698,7 +1706,7 @@ setNewExercise({
                           Current Session Logs
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                          Review today&apos;s workout and make any quick edits below.
+                          Review and edit today&apos;s workout below.
                         </Typography>
                       </Box>
                       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="center">
