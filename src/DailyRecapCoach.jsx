@@ -1,5 +1,6 @@
 // src/DailyRecapCoach.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import {
   Box,
   Button,
@@ -16,6 +17,7 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import UpgradeModal from "./components/UpgradeModal";
+import DailyEvaluationHome from "./DailyEvaluationHome";
 import { getFreeDailyLimit } from "./components/FeatureUseBadge.jsx";
 import { useAuth } from "./context/AuthProvider.jsx";
 import { useEntitlements } from "./context/EntitlementsContext.jsx";
@@ -651,7 +653,7 @@ function calcCaloriesFromSets(sets) {
 
 // -----------------------------------------------------------------------------
 // Component
-export default function DailyRecapCoach({ embedded = false } = {}) {
+export default function DailyRecapCoach({ embedded = false, initialVerdictOpen = false } = {}) {
   const { user } = useAuth();
   const ent = useEntitlements();
 
@@ -667,6 +669,7 @@ export default function DailyRecapCoach({ embedded = false } = {}) {
 
   const [savedAt, setSavedAt] = useState(null);
   const [history, setHistory] = useState([]);
+  const [showAiVerdict, setShowAiVerdict] = useState(!!initialVerdictOpen);
 
   const todayUS = useMemo(() => usDay(), []);
   const todayISO = useMemo(() => localISODay(), []);
@@ -1303,14 +1306,64 @@ Output format (use these headings):
 
   return (
     <Box sx={{ p: 2, maxWidth: 900, mx: "auto" }}>
-      <Box sx={{ mb: 2.2 }}>
-        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: "-0.02em" }}>
-          🧠 Coach
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.3 }}>
-          Open app → Coach reacts to your day → you log meals/workouts → come back for the recap.
-        </Typography>
-      </Box>
+      {!embedded && (
+        <Card
+          elevation={0}
+          sx={{
+            mb: 2.2,
+            borderRadius: 5,
+            overflow: "visible",
+            border: "1px solid rgba(2,6,23,0.08)",
+            boxShadow: "0 24px 60px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)",
+          }}
+        >
+          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+            <Stack spacing={2} alignItems="center" textAlign="center">
+              <Typography
+                variant="h4"
+                sx={{
+                  fontWeight: 800,
+                  lineHeight: 1.08,
+                  letterSpacing: "-0.02em",
+                  fontSize: { xs: "2.15rem", sm: "2.35rem" },
+                }}
+              >
+                Coach
+              </Typography>
+              <Typography
+                variant="body1"
+                color="text.secondary"
+                sx={{ maxWidth: 580, mx: "auto", fontSize: { xs: "1rem", sm: "1.08rem" }, lineHeight: 1.5 }}
+              >
+                Fire off an AI Verdict at the top, then keep the rest of your Coach flow the same with daily quests and your recap underneath.
+              </Typography>
+              <Button
+                onClick={() => setShowAiVerdict((s) => !s)}
+                variant={showAiVerdict ? "outlined" : "contained"}
+                startIcon={<AutoAwesomeIcon />}
+                size="large"
+                sx={{
+                  width: "100%",
+                  maxWidth: 560,
+                  minHeight: 56,
+                  fontWeight: 700,
+                  fontSize: { xs: "1.05rem", sm: "1.08rem" },
+                  borderRadius: 999,
+                  px: 3,
+                }}
+              >
+                {showAiVerdict ? "Hide AI Verdict" : "AI Verdict"}
+              </Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {showAiVerdict && !embedded && (
+        <Box sx={{ mb: 2.2 }}>
+          <DailyEvaluationHome view="coach" />
+        </Box>
+      )}
 
       {roastLine && (
         <Card

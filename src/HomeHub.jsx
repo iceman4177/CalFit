@@ -15,7 +15,6 @@ import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import DinnerDiningIcon from "@mui/icons-material/DinnerDining";
 import CenterFocusStrongIcon from "@mui/icons-material/CenterFocusStrong";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
-import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import DonutLargeIcon from "@mui/icons-material/DonutLarge";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 
@@ -212,12 +211,6 @@ export default function HomeHub() {
             />
             
             <AppIcon
-              label="Get Verdict"
-              grad="linear-gradient(180deg, rgba(34,197,94,0.92) 0%, rgba(21,128,61,0.98) 100%)"
-              icon={<AutoAwesomeIcon sx={{ fontSize: 44 }} />}
-              onClick={() => history.push("/get-verdict")}
-            />
-<AppIcon
               label="Coach"
               grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
               icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
