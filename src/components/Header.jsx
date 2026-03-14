@@ -174,7 +174,7 @@ const [authUser, setAuthUser] = useState(null);
         borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}
     >
-      <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto' }}>
+      <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto', position: 'relative' }}>
         {/* Brand */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2 }}>
           <a
@@ -226,8 +226,17 @@ const [authUser, setAuthUser] = useState(null);
         </Box>
 
         {/* Primary nav */}
-        <Box sx={{ flex: 1, display: { xs: 'none', sm: 'flex' }, justifyContent: 'center' }}>
-          <Stack direction="row" spacing={0.5} alignItems="center">
+        <Box
+          sx={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: { xs: 'none', md: 'flex' },
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ pointerEvents: 'auto' }}>
             <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
               Home
             </NavLink>
@@ -237,11 +246,11 @@ const [authUser, setAuthUser] = useState(null);
             <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
               Dashboard
             </NavLink>
-</Stack>
+          </Stack>
         </Box>
 
         {/* Plan action + account */}
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ ml: 'auto' }}>
           {/* Upgrade CTA (hide when already Pro) */}
           {!pro && (
             <Button
