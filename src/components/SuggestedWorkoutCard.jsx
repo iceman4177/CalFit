@@ -9,7 +9,8 @@ import {
   ListItem,
   Divider,
   Box,
-  Chip
+  Chip,
+  LinearProgress
 } from '@mui/material';
 import UpgradeModal from './UpgradeModal';
 import WorkoutTypePicker from './WorkoutTypePicker';
@@ -84,6 +85,7 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(6);
 
   const pro = isProUser();
 
@@ -103,6 +105,34 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
   useEffect(() => {
     if (typeof onLoadingChange === 'function') onLoadingChange(loading);
   }, [loading, onLoadingChange]);
+
+  useEffect(() => {
+    if (!loading) {
+      setGenerationProgress(6);
+      return undefined;
+    }
+
+    setGenerationProgress(8);
+    let rafId = null;
+    let mounted = true;
+    const startedAt = Date.now();
+    const targetMs = 10500;
+
+    const tick = () => {
+      if (!mounted) return;
+      const elapsed = Date.now() - startedAt;
+      const normalized = Math.min(elapsed / targetMs, 1);
+      const eased = 8 + (92 - 8) * (1 - Math.pow(1 - normalized, 2.15));
+      setGenerationProgress((prev) => Math.max(prev, Math.min(92, eased)));
+      if (mounted && normalized < 1) rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [loading]);
 
   useEffect(() => {
     if (loading) {
@@ -225,12 +255,40 @@ export default function SuggestedWorkoutCard({ userData, onAccept, onLoadingChan
 
   if (loading) {
     return (
-      <Card sx={{ mb: 4, overflow: 'visible' }}>
-        <CardContent sx={{ overflow: 'visible' }}>
-          <Typography variant="h6">Generating a plan…</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Personalizing based on your goal, intent, equipment, and split.
-          </Typography>
+      <Card sx={{ mb: 4, overflow: 'visible', borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 6px 18px rgba(0,0,0,0.04)' }}>
+        <CardContent sx={{ overflow: 'visible', px: { xs: 2, sm: 3 }, py: { xs: 2.25, sm: 2.5 }, textAlign: 'center' }}>
+          <Box sx={{ width: '100%', maxWidth: 520, mx: 'auto' }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.15 }}>
+              Generating your workout…
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, fontSize: { xs: '0.96rem', sm: '1rem' } }}>
+              Personalizing it around your goal, split, and available equipment.
+            </Typography>
+
+            <Box sx={{ mt: 2.1 }}>
+              <LinearProgress
+                variant="determinate"
+                value={generationProgress}
+                sx={{
+                  height: 10,
+                  borderRadius: 999,
+                  bgcolor: 'rgba(16,24,40,0.08)',
+                  overflow: 'hidden',
+                  '& .MuiLinearProgress-bar': {
+                    borderRadius: 999,
+                  }
+                }}
+              />
+              <Box sx={{ mt: 0.9, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+                <Typography sx={{ fontWeight: 800, fontSize: 13 }}>
+                  {Math.round(generationProgress)}%
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 12 }}>
+                  Building your next session
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
         </CardContent>
       </Card>
     );
