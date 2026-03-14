@@ -9,15 +9,13 @@ import {
   Container,
   Stack,
   Typography,
+  Chip,
 } from "@mui/material";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { supabase } from "./lib/supabaseClient";
 
-// ⬇️ Add this import (you created this earlier)
-//    If you placed it somewhere else, update the import path accordingly.
-import CancelProButton from "./components/CancelProButton.jsx";
 
 // Read query params once (client-only)
 function useQuery() {
@@ -137,104 +135,254 @@ export default function ProSuccess() {
       if (!ud.isPremium) {
         localStorage.setItem("userData", JSON.stringify({ ...ud, isPremium: true }));
       }
+      window.dispatchEvent(new CustomEvent("slimcal:pro-changed"));
     } catch { /* ignore */ }
   }, [phase]);
 
   const go = (path) => () => { window.location.href = path; };
+  const statusTone = String(statusLine || "").toLowerCase();
+  const statusLabel = statusTone === "trialing" ? "Trial active" : "Pro active";
 
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
-      <Card elevation={3} sx={{ borderRadius: 3 }}>
-        <CardContent>
-          <Stack alignItems="center" spacing={2}>
-            {phase === "active" ? (
-              <>
-                <CheckCircleOutlineIcon color="success" sx={{ fontSize: 64 }} />
-                <Typography variant="h4" align="center" gutterBottom>
-                  {dev ? "Pro Activated (Dev) 🎉" : "You’re Pro! 🎉"}
-                </Typography>
+    <Box
+      sx={{
+        minHeight: 'calc(100vh - 72px)',
+        background: 'linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)',
+        py: { xs: 3, sm: 5 },
+      }}
+    >
+      <Container maxWidth="sm">
+        <Card
+          elevation={0}
+          sx={{
+            borderRadius: { xs: 5, sm: 6 },
+            border: '1px solid rgba(15,23,42,0.06)',
+            boxShadow: '0 18px 50px rgba(37,99,235,0.08)',
+            overflow: 'hidden',
+          }}
+        >
+          <CardContent sx={{ p: { xs: 3, sm: 4.5 } }}>
+            <Stack alignItems="center" spacing={2.25}>
+              {phase === "active" ? (
+                <>
+                  <Box
+                    sx={{
+                      width: 96,
+                      height: 96,
+                      borderRadius: '50%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      background: 'radial-gradient(circle at 30% 30%, rgba(34,197,94,0.18), rgba(34,197,94,0.06))',
+                    }}
+                  >
+                    <CheckCircleOutlineIcon color="success" sx={{ fontSize: 68 }} />
+                  </Box>
 
-                <Typography variant="body1" align="center" sx={{ opacity: 0.9 }}>
-                  {message}
-                </Typography>
-
-                {(cid || sessionId) && (
-                  <Typography variant="caption" sx={{ mt: 1, opacity: 0.6 }}>
-                    {cid ? `Ref: ${cid}${dev ? " (dev)" : ""}` : ""}
-                    {cid && sessionId ? " • " : ""}
-                    {sessionId ? `session ${sessionId}` : ""}
-                  </Typography>
-                )}
-
-                {/* Status line & cancel control */}
-                <Box sx={{ mt: 2 }}>
-                  {statusLine ? (
-                    <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                      Subscription status: {statusLine}
+                  <Stack spacing={1} alignItems="center">
+                    <Typography
+                      variant="h3"
+                      align="center"
+                      sx={{
+                        fontWeight: 900,
+                        fontSize: { xs: '2rem', sm: '2.4rem' },
+                        letterSpacing: '-0.02em',
+                        color: '#0f172a',
+                      }}
+                    >
+                      {dev ? "Pro Activated" : "You’re Pro! 🎉"}
                     </Typography>
-                  ) : null}
-                </Box>
-
-                <Box sx={{ mt: 2 }}>
-                  {subscriptionId ? (
-                    <CancelProButton subscriptionId={subscriptionId} />
-                  ) : (
-                    <Typography variant="caption" sx={{ opacity: 0.6 }}>
-                      (Subscription details syncing… refresh if you don’t see the cancel option.)
+                    <Typography
+                      variant="body1"
+                      align="center"
+                      sx={{
+                        maxWidth: 440,
+                        color: 'rgba(15,23,42,0.72)',
+                        fontSize: { xs: '1.02rem', sm: '1.08rem' },
+                      }}
+                    >
+                      {message || "Your Pro access is active. You’re all set."}
                     </Typography>
-                  )}
-                </Box>
+                  </Stack>
 
-                <Box sx={{ mt: 3 }}>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="center">
-                    <Button variant="contained" onClick={go("/")}>
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1.25}
+                    alignItems="center"
+                    justifyContent="center"
+                    sx={{ width: '100%', pt: 0.5 }}
+                  >
+                    <Chip
+                      label={statusLabel}
+                      color="success"
+                      sx={{
+                        fontWeight: 800,
+                        height: 38,
+                        borderRadius: 999,
+                        fontSize: '0.95rem',
+                        '& .MuiChip-label': { px: 1.75 },
+                      }}
+                    />
+                    {dev ? (
+                      <Chip
+                        label="Dev mode"
+                        variant="outlined"
+                        sx={{
+                          fontWeight: 800,
+                          height: 38,
+                          borderRadius: 999,
+                          fontSize: '0.95rem',
+                          '& .MuiChip-label': { px: 1.75 },
+                        }}
+                      />
+                    ) : null}
+                  </Stack>
+
+                  <Box
+                    sx={{
+                      width: '100%',
+                      borderRadius: 4,
+                      background: 'linear-gradient(180deg, rgba(37,99,235,0.05), rgba(37,99,235,0.025))',
+                      border: '1px solid rgba(37,99,235,0.10)',
+                      px: { xs: 2, sm: 2.5 },
+                      py: { xs: 2, sm: 2.25 },
+                    }}
+                  >
+                    <Stack spacing={0.75}>
+                      <Typography sx={{ fontWeight: 900, color: '#0f172a', fontSize: '1rem' }}>
+                        You’re unlocked
+                      </Typography>
+                      <Typography sx={{ color: 'rgba(15,23,42,0.72)' }}>
+                        AI Workout, AI Meals, Coach, Daily Check-In, and Pose Session are ready to go.
+                      </Typography>
+                    </Stack>
+                  </Box>
+
+                  <Stack spacing={1.25} sx={{ width: '100%', pt: 0.5 }}>
+                    <Button
+                      variant="contained"
+                      onClick={go("/")}
+                      size="large"
+                      sx={{
+                        minHeight: 54,
+                        borderRadius: 999,
+                        fontWeight: 900,
+                        fontSize: '1.05rem',
+                        textTransform: 'none',
+                      }}
+                    >
                       Go Home
                     </Button>
-                    <Button variant="outlined" onClick={go("/workout")}>
-                      Log a Workout
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+                      <Button
+                        variant="outlined"
+                        onClick={go("/workout")}
+                        size="large"
+                        fullWidth
+                        sx={{
+                          minHeight: 52,
+                          borderRadius: 999,
+                          fontWeight: 800,
+                          textTransform: 'none',
+                        }}
+                      >
+                        Log a Workout
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={go("/meals")}
+                        size="large"
+                        fullWidth
+                        sx={{
+                          minHeight: 52,
+                          borderRadius: 999,
+                          fontWeight: 800,
+                          textTransform: 'none',
+                        }}
+                      >
+                        Log a Meal
+                      </Button>
+                    </Stack>
+                  </Stack>
+
+                  {dev && (cid || sessionId) ? (
+                    <Typography variant="caption" sx={{ opacity: 0.55, pt: 1 }}>
+                      {cid ? `Ref: ${cid}` : ''}
+                      {cid && sessionId ? ' • ' : ''}
+                      {sessionId ? `session ${sessionId}` : ''}
+                    </Typography>
+                  ) : null}
+                </>
+              ) : phase === "waiting" || phase === "checking" ? (
+                <>
+                  <Box
+                    sx={{
+                      width: 88,
+                      height: 88,
+                      borderRadius: '50%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      background: 'radial-gradient(circle at 30% 30%, rgba(37,99,235,0.10), rgba(37,99,235,0.03))',
+                    }}
+                  >
+                    {phase === "checking" ? (
+                      <HourglassEmptyIcon sx={{ fontSize: 56, color: '#2563eb' }} />
+                    ) : (
+                      <CircularProgress size={42} />
+                    )}
+                  </Box>
+                  <Typography variant="h4" align="center" sx={{ fontWeight: 900, color: '#0f172a' }}>
+                    {phase === "checking" ? "Confirming your Pro upgrade…" : "Finalizing your Pro access…"}
+                  </Typography>
+                  <Typography variant="body1" align="center" sx={{ maxWidth: 420, color: 'rgba(15,23,42,0.72)' }}>
+                    {message || "Hang tight while we confirm your payment with Stripe."}
+                  </Typography>
+                </>
+              ) : (
+                <>
+                  <Box
+                    sx={{
+                      width: 88,
+                      height: 88,
+                      borderRadius: '50%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      background: 'radial-gradient(circle at 30% 30%, rgba(239,68,68,0.10), rgba(239,68,68,0.03))',
+                    }}
+                  >
+                    <ErrorOutlineIcon color="error" sx={{ fontSize: 56 }} />
+                  </Box>
+                  <Typography variant="h4" align="center" sx={{ fontWeight: 900, color: '#0f172a' }}>
+                    We’re still syncing your Pro access
+                  </Typography>
+                  <Typography variant="body1" align="center" sx={{ maxWidth: 440, color: 'rgba(15,23,42,0.72)' }}>
+                    {message}
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mt: 1, width: '100%' }}>
+                    <Button
+                      variant="contained"
+                      onClick={() => window.location.reload()}
+                      size="large"
+                      fullWidth
+                      sx={{ minHeight: 52, borderRadius: 999, fontWeight: 900, textTransform: 'none' }}
+                    >
+                      Refresh
                     </Button>
-                    <Button variant="outlined" onClick={go("/meals")}>
-                      Log a Meal
+                    <Button
+                      variant="outlined"
+                      onClick={go("/")}
+                      size="large"
+                      fullWidth
+                      sx={{ minHeight: 52, borderRadius: 999, fontWeight: 800, textTransform: 'none' }}
+                    >
+                      Back Home
                     </Button>
                   </Stack>
-                </Box>
-              </>
-            ) : phase === "waiting" || phase === "checking" ? (
-              <>
-                {phase === "checking" ? (
-                  <HourglassEmptyIcon sx={{ fontSize: 64 }} />
-                ) : (
-                  <CircularProgress />
-                )}
-                <Typography variant="h6" align="center">
-                  {phase === "checking" ? "Confirming your Pro upgrade…" : "Finalizing your Pro access…"}
-                </Typography>
-                <Typography variant="body2" align="center" sx={{ opacity: 0.8 }}>
-                  {message || "Hang tight while we confirm your payment with Stripe."}
-                </Typography>
-              </>
-            ) : (
-              <>
-                <ErrorOutlineIcon color="error" sx={{ fontSize: 64 }} />
-                <Typography variant="h6" align="center" gutterBottom>
-                  We’re still syncing your Pro access
-                </Typography>
-                <Typography variant="body2" align="center" sx={{ opacity: 0.8 }}>
-                  {message}
-                </Typography>
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 2 }}>
-                  <Button variant="contained" onClick={() => window.location.reload()}>
-                    Refresh
-                  </Button>
-                  <Button variant="outlined" onClick={go("/")}>
-                    Back Home
-                  </Button>
-                </Stack>
-              </>
-            )}
-          </Stack>
-        </CardContent>
-      </Card>
-    </Container>
+                </>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+      </Container>
+    </Box>
   );
 }
