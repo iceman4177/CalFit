@@ -1581,7 +1581,7 @@ setNewExercise({
                 lineHeight: 1.5
               }}
             >
-              Build or generate your session, review it, then submit it in one smooth flow.
+              Build your workout manually or let AI create one, then review and submit in one smooth flow.
             </Typography>
           </Box>
 
@@ -1681,7 +1681,7 @@ setNewExercise({
               </Paper>
 
               {showCurrentSession && (
-                <Box ref={sessionLogRef}>
+                <Box ref={sessionLogRef} sx={{ maxWidth: 620, mx: 'auto', width: '100%' }}>
                   <Divider sx={{ my: 0.5 }} />
                   <Stack spacing={1.25} sx={{ pt: 1.25 }}>
                     <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center' }}>
@@ -1752,7 +1752,7 @@ setNewExercise({
                   onClick={() => setShowSaunaSection((s) => !s)}
                   sx={{ borderRadius: 999, fontWeight: 700, display: 'flex', mx: 'auto' }}
                 >
-                  {showSaunaSection ? 'Hide Sauna' : 'Add Sauna (optional)'}
+                  {showSaunaSection ? 'Hide Sauna Session' : 'Add Sauna Session'}
                 </Button>
               </Box>
 
