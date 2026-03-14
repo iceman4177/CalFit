@@ -119,7 +119,7 @@ export default function HomeHub() {
               width: "100%",
               maxWidth: 720,
               textAlign: "center",
-              p: { xs: 2, sm: 2.5 },
+              p: { xs: 1.8, sm: 2.5 },
               borderRadius: 4,
               border: "1px solid rgba(148,163,184,0.28)",
               background: "rgba(255,255,255,0.82)",
@@ -128,39 +128,41 @@ export default function HomeHub() {
           >
             <Typography
               variant="overline"
-              sx={{ fontWeight: 900, letterSpacing: 1.2, color: "primary.main", lineHeight: 1 }}
+              sx={{ fontWeight: 900, letterSpacing: { xs: 0.9, sm: 1.2 }, color: "primary.main", lineHeight: 1, fontSize: { xs: "0.72rem", sm: "0.78rem" } }}
             >
               SlimCal Home
             </Typography>
             <Typography
               variant="h5"
-              sx={{ fontWeight: 1000, letterSpacing: -0.8, color: "rgba(15,23,42,0.96)" }}
+              sx={{ fontWeight: 1000, letterSpacing: { xs: -0.4, sm: -0.8 }, color: "rgba(15,23,42,0.96)", fontSize: { xs: "2rem", sm: undefined }, lineHeight: { xs: 1.05, sm: 1.1 } }}
             >
               Pick your next move
             </Typography>
             <Typography
               variant="subtitle1"
-              sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 650 }}
+              sx={{ color: "rgba(51,65,85,0.85)", fontWeight: 650, fontSize: { xs: "0.98rem", sm: "1rem" }, maxWidth: { xs: 330, sm: 620 }, mx: "auto" }}
             >
               Log your food and training, check how today is going, then get a clear next step.
             </Typography>
             <Stack
               direction="row"
-              spacing={1}
               sx={{
-                flexWrap: "wrap",
-                gap: 1,
+                flexWrap: { xs: "nowrap", sm: "wrap" },
+                gap: { xs: 0.65, sm: 1 },
                 pt: 0.35,
                 justifyContent: "center",
                 alignItems: "center",
                 width: "100%",
+                overflowX: { xs: "auto", sm: "visible" },
+                scrollbarWidth: "none",
+                "&::-webkit-scrollbar": { display: "none" },
               }}
             >
-              <Chip label="Log" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(59,130,246,0.10)", color: "rgba(30,64,175,1)" }} />
-              <Chip label="Check" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(168,85,247,0.10)", color: "rgba(107,33,168,1)" }} />
-              <Chip label="Plan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(245,158,11,0.12)", color: "rgba(146,64,14,1)" }} />
-              <Chip label="Scan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(236,72,153,0.10)", color: "rgba(157,23,77,1)" }} />
-              <Chip label="Coach" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(14,165,233,0.10)", color: "rgba(3,105,161,1)" }} />
+              <Chip label="Log" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(59,130,246,0.10)", color: "rgba(30,64,175,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
+              <Chip label="Check" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(168,85,247,0.10)", color: "rgba(107,33,168,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
+              <Chip label="Plan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(245,158,11,0.12)", color: "rgba(146,64,14,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
+              <Chip label="Scan" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(236,72,153,0.10)", color: "rgba(157,23,77,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
+              <Chip label="Coach" size="small" sx={{ fontWeight: 800, bgcolor: "rgba(14,165,233,0.10)", color: "rgba(3,105,161,1)", height: { xs: 30, sm: 32 }, px: { xs: 0.15, sm: 0.25 }, "& .MuiChip-label": { px: { xs: 1.15, sm: 1.5 }, fontSize: { xs: "0.8rem", sm: "0.8125rem" } } }} />
             </Stack>
           </Stack>
 
