@@ -201,7 +201,20 @@ export default function ExerciseForm({
   );
 
   return (
-    <Box sx={{ width: '100%', maxWidth: { xs: '100%', md: 760 }, mx: 'auto' }}>
+    <Box
+      sx={{
+        width: '100%',
+        '& > .MuiFormControl-root, & > .MuiPaper-root': {
+          width: '100%',
+          mx: 'auto'
+        },
+        '@media (min-width:900px)': {
+          '& > .MuiFormControl-root, & > .MuiPaper-root': {
+            maxWidth: '760px'
+          }
+        }
+      }}
+    >
       <EquipTip />
       {isCardio   && <CardioTip />}
       {isStrength && <MuscleTip />}
