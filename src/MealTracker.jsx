@@ -1205,6 +1205,23 @@ export default function MealTracker({ onMealUpdate }) {
                     </Alert>
                   )}
 
+                  <Button
+                    onClick={handleAdd}
+                    onFocus={triggerAddTip}
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    sx={{
+                      minHeight: 56,
+                      borderRadius: 999,
+                      fontWeight: 800,
+                      fontSize: { xs: '1rem', sm: '1.02rem' },
+                      textTransform: 'none'
+                    }}
+                  >
+                    Add Meal
+                  </Button>
+
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%' }}>
                     <Button
                       onClick={() => setOpenCustom(true)}
