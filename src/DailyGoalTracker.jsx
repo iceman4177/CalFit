@@ -3,55 +3,62 @@ import React from "react";
 import { Box, Typography, LinearProgress, Paper, Stack } from "@mui/material";
 
 export default function DailyGoalTracker({ burned, consumed, goal }) {
-  const net = consumed - burned;
-  const absNet = Math.abs(net);
-  const pct = goal > 0 ? Math.min((absNet / goal) * 100, 100) : 0;
+  const safeGoal = Math.max(Number(goal) || 0, 0);
+  const safeBurned = Math.max(Number(burned) || 0, 0);
+  const safeConsumed = Math.max(Number(consumed) || 0, 0);
+  const net = safeConsumed - safeBurned;
 
-  const title = net < 0 ? "Today" : "Today's pace";
-  const status = net < 0
-    ? `You are in a ${Math.round(absNet)} kcal deficit so far.`
-    : net > 0
+  const rawPct = safeGoal > 0 ? (Math.abs(net) / safeGoal) * 100 : 0;
+  const pct = Math.max(0, Math.min(rawPct, 100));
+  const paceCopy =
+    net > 0
       ? `You are ${Math.round(net)} kcal above burned so far.`
-      : "You are perfectly even so far today.";
+      : net < 0
+        ? `You are ${Math.round(Math.abs(net))} kcal under burned so far.`
+        : "You are perfectly balanced so far today.";
 
   return (
     <Paper
       elevation={0}
       sx={{
-        p: { xs: 2.25, md: 3 },
-        borderRadius: 4,
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
-        background: "rgba(255,255,255,0.02)",
+        p: { xs: 2.5, md: 4 },
+        borderRadius: "32px",
+        border: "1px solid rgba(15,23,42,0.06)",
+        mb: 3,
       }}
     >
-      <Typography variant="overline" sx={{ display: "block", textAlign: "center", opacity: 0.65, letterSpacing: 1.3 }}>
-        {title}
-      </Typography>
-      <Typography variant="h6" align="center" sx={{ mt: 0.25, fontWeight: 800 }}>
-        How today is tracking
-      </Typography>
-      <Typography variant="body2" align="center" sx={{ mt: 0.75, opacity: 0.78 }}>
-        {status}
-      </Typography>
+      <Stack spacing={1.25} alignItems="center" textAlign="center" sx={{ mb: 2.25 }}>
+        <Typography sx={{ fontSize: 16, letterSpacing: "0.12em", textTransform: "uppercase", color: "#6b7280", fontWeight: 700 }}>
+          Today&apos;s Pace
+        </Typography>
+        <Typography sx={{ fontSize: { xs: 28, md: 36 }, fontWeight: 900, color: "#0f172a" }}>
+          How today is tracking
+        </Typography>
+        <Typography sx={{ color: "#98a2b3", fontSize: { xs: 18, md: 20 } }}>{paceCopy}</Typography>
+      </Stack>
 
-      <Box sx={{ mt: 2.25 }}>
+      <Box sx={{ px: { xs: 0, md: 1 } }}>
         <LinearProgress
           variant="determinate"
           value={pct}
           sx={{
-            height: 12,
+            height: 14,
             borderRadius: 999,
-            bgcolor: "rgba(255,255,255,0.08)",
-            ".MuiLinearProgress-bar": { borderRadius: 999 },
+            bgcolor: "rgba(15,23,42,0.07)",
+            "& .MuiLinearProgress-bar": {
+              borderRadius: 999,
+              background: net >= 0 ? "linear-gradient(90deg, #2563eb 0%, #3b82f6 100%)" : "linear-gradient(90deg, #10b981 0%, #34d399 100%)",
+            },
           }}
         />
+        <Box sx={{ display: "flex", justifyContent: "space-between", mt: 1.25, gap: 2, flexWrap: "wrap" }}>
+          <Typography sx={{ color: "#98a2b3", fontSize: { xs: 16, md: 18 } }}>
+            Net: {net >= 0 ? "+" : "-"}
+            {Math.round(Math.abs(net))} kcal
+          </Typography>
+          <Typography sx={{ color: "#98a2b3", fontSize: { xs: 16, md: 18 } }}>Goal: {Math.round(safeGoal)} kcal</Typography>
+        </Box>
       </Box>
-
-      <Stack direction="row" justifyContent="space-between" sx={{ mt: 1.25, opacity: 0.72 }}>
-        <Typography variant="body2">Net: {Math.round(net)} kcal</Typography>
-        <Typography variant="body2">Goal: {Math.round(goal || 0)} kcal</Typography>
-      </Stack>
     </Paper>
   );
 }

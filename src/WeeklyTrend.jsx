@@ -1,6 +1,6 @@
 // src/WeeklyTrend.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Paper, Typography, Box } from "@mui/material";
+import { Paper, Typography, Box, Stack } from "@mui/material";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -151,7 +151,6 @@ function buildWorkoutTotalsByDay(userId) {
 export default function WeeklyTrend() {
   const { user } = useAuth();
   const uid = user?.id || null;
-
   const [rows, setRows] = useState([]);
 
   const recompute = useCallback(() => {
@@ -159,43 +158,55 @@ export default function WeeklyTrend() {
     const eatenByDay = buildMealTotalsByDay(uid);
     const burnedByDay = buildWorkoutTotalsByDay(uid);
 
-    const out = days.map((dayISO) => {
-      const eaten = Number(eatenByDay.get(dayISO) || 0);
-      const burned = Number(burnedByDay.get(dayISO) || 0);
-      return { dayISO, net: eaten - burned };
-    });
-    setRows(out);
+    setRows(
+      days.map((dayISO) => {
+        const eaten = Number(eatenByDay.get(dayISO) || 0);
+        const burned = Number(burnedByDay.get(dayISO) || 0);
+        return { dayISO, net: eaten - burned };
+      })
+    );
   }, [uid]);
 
   useEffect(() => {
     recompute();
   }, [recompute]);
 
-  const chart = useMemo(() => ({
-    labels: rows.map((r) => isoToUS(r.dayISO)),
-    datasets: [
-      {
-        label: "Net Calories",
-        data: rows.map((r) => Number(r.net) || 0),
-        tension: 0.25,
-        borderColor: "rgba(99, 102, 241, 0.95)",
-        backgroundColor: "rgba(99, 102, 241, 0.18)",
-        pointBackgroundColor: "rgba(99, 102, 241, 0.95)",
-        pointBorderColor: "#ffffff",
-        pointRadius: 3,
-        fill: true,
-      },
-    ],
-  }), [rows]);
+  const chart = useMemo(
+    () => ({
+      labels: rows.map((r) => isoToUS(r.dayISO)),
+      datasets: [
+        {
+          label: "Net Calories",
+          data: rows.map((r) => Number(r.net) || 0),
+          tension: 0.35,
+          borderColor: "rgba(99, 102, 241, 0.95)",
+          backgroundColor: "rgba(99, 102, 241, 0.12)",
+          pointBackgroundColor: "rgba(99, 102, 241, 0.95)",
+          pointBorderColor: "#ffffff",
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          fill: true,
+        },
+      ],
+    }),
+    [rows]
+  );
 
   const options = useMemo(
     () => ({
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { displayColors: false },
+      },
       scales: {
-        y: { beginAtZero: false, grid: { color: "rgba(255,255,255,0.08)" }, ticks: { color: "rgba(255,255,255,0.72)" } },
-        x: { grid: { display: false }, ticks: { color: "rgba(255,255,255,0.72)" } },
+        y: {
+          beginAtZero: false,
+          grid: { color: "rgba(17,24,39,0.07)" },
+          ticks: { precision: 0 },
+        },
+        x: { grid: { display: false } },
       },
     }),
     []
@@ -205,24 +216,23 @@ export default function WeeklyTrend() {
     <Paper
       elevation={0}
       sx={{
-        p: { xs: 2.25, md: 3 },
-        borderRadius: 4,
-        mt: 3,
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
-        background: "rgba(255,255,255,0.02)",
+        p: { xs: 2.5, md: 4 },
+        borderRadius: "32px",
+        border: "1px solid rgba(15,23,42,0.06)",
       }}
     >
-      <Typography variant="overline" sx={{ display: "block", textAlign: "center", opacity: 0.65, letterSpacing: 1.3 }}>
-        Net trend
-      </Typography>
-      <Typography variant="h6" sx={{ mt: 0.25, mb: 0.75, fontWeight: 800, textAlign: "center" }}>
-        7-day net calorie trend
-      </Typography>
-      <Typography variant="body2" sx={{ textAlign: "center", opacity: 0.72 }}>
-        Track how your intake versus burn is trending across the week.
-      </Typography>
-      <Box sx={{ height: 260, mt: 2 }}>
+      <Stack spacing={1.25} alignItems="center" textAlign="center" sx={{ mb: 2.5 }}>
+        <Typography sx={{ fontSize: 16, letterSpacing: "0.12em", textTransform: "uppercase", color: "#6b7280", fontWeight: 700 }}>
+          Net Trend
+        </Typography>
+        <Typography sx={{ fontSize: { xs: 28, md: 36 }, fontWeight: 900, color: "#0f172a" }}>
+          7-day net calorie trend
+        </Typography>
+        <Typography sx={{ color: "#98a2b3", fontSize: { xs: 18, md: 20 } }}>
+          Track how your intake versus burn is trending across the week.
+        </Typography>
+      </Stack>
+      <Box sx={{ height: { xs: 260, md: 320 } }}>
         <Line data={chart} options={options} />
       </Box>
     </Paper>
