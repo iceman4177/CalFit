@@ -1622,10 +1622,7 @@ Score: ${bundle.derived.score}/100
         sx={{ display: { xs: "none", sm: "flex" }, width: "100%", maxWidth: 980, mx: "auto", position: "relative" }}
       >
         <Stack spacing={0.2} alignItems="center" sx={{ textAlign: "center" }}>
-          <Typography sx={{ fontWeight: 950, letterSpacing: -0.4, fontSize: 22, color: "rgba(2,6,23,0.98)" }}>
-            {pageTitle}
-          </Typography>
-          <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(2,6,23,0.70)", fontSize: 18 }}>
             {topSubtitle}
           </Typography>
         </Stack>
