@@ -25,6 +25,7 @@ import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { ensureScopedProfileFromLegacy } from './lib/profileStorage.js';
 
 
 
@@ -106,13 +107,13 @@ function safeNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-function readTodayConsumedFromLocal() {
+function readTodayConsumedFromLocal(userId = null) {
   const todayUS = new Date().toLocaleDateString('en-US');
   const todayISO = localDayISO(new Date());
 
   // prefer dailyMetricsCache if present
   try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     const row = cache?.[todayISO];
     if (row) {
       const consumed =
@@ -125,7 +126,7 @@ function readTodayConsumedFromLocal() {
 
   // fallback to mealHistory
   try {
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]') || [];
+    const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
     const rec = mh.find(m => m?.date === todayUS || m?.date === todayISO);
     if (!rec?.meals?.length) return 0;
     return rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
@@ -134,16 +135,16 @@ function readTodayConsumedFromLocal() {
   return 0;
 }
 
-function writeDailyMetricsCache(dayISO, consumed, burned) {
+function writeDailyMetricsCache(userId, dayISO, consumed, burned) {
   try {
-    const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
+    const cache = readScopedJSON(KEYS.dailyMetricsCache, userId, {}) || {};
     cache[dayISO] = {
       eaten: safeNum(consumed, 0),
       burned: safeNum(burned, 0),
       net: safeNum(consumed, 0) - safeNum(burned, 0),
       updated_at: new Date().toISOString()
     };
-    localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
+    writeScopedJSON(KEYS.dailyMetricsCache, userId, cache);
   } catch (e) {}
 }
 
@@ -213,7 +214,10 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
   const readWorkoutHistory = useCallback(() => {
     try {
+      ensureScopedProfileFromLegacy(userId);
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
+      ensureScopedFromLegacy(KEYS.mealHistory, userId);
+      ensureScopedFromLegacy(KEYS.dailyMetricsCache, userId);
       const list = readScopedJSON(KEYS.workoutHistory, userId, []);
       return Array.isArray(list) ? list : [];
     } catch (e) {
@@ -275,7 +279,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
         .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
     } catch (e) {}
 
-    const consumedToday = readTodayConsumedFromLocal();
+    const consumedToday = readTodayConsumedFromLocal(userId);
 
     // write caches so banner updates instantly
     writeDailyMetricsCache(todayISO, consumedToday, burnedToday);

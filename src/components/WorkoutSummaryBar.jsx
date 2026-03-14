@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Box, Paper, Typography, Chip, Stack } from '@mui/material';
+import { useAuth } from '../context/AuthProvider.jsx';
+import { readScopedJSON, KEYS } from '../lib/scopedStorage.js';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const todayUS = () => new Date().toLocaleDateString('en-US');
 
-function readLocal() {
+function readLocal(userId = null) {
   const d = todayUS();
   try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+    const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
     const burned = wh
       .filter(w => w.date === d)
       .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
@@ -23,14 +25,16 @@ function readLocal() {
 }
 
 export default function WorkoutSummaryBar() {
+  const { user } = useAuth();
+  const uid = user?.id || null;
   const [burned, setBurned] = useState(0);
   const [consumed, setConsumed] = useState(0);
 
   const recompute = useCallback(() => {
-    const { burned: b, consumed: c } = readLocal();
+    const { burned: b, consumed: c } = readLocal(uid);
     setBurned(Math.round(b || 0));
     setConsumed(Math.round(c || 0));
-  }, []);
+  }, [uid]);
 
   useEffect(() => {
     recompute();

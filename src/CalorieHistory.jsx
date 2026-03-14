@@ -15,6 +15,8 @@ import { Box,
   Stack } from '@mui/material';
 import { useAuth } from './context/AuthProvider.jsx';
 import { getDailyMetricsRange } from './lib/db';
+import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { ensureScopedProfileFromLegacy, readProfileBundle } from './lib/profileStorage.js';
 
 // ---------- Local-day helpers (no UTC drift) ----------
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -62,9 +64,9 @@ function calcStreak(rows) {
 }
 
 // Build a daily index from localStorage (always fresh)
-function buildLocalDailyIndex() {
-  const workouts = JSON.parse(localStorage.getItem('workoutHistory') || '[]'); // [{date, totalCalories}]
-  const mealsArr = JSON.parse(localStorage.getItem('mealHistory')    || '[]'); // [{date, meals:[{calories}]}]
+function buildLocalDailyIndex(userId = null) {
+  const workouts = readScopedJSON(KEYS.workoutHistory, userId, []) || []; // [{date, totalCalories}]
+  const mealsArr = readScopedJSON(KEYS.mealHistory, userId, []) || []; // [{date, meals:[{calories}]}]
 
   const idx = new Map(); // day(US) -> { cals_burned, cals_eaten }
   for (const w of workouts) {
@@ -97,7 +99,7 @@ export default function CalorieHistory() {
   const [rows, setRows]       = useState([]);
 
   const recompute = useCallback(async () => {
-    const localRows = buildLocalDailyIndex();
+    const localRows = buildLocalDailyIndex(user?.id || null);
 
     // If not signed in, local is canonical.
     if (!user) { setRows(localRows); return; }
@@ -133,7 +135,7 @@ export default function CalorieHistory() {
       setRows(sortDesc([...mergedMap.values()]));
     } catch (err) {
       console.error('[CalorieHistory] fetch failed, falling back to local', err);
-      setRows(buildLocalDailyIndex());
+      setRows(buildLocalDailyIndex(user?.id || null));
     } finally {
       setLoading(false);
     }
@@ -173,8 +175,12 @@ export default function CalorieHistory() {
   const streak      = calcStreak(rows);
 
   // persona chips (relatable, persistent)
-  const trainingIntent = (localStorage.getItem('training_intent') || 'general').replace('_', ' ');
-  const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
+  const profile = (() => {
+    if (user?.id) ensureScopedProfileFromLegacy(user.id);
+    return readProfileBundle(user?.id || null);
+  })();
+  const trainingIntent = (profile?.trainingIntent || 'general').replace('_', ' ');
+  const dietPreference = profile?.dietPreference || 'omnivore';
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>

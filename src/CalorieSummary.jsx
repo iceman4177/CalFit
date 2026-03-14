@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Paper,
   Typography,
@@ -9,18 +9,21 @@ import {
   Divider,
   Stack
 } from '@mui/material';
+import { useAuth } from './context/AuthProvider.jsx';
+import { readScopedJSON, KEYS } from './lib/scopedStorage.js';
+import { ensureScopedProfileFromLegacy, readProfileBundle } from './lib/profileStorage.js';
 
 const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const todayUS = () => new Date().toLocaleDateString('en-US');
 
-function readLocal() {
+function readLocal(userId = null) {
   const d = todayUS();
   try {
-    const wh = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-    const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
+    const mh = readScopedJSON(KEYS.mealHistory, userId, []) || [];
     const burned = wh
       .filter(w => w.date === d)
-      .reduce((s, w) => s + (Number(w.totalCalories) || 0), 0);
+      .reduce((s, w) => s + (Number(w.totalCalories ?? w.total_calories) || 0), 0);
     const meals = mh.find(m => m.date === d);
     const eaten = meals
       ? (meals.meals || []).reduce((s, m) => s + (Number(m.calories) || 0), 0)
@@ -32,14 +35,16 @@ function readLocal() {
 }
 
 export default function CalorieSummary() {
+  const { user } = useAuth();
+  const uid = user?.id || null;
   const [burned, setBurned] = useState(0);
   const [consumed, setConsumed] = useState(0);
 
   const recompute = useCallback(() => {
-    const { burned: b, eaten: c } = readLocal();
+    const { burned: b, eaten: c } = readLocal(uid);
     setBurned(Math.round(b || 0));
     setConsumed(Math.round(c || 0));
-  }, []);
+  }, [uid]);
 
   useEffect(() => { recompute(); }, [recompute]);
 
@@ -65,6 +70,11 @@ export default function CalorieSummary() {
     };
   }, [recompute]);
 
+  const profile = useMemo(() => {
+    if (uid) ensureScopedProfileFromLegacy(uid);
+    return readProfileBundle(uid);
+  }, [uid]);
+
   const net = (consumed || 0) - (burned || 0);
   const status =
     net > 0 ? { label: 'Surplus', color: 'error' } :
@@ -72,10 +82,12 @@ export default function CalorieSummary() {
               { label: 'Balanced', color: 'info' };
 
   // Persona chips
-  const trainingIntent = (localStorage.getItem('training_intent') || 'general').replace('_',' ');
-  const dietPreference = localStorage.getItem('diet_preference') || 'omnivore';
-  const proteinDaily   = Number(localStorage.getItem('protein_target_daily_g') || 0);
-  const proteinMeal    = Number(localStorage.getItem('protein_target_meal_g') || 0);
+  const trainingIntent = (profile?.trainingIntent || 'general').replace('_',' ');
+  const dietPreference = profile?.dietPreference || 'omnivore';
+  const proteinDaily = Number(localStorage.getItem(uid ? `protein_target_daily_g:${uid}` : 'protein_target_daily_g') || 0)
+    || Number(localStorage.getItem('protein_target_daily_g') || 0);
+  const proteinMeal = Number(localStorage.getItem(uid ? `protein_target_meal_g:${uid}` : 'protein_target_meal_g') || 0)
+    || Number(localStorage.getItem('protein_target_meal_g') || 0);
 
   const quickFoods = {
     vegan: 'tofu, tempeh, lentils, edamame, vegan protein shake',

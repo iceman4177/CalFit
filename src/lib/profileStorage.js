@@ -1,3 +1,5 @@
+import { ensureScopedFromLegacy } from './scopedStorage.js';
+
 const AUX_DEFAULTS = {
   diet_preference: 'omnivore',
   training_intent: 'general',
@@ -43,6 +45,24 @@ export function getProfileStorageKeys(userId) {
     tdeeEst: scopedKey('tdee_est', userId),
     hasCompleted: scopedKey('hasCompletedHealthData', userId),
   };
+}
+
+export function ensureScopedProfileFromLegacy(userId) {
+  if (!userId) return;
+  ensureScopedFromLegacy('userData', userId);
+  ensureScopedFromLegacy('gender', userId);
+  ensureScopedFromLegacy('diet_preference', userId);
+  ensureScopedFromLegacy('training_intent', userId);
+  ensureScopedFromLegacy('training_split', userId);
+  ensureScopedFromLegacy('last_focus', userId);
+  ensureScopedFromLegacy('equipment_list', userId);
+  ensureScopedFromLegacy('fitness_goal', userId);
+  ensureScopedFromLegacy('protein_target_daily_g', userId);
+  ensureScopedFromLegacy('protein_target_meal_g', userId);
+  ensureScopedFromLegacy('calorie_bias', userId);
+  ensureScopedFromLegacy('bmr_est', userId);
+  ensureScopedFromLegacy('tdee_est', userId);
+  ensureScopedFromLegacy('hasCompletedHealthData', userId);
 }
 
 export function readProfileBundle(userId) {

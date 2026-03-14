@@ -14,6 +14,7 @@ import {
 
 import { useAuth } from "./context/AuthProvider.jsx";
 import { readScopedJSON, KEYS } from "./lib/scopedStorage.js";
+import { ensureScopedProfileFromLegacy, readProfileBundle } from "./lib/profileStorage.js";
 import WeeklyTrend from "./WeeklyTrend.jsx";
 import DailyGoalTracker from "./DailyGoalTracker.jsx";
 
@@ -54,14 +55,12 @@ function safeNum(v, d = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 }
-function readUserGoalCalories(fallback = 0) {
+function readUserGoalCalories(userId, fallback = 0) {
   try {
-    const raw = localStorage.getItem("userData");
-    if (raw) {
-      const obj = JSON.parse(raw);
-      const g = safeNum(obj?.dailyGoal, NaN);
-      if (Number.isFinite(g) && g > 0) return g;
-    }
+    if (userId) ensureScopedProfileFromLegacy(userId);
+    const profile = readProfileBundle(userId);
+    const g = safeNum(profile?.userData?.dailyGoal, NaN);
+    if (Number.isFinite(g) && g > 0) return g;
   } catch {}
   return safeNum(fallback, 0);
 }
@@ -173,7 +172,7 @@ export default function ProgressDashboard() {
   const { user } = useAuth();
   const uid = user?.id || null;
 
-  const goalCalories = useMemo(() => readUserGoalCalories(0), []);
+  const goalCalories = useMemo(() => readUserGoalCalories(uid, 0), [uid]);
   const [burnedSeries, setBurnedSeries] = useState([]);
   const [consumedToday, setConsumedToday] = useState(0);
   const [burnedToday, setBurnedToday] = useState(0);
