@@ -168,47 +168,31 @@ export default function ExerciseForm({
         position: 'sticky',
         bottom: 0,
         mt: 2,
-        p: { xs: 1.5, sm: 1.75 },
+        p: 1.5,
         borderRadius: 2,
         border: '1px solid rgba(0,0,0,0.06)',
         boxShadow: '0 8px 24px rgba(0,0,0,0.03)',
         backdropFilter: 'blur(2px)'
       }}
     >
-      <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center' }}>
+      <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center" flexWrap="wrap">
         <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
           Calories: <b>{Number.isFinite(currentCalories) ? String(Math.round(currentCalories)) : '0'}</b>
         </Typography>
-        <Stack
-          direction="row"
-          spacing={1}
-          useFlexGap
-          flexWrap="wrap"
-          justifyContent="center"
-          alignItems="center"
-          sx={{ width: '100%', maxWidth: 420, mx: 'auto' }}
-        >
+        <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {isStrength && (
             <Button
+              fullWidth
               variant="outlined"
               onClick={() => { triggerCalcTip(); onCalculate(); }}
-              sx={{ borderRadius: 999, minWidth: { xs: 120, sm: 132 }, fontWeight: 700, flex: { xs: '1 1 140px', sm: '0 0 auto' } }}
             >
               Calculate
             </Button>
           )}
-          <Button
-            variant="contained"
-            onClick={() => { triggerAddTip(); onAddExercise(); }}
-            sx={{ borderRadius: 999, minWidth: { xs: 144, sm: 156 }, fontWeight: 700, flex: { xs: '1 1 160px', sm: '0 0 auto' } }}
-          >
+          <Button fullWidth variant="contained" onClick={() => { triggerAddTip(); onAddExercise(); }}>
             Add Exercise
           </Button>
-          <Button
-            variant="text"
-            onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}
-            sx={{ minWidth: { xs: 96, sm: 104 }, fontWeight: 700, flex: { xs: '1 1 100px', sm: '0 0 auto' } }}
-          >
+          <Button fullWidth variant="text" onClick={() => { triggerDoneTip(); onDoneWithExercises(); }}>
             Done
           </Button>
         </Stack>
@@ -217,7 +201,7 @@ export default function ExerciseForm({
   );
 
   return (
-    <Box>
+    <Box sx={{ width: '100%', maxWidth: 560, mx: 'auto' }}>
       <EquipTip />
       {isCardio   && <CardioTip />}
       {isStrength && <MuscleTip />}
