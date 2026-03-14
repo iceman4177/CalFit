@@ -1574,16 +1574,47 @@ Output format (use these headings):
       >
         <CardContent sx={{ p: { xs: 2.1, sm: 2.5 } }}>
           <Stack spacing={1.3}>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
-              <Box>
-                <Typography variant="h4" sx={{ fontWeight: 1000, letterSpacing: "-0.03em", color: "rgba(15,23,42,0.98)" }}>
+            <Stack spacing={1.3} alignItems="center" textAlign="center">
+              {!isPro && (
+                <Box sx={{ width: '100%', display: 'flex', justifyContent: { xs: 'center', sm: 'flex-end' }, mb: -0.2 }}>
+                  <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" />
+                </Box>
+              )}
+
+              <Box sx={{ width: '100%', maxWidth: 620, mx: 'auto' }}>
+                <Typography
+                  variant="h4"
+                  align="center"
+                  sx={{
+                    width: '100%',
+                    fontWeight: 800,
+                    lineHeight: 1.08,
+                    letterSpacing: '-0.02em',
+                    color: 'rgba(15,23,42,0.98)',
+                    fontSize: { xs: '2.15rem', sm: '2.35rem' },
+                    textAlign: 'center'
+                  }}
+                >
                   Coach
                 </Typography>
-                <Typography variant="body1" sx={{ mt: 0.5, color: "rgba(51,65,85,0.88)", fontWeight: 600, maxWidth: 620 }}>
+                <Typography
+                  variant="body1"
+                  align="center"
+                  sx={{
+                    mt: 0.5,
+                    width: '100%',
+                    maxWidth: 560,
+                    mx: 'auto',
+                    color: 'rgba(51,65,85,0.88)',
+                    fontWeight: 600,
+                    fontSize: { xs: '1rem', sm: '1.08rem' },
+                    lineHeight: 1.5,
+                    textAlign: 'center'
+                  }}
+                >
                   Ask AI Coach for today, then knock out your plan below.
                 </Typography>
               </Box>
-              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
             </Stack>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.1} alignItems={{ xs: "stretch", sm: "center" }}>

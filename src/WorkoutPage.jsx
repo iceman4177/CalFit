@@ -759,9 +759,6 @@ const readTodaySessionsFromLocal = useCallback(() => {
       setCumulativeExercises(next);
       instantPersistWorkoutDraftToBanner(next);
       debouncedUpsertWorkoutToCloud(next);
-      window.setTimeout(() => {
-        scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 140, 300, 520, 820] });
-      }, 0);
 setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
       setCurrentCalories(0);
       return;
@@ -782,9 +779,6 @@ setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
     setCumulativeExercises(next);
     instantPersistWorkoutDraftToBanner(next);
       debouncedUpsertWorkoutToCloud(next);
-      window.setTimeout(() => {
-        scheduleWindowScroll(sessionLogRef, { offset: 108, retries: [0, 140, 300, 520, 820] });
-      }, 0);
 
 setNewExercise({
       exerciseType: '',
@@ -1568,8 +1562,18 @@ setNewExercise({
         }}
       >
         {!isProUser() && showIdle && (
-          <Box sx={{ position: 'absolute', top: { xs: 20, sm: 20 }, right: { xs: 20, sm: 24 } }}>
-            <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+          <Box
+            sx={{
+              width: '100%',
+              display: 'flex',
+              justifyContent: { xs: 'center', sm: 'flex-end' },
+              mb: { xs: 0.5, sm: 0 },
+              pr: { sm: 0.5 }
+            }}
+          >
+            <Box sx={{ position: { xs: 'static', sm: 'absolute' }, top: { sm: 20 }, right: { sm: 24 } }}>
+              <FeatureUseBadge featureKey="ai_workout" isPro={false} />
+            </Box>
           </Box>
         )}
 
