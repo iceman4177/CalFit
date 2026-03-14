@@ -225,7 +225,7 @@ function inferNextUp({ nextUp = [], levers = [], summary = "", mode = "Baseline 
 
 function drawSectionTitle(ctx, text, x, y, width) {
   ctx.fillStyle = "#f2c27b";
-  ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.font = "900 30px system-ui, -apple-system, Segoe UI, Roboto";
   ctx.fillText(text, x, y);
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = "rgba(255,190,120,0.26)";
@@ -434,15 +434,15 @@ export async function buildPoseSessionSharePng({
   drawSectionTitle(ctx, resolvedBulletsLabel, contentX, y, contentW);
   y += 34;
   ctx.fillStyle = "rgba(246,234,224,0.96)";
-  ctx.font = "500 19px system-ui, -apple-system, Segoe UI, Roboto";
-  const bulletLineHeight = 24;
+  ctx.font = "500 22px system-ui, -apple-system, Segoe UI, Roboto";
+  const bulletLineHeight = 29;
   for (const item of resolvedBullets) {
     ctx.beginPath();
     ctx.fillStyle = "#f2c27b";
     ctx.arc(contentX + 8, y - 6, 4.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "rgba(246,234,224,0.96)";
-    const lines = wrapLines(ctx, item, contentW - 26, 4);
+    const lines = wrapLines(ctx, item, contentW - 96, 6);
     lines.forEach((line, i) => ctx.fillText(line, contentX + 24, y + i * bulletLineHeight));
     y += lines.length * bulletLineHeight + 10;
   }
@@ -451,10 +451,10 @@ export async function buildPoseSessionSharePng({
   drawSectionTitle(ctx, "BREAKDOWN", contentX, y, contentW);
   y += 34;
   ctx.fillStyle = "rgba(246,234,224,0.94)";
-  ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
-  const bodyLineHeight = 24;
+  ctx.font = "500 21px system-ui, -apple-system, Segoe UI, Roboto";
+  const bodyLineHeight = 29;
   for (const item of resolvedBreakdown.slice(0, 4)) {
-    const lines = wrapLines(ctx, item, contentW, 6);
+    const lines = wrapLines(ctx, item, contentW - 64, 8);
     lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
     y += lines.length * bodyLineHeight + 12;
   }
@@ -465,7 +465,7 @@ export async function buildPoseSessionSharePng({
   ctx.fillStyle = "rgba(246,234,224,0.94)";
   ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
   for (const item of resolvedNextUp.slice(0, 2)) {
-    const lines = wrapLines(ctx, item, contentW, 5);
+    const lines = wrapLines(ctx, item, contentW - 64, 7);
     lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
     y += lines.length * bodyLineHeight + 12;
   }
@@ -477,7 +477,7 @@ export async function buildPoseSessionSharePng({
     ctx.fillStyle = "rgba(246,234,224,0.94)";
     ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto";
     for (const item of resolvedCoachNote.slice(0, 2)) {
-      const lines = wrapLines(ctx, item, contentW, 5);
+      const lines = wrapLines(ctx, item, contentW - 64, 7);
       lines.forEach((line, i) => ctx.fillText(line, contentX, y + i * bodyLineHeight));
       y += lines.length * bodyLineHeight + 12;
     }
