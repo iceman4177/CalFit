@@ -189,13 +189,14 @@ export default function HomeHub() {
 
             <Box
               sx={{
-                width: "100%",
-                maxWidth: 560,
-                display: "grid",
-                gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-                gap: { xs: 0.75, sm: 1 },
-                alignItems: "center",
                 pt: 0.4,
+                width: "100%",
+                display: "grid",
+                gridTemplateColumns: { xs: "repeat(3, max-content)", sm: "repeat(5, max-content)" },
+                justifyContent: "center",
+                justifyItems: "center",
+                columnGap: { xs: 1, sm: 1 },
+                rowGap: { xs: 1, sm: 0 },
               }}
             >
               {heroChips.map((chip) => (
@@ -203,17 +204,21 @@ export default function HomeHub() {
                   key={chip.label}
                   label={chip.label}
                   sx={{
-                    width: "100%",
                     bgcolor: chip.bg,
                     color: chip.color,
                     fontWeight: 900,
                     borderRadius: 999,
-                    justifyContent: "center",
-                    fontSize: { xs: "0.78rem", sm: "0.95rem" },
-                    height: { xs: 40, sm: 38 },
+                    fontSize: { xs: "1rem", sm: "0.95rem" },
+                    height: { xs: 42, sm: 38 },
+                    px: { xs: 0.6, sm: 0.2 },
+                    minWidth: { xs: chip.label === "Coach" ? 132 : 104, sm: "unset" },
                     '& .MuiChip-label': {
-                      px: { xs: 0.8, sm: 1.4 },
+                      px: { xs: 1.1, sm: 1.25 },
                       whiteSpace: "nowrap",
+                    },
+                    gridColumn: {
+                      xs: chip.label === "Scan" ? "1 / span 1" : chip.label === "Coach" ? "2 / span 1" : "auto",
+                      sm: "auto",
                     },
                   }}
                 />
