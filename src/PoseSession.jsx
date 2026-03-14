@@ -110,34 +110,37 @@ function firstNonEmpty(...vals) {
 }
 
 function buildMemoryAwareShareSummary(result, isFemale = false) {
+  const prebuilt = String(result?.shareCardSummary || "").replace(/\s+/g, " ").trim();
+  if (prebuilt) return prebuilt.slice(0, 240);
+
   const strongest = firstNonEmpty(
     result?.physiqueSnapshot?.summary_seed?.strongest_feature,
     Array.isArray(result?.bestDeveloped) ? result.bestDeveloped[0] : "",
     Array.isArray(result?.highlights) ? result.highlights[0] : ""
   );
-
-  const momentum = String(result?.momentumNote || "").trim();
-  const baseline = String(result?.baselineComparison || "").trim();
+  const momentum = String(result?.momentumNote || "").replace(/\s+/g, " ").trim();
+  const baseline = String(result?.baselineComparison || "").replace(/\s+/g, " ").trim();
+  const firstHighlight = firstNonEmpty(Array.isArray(result?.highlights) ? result.highlights[0] : "");
   const summary =
     String(result?.report || "")
       .split(/\n\s*\n/)
       .map((s) => s.trim())
       .filter(Boolean)[0] || "";
 
-  const softStrongest = strongest
+  const fallback = strongest
     ? isFemale
-      ? `Today your ${strongest} reads especially polished.`
-      : `Today your ${strongest} reads especially strong.`
+      ? `Your ${strongest} is reading especially polished right now.`
+      : `Your ${strongest} is reading especially strong right now.`
     : isFemale
-      ? "Today your overall look reads polished and athletic."
-      : "Today your overall look reads muscular and athletic.";
+      ? "Your overall look is landing polished and athletic right now."
+      : "Your overall look is landing athletic and well put together right now.";
 
-  const lead = firstNonEmpty(momentum, baseline, summary, softStrongest)
-    .replace(/\s+/g, " ")
+  const lead = firstNonEmpty(momentum, summary, baseline, fallback)
     .replace(/Compared with \d+ recent checks?,?/i, "Compared with your recent baseline,")
     .trim();
-
-  const closer = firstNonEmpty(baseline, softStrongest).replace(/\s+/g, " ").trim();
+  const closer = firstNonEmpty(firstHighlight ? `${firstHighlight}.` : "", baseline, fallback)
+    .replace(/Compared with \d+ recent checks?,?/i, "Compared with your recent baseline,")
+    .trim();
 
   const joined = [lead, closer]
     .filter(Boolean)
@@ -639,13 +642,17 @@ export default function PoseSession() {
     setShareBusy(true);
     try {
       const shareSummary = buildMemoryAwareShareSummary(result, isFemale);
+      const shareCardCopy = {
+        ...lockedCopy,
+        subread: shareSummary || lockedCopy.subread,
+      };
       const pngDataUrl = await buildPoseSessionSharePng({
         mode: scanHasPriorSameGender ? "recheck" : "baseline",
         gender,
-        copy: lockedCopy,
+        copy: shareCardCopy,
         summary: shareSummary,
         hashtag: "#SlimCalAI",
-        thumbs: captures.map((c) => ({ title: c.title, dataUrl: c.fullDataUrl })),
+        thumbs: captures.map((c) => ({ poseKey: c.poseKey, title: c.title, dataUrl: c.fullDataUrl })),
       });
       await shareOrDownloadPng(pngDataUrl, "slimcal-build-arc.png");
     } catch (e) {

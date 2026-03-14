@@ -381,6 +381,17 @@ function buildPhysiqueSnapshot(session, { gender = "male", scanMode = "", localD
   };
 }
 
+function seededIndex(seed = "", count = 1) {
+  const src = String(seed || "seed");
+  let hash = 0;
+  for (let i = 0; i < src.length; i += 1) hash = (hash * 31 + src.charCodeAt(i)) >>> 0;
+  return count > 0 ? hash % count : 0;
+}
+
+function pickVariant(seed = "", items = []) {
+  return Array.isArray(items) && items.length ? items[seededIndex(seed, items.length)] : "";
+}
+
 function buildTrendNarrative({ session, recentScans = [], gender = "male", goalType = "", localDay = "" }) {
   const scans = sanitizeRecentPoseScans(recentScans);
   const current = session?.muscleSignals || {};
@@ -392,6 +403,7 @@ function buildTrendNarrative({ session, recentScans = [], gender = "male", goalT
   const label = poseSignalLabel(top.key, gender);
   const days = scans[0]?.local_day ? `${scans.length} recent check${scans.length > 1 ? "s" : ""}` : "your recent baseline";
   const goalHint = normalizeGoalType(goalType, gender);
+  const seed = [gender, goalHint, localDay || dayKeyUTC(), scans.length, label, Math.round((top.delta || 0) * 1000)].join("|");
 
   let momentumNote = "";
   let baselineComparison = "";
@@ -399,44 +411,116 @@ function buildTrendNarrative({ session, recentScans = [], gender = "male", goalT
 
   if (!scans.length) {
     if (gender === "female") {
-      momentumNote = "This is your baseline beauty check, so the win today is locking in a clean starting point you can build on. The overall presentation already reads polished, pretty, and athletic.";
-      baselineComparison = "First physique memory saved — future scans can now track how your silhouette and polish evolve over time.";
-      highlight = "Baseline beauty check locked in";
+      momentumNote = pickVariant(seed + '|f-base-momentum', [
+        "This is your opening physique baseline, and it already lands with a polished, athletic shape that reads clean on camera.",
+        "This baseline is strong because the shape already feels put together, balanced, and easy to build from.",
+        "This first scan already gives you a polished athletic starting point, which makes future progress easier to spot."
+      ]);
+      baselineComparison = pickVariant(seed + '|f-base-compare', [
+        "First physique memory saved — future scans can now track how your silhouette, polish, and visual consistency evolve over time.",
+        "First physique memory saved — future scans can now compare how your shape, presentation, and overall polish develop over time.",
+        "First physique memory saved — future scans can now track how your silhouette and overall finish sharpen from here."
+      ]);
+      highlight = pickVariant(seed + '|f-base-highlight', [
+        "Polished baseline locked in",
+        "Strong shape baseline locked in",
+        "Athletic baseline locked in"
+      ]);
     } else {
-      momentumNote = "This is your baseline physique check, so the win today is locking in a strong starting point you can measure against. The overall presentation already reads muscular, athletic, and built.";
-      baselineComparison = "First physique memory saved — future scans can now track how much more jacked and dialed-in you look over time.";
-      highlight = "Baseline jacked check locked in";
+      momentumNote = pickVariant(seed + '|m-base-momentum', [
+        "This is your opening physique baseline, and the frame already reads athletic, structured, and clearly trained.",
+        "This baseline is strong because your shape already lands with upper-body presence and a real trained look.",
+        "This first scan already gives you a sharp athletic starting point, which makes future progress easier to notice."
+      ]);
+      baselineComparison = pickVariant(seed + '|m-base-compare', [
+        "First physique memory saved — future scans can now track how your frame, fullness, and overall presence evolve over time.",
+        "First physique memory saved — future scans can now compare how much sharper, fuller, and more complete your look gets from here.",
+        "First physique memory saved — future scans can now track how your physique presentation builds from this starting point."
+      ]);
+      highlight = pickVariant(seed + '|m-base-highlight', [
+        "Strong baseline locked in",
+        "Athletic baseline locked in",
+        "Trained-look baseline locked in"
+      ]);
     }
   } else if (top.delta > 0.045) {
     if (gender === "female") {
-      momentumNote = `Compared with ${days}, your ${label} is reading cleaner today, and the overall silhouette feels more polished and beautifully put together. This scan lands with a prettier, more confident energy while still feeling athletic and real.`;
-      baselineComparison = `Your ${label} is trending above your recent baseline, which is a strong sign that your current look is becoming more refined and photogenic.`;
-      highlight = `${label.charAt(0).toUpperCase() + label.slice(1)} is trending prettier than your recent baseline`;
+      momentumNote = pickVariant(seed + '|f-up-momentum', [
+        `Compared with ${days}, your ${label} is reading cleaner today, and the whole look feels more polished and more camera-ready.`,
+        `Compared with ${days}, your ${label} is showing better today, and the overall silhouette feels sharper, smoother, and more put together.`,
+        `Compared with ${days}, your ${label} is landing better today, which gives the full scan a more refined and more confident feel.`
+      ]);
+      baselineComparison = pickVariant(seed + '|f-up-compare', [
+        `Your ${label} is trending above your recent baseline, which is a strong sign that the look is becoming more refined and more photogenic.`,
+        `Your ${label} is landing ahead of your recent baseline, which usually means the overall presentation is getting cleaner and more polished.`,
+        `Your ${label} is showing above your recent baseline, and that is helping the whole silhouette read with more finish.`
+      ]);
+      highlight = pickVariant(seed + '|f-up-highlight', [
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is reading cleaner than your recent baseline`,
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is showing more polish than your recent baseline`,
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is trending sharper than your recent baseline`
+      ]);
     } else {
-      momentumNote = `Compared with ${days}, your ${label} is reading stronger today, and the overall physique comes across more muscular and built. This scan has a fuller, more jacked feel than your recent baseline without forcing it.`;
-      baselineComparison = `Your ${label} is trending above your recent baseline, which is a strong sign that your look is getting sharper and more powerful over time.`;
-      highlight = `${label.charAt(0).toUpperCase() + label.slice(1)} is trending more jacked than your recent baseline`;
+      momentumNote = pickVariant(seed + '|m-up-momentum', [
+        `Compared with ${days}, your ${label} is reading stronger today, and the whole build looks sharper and more complete.`,
+        `Compared with ${days}, your ${label} is landing better today, which gives the overall physique a fuller and more trained look.`,
+        `Compared with ${days}, your ${label} is showing up harder today, and the scan reads more dialed and more put together overall.`
+      ]);
+      baselineComparison = pickVariant(seed + '|m-up-compare', [
+        `Your ${label} is trending above your recent baseline, which is a strong sign that the look is getting sharper and more convincing over time.`,
+        `Your ${label} is landing ahead of your recent baseline, which usually means the physique is reading with more fullness and more structure.`,
+        `Your ${label} is showing above your recent baseline, and that is helping the whole build look more complete.`
+      ]);
+      highlight = pickVariant(seed + '|m-up-highlight', [
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is reading stronger than your recent baseline`,
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is looking sharper than your recent baseline`,
+        `${label.charAt(0).toUpperCase() + label.slice(1)} is trending fuller than your recent baseline`
+      ]);
     }
   } else {
     if (gender === "female") {
-      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read feels polished, pretty, and steadily more put together.`;
-      baselineComparison = "Your recent scans are clustering in a good way, which means your silhouette and presentation are becoming more repeatable and reliable.";
-      highlight = "Your polished look is staying consistent";
+      momentumNote = pickVariant(seed + '|f-steady-momentum', [
+        `Compared with ${days}, this look is staying very consistent, which is exactly what makes progress easier to trust.`,
+        `Compared with ${days}, your presentation is staying very steady, and that consistency is a good sign in itself.`,
+        `Compared with ${days}, the overall look is holding its shape well, which makes your progress feel more real and more repeatable.`
+      ]);
+      baselineComparison = pickVariant(seed + '|f-steady-compare', [
+        "Your recent scans are clustering in a good way, which means your silhouette and presentation are becoming more repeatable and reliable.",
+        "Your recent scans are lining up well, which suggests your shape and overall polish are staying consistent from check to check.",
+        "Your recent scans are tracking closely together, which usually means the look is becoming easier to reproduce and trust."
+      ]);
+      highlight = pickVariant(seed + '|f-steady-highlight', [
+        "Your polished look is staying consistent",
+        "Your shape is staying steady",
+        "Your silhouette is holding well"
+      ]);
     } else {
-      momentumNote = `Compared with ${days}, this look is staying very consistent, which is exactly what makes your progress easier to trust. The overall read still lands as muscular, strong, and convincingly built.`;
-      baselineComparison = "Your recent scans are clustering in a good way, which means your physique presentation is becoming more repeatable and easier to track.";
-      highlight = "Your muscular look is staying consistent";
+      momentumNote = pickVariant(seed + '|m-steady-momentum', [
+        `Compared with ${days}, this look is staying very consistent, which is exactly what makes progress easier to trust.`,
+        `Compared with ${days}, your physique presentation is staying very steady, and that consistency is a strong signal on its own.`,
+        `Compared with ${days}, the overall build is holding well, which makes the progress feel more believable and easier to track.`
+      ]);
+      baselineComparison = pickVariant(seed + '|m-steady-compare', [
+        "Your recent scans are clustering in a good way, which means your physique presentation is becoming more repeatable and easier to track.",
+        "Your recent scans are lining up well, which suggests your shape and visual presence are staying consistent from check to check.",
+        "Your recent scans are tracking closely together, which usually means the look is becoming easier to reproduce and trust."
+      ]);
+      highlight = pickVariant(seed + '|m-steady-highlight', [
+        "Your look is staying consistent",
+        "Your trained look is holding well",
+        "Your physique is staying steady"
+      ]);
     }
   }
 
   if (goalHint === "cutting") {
     baselineComparison += gender === "female"
-      ? " For a leaner goal, that kind of cleaner presentation is exactly the right direction."
-      : " For a leaner goal, that sharper presentation is exactly the right direction.";
+      ? " For a leaner goal, that cleaner presentation is exactly the direction you want."
+      : " For a leaner goal, that sharper presentation is exactly the direction you want.";
   } else if (goalHint === "bulking") {
     baselineComparison += gender === "female"
-      ? " For a sculpted-building goal, the extra presence is a great sign."
-      : " For a muscle-building goal, the extra fullness is a great sign.";
+      ? " For a sculpted-building goal, that extra presence is a great sign."
+      : " For a muscle-building goal, that extra fullness is a great sign.";
   }
 
   return {
@@ -1616,6 +1700,8 @@ const freeBypass =
         "Tone MUST be neutral or positive only. Never insult. Never shame. Never diagnose. Avoid negative labels, fear framing, or harsh comparisons. " +
         "Do NOT reference any influencer or celebrity. Do NOT assume prior context about the user. " +
         "Write as a fresh, careful analyst focusing on what is visible, flattering, and genuinely supported by the images. " +
+        "Voice should feel premium, sharp, modern, and naturally shareable for an 18-30 fitness audience without sounding clinical, cringe, or copied. " +
+        "Vary sentence openings, cadence, and vocabulary so outputs do not feel templated from prior scans. Avoid leaning on the same stock phrases across every result. " +
         "For women, use female-specific language naturally and supportively. For men, use male-specific language naturally and supportively. " +
         "Output JSON keys (required): " +
         "build_arc (int 0-100), percentile (int 1-99), tierLabel (string), strength (string), horizon_days (int), " +
@@ -1625,7 +1711,8 @@ const freeBypass =
         "highlights (array 4-7 short strings), levers (array 4-7 short strings), confidenceNote (string), " +
         "report (string: 6-10 short paragraphs separated by \n\n), " +
         "muscleBreakdown (array 8-12 items; each {group: string, note: string, visibility?: string} where note is 2-5 sentences, specific, supportive), " +
-        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings).";
+        "bestDeveloped (array 2-4 strings), biggestOpportunity (array 2-4 strings), poseNotes (array 2-4 strings), " +
+        "shareCardSummary (string: 1-2 punchy sentences, premium and shareable, max 220 chars, condensed from the full analysis).";
 
       const userText =
         `Analyze this ${subjectLabel} using these captures: ${poseTitles || "pose scans"}. ` +
@@ -1637,9 +1724,10 @@ const freeBypass =
         "Keep every response neutral or positive only, but still specific and intelligent. Avoid words like weak, poor, bad, lacking, flawed, average, mediocre, negative, or disappointing. " +
         "For female scans, focus on supportive reads like posture, shoulder line, waist flow, symmetry, polished silhouette, beauty, elegance, and confidence without objectifying language. Use words like pretty, polished, graceful, sculpted, beautiful, athletic, and motivating when genuinely supported by the scan. " +
         "For male scans, focus on supportive reads like arm pop, shoulder presence, lat spread, back width, taper, posture, and overall presence only when visible. Use words like jacked, fuller, broader, more built, more muscular, and sharper when genuinely supported by the scan. " +
-        "If recent physique memory is provided, compare today's look against that recent baseline in a believable, positive-only way. Favor trend language like stronger than your recent baseline, more polished than your recent baseline, or more consistent than your recent baseline when the structured numbers support it. " +
+        "If recent physique memory is provided, compare today's look against that recent baseline in a believable, positive-only way. Favor trend language like sharper than your recent baseline, stronger than your recent baseline, more polished than your recent baseline, or more complete than your recent baseline when the structured numbers support it. " +
+        "Use tasteful modern vocabulary that feels high-end and alive: words like sharp, polished, complete, structured, fuller, cleaner, athletic, composed, and standout are good when genuinely supported. Do not spam the same adjectives. " +
         "build_arc is an overall friendly score 55..96 that rewards consistency. percentile should be an integer 1..99. " +
-        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency.";
+        "Highlights should be positive-only and specific. Levers should be actionable: protein, training frequency, steps, sleep, re-scan consistency. shareCardSummary should sound like a premium distilled version of the analysis, not generic app copy.";
 
       const content = [
         { type: "text", text: userText },
@@ -1726,6 +1814,7 @@ const freeBypass =
           ? parsed.levers.map((s) => String(s).slice(0, 90)).slice(0, 4)
           : fb.levers,
         confidenceNote: String(parsed.confidenceNote || fb.confidenceNote).slice(0, 160),
+        shareCardSummary: String(parsed.shareCardSummary || parsed.share_card_summary || "").slice(0, 240) || undefined,
         gender,
         scanMode,
         poses: cleanPoses.map((p) => ({ poseKey: p.poseKey, title: p.title })),

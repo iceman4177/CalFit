@@ -107,6 +107,24 @@ function drawCover(ctx, img, x, y, w, h) {
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
+function formatPoseLabel(thumb = {}) {
+  const key = String(thumb?.poseKey || "").toLowerCase().trim();
+  if (key === "front_double_bi") return "Front Double Bi";
+  if (key === "lat_spread") return "Lat Spread";
+  if (key === "back_double_bi") return "Back Double Bi";
+  if (key === "front_scan") return "Front Pose";
+  if (key === "side_scan") return "Side Pose";
+  if (key === "back_scan") return "Back Pose";
+
+  const title = String(thumb?.title || "").trim();
+  if (!title) return "Pose";
+  return title
+    .replace(/\bscan\b/i, "Pose")
+    .replace(/\bdouble bi\b/i, "Front Double Bi")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function fitFont(ctx, text, maxWidth, start, min, fontFamily, style = "700 italic") {
   let size = start;
   while (size > min) {
@@ -526,8 +544,10 @@ export async function buildPoseSessionSharePng({
   const imgGap = 14;
   const imgW = Math.floor((contentW - imgGap * 2) / 3);
   const imgH = 232;
+  const thumbLabelH = 34;
   for (let i = 0; i < 3; i++) {
     const x = contentX + i * (imgW + imgGap);
+    const thumb = normalizedThumbs[i] || {};
     ctx.save();
     roundRectPath(ctx, x, y, imgW, imgH, 24);
     ctx.fillStyle = "rgba(255,255,255,0.05)";
@@ -540,6 +560,20 @@ export async function buildPoseSessionSharePng({
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(255,214,158,0.72)";
     ctx.stroke();
+    ctx.restore();
+
+    const label = formatPoseLabel(thumb);
+    ctx.save();
+    roundRectPath(ctx, x + 8, y + imgH - thumbLabelH - 8, imgW - 16, thumbLabelH, 14);
+    ctx.fillStyle = "rgba(20,7,7,0.78)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,214,158,0.42)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(246,234,224,0.96)";
+    ctx.font = "800 16px system-ui, -apple-system, Segoe UI, Roboto";
+    const labelLines = wrapLines(ctx, label, imgW - 36, 2);
+    labelLines.forEach((line, lineIndex) => ctx.fillText(line, x + 18, y + imgH - thumbLabelH + 13 + lineIndex * 15));
     ctx.restore();
   }
   y += imgH + 38;
