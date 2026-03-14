@@ -8,117 +8,134 @@ import {
   Button,
   Stack,
   TextField,
-  Typography
+  Typography,
+  Chip,
+  Box,
+  Divider,
 } from '@mui/material';
 
-function ShareWorkoutModal({ open, onClose, shareText }) {
-  // Always pull from localStorage first to avoid any async server lag
-  const latest = React.useMemo(() => {
+function lineFromExercise(ex) {
+  const name = ex?.exerciseName || ex?.name || 'Exercise';
+  const sets = Number.isFinite(Number(ex?.sets)) ? Number(ex.sets) : null;
+  const reps = Number.isFinite(Number(ex?.reps)) ? Number(ex.reps) : null;
+  const weight = Number.isFinite(Number(ex?.weight)) ? Number(ex.weight) : null;
+  const calories = Number.isFinite(Number(ex?.calories)) ? Math.round(Number(ex.calories)) : null;
+  const type = String(ex?.exerciseType || '').toLowerCase();
+  const isSauna = type === 'sauna' || /sauna/i.test(name);
+  const isTimed = isSauna || type === 'cardio';
+
+  if (isTimed) {
+    const timedPart = reps ? `${reps} min` : sets ? `${sets} round${sets === 1 ? '' : 's'}` : '';
+    return `• ${name}${timedPart ? ` — ${timedPart}` : ''}${calories ? ` • ${calories} cal` : ''}`;
+  }
+
+  const volumeParts = [];
+  if (sets) volumeParts.push(`${sets} set${sets === 1 ? '' : 's'}`);
+  if (reps) volumeParts.push(`${reps} reps`);
+  if (weight && weight > 0) volumeParts.push(`${weight} lb`);
+
+  return `• ${name}${volumeParts.length ? ` — ${volumeParts.join(' • ')}` : ''}${calories ? ` • ${calories} cal` : ''}`;
+}
+
+function buildCaption({ shareText, exercises, totalCalories, workoutDate }) {
+  const total = Math.max(0, Math.round(Number(totalCalories) || 0));
+  const dateText = workoutDate || 'today';
+  const header = total > 0
+    ? `🔥 Just crushed my workout on ${dateText} — ${total} kcal burned!`
+    : `🔥 Just finished my workout on ${dateText}!`;
+
+  const body = Array.isArray(exercises) && exercises.length
+    ? exercises.map(lineFromExercise).join('\n')
+    : (shareText || '').trim();
+
+  const footer = '\n\nTracked with Slimcal.ai 💪 #SlimcalAI';
+  return `${header}${body ? `\n${body}` : ''}${footer}`.trim();
+}
+
+const SOCIALS = [
+  { name: 'Facebook', url: 'https://www.facebook.com/', label: 'Post on Facebook' },
+  { name: 'X', url: 'https://twitter.com/compose/tweet', label: 'Share on X' },
+  { name: 'LinkedIn', url: 'https://www.linkedin.com/feed/', label: 'Share on LinkedIn' },
+  { name: 'WhatsApp', url: 'https://web.whatsapp.com/', label: 'Send on WhatsApp' },
+  { name: 'Instagram', url: 'https://www.instagram.com/', label: 'Open Instagram' },
+];
+
+function ShareWorkoutModal({ open, onClose, shareText, exercises = [], totalCalories = 0, workoutDate = '' }) {
+  const builtCaption = React.useMemo(
+    () => buildCaption({ shareText, exercises, totalCalories, workoutDate }),
+    [shareText, exercises, totalCalories, workoutDate]
+  );
+
+  const handleCopy = async () => {
     try {
-      const hist = JSON.parse(localStorage.getItem('workoutHistory') || '[]');
-      return hist.length ? hist[hist.length - 1] : null;
-    } catch {
-      return null;
-    }
-  }, [open]); // recompute each time modal opens
-
-  const linesFromLatest = React.useMemo(() => {
-    if (!latest || !Array.isArray(latest.exercises)) return [];
-    const fmt = (v) => (Number.isFinite(+v) ? +v : null);
-
-    return latest.exercises.map((ex) => {
-      const name = ex.exerciseName || ex.name || 'Exercise';
-      const isSauna = (ex.exerciseType === 'Sauna') || /sauna/i.test(name);
-      const sets = fmt(ex.sets);
-      const reps = typeof ex.reps === 'string' ? ex.reps.trim() : fmt(ex.reps);
-      const weight = fmt(ex.weight);
-      const cals = fmt(ex.calories);
-
-      let vol = '';
-      if (sets && reps && reps !== 0 && reps !== '0') vol = `${sets}×${reps}`;
-      else if (sets) vol = `${sets}×`;
-      else if (reps && reps !== 0 && reps !== '0') vol = `×${reps}`;
-
-      const wt = weight && weight > 0 ? ` @ ${weight} lb` : '';
-      const kcal = cals && cals > 0 ? ` — ${Math.round(cals)} kcal` : '';
-
-      if (isSauna) return `• Sauna Session${kcal}`;
-      return `• ${name}${vol || wt ? ` — ${vol}${wt}` : ''}${kcal}`;
-    });
-  }, [latest]);
-
-  const builtCaption = React.useMemo(() => {
-    if (latest && Array.isArray(latest.exercises)) {
-      const total = Math.max(0, Math.round(Number(latest.totalCalories || 0)));
-      const header = total > 0
-        ? `🔥 Just crushed my workout — ${total} kcal burned!`
-        : `🔥 Just finished my workout!`;
-      const body = linesFromLatest.join('\n');
-      const footer = `\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
-      return `${header}\n${body}${footer}`.trim();
-    }
-
-    // Fallback to whatever was passed in, but clean it up a bit
-    if (shareText) {
-      let t = shareText.replace(/\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
-      t = t.replace(/\b\d+\s*items?,?\s*/i, '').trim();
-      if (!/Slimcal/i.test(t)) t += `\n\nTracked with Slimcal.ai 💪 #SlimcalAI`;
-      return t;
-    }
-    return '🔥 Just finished my workout!\n\nTracked with Slimcal.ai 💪 #SlimcalAI';
-  }, [latest, linesFromLatest, shareText]);
-
-  const handleCopy = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(builtCaption)
-        .then(() => alert('🔥 Copied! Paste it into your post and tag #SlimcalAI'))
-        .catch(() => alert('Failed to copy workout summary'));
-    } else {
-      alert('Clipboard API not supported.');
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(builtCaption);
+      alert('Copied. Paste it into your post and tag #SlimcalAI');
+    } catch (err) {
+      alert('Could not copy the workout caption.');
     }
   };
 
-  const socialLinks = [
-    { name: 'Facebook', url: 'https://www.facebook.com/' },
-    { name: 'Twitter', url: 'https://twitter.com/compose/tweet' },
-    { name: 'LinkedIn', url: 'https://www.linkedin.com/feed/' },
-    { name: 'WhatsApp', url: 'https://web.whatsapp.com/' },
-    { name: 'Instagram', url: 'https://www.instagram.com/' }
-  ];
-
   return (
-    <Dialog open={open} onClose={onClose}>
-      <DialogTitle>Share Your Workout</DialogTitle>
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ fontWeight: 800 }}>Share this session</DialogTitle>
       <DialogContent>
-        <Stack spacing={2}>
-          <TextField
-            multiline
-            fullWidth
-            minRows={6}
-            variant="outlined"
-            value={builtCaption}
-            InputProps={{ readOnly: true }}
-          />
-          <Button variant="contained" onClick={handleCopy}>
-            Copy to Clipboard
+        <Stack spacing={2.25}>
+          <Box
+            sx={{
+              p: 2,
+              borderRadius: 3,
+              border: '1px solid rgba(16,24,40,0.08)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)',
+            }}
+          >
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+              <Chip label={`${Math.max(0, Math.round(Number(totalCalories) || 0))} kcal`} />
+              <Chip label={`${Array.isArray(exercises) ? exercises.length : 0} exercises`} />
+              {workoutDate ? <Chip label={workoutDate} /> : null}
+            </Stack>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+              Copy the caption below, then drop it into your post or story.
+            </Typography>
+            <TextField
+              multiline
+              fullWidth
+              minRows={8}
+              variant="outlined"
+              value={builtCaption}
+              InputProps={{ readOnly: true }}
+            />
+          </Box>
+
+          <Button variant="contained" size="large" onClick={handleCopy}>
+            Copy caption
           </Button>
-          <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap">
-            {socialLinks.map((link) => (
-              <Button
-                key={link.name}
-                variant="outlined"
-                onClick={() => window.open(link.url, '_blank', 'noopener,noreferrer')}
-              >
-                {link.name}
-              </Button>
-            ))}
-          </Stack>
-          <Typography variant="body2" align="center">
-            Tap a social icon, then paste your caption. Let’s go! 💥
-          </Typography>
+
+          <Divider />
+
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.25 }}>
+              Open a social app
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {SOCIALS.map((link) => (
+                <Button
+                  key={link.name}
+                  variant="outlined"
+                  onClick={() => window.open(link.url, '_blank', 'noopener,noreferrer')}
+                  sx={{ borderRadius: 999, px: 2 }}
+                >
+                  {link.name}
+                </Button>
+              ))}
+            </Stack>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1.25 }}>
+              Best flow: copy the caption first, then open the app you want to post in.
+            </Typography>
+          </Box>
         </Stack>
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2.5 }}>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
