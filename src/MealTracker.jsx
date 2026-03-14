@@ -1129,7 +1129,15 @@ export default function MealTracker({ onMealUpdate }) {
                 }}
               >
                 <Stack spacing={2}>
-                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    useFlexGap
+                    flexWrap="wrap"
+                    justifyContent="center"
+                    alignItems="center"
+                    sx={{ width: '100%' }}
+                  >
                     <Chip label="Search food" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
                     <Chip label="Custom Food" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
                     <Chip label="Build a Bowl" size="small" sx={{ fontWeight: 700, borderRadius: 999 }} />
