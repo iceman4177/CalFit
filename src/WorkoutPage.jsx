@@ -1664,10 +1664,9 @@ setNewExercise({
                   border: '1px solid rgba(0,0,0,0.06)',
                   bgcolor: 'rgba(255,255,255,0.86)',
                   boxShadow: 'none',
-                  width: '100%',
-                  maxWidth: { xs: '100%', md: 540 },
+                  maxWidth: 620,
                   mx: 'auto',
-                  alignSelf: 'center'
+                  width: '100%'
                 }}
               >
                 <ExerciseForm
@@ -1753,7 +1752,7 @@ setNewExercise({
                   onClick={() => setShowSaunaSection((s) => !s)}
                   sx={{ borderRadius: 999, fontWeight: 700, display: 'flex', mx: 'auto' }}
                 >
-                  {showSaunaSection ? 'Hide Sauna Session' : 'Add Sauna Session'}
+                  {showSaunaSection ? 'Hide Sauna (optional)' : 'Add Sauna (optional)'}
                 </Button>
               </Box>
 
