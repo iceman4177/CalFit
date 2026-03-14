@@ -1570,32 +1570,26 @@ Output format (use these headings):
           border: "1px solid rgba(2,6,23,0.08)",
           background: "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)",
           boxShadow: "0 16px 40px rgba(15,23,42,0.06)",
+          overflow: "visible",
         }}
       >
-        <CardContent sx={{ p: { xs: 2.1, sm: 2.5 }, position: "relative" }}>
-          <FeatureUseBadge
-            featureKey="daily_eval_verdict"
-            isPro={isPro}
-            labelPrefix="AI Coach"
-            sx={{
-              position: { sm: "absolute" },
-              top: { sm: 20 },
-              right: { sm: 24 },
-              alignSelf: { xs: "center", sm: "auto" },
-              mb: { xs: 1.1, sm: 0 },
-            }}
-          />
+        <CardContent sx={{ p: { xs: 2.1, sm: 2.5 }, textAlign: "center" }}>
+          {!isPro && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
+              <FeatureUseBadge featureKey="daily_eval_verdict" isPro={isPro} labelPrefix="AI Coach" />
+            </Box>
+          )}
 
-          <Stack spacing={1.3} alignItems="center" sx={{ textAlign: "center", pr: { sm: 16 } }}>
-            <Box sx={{ width: "100%", maxWidth: 720, mx: "auto" }}>
+          <Stack spacing={2}>
+            <Box sx={{ maxWidth: 620, mx: "auto" }}>
               <Typography
                 variant="h4"
                 sx={{
-                  fontWeight: 1000,
-                  letterSpacing: "-0.03em",
+                  fontWeight: 800,
+                  lineHeight: 1.08,
+                  letterSpacing: "-0.02em",
                   color: "rgba(15,23,42,0.98)",
-                  fontSize: { xs: "3rem", sm: "3.2rem" },
-                  lineHeight: 1,
+                  fontSize: { xs: "2.15rem", sm: "2.35rem" }
                 }}
               >
                 Coach
@@ -1603,11 +1597,12 @@ Output format (use these headings):
               <Typography
                 variant="body1"
                 sx={{
-                  mt: 0.8,
-                  color: "rgba(51,65,85,0.88)",
-                  fontWeight: 600,
-                  maxWidth: 720,
+                  mt: 0.5,
+                  maxWidth: 560,
                   mx: "auto",
+                  color: "rgba(51,65,85,0.88)",
+                  fontSize: { xs: "1rem", sm: "1.08rem" },
+                  lineHeight: 1.5
                 }}
               >
                 Ask AI Coach for today, then knock out your plan below.
@@ -1619,14 +1614,28 @@ Output format (use these headings):
               startIcon={aiLoading ? null : <AutoAwesomeRoundedIcon />}
               onClick={handleGenerateAiVerdict}
               disabled={aiLoading}
-              sx={{ borderRadius: 999, px: 3, py: 1.25, fontWeight: 950, minWidth: { sm: 220 } }}
+              size="large"
+              sx={{
+                fontWeight: 700,
+                fontSize: { xs: "1.05rem", sm: "1.08rem" },
+                borderRadius: 999,
+                alignSelf: "center",
+                minWidth: { xs: "100%", sm: 320 },
+                maxWidth: 420
+              }}
             >
               {aiLoading ? <CircularProgress size={22} color="inherit" /> : aiVerdict ? "Refresh AI Coach" : "Ask AI Coach"}
             </Button>
 
             <Typography
-              variant="body2"
-              sx={{ color: "rgba(71,85,105,0.84)", fontWeight: 600, maxWidth: 760, mx: "auto" }}
+              variant="body1"
+              sx={{
+                maxWidth: 560,
+                mx: "auto",
+                color: "rgba(71,85,105,0.84)",
+                fontSize: { xs: "1rem", sm: "1.08rem" },
+                lineHeight: 1.5
+              }}
             >
               Uses today’s meals, workouts, and progress to call your next best move.
             </Typography>
