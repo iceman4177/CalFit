@@ -10,6 +10,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useEntitlements } from "../context/EntitlementsContext.jsx";
+import { showAppToast } from "../lib/appToast";
 
 export default function UpgradeButton({
   priceIdMonthly = import.meta.env.VITE_PRICE_ID_MONTHLY,
@@ -56,7 +57,7 @@ export default function UpgradeButton({
   const startCheckout = async (emailForCheckout) => {
     const selected = plan === "annual" ? priceIdAnnual : priceIdMonthly;
     if (!selected) {
-      alert("Missing priceId for selected plan.");
+      showAppToast("Missing priceId for selected plan.", "warning");
       return;
     }
     try {
@@ -69,18 +70,18 @@ export default function UpgradeButton({
       if (!r.ok) {
         const t = await r.text();
         console.error("[Upgrade] non-OK:", t);
-        alert("Unable to start checkout. Please try again.");
+        showAppToast("Unable to start checkout. Please try again.", "warning");
         return;
       }
       const data = await r.json();
       if (data?.url) {
         window.location.href = data.url; // Stripe Checkout
       } else {
-        alert("Checkout not initialized. Please try again.");
+        showAppToast("Checkout not initialized. Please try again.", "warning");
       }
     } catch (err) {
       console.error("[Upgrade] error:", err);
-      alert("Something went wrong launching checkout.");
+      showAppToast("Something went wrong launching checkout.", "warning");
     } finally {
       setBusy(false);
       clearIntent();
@@ -90,7 +91,7 @@ export default function UpgradeButton({
   const ensureEmailThenCheckout = async () => {
     const e = normalize(val || email);
     if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
-      alert("Please enter a valid email to continue.");
+      showAppToast("Please enter a valid email to continue.", "warning");
       return;
     }
     setEmail?.(e);

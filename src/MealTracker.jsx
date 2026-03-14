@@ -57,6 +57,7 @@ import { callAIGenerate } from './lib/ai';
 
 // ✅ NEW: Supabase client (only used for simple “hydrate today” pulls)
 import { supabase } from './lib/supabaseClient';
+import { showAppToast } from './lib/appToast';
 
 // ---------- Pro / gating helpers ----------
 const isProUser = () => {
@@ -807,13 +808,13 @@ export default function MealTracker({ onMealUpdate }) {
     if (selectedFood && selectedPortion) {
       const q = safeNumber(qty, 0);
       if (!Number.isFinite(q) || q <= 0) {
-        alert('Enter a valid quantity.');
+        showAppToast('Enter a valid quantity.', 'warning');
         return;
       }
 
       const c = safeNumber(calories, NaN);
       if (!Number.isFinite(c) || c <= 0) {
-        alert('Calories must be greater than 0.');
+        showAppToast('Calories must be greater than 0.', 'warning');
         return;
       }
 
@@ -856,7 +857,7 @@ export default function MealTracker({ onMealUpdate }) {
     // Legacy/freeSolo path: requires manual calories
     const c = Number.parseInt(calories, 10);
     if (!nameText || !Number.isFinite(c) || c <= 0) {
-      alert('Enter a valid food & calories.');
+      showAppToast('Enter a valid food & calories.', 'warning');
       return;
     }
 

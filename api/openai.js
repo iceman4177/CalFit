@@ -8,7 +8,6 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
-  console.log("🔑 OPENAI_API_KEY present?", Boolean(apiKey));
   if (!apiKey) {
     return res
       .status(500)

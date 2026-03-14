@@ -1,8 +1,14 @@
 // /api/entitlements.js
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 
-function allowCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
+function allowCors(req, res) {
+  const configured = String(process.env.ALLOWED_ORIGIN || '').trim();
+  const requestOrigin = String(req.headers.origin || '').trim();
+  const allowedOrigin = configured || requestOrigin || '';
+  if (allowedOrigin) res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  if (configured && requestOrigin && configured === requestOrigin) {
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 }
@@ -21,7 +27,7 @@ const DEFAULT = {
 };
 
 export default async function handler(req, res) {
-  allowCors(res);
+  allowCors(req, res);
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 

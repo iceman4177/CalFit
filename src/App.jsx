@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect, useRef, useLayoutEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Route,
   Switch,
@@ -29,14 +29,31 @@ import AssessmentIcon    from '@mui/icons-material/Assessment';
 import InfoIcon          from '@mui/icons-material/Info';
 import ChatIcon          from '@mui/icons-material/Chat';
 
+import ProLandingPage from './ProLandingPage';
+import ProSuccess     from './ProSuccess';
+import AuthCallback   from './AuthCallback';
 
 import useVariableRewards    from './hooks/useVariableRewards';
 
 import useFirstTimeTip       from './hooks/useFirstTimeTip';
 import useReferral           from './hooks/useReferral';
 
+import HealthDataForm    from './HealthDataForm';
+import WorkoutPage       from './WorkoutPage';
+import WorkoutHistory    from './WorkoutHistory';
+import ProgressDashboard from './ProgressDashboard';
+import Achievements      from './Achievements';
+import MealTracker       from './MealTracker';
+import CalorieHistory    from './CalorieHistory';
+import CalorieSummary    from './CalorieSummary';
+import NetCalorieBanner  from './NetCalorieBanner';
+import DailyRecapCoach   from './DailyRecapCoach';
+import HomeHub          from './HomeHub';
+import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
+import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 import SocialProofBanner from './components/SocialProofBanner';
+import WaitlistSignup    from './components/WaitlistSignup';
 
 import UpgradeModal      from './components/UpgradeModal';
 import AmbassadorModal   from './components/AmbassadorModal';
@@ -48,6 +65,7 @@ import { supabase }        from './lib/supabaseClient';
 
 import { attachSyncListeners } from './lib/sync';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
+import { showAppToast } from './lib/appToast';
 import { getMinimumProfileStatusFromData } from './lib/profileCompletion';
 import ProfileSetupGate from './components/ProfileSetupGate';
 
@@ -62,20 +80,6 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
-const ProLandingPage = lazy(() => import('./ProLandingPage'));
-const ProSuccess = lazy(() => import('./ProSuccess'));
-const AuthCallback = lazy(() => import('./AuthCallback'));
-const HealthDataForm = lazy(() => import('./HealthDataForm'));
-const WorkoutPage = lazy(() => import('./WorkoutPage'));
-const WorkoutHistory = lazy(() => import('./WorkoutHistory'));
-const ProgressDashboard = lazy(() => import('./ProgressDashboard'));
-const MealTracker = lazy(() => import('./MealTracker'));
-const DailyRecapCoach = lazy(() => import('./DailyRecapCoach'));
-const HomeHub = lazy(() => import('./HomeHub'));
-const DailyEvaluationHome = lazy(() => import('./DailyEvaluationHome'));
-const PoseSession = lazy(() => import('./PoseSession.jsx'));
-
-
 // Hide Recap Coach from navigation (page remains accessible via direct URL).
 const SHOW_COACH_NAV = false;
 
@@ -87,20 +91,13 @@ const routeTips = {
   '/meals':        'Track your meals here: search foods or add calories manually.',
   '/history':      'View your past workouts & meals at a glance.',
   '/dashboard':    'Dashboard: see trends and invite friends below.',
+  '/achievements': 'Achievements: hit milestones to unlock badges!',
+  '/calorie-log':  'Calorie Log: detailed daily breakdown of intake vs burn.',
+  '/summary':      'Summary: quick overview of today’s net calories.',
   '/recap':        'Coach (legacy route): redirects to Coach tab.',
+  '/waitlist':     'Join our waitlist for early access to new features!',
 
 };
-
-function RouteLoader() {
-  return (
-    <Box sx={{ minHeight: '50vh', display: 'grid', placeItems: 'center' }}>
-      <Stack spacing={1.5} alignItems="center">
-        <CircularProgress size={28} />
-        <Typography variant="body2" color="text.secondary">Loading…</Typography>
-      </Stack>
-    </Box>
-  );
-}
 
 function PageTracker() {
   const location = useLocation();
@@ -374,11 +371,6 @@ export default function App() {
     attachSyncListeners();
   }, []);
 
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   /* ---------------- Entitlements (context) ---------------- */
   const { isProActive, status, entitlements } = useEntitlements();
@@ -866,6 +858,18 @@ export default function App() {
     });
   };
 
+
+  useEffect(() => {
+    const onToast = (event) => {
+      const message = String(event?.detail?.message || '').trim();
+      const severity = event?.detail?.severity || 'info';
+      if (!message) return;
+      setAppSnack({ open: true, message, severity });
+    };
+    window.addEventListener('slimcal:toast', onToast);
+    return () => window.removeEventListener('slimcal:toast', onToast);
+  }, []);
+
   return (
     <>
       <Header logoSrc="/slimcal-logo.svg" showBeta={false} />
@@ -915,7 +919,6 @@ export default function App() {
           </>
         )}
 
-        <Suspense fallback={<RouteLoader />}>
         <Switch>
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
@@ -1020,14 +1023,14 @@ export default function App() {
           }/>
           <Route path="/history" component={WorkoutHistory} />
           <Route path="/dashboard" component={ProgressDashboard} />
-          <Route path="/achievements" render={() => <Redirect to="/dashboard" />} />
-          <Route path="/calorie-log" render={() => <Redirect to="/dashboard" />} />
-          <Route path="/summary" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/achievements" component={Achievements} />
+          <Route path="/calorie-log"  component={CalorieHistory} />
+          <Route path="/summary"      component={CalorieSummary} />
 
           {/* ✅ Legacy recap route now redirects to Coach (retention) */}
           <Route path="/recap" render={() => <Redirect to="/coach" />} />
 
-          <Route path="/waitlist" render={() => <Redirect to="/dashboard" />} />
+          <Route path="/waitlist"     component={WaitlistSignup} />
 
           {/* ✅ NEW: Acquisition home is Daily Evaluation */}
           <Route exact path="/" component={HomeHub} />
@@ -1065,7 +1068,6 @@ export default function App() {
           {/* ✅ Retention side: Recap Coach */}
           <Route path="/coach" render={() => <Redirect to="/verdict" />} />
         </Switch>
-        </Suspense>
 
         <UpgradeModal
           open={upgradeOpen}
@@ -1085,6 +1087,10 @@ export default function App() {
           {netSnack.type === 'online'
             ? <Alert onClose={closeNetSnack} severity="success" variant="filled">Back online. Your local data is safe.</Alert>
             : <Alert onClose={closeNetSnack} severity="warning" variant="filled">You’re offline. Entries are saved locally.</Alert>}
+        </Snackbar>
+
+        <Snackbar open={appSnack.open} autoHideDuration={2600} onClose={closeAppSnack} anchorOrigin={{ vertical:'bottom', horizontal:'center' }}>
+          <Alert onClose={closeAppSnack} severity={appSnack.severity || 'info'} variant="filled">{appSnack.message}</Alert>
         </Snackbar>
       </Container>
 

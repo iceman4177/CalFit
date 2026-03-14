@@ -18,14 +18,12 @@ export default function AuthCallback() {
         const hasCode = /[?&]code=/.test(fullUrl);
         const hasHashTokens = /#access_token=/.test(fullUrl);
 
-        console.log('[AuthCallback] url', { fullUrl, hasCode, hasHashTokens });
         setMsg('Checking session…');
 
         // If a session is already available, skip exchanging.
         const { data: s1 } = await supabase.auth.getSession();
         const existingSession = s1?.session || null;
         if (existingSession?.user) {
-          console.log('[AuthCallback] session already present; skipping exchange');
           setMsg('Signed in. Redirecting…');
           if (mounted) history.replace('/');
           return;
@@ -33,16 +31,13 @@ export default function AuthCallback() {
 
         // Only try exchange if we actually have a `code` and no session yet
         if (hasCode && !existingSession) {
-          console.log('[AuthCallback] calling exchangeCodeForSession');
           setMsg('Exchanging code…');
 
           const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
           if (error) {
             // Non-fatal if we can confirm a session right after (cookies might already be set)
-            console.warn('[AuthCallback] exchange error', error);
             setMsg('Verifying session…');
           } else {
-            console.log('[AuthCallback] exchange ok?', Boolean(data?.session));
           }
         }
 
@@ -50,7 +45,6 @@ export default function AuthCallback() {
         const { data: s2, error: e2 } = await supabase.auth.getSession();
         const finalSession = s2?.session || null;
 
-        console.log('[AuthCallback] session?', Boolean(finalSession), 'user?', finalSession?.user?.email);
         if (finalSession?.user) {
           setMsg('Signed in. Redirecting…');
           if (mounted) history.replace('/');

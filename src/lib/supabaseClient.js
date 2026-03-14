@@ -31,7 +31,3 @@ export const supabase = createClient(url, anon, {
   },
 });
 
-// expose for console poking
-if (typeof window !== 'undefined') {
-  window.supabase = supabase;
-}

@@ -18,6 +18,7 @@ import useFirstTimeTip from './hooks/useFirstTimeTip';
 import { supabase } from './lib/supabaseClient';
 import { useAuth } from './context/AuthProvider';
 import { readProfileBundle, writeProfileBundle, mirrorProfileToLegacy } from './lib/profileStorage';
+import { showAppToast } from './lib/appToast';
 
 function getHealthSeenKeyForUser(userId) {
   return userId ? `slimcal:healthFormSeen:user:${userId}:v1` : 'slimcal:healthFormSeen:anon:v1';
@@ -294,11 +295,11 @@ export default function HealthDataForm({ setUserData }) {
     // Basic validation
     const ageN = num(age);
     if (!ageN || ageN < 13 || ageN > 99) {
-      alert('Please enter a valid age (13–99).');
+      showAppToast('Please enter a valid age (13–99).', 'warning');
       return;
     }
     if (!gender) {
-      alert('Please select a gender so we can estimate BMR accurately.');
+      showAppToast('Please select a gender so we can estimate BMR accurately.', 'warning');
       return;
     }
 

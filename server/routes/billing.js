@@ -1,58 +1,56 @@
-// server/routes/billing.js
-const express = require('express');
-const Stripe = require('stripe');
-
-const router = express.Router();
-
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.warn('[Billing] STRIPE_SECRET_KEY is not set. Set it in your .env');
-}
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2024-06-20',
-});
+// src/lib/billing.js
+import { supabase } from './supabaseClient';
+import { showAppToast } from './appToast';
 
 /**
- * POST /api/create-checkout-session
- * Body: { plan?: "monthly" | "annual" }
- * Behavior:
- *  - If STRIPE_PRICE_ID_MONTHLY/ANNUAL exist, use them
- *  - Else fall back to STRIPE_PRICE_ID for all plans (single-plan mode)
+ * Opens Stripe Billing Portal for the current signed-in user.
+ * - Calls POST /api/portal with { user_id, email, return_url }
+ * - Redirects to Stripe if a portal URL is returned.
+ * - If the server returns 404 "no_customer", we open the Upgrade modal.
+ * - If the user isn't signed in, we trigger your sign-in flow.
  */
-router.post('/create-checkout-session', async (req, res) => {
+export async function openBillingPortal() {
   try {
-    const { plan } = req.body || {};
-
-    // Preferred: separate prices
-    const monthlyPrice = process.env.STRIPE_PRICE_ID_MONTHLY || process.env.STRIPE_PRICE_ID;
-    const annualPrice  = process.env.STRIPE_PRICE_ID_ANNUAL  || process.env.STRIPE_PRICE_ID;
-
-    if (!monthlyPrice) {
-      return res.status(500).json({ error: 'Stripe price ID not configured on server.' });
+    const { data } = await supabase.auth.getUser();
+    const user = data?.user;
+    if (!user?.id) {
+      console.warn('[billing] no user, opening sign-in');
+      window.dispatchEvent(new CustomEvent('slimcal:open-signin'));
+      return;
     }
 
-    const useAnnual = plan === 'annual' && !!annualPrice;
-    const priceId = useAnnual ? annualPrice : monthlyPrice;
+    const payload = {
+      user_id: user.id,
+      email: user.email || null,
+      return_url: window.location.href,
+    };
 
-    const baseUrl = process.env.APP_BASE_URL || 'http://localhost:5173';
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      payment_method_types: ['card'],
-      line_items: [{ price: priceId, quantity: 1 }],
-      subscription_data: {
-        trial_period_days: Number(process.env.STRIPE_TRIAL_DAYS || 7),
-      },
-      success_url: `${baseUrl}/pro-success`,
-      cancel_url: `${baseUrl}/pro`,
-      allow_promotion_codes: true,
+    const res = await fetch('/api/portal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
 
-    return res.json({ sessionId: session.id });
-  } catch (err) {
-    console.error('Stripe checkout session error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // If no Stripe customer is mapped yet, nudge to Upgrade flow
+    if (res.status === 404) {
+      console.info('[billing] no stripe customer yet -> open Upgrade');
+      window.dispatchEvent(new CustomEvent('slimcal:open-upgrade'));
+      return;
+    }
 
-module.exports = router;
+    const json = await res.json().catch(() => ({}));
+
+    if (res.ok && json?.url) {
+      window.location.href = json.url;
+      return;
+    }
+
+    // Other non-OK outcomes — show an error, do NOT silently open Upgrade
+    const msg = json?.error || `Portal error (${res.status})`;
+    console.error('[billing] invalid portal response:', msg, json);
+    showAppToast(msg, "warning");
+  } catch (e) {
+    console.error('[billing] failed opening portal', e);
+    showAppToast(e?.message || 'Network error opening billing portal', 'warning');
+  }
+}

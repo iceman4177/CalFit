@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { showAppToast } from "./lib/appToast";
 
 function buildCaption({ shareText, exercises = [], totalCalories = 0 }) {
   const cleanExercises = Array.isArray(exercises) ? exercises : [];
@@ -100,7 +101,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
 
   const handleCopy = React.useCallback(async () => {
     const ok = await copyTextQuiet(caption);
-    alert(ok ? "Copied caption — paste it into your post." : "Could not copy caption.");
+    showAppToast(ok ? "Copied caption — paste it into your post." : "Could not copy caption.", ok ? "success" : "warning");
   }, [caption]);
 
   const handleNativeShare = React.useCallback(async () => {
@@ -122,7 +123,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
           await navigator.share({ files: [file] });
           if (copied) {
             setTimeout(() => {
-              try { alert("Workout card shared. Caption is already copied for paste."); } catch {}
+              try { showAppToast("Workout card shared. Caption is already copied for paste.", "success"); } catch {}
             }, 180);
           }
           return;
@@ -130,7 +131,7 @@ export default function ShareWorkoutModal({ open, onClose, shareText, exercises,
 
         await downloadBlob(blob, "slimcal-workout-share.png");
         if (copied) {
-          alert("Workout card saved/downloaded. Caption is copied and ready to paste.");
+          showAppToast("Workout card saved/downloaded. Caption is copied and ready to paste.", "success");
         }
         return;
       }

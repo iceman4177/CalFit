@@ -47,6 +47,7 @@ import FeatureUseBadge, {
 import { useAuth } from './context/AuthProvider.jsx';
 import { calcExerciseCaloriesHybrid } from './analytics';
 import { getAIQuotaStatus } from './lib/ai';
+import { showAppToast } from './lib/appToast';
 
 // ✅ direct Supabase reads for lightweight "today" history hydration (mirrors meals behavior)
 import { supabase } from './lib/supabaseClient';
@@ -737,7 +738,7 @@ const readTodaySessionsFromLocal = useCallback(() => {
     if (newExercise.exerciseType === 'cardio') {
       const cal = parseFloat(newExercise.manualCalories);
       if (!cal || cal <= 0) {
-        alert('Please enter valid calories for cardio.');
+        showAppToast('Please enter valid calories for cardio.', 'warning');
         return;
       }
       setCurrentCalories(cal);
@@ -751,7 +752,7 @@ const readTodaySessionsFromLocal = useCallback(() => {
     if (newExercise.exerciseType === 'cardio') {
       const cal = parseFloat(newExercise.manualCalories);
       if (!cal || cal <= 0) {
-        alert('Please enter valid calories for cardio.');
+        showAppToast('Please enter valid calories for cardio.', 'warning');
         return;
       }
             const entry = { exerciseType: 'cardio', exerciseName: newExercise.cardioType || 'Cardio', calories: cal };
@@ -769,7 +770,7 @@ setNewExercise(prev => ({ ...prev, cardioType: '', manualCalories: '' }));
       parseFloat(newExercise.weight) <= 0 ||
       parseInt(newExercise.reps, 10) <= 0
     ) {
-      alert('Please enter a valid exercise, weight, and reps.');
+      showAppToast('Please enter a valid exercise, weight, and reps.', 'warning');
       return;
     }
 
@@ -1170,7 +1171,7 @@ setNewExercise({
 
     const totalRaw = cumulativeExercises.reduce((sum, ex) => sum + (Number(ex.calories) || 0), 0);
     if (!cumulativeExercises.length || totalRaw <= 0) {
-      alert('Add at least 1 exercise before submitting.');
+      showAppToast('Add at least 1 exercise before submitting.', 'warning');
       return;
     }
 
