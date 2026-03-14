@@ -169,6 +169,9 @@ export default function ExerciseForm({
         bottom: 0,
         mt: 2,
         p: 1.5,
+        width: '100%',
+        maxWidth: 760,
+        mx: 'auto',
         borderRadius: 2,
         border: '1px solid rgba(0,0,0,0.06)',
         boxShadow: '0 8px 24px rgba(0,0,0,0.03)',
@@ -203,8 +206,8 @@ export default function ExerciseForm({
   return (
     <Box
       sx={{
-        width: '100%',
-        maxWidth: { xs: '100%', md: 980 },
+        width: { xs: '100%', md: '86%' },
+        maxWidth: { xs: '100%', md: 760 },
         mx: 'auto'
       }}
     >
