@@ -5,28 +5,29 @@ import {
   Button,
   Container,
   Divider,
+  List,
+  ListItem,
+  ListItemText,
   Typography,
   CircularProgress,
   Paper,
   Stack,
   Chip,
-  IconButton,
-  Dialog,
+  IconButton,  Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions,
+  DialogActions
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import FitnessCenterRoundedIcon from '@mui/icons-material/FitnessCenterRounded';
-import LocalFireDepartmentRoundedIcon from '@mui/icons-material/LocalFireDepartmentRounded';
-import IosShareRoundedIcon from '@mui/icons-material/IosShareRounded';
+import ShareRoundedIcon from '@mui/icons-material/ShareRounded';
 
 import { useAuth } from './context/AuthProvider.jsx';
 import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
+
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
-import { supabase } from './lib/supabaseClient';
-import { upsertDailyMetricsLocalFirst } from './lib/localFirst';
+
+
 
 function setsFromExercises(exercises = []) {
   const exArr = Array.isArray(exercises) ? exercises : [];
@@ -37,9 +38,14 @@ function setsFromExercises(exercises = []) {
     const nSets = Math.max(1, parseInt(ex?.sets, 10) || 1);
     const reps = ex?.reps != null ? Number(ex.reps) : 0;
     const weight = ex?.weight != null ? Number(ex.weight) : 0;
-    const volume = ex?.volume != null ? Number(ex.volume) : 0;
+    const volume = ex?.volume != null ? Number(ex.volume) : 0; // minutes for cardio if used
     for (let i = 0; i < nSets; i += 1) {
-      rows.push({ exercise_name: name, reps, weight, volume });
+      rows.push({
+        exercise_name: name,
+        reps: Number.isFinite(reps) ? reps : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+        volume: Number.isFinite(volume) ? volume : 0,
+      });
     }
   }
   return rows;
@@ -47,11 +53,20 @@ function setsFromExercises(exercises = []) {
 
 function getExercisesFromWorkout(workout) {
   try {
-    const ex = workout?.items?.exercises;
-    if (Array.isArray(ex) && ex.length) return ex;
+    const items = workout?.items;
+    if (items && typeof items === 'object') {
+      const ex = items.exercises;
+      if (Array.isArray(ex) && ex.length) return ex;
+    }
   } catch (e) {}
   return null;
 }
+
+// ✅ We use Supabase directly here to delete cloud rows safely
+import { supabase } from './lib/supabaseClient';
+
+// ✅ Update daily metrics after deletion so banner matches instantly
+import { upsertDailyMetricsLocalFirst } from './lib/localFirst';
 
 const SCALE = 0.1;
 
@@ -59,6 +74,10 @@ function calcCaloriesFromSets(sets) {
   if (!Array.isArray(sets) || sets.length === 0) return 0;
   let vol = 0;
   for (const s of sets) {
+    if (typeof s.calories === 'number' && Number.isFinite(s.calories)) {
+      vol += s.calories;
+      continue;
+    }
     const w = Number(s.weight) || 0;
     const r = Number(s.reps) || 0;
     vol += w * r * SCALE;
@@ -66,48 +85,19 @@ function calcCaloriesFromSets(sets) {
   return Number.isFinite(vol) ? vol : 0;
 }
 
+function formatDateTime(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
 function formatDateOnly(iso) {
-  try {
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  } catch {
-    return iso;
-  }
+  try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
+  catch (e) { return iso; }
 }
+function toUS(iso) { try { return new Date(iso).toLocaleDateString('en-US'); } catch (e) { return iso; } }
 
-function formatTimeOnly(iso) {
-  try {
-    return new Date(iso).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatShareDate(iso) {
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '';
-  }
-}
-
-function toUS(iso) {
-  try { return new Date(iso).toLocaleDateString('en-US'); } catch { return iso; }
-}
-
+// ---- local-day helpers (avoid UTC drift) ----
 function localDayISO(d = new Date()) {
   try {
     const ld = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     return ld.toISOString().slice(0, 10);
-  } catch {
+  } catch (e) {
     return new Date().toISOString().slice(0, 10);
   }
 }
@@ -120,20 +110,28 @@ function safeNum(v, d = 0) {
 function readTodayConsumedFromLocal() {
   const todayUS = new Date().toLocaleDateString('en-US');
   const todayISO = localDayISO(new Date());
+
+  // prefer dailyMetricsCache if present
   try {
     const cache = JSON.parse(localStorage.getItem('dailyMetricsCache') || '{}') || {};
     const row = cache?.[todayISO];
     if (row) {
-      const consumed = safeNum(row.consumed, NaN) ?? safeNum(row.eaten, NaN) ?? safeNum(row.calories_eaten, NaN);
+      const consumed =
+        safeNum(row.consumed, NaN) ??
+        safeNum(row.eaten, NaN) ??
+        safeNum(row.calories_eaten, NaN);
       if (Number.isFinite(consumed)) return consumed;
     }
-  } catch {}
+  } catch (e) {}
+
+  // fallback to mealHistory
   try {
     const mh = JSON.parse(localStorage.getItem('mealHistory') || '[]') || [];
     const rec = mh.find(m => m?.date === todayUS || m?.date === todayISO);
     if (!rec?.meals?.length) return 0;
     return rec.meals.reduce((s, m) => s + safeNum(m?.calories, 0), 0);
-  } catch {}
+  } catch (e) {}
+
   return 0;
 }
 
@@ -144,34 +142,51 @@ function writeDailyMetricsCache(dayISO, consumed, burned) {
       eaten: safeNum(consumed, 0),
       burned: safeNum(burned, 0),
       net: safeNum(consumed, 0) - safeNum(burned, 0),
-      updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
     localStorage.setItem('dailyMetricsCache', JSON.stringify(cache));
-  } catch {}
+  } catch (e) {}
 }
 
 function dispatchBurnedUpdate(dayISO, burned) {
   try {
-    window.dispatchEvent(new CustomEvent('slimcal:burned:update', { detail: { date: dayISO, burned: safeNum(burned, 0) } }));
-  } catch {}
+    window.dispatchEvent(
+      new CustomEvent('slimcal:burned:update', {
+        detail: { date: dayISO, burned: safeNum(burned, 0) }
+      })
+    );
+  } catch (e) {}
 }
 
+// --- Better display: show per-exercise summary instead of set-by-set "12 cals"
 function summarizeExercisesFromSets(sets = []) {
   const arr = Array.isArray(sets) ? sets : [];
   const by = new Map();
+
   for (const s of arr) {
     const name = String(s?.exercise_name || s?.name || 'Exercise').trim() || 'Exercise';
     const prev = by.get(name) || { name, sets: 0, reps: 0, topWeight: 0, minutes: 0 };
+
     prev.sets += 1;
+
     const w = safeNum(s?.weight, 0);
     const r = safeNum(s?.reps, 0);
     if (w > prev.topWeight) prev.topWeight = w;
     if (r) prev.reps += r;
+
     const vol = safeNum(s?.volume, 0);
+    // Treat `volume` as minutes for cardio/timed entries when there are no strength numbers.
     if (vol && w === 0 && r === 0) prev.minutes += vol;
+
     by.set(name, prev);
   }
-  return Array.from(by.values());
+
+  return Array.from(by.values()).sort((a, b) => {
+    // Prefer minutes (cardio) then sets (strength)
+    const as = (a.minutes || 0) * 1000 + (a.sets || 0);
+    const bs = (b.minutes || 0) * 1000 + (b.sets || 0);
+    return bs - as;
+  });
 }
 
 const normalizeName = s => (s || '').toLowerCase().trim();
@@ -193,6 +208,8 @@ function bestLocalMatch(candidates = [], supaSets = []) {
 
 export default function WorkoutHistory({ onHistoryChange }) {
   const { user } = useAuth();
+
+  // --- User-scoped workout history (prevents cross-account contamination on same device) ---
   const userId = user?.id || null;
 
   const readWorkoutHistory = useCallback(() => {
@@ -200,7 +217,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       const list = readScopedJSON(KEYS.workoutHistory, userId, []);
       return Array.isArray(list) ? list : [];
-    } catch {
+    } catch (e) {
       return [];
     }
   }, [userId]);
@@ -209,7 +226,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     try {
       ensureScopedFromLegacy(KEYS.workoutHistory, userId);
       writeScopedJSON(KEYS.workoutHistory, userId, Array.isArray(list) ? list : []);
-    } catch {}
+    } catch (e) {}
   }, [userId]);
 
   const [loading, setLoading] = useState(false);
@@ -218,7 +235,8 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [shareText, setShareText] = useState('');
   const [shareExercises, setShareExercises] = useState([]);
   const [shareTotal, setShareTotal] = useState(0);
-  const [shareDate, setShareDate] = useState('');
+
+  // delete confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -232,39 +250,66 @@ export default function WorkoutHistory({ onHistoryChange }) {
       byDay.set(sess.date, arr);
     }
     return { raw, byDay };
-  }, [readWorkoutHistory]);
+  }, []);
 
   const totalSessions = rows.length;
-  const totalCalories = useMemo(() => rows.reduce((s, r) => s + (Number(r.total_calories) || 0), 0), [rows]);
-  const sumTotals = useCallback((list) => (list || []).reduce((s, r) => s + (Number(r.total_calories) || 0), 0), []);
+  const totalCalories = useMemo(
+    () => rows.reduce((s, r) => s + (Number(r.total_calories) || 0), 0),
+    [rows]
+  );
+
+  const sumTotals = useCallback((list) => {
+    return (list || []).reduce((s, r) => s + (Number(r.total_calories) || 0), 0);
+  }, []);
 
   const recomputeBurnedTodayAndSync = useCallback(async () => {
     const todayUS = new Date().toLocaleDateString('en-US');
     const todayISO = localDayISO(new Date());
+
+    // burned today from local history (source of truth for UI)
     let burnedToday = 0;
     try {
       const wh = readWorkoutHistory();
-      burnedToday = (wh || []).filter(w => w?.date === todayUS || w?.date === todayISO).reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
-    } catch {}
+      burnedToday = (wh || [])
+        .filter(w => w?.date === todayUS || w?.date === todayISO)
+        .reduce((s, w) => s + safeNum(w?.totalCalories ?? w?.total_calories, 0), 0);
+    } catch (e) {}
+
     const consumedToday = readTodayConsumedFromLocal();
+
+    // write caches so banner updates instantly
     writeDailyMetricsCache(todayISO, consumedToday, burnedToday);
-    try { localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0))); } catch {}
+    try {
+      localStorage.setItem('burnedToday', String(Math.round(burnedToday || 0)));
+    } catch (e) {}
+
     dispatchBurnedUpdate(todayISO, burnedToday);
+
+    // if logged in, also update daily_metrics cloud via localFirst wrapper
     try {
       if (user?.id) {
-        await upsertDailyMetricsLocalFirst({ user_id: user.id, local_day: todayISO, consumed: consumedToday, burned: burnedToday });
+        await upsertDailyMetricsLocalFirst({
+          user_id: user.id,
+          local_day: todayISO,
+          consumed: consumedToday,
+          burned: burnedToday
+        });
       }
     } catch (e) {
       console.warn('[WorkoutHistory] upsertDailyMetricsLocalFirst failed after delete', e);
     }
-  }, [readWorkoutHistory, user?.id]);
+  }, [user?.id]);
 
   function openShareFor(row) {
+    const date = formatDateTime(row.started_at);
     const total = Number(row.total_calories) || 0;
-    setShareText((row.shareLines || []).join('\n'));
+
+    const header = `I just logged a workout on ${date} with Slimcal.ai — ${Math.round(total)} calories burned! #SlimcalAI`;
+
+    const body = (row.shareLines || []).join('\n');
+    setShareText(`${header}\n\n${body}`);
     setShareTotal(total);
     setShareExercises(row.exercisesForShare || []);
-    setShareDate(formatShareDate(row.started_at));
     setShareOpen(true);
   }
 
@@ -275,31 +320,58 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
   async function performDeleteRow(row) {
     if (!row) return;
+
     setDeleting(true);
     try {
+      // 1) Delete from Supabase if logged in
       if (user?.id && supabase && row.id && String(row.id).startsWith('local-') === false) {
-        const res = await supabase.from('workouts').delete().eq('user_id', user.id).eq('id', row.id);
-        if (res?.error) console.warn('[WorkoutHistory] cloud delete failed', res.error);
+        // safest: delete by workout "id" + user_id (RLS safe)
+        const res = await supabase
+          .from('workouts')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('id', row.id);
+
+        if (res?.error) {
+          console.warn('[WorkoutHistory] cloud delete failed', res.error);
+        }
       }
+
+      // 2) Delete from localStorage workoutHistory
       try {
         const wh = readWorkoutHistory();
+
+        // match strategy:
+        // - if row has client_id -> remove matching local session id/client_id
+        // - else fallback by started day + total calories
         const rowDayUS = toUS(row.started_at);
         const rowTotal = safeNum(row.total_calories, 0);
+
         const filtered = (wh || []).filter(sess => {
           const sameId =
             (row.client_id && (sess.id === row.client_id || sess.client_id === row.client_id)) ||
             (row.id && (sess.id === row.id || sess.client_id === row.id));
+
           if (sameId) return false;
+
           const sameDay = sess?.date === rowDayUS;
           const sameTotal = Math.abs(safeNum(sess?.totalCalories ?? sess?.total_calories, 0) - rowTotal) < 0.01;
+
+          // only remove by day+total if it's a clear match and there's no id
           if (!row.client_id && !row.id && sameDay && sameTotal) return false;
+
           return true;
         });
+
         writeWorkoutHistory(filtered);
       } catch (e) {
         console.warn('[WorkoutHistory] local delete failed', e);
       }
+
+      // 3) Update UI list
       setRows(prev => prev.filter(r => r.id !== row.id));
+
+      // 4) Update banner totals instantly
       await recomputeBurnedTodayAndSync();
     } finally {
       setDeleting(false);
@@ -308,17 +380,37 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
   useEffect(() => {
     let ignore = false;
+
     (async () => {
       if (!user) {
-        const asRows = localIdx.raw.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map((h, idx) => ({
-          id: `local-${idx}`,
-          started_at: new Date(h.date).toISOString(),
-          ended_at: new Date(h.date).toISOString(),
-          sets: (h.exercises || []).map(e => ({ exercise_name: e.name, reps: e.reps ?? 0, weight: e.weight ?? 0, calories: typeof e.calories === 'number' ? e.calories : undefined, exerciseType: e.exerciseType || undefined })),
-          total_calories: Number(h.totalCalories) || 0,
-          shareLines: (h.exercises || []).map(e => `- ${e.name}: ${e.sets}×${e.reps}${e.weight ? ` @ ${e.weight} lb` : ''} (${(e.calories || 0).toFixed(0)} cal)`),
-          exercisesForShare: (h.exercises || []).map(e => ({ exerciseName: e.name, sets: e.sets, reps: e.reps, weight: e.weight, calories: e.calories, exerciseType: e.exerciseType || undefined })),
-        }));
+        const asRows = localIdx.raw
+          .slice()
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .map((h, idx) => ({
+            id: `local-${idx}`,
+            started_at: new Date(h.date).toISOString(),
+            ended_at: new Date(h.date).toISOString(),
+            sets: (h.exercises || []).map(e => ({
+              exercise_name: e.name,
+              reps: e.reps ?? 0,
+              weight: e.weight ?? 0,
+              calories: typeof e.calories === 'number' ? e.calories : undefined,
+              exerciseType: e.exerciseType || undefined
+            })),
+            total_calories: Number(h.totalCalories) || 0,
+            shareLines: (h.exercises || []).map(e =>
+              `- ${e.name}: ${e.sets}×${e.reps}${e.weight ? ` @ ${e.weight} lb` : ''} (${(e.calories || 0).toFixed(0)} cal)`
+            ),
+            exercisesForShare: (h.exercises || []).map(e => ({
+              exerciseName: e.name,
+              sets: e.sets,
+              reps: e.reps,
+              weight: e.weight,
+              calories: e.calories,
+              exerciseType: e.exerciseType || undefined
+            }))
+          }));
+
         if (!ignore) {
           setRows(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
@@ -326,40 +418,53 @@ export default function WorkoutHistory({ onHistoryChange }) {
         return;
       }
 
+
+      // Seed from local-first cache so History never goes blank while cloud fetch runs.
       try {
-        const seeded = localIdx.raw.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map((h, idx) => ({
-          id: `seed-${idx}`,
-          started_at: new Date(h.date || Date.now()).toISOString(),
-          total_calories: safeNum(h.totalCalories, 0),
-          __draft: !!h.__draft,
-          __local: true,
-          exercises: Array.isArray(h.exercises) ? h.exercises : (Array.isArray(h.items) ? h.items : (h.items?.exercises || [])),
-          client_id: h.client_id || h.id,
-        }));
+        const seeded = localIdx.raw
+          .slice()
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .map((h, idx) => ({
+            id: `seed-${idx}`,
+            started_at: new Date(h.date || Date.now()).toISOString(),
+            total_calories: safeNum(h.totalCalories, 0),
+            __draft: !!h.__draft,
+            __local: true,
+            exercises: Array.isArray(h.exercises) ? h.exercises : (Array.isArray(h.items) ? h.items : (h.items?.exercises || [])),
+            client_id: h.client_id || h.id
+          }));
         if (!ignore && seeded.length) {
           setRows(seeded);
           if (onHistoryChange) onHistoryChange(sumTotals(seeded));
         }
-      } catch {}
+      } catch (e) {}
 
       setLoading(true);
       try {
         const base = await getWorkouts(user.id, { limit: 200 });
+
         if (!Array.isArray(base) || base.length === 0) {
+          // keep seeded local history; don't clobber
           setLoading(false);
           return;
         }
+
         const withSets = base.map(w => {
           const exercises = getExercisesFromWorkout(w);
           const sets = setsFromExercises(exercises);
+
           const dayUS = toUS(w.started_at);
           const candidates = localIdx.byDay.get(dayUS) || [];
           const fallback = bestLocalMatch(candidates, sets);
-          const total = (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
-            ? Number(w.total_calories)
-            : (fallback && Number.isFinite(fallback.totalCalories))
-              ? Number(fallback.totalCalories)
-              : calcCaloriesFromSets(sets);
+
+          let total =
+            (typeof w.total_calories === 'number' && Number.isFinite(w.total_calories))
+              ? Number(w.total_calories)
+              : (fallback && Number.isFinite(fallback.totalCalories))
+                ? Number(fallback.totalCalories)
+                : calcCaloriesFromSets(sets);
+
+          // clean share / list formatting
           const exercisesForShare = (exercises || []).map(ex => ({
             exerciseName: ex.name || ex.exerciseName,
             sets: ex.sets,
@@ -368,44 +473,91 @@ export default function WorkoutHistory({ onHistoryChange }) {
             calories: ex.calories,
             exerciseType: ex.exerciseType || undefined,
           }));
-          const shareLines = (exercises || []).map(ex => `- ${ex.name || ex.exerciseName}: ${ex.sets || 1}×${ex.reps || ''}${ex.weight ? ` @ ${ex.weight} lb` : ''} (${(Number(ex.calories) || 0).toFixed(0)} cal)`);
-          return { ...w, sets, total_calories: total, shareLines, exercisesForShare };
+
+          const shareLines = (exercises || []).map(ex =>
+            `- ${ex.name || ex.exerciseName}: ${ex.sets || 1}×${ex.reps || ''}${ex.weight ? ` @ ${ex.weight} lb` : ''} (${(Number(ex.calories) || 0).toFixed(0)} cal)`
+          );
+
+          return {
+            ...w,
+            sets,
+            total_calories: total,
+            shareLines,
+            exercisesForShare
+          };
         });
+
         if (!ignore) {
           setRows(withSets);
           if (onHistoryChange) onHistoryChange(sumTotals(withSets));
         }
       } catch (err) {
         console.error('[WorkoutHistory] fetch failed, falling back to local', err);
+
+        if (!ignore) {
+          const asRows = localIdx.raw
+            .slice()
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .map((h, idx) => ({
+              id: `local-${idx}`,
+              started_at: new Date(h.date).toISOString(),
+              ended_at: new Date(h.date).toISOString(),
+              sets: (h.exercises || []).map(e => ({
+                exercise_name: e.name,
+                reps: e.reps ?? 0,
+                weight: e.weight ?? 0,
+                calories: typeof e.calories === 'number' ? e.calories : undefined,
+                exerciseType: e.exerciseType || undefined
+              })),
+              total_calories: Number(h.totalCalories) || 0,
+              shareLines: (h.exercises || []).map(e =>
+                `- ${e.name}: ${e.sets}×${e.reps}${e.weight ? ` @ ${e.weight} lb` : ''} (${(e.calories || 0).toFixed(0)} cal)`
+              ),
+              exercisesForShare: (h.exercises || []).map(e => ({
+                exerciseName: e.name,
+                sets: e.sets,
+                reps: e.reps,
+                weight: e.weight,
+                calories: e.calories,
+                exerciseType: e.exerciseType || undefined
+              }))
+            }));
+
+          setRows(asRows);
+          if (onHistoryChange) onHistoryChange(sumTotals(asRows));
+        }
       } finally {
         if (!ignore) setLoading(false);
       }
     })();
+
     return () => { ignore = true; };
   }, [user, onHistoryChange, localIdx, sumTotals]);
 
   return (
-    <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 } }}>
+    <Container maxWidth="md" sx={{ py: 4 }}>
       <Paper
-        variant="outlined"
+        elevation={0}
         sx={{
-          mb: 3,
-          p: { xs: 2.25, md: 3 },
-          borderRadius: 6,
-          border: '1px solid rgba(16,24,40,0.06)',
-          boxShadow: '0 10px 34px rgba(15,23,42,0.05)',
+          mb: 3.5,
+          borderRadius: 8,
+          px: { xs: 2.5, sm: 4 },
+          py: { xs: 3, sm: 4 },
           textAlign: 'center',
+          background: 'linear-gradient(180deg, rgba(37,99,235,0.04) 0%, rgba(255,255,255,0.96) 100%)',
+          border: '1px solid rgba(37,99,235,0.08)',
+          boxShadow: '0 18px 50px rgba(15, 23, 42, 0.05)'
         }}
       >
-        <Typography sx={{ fontWeight: 900, fontSize: { xs: '2.2rem', md: '3rem' }, lineHeight: 1.05, mb: 1 }}>
+        <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: '-0.04em', lineHeight: 1, fontSize: { xs: '2.5rem', sm: '4rem' } }}>
           Workout History
         </Typography>
-        <Typography sx={{ color: 'text.secondary', maxWidth: 760, mx: 'auto', fontSize: { xs: '1rem', md: '1.1rem' }, mb: 2 }}>
+        <Typography sx={{ mt: 1.5, color: 'rgba(15,23,42,0.65)', fontSize: { xs: '1.05rem', sm: '1.15rem' } }}>
           Review recent sessions, see what you completed, and keep your training streak feeling real.
         </Typography>
-        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
-          <Chip icon={<FitnessCenterRoundedIcon />} label={`${totalSessions} sessions logged`} sx={{ fontWeight: 700 }} />
-          <Chip icon={<LocalFireDepartmentRoundedIcon />} label={`${Math.round(totalCalories)} calories burned`} sx={{ fontWeight: 700 }} />
+        <Stack direction="row" spacing={1.25} justifyContent="center" flexWrap="wrap" useFlexGap sx={{ mt: 2.25 }}>
+          <Chip label={`${totalSessions} sessions logged`} sx={{ fontWeight: 800, bgcolor: 'rgba(37,99,235,0.08)' }} />
+          <Chip label={`${totalCalories.toFixed(0)} calories burned`} sx={{ fontWeight: 800, bgcolor: 'rgba(16,185,129,0.12)' }} />
         </Stack>
       </Paper>
 
@@ -414,101 +566,116 @@ export default function WorkoutHistory({ onHistoryChange }) {
           <CircularProgress />
         </Box>
       ) : rows.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 4, borderRadius: 5, textAlign: 'center' }}>
-          <Typography sx={{ fontWeight: 800, fontSize: '1.4rem', mb: 1 }}>No workouts logged yet</Typography>
-          <Typography color="text.secondary">Your recent sessions will show up here once you start logging workouts.</Typography>
-        </Paper>
+        <Typography>No workouts yet.</Typography>
       ) : (
-        <Stack spacing={2.5}>
-          {rows.map((w) => {
+        <List sx={{ pt: 0 }}>
+          {rows.map(w => {
             const exerciseSummary = summarizeExercisesFromSets(w.sets || []);
-            const total = Math.round(Number(w.total_calories) || 0);
-            const exerciseCount = exerciseSummary.length || (w.exercisesForShare || []).length || 0;
+
             return (
               <Paper
-                key={w.id}
                 variant="outlined"
                 sx={{
-                  p: { xs: 2, md: 2.5 },
+                  mb: 2.25,
                   borderRadius: 5,
-                  border: '1px solid rgba(16,24,40,0.06)',
-                  boxShadow: '0 10px 28px rgba(15,23,42,0.04)',
+                  border: '1px solid rgba(37,99,235,0.08)',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
+                  boxShadow: '0 14px 34px rgba(15,23,42,0.045)'
                 }}
+                key={w.id}
               >
-                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2}>
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography sx={{ fontWeight: 900, fontSize: { xs: '1.45rem', md: '1.65rem' }, lineHeight: 1.1 }}>
-                      {formatDateOnly(w.started_at)}
-                    </Typography>
-                    <Typography sx={{ color: 'text.secondary', mt: 0.5, mb: 1.5 }}>
-                      {formatTimeOnly(w.started_at)}
-                    </Typography>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.75 }}>
-                      <Chip label={`${total} cals`} sx={{ fontWeight: 700 }} />
-                      <Chip label={`${exerciseCount} exercise${exerciseCount === 1 ? '' : 's'}`} variant="outlined" sx={{ fontWeight: 700 }} />
-                    </Stack>
-                  </Box>
+                <ListItem alignItems="flex-start" sx={{ alignItems: 'stretch' }}>
+                  <ListItemText
+                    primary={
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+                        <Box>
+                          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: '-0.03em', fontSize: { xs: '2rem', sm: '2.2rem' } }}>
+                            {formatDateOnly(w.started_at)}
+                          </Typography>
+                          <Typography variant="body1" sx={{ mt: 0.25, color: 'rgba(15,23,42,0.62)' }}>
+                            {formatDateTime(w.started_at).replace(/^\d{1,2}\/\d{1,2}\/\d{4},?\s*/, '')}
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+                            <Chip label={`${Math.round(Number(w.total_calories) || 0)} cals`} sx={{ fontWeight: 800, bgcolor: 'rgba(37,99,235,0.08)' }} />
+                            <Chip label={`${exerciseSummary.length} exercises`} variant="outlined" sx={{ fontWeight: 800 }} />
+                          </Stack>
+                        </Box>
 
-                  <Stack direction="row" spacing={0.5} alignItems="flex-start" justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<IosShareRoundedIcon />}
-                      onClick={() => openShareFor(w)}
-                      sx={{ borderRadius: 999 }}
-                    >
-                      Share Session
-                    </Button>
-                    <IconButton color="error" onClick={() => askDeleteRow(w)} disabled={deleting}>
-                      <DeleteIcon />
-                    </IconButton>
-                  </Stack>
-                </Stack>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Button
+                            size="large"
+                            variant="outlined"
+                            startIcon={<ShareRoundedIcon />}
+                            onClick={() => openShareFor(w)}
+                            sx={{ borderRadius: 999, fontWeight: 800, px: 2.25, py: 1 }}
+                          >
+                            Share Session
+                          </Button>
 
-                <Divider sx={{ my: 1.5 }} />
-
-                <Stack spacing={1.2}>
-                  {exerciseSummary.length > 0 ? exerciseSummary.map((e, i) => (
-                    <Paper
-                      key={`${w.id}-${e.name}-${i}`}
-                      variant="outlined"
-                      sx={{
-                        p: 1.5,
-                        borderRadius: 4,
-                        background: 'rgba(248,250,252,0.95)',
-                        border: '1px solid rgba(59,130,246,0.10)',
-                      }}
-                    >
-                      <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', mb: 0.4 }}>{e.name}</Typography>
-                      <Typography sx={{ color: 'text.secondary' }}>
-                        {e.minutes
-                          ? `${Math.round(e.minutes)} min`
-                          : `${e.sets} set${e.sets === 1 ? '' : 's'}${e.reps ? ` • ${e.reps} reps` : ''}${e.topWeight ? ` • top ${Math.round(e.topWeight)} lb` : ''}`}
-                      </Typography>
-                    </Paper>
-                  )) : (
-                    (w.shareLines || []).map((line, i) => (
-                      <Paper key={`${w.id}-fallback-${i}`} variant="outlined" sx={{ p: 1.5, borderRadius: 4 }}>
-                        <Typography sx={{ color: 'text.secondary' }}>• {line.replace(/^- /, '')}</Typography>
-                      </Paper>
-                    ))
-                  )}
-                </Stack>
+                          <span><IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => askDeleteRow(w)}
+                                disabled={deleting}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton></span>
+                        </Stack>
+                      </Stack>
+                    }
+                    secondary={
+                      <Box sx={{ mt: 2 }}>
+                        {exerciseSummary.length > 0 ? (
+                          <Stack spacing={1.25}>
+                            {exerciseSummary.map((e, i) => (
+                              <Box
+                                key={i}
+                                sx={{
+                                  px: 2,
+                                  py: 1.4,
+                                  borderRadius: 999,
+                                  border: '1px solid rgba(37,99,235,0.08)',
+                                  bgcolor: 'rgba(37,99,235,0.035)'
+                                }}
+                              >
+                                <Typography variant="body1" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                                  {e.name}
+                                </Typography>
+                                <Typography variant="body1" sx={{ color: 'rgba(15,23,42,0.62)' }}>
+                                  {e.minutes
+                                    ? `${Math.round(e.minutes)} min`
+                                    : `${e.sets} set${e.sets === 1 ? '' : 's'}`}
+                                </Typography>
+                              </Box>
+                            ))}
+                          </Stack>
+                        ) : (
+                          (w.shareLines || []).map((line, i) => (
+                            <Typography key={i} variant="body2">
+                              • {line.replace(/^- /, '')}
+                            </Typography>
+                          ))
+                        )}
+                      </Box>
+                    }
+                  />
+                </ListItem>
               </Paper>
             );
           })}
-        </Stack>
+        </List>
       )}
 
       <ShareWorkoutModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         shareText={shareText}
+        shareUrl={window.location.href}
         exercises={shareExercises}
         totalCalories={shareTotal}
-        workoutDate={shareDate}
       />
 
+      {/* ✅ Delete confirm dialog */}
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <DialogTitle>Delete workout?</DialogTitle>
         <DialogContent>
@@ -517,7 +684,12 @@ export default function WorkoutHistory({ onHistoryChange }) {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+          <Button
+            onClick={() => setConfirmOpen(false)}
+            disabled={deleting}
+          >
+            Cancel
+          </Button>
           <Button
             color="error"
             variant="contained"
