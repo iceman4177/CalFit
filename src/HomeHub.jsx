@@ -307,13 +307,15 @@ export default function HomeHub() {
               icon={<CenterFocusStrongIcon sx={{ fontSize: 44 }} />}
               onClick={() => history.push("/body-scan/session")}
             />
-            <AppIcon
-              label="Coach"
-              desc="Get your clearest next step."
-              grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
-              icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
-              onClick={() => history.push("/verdict")}
-            />
+            <Box sx={{ gridColumn: { xs: "1 / -1", sm: "auto" }, display: "flex", justifyContent: "center", width: "100%" }}>
+              <AppIcon
+                label="Coach"
+                desc="Get your clearest next step."
+                grad="linear-gradient(180deg, rgba(14,165,233,0.92) 0%, rgba(3,105,161,0.98) 100%)"
+                icon={<FactCheckIcon sx={{ fontSize: 44 }} />}
+                onClick={() => history.push("/verdict")}
+              />
+            </Box>
           </Box>
         </Stack>
       </Container>
