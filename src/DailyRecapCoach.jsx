@@ -263,6 +263,40 @@ function recapSignature(ctx = {}, targets = {}) {
   });
 }
 
+function hourFromMealLike(meal = null) {
+  const raw = meal?.eaten_at || meal?.eatenAt || meal?.createdAt || meal?.created_at || null;
+  if (raw) {
+    const d = new Date(raw);
+    const h = d.getHours();
+    if (Number.isFinite(h)) return h;
+  }
+  const label = String(meal?.time_label || meal?.time || "").trim();
+  if (label) {
+    const m = label.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (m) {
+      let h = Number(m[1]) % 12;
+      if (m[3].toUpperCase() === "PM") h += 12;
+      return h;
+    }
+  }
+  return null;
+}
+
+function hasMealBeforeHour(meals = [], cutoffHour = 11) {
+  return (Array.isArray(meals) ? meals : []).some((meal) => {
+    const h = hourFromMealLike(meal);
+    return Number.isFinite(h) && h < cutoffHour;
+  });
+}
+
+function proteinBeforeHour(meals = [], cutoffHour = 12) {
+  return Math.round((Array.isArray(meals) ? meals : []).reduce((sum, meal) => {
+    const h = hourFromMealLike(meal);
+    if (!Number.isFinite(h) || h >= cutoffHour) return sum;
+    return sum + safeNum(meal?.macros?.protein_g ?? meal?.protein_g ?? 0, 0);
+  }, 0));
+}
+
 // -------------------- Quests (FREE) -------------------------------------------
 function buildQuestPool({ proteinTarget }) {
   const lunchProtein = Math.min(60, Math.max(30, Math.round((proteinTarget || 0) * 0.35 || 40)));
@@ -271,14 +305,14 @@ function buildQuestPool({ proteinTarget }) {
     {
       id: "breakfast_before_11",
       label: "Log breakfast before 11am",
-      progress: ({ mealsCount }) => ({ value: Math.min(mealsCount, 1), goal: 1 }),
-      complete: ({ mealsCount, now }) => mealsCount >= 1 && now.getHours() < 11,
+      progress: ({ meals }) => ({ value: hasMealBeforeHour(meals, 11) ? 1 : 0, goal: 1 }),
+      complete: ({ meals }) => hasMealBeforeHour(meals, 11),
     },
     {
       id: "protein_by_lunch",
       label: `Hit ${lunchProtein}g protein by lunch`,
-      progress: ({ proteinSoFar }) => ({ value: proteinSoFar, goal: lunchProtein }),
-      complete: ({ proteinSoFar }) => proteinSoFar >= lunchProtein,
+      progress: ({ meals }) => ({ value: proteinBeforeHour(meals, 12), goal: lunchProtein }),
+      complete: ({ meals }) => proteinBeforeHour(meals, 12) >= lunchProtein,
     },
     {
       id: "log_3_meals",
@@ -1065,15 +1099,19 @@ Rules:
 - If any data is missing, say what is missing and give a best-effort alternative.
 - Use short punchy sections, emojis (tastefully), and coach-like energy.
 - Do NOT invent foods or workouts that are not in the provided data.
+- Do NOT say timing data is missing if any meal time is present in the JSON.
+- Do NOT imply breakfast was logged unless a meal time before 11:00 AM is present in the JSON.
+- Do NOT use wake-up timing advice unless wake time is explicitly present in the JSON.
+- Keep advice low-risk and tied to tracked facts; avoid unsupported assumptions.
 
 Output format (use these headings):
 1) "Today’s Scoreboard" (calories eaten/burned/net + macro totals)
 2) "What You Ate" (list each meal with time + items + macros)
 3) "Training Check-In" (what was trained + quick note)
 4) "Goal Progress" (daily kcal goal + how far off + protein target progress)
-5) "Timing & Consistency" (comments on meal timing & gaps; practical fix)
+5) "Timing & Consistency" (comments on meal timing and gaps only when meal times exist; if only one meal time exists, acknowledge that one meal instead of saying timing data is missing)
 6) "Next Move" (2–4 actionable steps. Prioritize micro_quest_summary.next_best_move when present + 2–3 foods to hit targets)
-7) "Coach Challenge" (a fun micro-challenge for tomorrow)
+7) "Coach Challenge" (a fun micro-challenge for tomorrow, grounded in tracked facts only — no wake-time assumptions)
 `;
 
       const userMsg = `Here is my structured day data as JSON. Use it exactly:\n\n${JSON.stringify(
@@ -1115,11 +1153,7 @@ Output format (use these headings):
   };
 
   // ---- UI --------------------------------------------------------------------
-  const FreeUsageBanner = !isPro ? (
-    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-      Free recaps used today: <strong>{count}</strong>/{freeDailyRecapLimit}
-    </Typography>
-  ) : null;
+  const FreeUsageBanner = null;
 
   const buttonText = recap ? "Regenerate Today’s Recap" : "Get Daily Recap";
 
@@ -1315,8 +1349,8 @@ Output format (use these headings):
 
           <Stack spacing={1.1}>
             {quests.map((q) => {
-              const prog = q.progress({ mealsCount, burned, proteinSoFar, now });
-              const done = q.complete({ mealsCount, burned, proteinSoFar, now });
+              const prog = q.progress({ meals: dayCtx?.meals || [], mealsCount, burned, proteinSoFar, now });
+              const done = q.complete({ meals: dayCtx?.meals || [], mealsCount, burned, proteinSoFar, now });
               const pct = prog.goal ? clamp((prog.value / prog.goal) * 100, 0, 100) : 0;
 
               return (
