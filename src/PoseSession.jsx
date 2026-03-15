@@ -908,7 +908,7 @@ export default function PoseSession() {
           bgcolor: "#0b0f14",
           display: "flex",
           justifyContent: "center",
-          p: { xs: 0.5, md: 4 },
+          p: { xs: 0.25, md: 4 },
         }}
       >
         <Card
@@ -924,7 +924,7 @@ export default function PoseSession() {
         >
           <CardContent
             sx={{
-              p: { xs: 1, md: 3 },
+              p: { xs: 0.75, md: 3 },
               minHeight: { xs: "100svh", md: "auto" },
               display: "flex",
               flexDirection: "column",
@@ -934,7 +934,7 @@ export default function PoseSession() {
               direction="row"
               alignItems="center"
               justifyContent="space-between"
-              sx={{ mb: { xs: 1, md: 2 } }}
+              sx={{ mb: { xs: 0.5, md: 2 } }}
             >
               <Button
                 startIcon={<ArrowBackIcon />}
@@ -997,8 +997,8 @@ export default function PoseSession() {
 
             {stage === "intro" && (
               <Stack
-                spacing={{ xs: 0.9, md: 2.2 }}
-                sx={{ flex: 1, minHeight: 0 }}
+                spacing={{ xs: 0.65, md: 2.2 }}
+                sx={{ flex: 1, minHeight: 0, pt: { xs: 0.1, md: 0 } }}
               >
                 <Typography
                   variant="h4"
@@ -1010,7 +1010,7 @@ export default function PoseSession() {
                 >
                   Pose Session
                 </Typography>
-                <Stack spacing={1}>
+                <Stack spacing={{ xs: 0.6, md: 1 }}>
                   <Typography sx={{ color: bodyColor }}>
                     3 guided poses · quick scan · shareable results
                   </Typography>
@@ -1053,21 +1053,21 @@ export default function PoseSession() {
                           borderRadius: 3.5,
                           border: "1px solid rgba(120,255,220,0.18)",
                           bgcolor: "rgba(0,0,0,0.22)",
-                          p: { xs: 1.25, md: 1.8 },
+                          p: { xs: 1.05, md: 1.8 },
                           textAlign: "center",
                           boxShadow: "0 0 0 1px rgba(255,255,255,0.02) inset",
                         }}
                       >
                         <Box
                           sx={{
-                            height: { xs: 84, md: 132 },
+                            height: { xs: 74, md: 132 },
                             borderRadius: 3,
                             bgcolor: "rgba(255,255,255,0.03)",
                             border: "1px solid rgba(255,255,255,0.06)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            mb: 1.15,
+                            mb: 0.9,
                             overflow: "hidden",
                             position: "relative",
                           }}
@@ -1100,7 +1100,7 @@ export default function PoseSession() {
                           sx={{
                             color: titleColor,
                             fontWeight: 800,
-                            fontSize: { xs: 14, md: 16 },
+                            fontSize: { xs: 13.5, md: 16 },
                             mb: 0.55,
                           }}
                         >
@@ -1109,7 +1109,7 @@ export default function PoseSession() {
                         <Typography
                           sx={{
                             color: bodyColor,
-                            fontSize: { xs: 12, md: 13 },
+                            fontSize: { xs: 11.5, md: 13 },
                             lineHeight: 1.38,
                             maxWidth: 240,
                             mx: "auto",
@@ -1150,7 +1150,7 @@ export default function PoseSession() {
                   onClick={startScan}
                   startIcon={<CameraAltIcon />}
                   sx={{
-                    mt: { xs: 0.5, md: 1 },
+                    mt: { xs: 0.2, md: 1 },
                     borderRadius: 999,
                     py: 1.4,
                     fontWeight: 800,
