@@ -14,13 +14,6 @@ const anon =
   (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ||
   '';
 
-const mask = (s) => (typeof s === 'string' && s.length > 10 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s);
-console.log('[Supabase ENV]', {
-  urlHost: (() => { try { return new URL(url).host; } catch { return null; } })(),
-  urlPresent: !!url,
-  anonPresent: !!anon,
-  anonPreview: mask(anon)
-});
 
 export const supabase = createClient(url, anon, {
   auth: {

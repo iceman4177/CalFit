@@ -1,5 +1,5 @@
 // src/ProSuccess.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -55,76 +55,71 @@ export default function ProSuccess() {
     return () => { aborted = true; };
   }, [sessionId]);
 
-  // 2) Poll server truth (Supabase-backed) until isPro flips true, or timeout.
-  useEffect(() => {
-    let cancelled = false;
+  const checkProStatus = useCallback(async ({ settleDelayMs = 900, maxMs = 30000 } = {}) => {
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const user = auth?.user || null;
+      if (!user) {
+        setPhase("error");
+        setMessage("You’re not signed in. Please sign in again to finish your Pro upgrade.");
+        return;
+      }
 
-    (async () => {
-      try {
-        const { data: auth } = await supabase.auth.getUser();
-        const user = auth?.user || null;
-        if (!user) {
-          setPhase("error");
-          setMessage("You’re not signed in. Please sign in again to finish your Pro upgrade.");
+      setPhase("checking");
+      setMessage("Checking your Pro access…");
+
+      const start = Date.now();
+      const step = 1200;
+
+      if (settleDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, settleDelayMs));
+      }
+
+      while (Date.now() - start < maxMs) {
+        const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(user.id)}`, {
+          headers: { "Cache-Control": "no-cache" },
+        });
+
+        let json = {};
+        try { json = await res.json(); } catch {}
+
+        if (json?.subscription_id) setSubscriptionId(json.subscription_id);
+        if (json?.status) setStatusLine(json.status);
+
+        if (res.ok && (json?.isPro || json?.is_pro)) {
+          setPhase("active");
+          setMessage("Your Pro access is active. Enjoy!");
+          if (!json?.subscription_id) {
+            try {
+              const r2 = await fetch("/api/me/subscription", { headers: { "Cache-Control": "no-cache" } });
+              const j2 = await r2.json().catch(() => ({}));
+              if (j2?.subscription_id) setSubscriptionId(j2.subscription_id);
+              if (j2?.status) setStatusLine(j2.status);
+            } catch {}
+          }
           return;
         }
 
-        const start = Date.now();
-        const maxMs = 30000; // 30s overall
-        const step = 1200;
-
-        // brief wait to allow webhook → DB write path to run
-        await new Promise((r) => setTimeout(r, 900));
-
-        while (!cancelled && Date.now() - start < maxMs) {
-          const res = await fetch(`/api/me/pro-status?user_id=${encodeURIComponent(user.id)}`, {
-            headers: { "Cache-Control": "no-cache" },
-          });
-
-          let json = {};
-          try { json = await res.json(); } catch {}
-
-          // Older builds might not include subscription_id; try separate endpoint when needed.
-          if (json?.subscription_id) setSubscriptionId(json.subscription_id);
-          if (json?.status) setStatusLine(json.status);
-
-          if (res.ok && (json?.isPro || json?.is_pro)) {
-            setPhase("active");
-            setMessage("Your Pro access is active. Enjoy!");
-            // Try to get subscription details for the Cancel button
-            if (!json?.subscription_id) {
-              try {
-                const r2 = await fetch("/api/me/subscription", { headers: { "Cache-Control": "no-cache" } });
-                const j2 = await r2.json().catch(() => ({}));
-                if (j2?.subscription_id) setSubscriptionId(j2.subscription_id);
-                if (j2?.status) setStatusLine(j2.status);
-              } catch {}
-            }
-            return;
-          }
-
-          setPhase("waiting");
-          setMessage("Finalizing your Pro access… This can take a few seconds.");
-          await new Promise((r) => setTimeout(r, step));
-        }
-
-        if (!cancelled) {
-          setPhase("error");
-          setMessage(
-            "Still syncing your subscription. If this persists, refresh this page or contact support."
-          );
-        }
-      } catch (e) {
-        console.error("[ProSuccess] error:", e);
-        if (!cancelled) {
-          setPhase("error");
-          setMessage(e?.message || "Unexpected error while checking your Pro status.");
-        }
+        setPhase("waiting");
+        setMessage("Finalizing your Pro access… This can take a few seconds.");
+        await new Promise((r) => setTimeout(r, step));
       }
-    })();
 
-    return () => { cancelled = true; };
+      setPhase("error");
+      setMessage(
+        "Still syncing your subscription. If this persists, try checking again or contact support."
+      );
+    } catch (e) {
+      console.error("[ProSuccess] error:", e);
+      setPhase("error");
+      setMessage(e?.message || "Unexpected error while checking your Pro status.");
+    }
   }, []);
+
+  // 2) Poll server truth (Supabase-backed) until isPro flips true, or timeout.
+  useEffect(() => {
+    checkProStatus({ settleDelayMs: 900, maxMs: 30000 });
+  }, [checkProStatus]);
 
   // 3) When active, flip local flags so the UI updates immediately (header CTA, etc.)
   useEffect(() => {
@@ -360,12 +355,12 @@ export default function ProSuccess() {
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mt: 1, width: '100%' }}>
                     <Button
                       variant="contained"
-                      onClick={() => window.location.reload()}
+                      onClick={() => checkProStatus({ settleDelayMs: 0, maxMs: 15000 })}
                       size="large"
                       fullWidth
                       sx={{ minHeight: 52, borderRadius: 999, fontWeight: 900, textTransform: 'none' }}
                     >
-                      Refresh
+                      Check again
                     </Button>
                     <Button
                       variant="outlined"

@@ -48,7 +48,7 @@ export async function openBillingPortal() {
     // Other non-OK outcomes — show an error, do NOT silently open Upgrade
     const msg = json?.error || `Portal error (${res.status})`;
     console.error('[billing] invalid portal response:', msg, json);
-    showAppToast(msg, "warning");
+    showAppToast(msg, 'warning');
   } catch (e) {
     console.error('[billing] failed opening portal', e);
     showAppToast(e?.message || 'Network error opening billing portal', 'warning');

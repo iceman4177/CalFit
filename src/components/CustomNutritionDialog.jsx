@@ -4,6 +4,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, Stack
 } from '@mui/material';
+import { showAppToast } from '../lib/appToast';
 
 function calcCalories({ calories, protein_g, carbs_g, fat_g }) {
   const p = Number(protein_g) || 0;
@@ -40,8 +41,8 @@ export default function CustomNutritionDialog({ open, onClose, onSubmit, initial
       fat_g: Number(fat_g) || 0,
     };
     if (!payload.calories || payload.calories <= 0) {
-      // require at least calories or some macros
-      return alert("Enter calories or any macros (protein, carbs, fat) so we can compute calories.");
+      showAppToast('Enter calories or at least one macro so SlimCal can compute calories.', 'warning');
+      return;
     }
     onSubmit?.(payload);
   };
