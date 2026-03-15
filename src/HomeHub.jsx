@@ -133,17 +133,28 @@ export default function HomeHub() {
       sx={{
         minHeight: "calc(100vh - 64px)",
         py: { xs: 2.5, sm: 3 },
+        width: "100%",
+        overflowX: "clip",
         background:
           "radial-gradient(1200px 600px at 50% 0%, rgba(59,130,246,0.10), rgba(255,255,255,0) 55%), radial-gradient(1000px 520px at 50% 60%, rgba(16,185,129,0.08), rgba(255,255,255,0) 60%)",
       }}
     >
-      <Container maxWidth="md">
+      <Container
+        maxWidth="md"
+        disableGutters
+        sx={{
+          px: { xs: 1.5, sm: 2.5 },
+          overflowX: "clip",
+        }}
+      >
         <Stack spacing={{ xs: 2, sm: 2.6 }} sx={{ alignItems: "center" }}>
           <Stack
             spacing={1}
             sx={{
               width: "100%",
-              maxWidth: 760,
+              maxWidth: { xs: "min(100%, 760px)", sm: 760 },
+              mx: "auto",
+              boxSizing: "border-box",
               alignItems: "center",
               textAlign: "center",
               p: { xs: 2.25, sm: 2.8 },
@@ -169,7 +180,8 @@ export default function HomeHub() {
                 fontWeight: 1000,
                 letterSpacing: -1.1,
                 color: "rgba(15,23,42,0.98)",
-                fontSize: { xs: "2rem", sm: "2.35rem" },
+                fontSize: { xs: "1.8rem", sm: "2.35rem" },
+                maxWidth: "100%",
                 lineHeight: 1.05,
               }}
             >
@@ -181,7 +193,8 @@ export default function HomeHub() {
                 fontWeight: 700,
                 lineHeight: 1.45,
                 fontSize: { xs: "1rem", sm: "1.2rem" },
-                maxWidth: 640,
+                maxWidth: { xs: 340, sm: 640 },
+                mx: "auto",
               }}
             >
               Log your food and training, check how today is going, then get a clear next step.
@@ -192,7 +205,8 @@ export default function HomeHub() {
               spacing={{ xs: 0.55, sm: 1 }}
               sx={{
                 width: "100%",
-                maxWidth: { xs: 420, sm: 560 },
+                maxWidth: { xs: 390, sm: 560 },
+                mx: "auto",
                 justifyContent: "center",
                 alignItems: "center",
                 flexWrap: "nowrap",
@@ -271,7 +285,9 @@ export default function HomeHub() {
           <Box
             sx={{
               width: "100%",
-              maxWidth: 760,
+              maxWidth: { xs: "min(100%, 760px)", sm: 760 },
+              mx: "auto",
+              boxSizing: "border-box",
               display: "grid",
               gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
               gap: { xs: 2.3, sm: 2.8 },
