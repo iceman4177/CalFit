@@ -25,7 +25,7 @@ import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
-import { getTodayBurnedFromWorkoutHistory, localDayISO, safeNum } from './lib/workoutHistoryTotals.js';
+import { getTodayBurnedFromWorkoutHistory, localDayISO, safeNum, writeWorkoutHistoryRowsCache } from './lib/workoutHistoryTotals.js';
 
 
 
@@ -223,6 +223,12 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [shareTotal, setShareTotal] = useState(0);
   const [shareStartedAt, setShareStartedAt] = useState('');
 
+  const cacheRowsForTotals = useCallback((nextRows) => {
+    try {
+      writeWorkoutHistoryRowsCache(userId, Array.isArray(nextRows) ? nextRows : []);
+    } catch (e) {}
+  }, [userId]);
+
   // delete confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null);
@@ -351,7 +357,11 @@ export default function WorkoutHistory({ onHistoryChange }) {
       }
 
       // 3) Update UI list
-      setRows(prev => prev.filter(r => r.id !== row.id));
+      setRows(prev => {
+        const next = prev.filter(r => r.id !== row.id);
+        cacheRowsForTotals(next);
+        return next;
+      });
 
       // 4) Update banner totals instantly
       await recomputeBurnedTodayAndSync();
@@ -395,6 +405,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
         if (!ignore) {
           setRows(asRows);
+          cacheRowsForTotals(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
         }
         return;
@@ -417,6 +428,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
           }));
         if (!ignore && seeded.length) {
           setRows(seeded);
+          cacheRowsForTotals(seeded);
           if (onHistoryChange) onHistoryChange(sumTotals(seeded));
         }
       } catch (e) {}
@@ -471,6 +483,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
         if (!ignore) {
           setRows(withSets);
+          cacheRowsForTotals(withSets);
           if (onHistoryChange) onHistoryChange(sumTotals(withSets));
         }
       } catch (err) {
@@ -506,6 +519,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
             }));
 
           setRows(asRows);
+          cacheRowsForTotals(asRows);
           if (onHistoryChange) onHistoryChange(sumTotals(asRows));
         }
       } finally {
@@ -514,7 +528,7 @@ export default function WorkoutHistory({ onHistoryChange }) {
     })();
 
     return () => { ignore = true; };
-  }, [user, onHistoryChange, localIdx, sumTotals]);
+  }, [user, onHistoryChange, localIdx, sumTotals, cacheRowsForTotals]);
 
   return (
     <Container maxWidth="md" sx={{ py: { xs: 2.5, md: 4 } }}>
