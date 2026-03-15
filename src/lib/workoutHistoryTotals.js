@@ -1,10 +1,4 @@
-import { readScopedJSON, KEYS } from './scopedStorage.js';
-
-const VISIBLE_HISTORY_CACHE_PREFIX = 'slimcal:visibleWorkoutHistoryRows:';
-
-function visibleHistoryCacheKey(userId) {
-  return `${VISIBLE_HISTORY_CACHE_PREFIX}${userId || 'guest'}`;
-}
+import { readScopedJSON, scopedKey, KEYS } from './scopedStorage.js';
 
 export function localDayISO(d = new Date()) {
   try {
@@ -44,9 +38,51 @@ export function isDraftWorkout(workout) {
   return Boolean(
     workout?.isDraft ||
       workout?.draft === true ||
-      workout?.status === 'draft' ||
-      workout?.__draft === true
+      workout?.status === 'draft'
   );
+}
+
+
+
+export const VISIBLE_WORKOUT_HISTORY_ROWS_KEY = 'visibleWorkoutHistoryRows';
+
+export function getWorkoutDedupKey(workout, fallback = '') {
+  const primary = workout?.client_id || workout?.id;
+  if (primary) return String(primary);
+
+  const dayISO = dayISOFromAny(
+    workout?.local_day ||
+      workout?.__local_day ||
+      workout?.day ||
+      workout?.date ||
+      workout?.started_at ||
+      workout?.createdAt ||
+      workout?.created_at
+  ) || 'unknown-day';
+
+  const kcal = Math.round(getWorkoutCalories(workout) || 0);
+  const started = String(workout?.started_at || workout?.created_at || workout?.date || '');
+  return `${dayISO}::${kcal}::${started}::${fallback}`;
+}
+
+export function readVisibleWorkoutHistoryRows(userId) {
+  try {
+    const raw = localStorage.getItem(scopedKey(VISIBLE_WORKOUT_HISTORY_ROWS_KEY, userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeVisibleWorkoutHistoryRows(userId, rows) {
+  try {
+    localStorage.setItem(
+      scopedKey(VISIBLE_WORKOUT_HISTORY_ROWS_KEY, userId),
+      JSON.stringify(Array.isArray(rows) ? rows : [])
+    );
+  } catch {}
 }
 
 export function readWorkoutHistoryLocal(userId) {
@@ -54,31 +90,9 @@ export function readWorkoutHistoryLocal(userId) {
   return Array.isArray(raw) ? raw : [];
 }
 
-export function writeVisibleWorkoutHistoryRowsCache(userId, rows) {
-  try {
-    const cleaned = (Array.isArray(rows) ? rows : [])
-      .filter((row) => row && !isDraftWorkout(row))
-      .map((row) => ({
-        id: row?.id ?? null,
-        client_id: row?.client_id ?? null,
-        started_at: row?.started_at ?? row?.date ?? row?.local_day ?? null,
-        local_day: row?.local_day ?? null,
-        total_calories: getWorkoutCalories(row),
-      }));
-    localStorage.setItem(visibleHistoryCacheKey(userId), JSON.stringify(cleaned));
-  } catch {}
-}
-
-export function readVisibleWorkoutHistoryRowsCache(userId) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(visibleHistoryCacheKey(userId)) || '[]');
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
-}
-
-function buildTotalsFromList(list) {
+export function buildWorkoutBurnedTotalsByDay(userId) {
+  const visibleRows = readVisibleWorkoutHistoryRows(userId);
+  const wh = visibleRows.length ? visibleRows : readWorkoutHistoryLocal(userId);
   const byDay = new Map();
 
   const put = (dayISO, key, calories) => {
@@ -89,8 +103,8 @@ function buildTotalsFromList(list) {
     byDay.set(dayISO, m);
   };
 
-  for (let i = 0; i < list.length; i += 1) {
-    const w = list[i] || {};
+  for (let i = 0; i < wh.length; i += 1) {
+    const w = wh[i] || {};
     const dayISO = dayISOFromAny(
       w?.local_day ||
         w?.__local_day ||
@@ -104,7 +118,7 @@ function buildTotalsFromList(list) {
     if (isDraftWorkout(w)) continue;
 
     const kcal = getWorkoutCalories(w);
-    const key = String(w?.client_id || w?.id || i);
+    const key = getWorkoutDedupKey(w, String(i));
     put(dayISO, key, kcal);
   }
 
@@ -115,13 +129,6 @@ function buildTotalsFromList(list) {
     totals.set(dayISO, sum);
   }
   return totals;
-}
-
-export function buildWorkoutBurnedTotalsByDay(userId) {
-  const visibleRows = readVisibleWorkoutHistoryRowsCache(userId);
-  if (visibleRows.length) return buildTotalsFromList(visibleRows);
-  const wh = readWorkoutHistoryLocal(userId);
-  return buildTotalsFromList(wh);
 }
 
 export function getTodayBurnedFromWorkoutHistory(userId, dayISO = localDayISO()) {

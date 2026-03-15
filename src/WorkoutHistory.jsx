@@ -25,7 +25,7 @@ import { getWorkouts } from './lib/db';
 import ShareWorkoutModal from './ShareWorkoutModal';
 
 import { ensureScopedFromLegacy, readScopedJSON, writeScopedJSON, KEYS } from './lib/scopedStorage.js';
-import { getTodayBurnedFromWorkoutHistory, localDayISO, safeNum, writeVisibleWorkoutHistoryRowsCache } from './lib/workoutHistoryTotals.js';
+import { getTodayBurnedFromWorkoutHistory, localDayISO, safeNum, writeVisibleWorkoutHistoryRows } from './lib/workoutHistoryTotals.js';
 
 
 
@@ -227,6 +227,20 @@ export default function WorkoutHistory({ onHistoryChange }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  useEffect(() => {
+    writeVisibleWorkoutHistoryRows(
+      userId,
+      rows.map((r) => ({
+        id: r?.id || null,
+        client_id: r?.client_id || null,
+        started_at: r?.started_at || null,
+        local_day: r?.local_day || null,
+        total_calories: Number(r?.total_calories) || 0,
+        draft: !!(r?.__draft || r?.draft || r?.isDraft),
+      }))
+    );
+  }, [rows, userId]);
+
 
   const localIdx = useMemo(() => {
     const raw = readWorkoutHistory();
@@ -515,10 +529,6 @@ export default function WorkoutHistory({ onHistoryChange }) {
 
     return () => { ignore = true; };
   }, [user, onHistoryChange, localIdx, sumTotals]);
-
-  useEffect(() => {
-    writeVisibleWorkoutHistoryRowsCache(userId, rows);
-  }, [userId, rows]);
 
   return (
     <Container maxWidth="md" sx={{ py: { xs: 2.5, md: 4 } }}>

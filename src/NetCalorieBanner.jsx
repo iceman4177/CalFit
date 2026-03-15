@@ -62,19 +62,15 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
   const { dailyGoal } = useUserData();
 
   const todayISO = useMemo(() => localDayISO(new Date()), []);
-  const burnedFromHistoryToday = useMemo(() => getTodayBurnedFromWorkoutHistory(userId, todayISO), [userId, todayISO]);
+  const historyBurnedToday = useMemo(() => (userId ? getTodayBurnedFromWorkoutHistory(userId, todayISO) : 0), [userId, todayISO, consumed, burned]);
 
-  // Initial state: prefer props, then scoped cache, but never let burned drift below workout history.
+  // Initial state: prefer props, then scoped cache.
   const [state, setState] = useState(() => {
     const cache = readTodayCache(userId, todayISO);
     const g = readUserGoalCalories(safeNum(goal || dailyGoal || 0, 0));
     return {
       eatenNow: preferLiveProp(consumed, cache.eaten),
-      burnedNow: Math.max(
-        0,
-        Number(preferLiveProp(burned, cache.burned)) || 0,
-        Number(burnedFromHistoryToday) || 0
-      ),
+      burnedNow: historyBurnedToday > 0 ? historyBurnedToday : preferLiveProp(burned, cache.burned),
       goalNow: g,
     };
   });
@@ -84,14 +80,10 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
     setState((s) => ({
       ...s,
       eatenNow: preferLiveProp(consumed, s.eatenNow),
-      burnedNow: Math.max(
-        0,
-        Number(preferLiveProp(burned, s.burnedNow)) || 0,
-        Number(burnedFromHistoryToday) || 0
-      ),
+      burnedNow: historyBurnedToday > 0 ? historyBurnedToday : preferLiveProp(burned, s.burnedNow),
       goalNow: readUserGoalCalories(safeNum(goal || dailyGoal || s.goalNow || 0, 0)),
     }));
-  }, [consumed, burned, goal, dailyGoal, burnedFromHistoryToday]);
+  }, [consumed, burned, goal, dailyGoal]);
 
   const hydratorInFlight = useRef(false);
   const runHydrate = useCallback(async () => {
@@ -107,16 +99,9 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
             ? s.eatenNow
             : safeNum(res.eaten, s.eatenNow);
 
-          const nextBurnedRaw = (safeNum(res.burned, 0) === 0 && s.burnedNow > 0)
+          const nextBurned = (safeNum(res.burned, 0) === 0 && s.burnedNow > 0)
             ? s.burnedNow
             : safeNum(res.burned, s.burnedNow);
-
-          const nextBurned = Math.max(
-            0,
-            Number(nextBurnedRaw) || 0,
-            Number(burnedFromHistoryToday) || 0,
-            Number(burned) || 0
-          );
 
           return {
             ...s,
@@ -131,7 +116,7 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
     } finally {
       hydratorInFlight.current = false;
     }
-  }, [user, userId, goal, dailyGoal, burnedFromHistoryToday, burned]);
+  }, [user, userId, goal, dailyGoal]);
 
   // Auto-hydrate on login / focus / reconnect so mobile + PC stay aligned.
   useEffect(() => {
@@ -169,7 +154,7 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
     const onBurned = (e) => {
       const amt = safeNum(e?.detail?.burned, NaN);
       if (Number.isFinite(amt)) {
-        setState((s) => ({ ...s, burnedNow: Math.max(0, amt, Number(burnedFromHistoryToday) || 0) }));
+        setState((s) => ({ ...s, burnedNow: amt }));
       }
     };
 
@@ -180,14 +165,7 @@ export default function NetCalorieBanner({ consumed = 0, burned = 0, goal = 0, g
       window.removeEventListener('slimcal:consumed:update', onConsumed);
       window.removeEventListener('slimcal:burned:update', onBurned);
     };
-  }, [burnedFromHistoryToday]);
-
-  useEffect(() => {
-    setState((s) => ({
-      ...s,
-      burnedNow: Math.max(0, Number(s.burnedNow) || 0, Number(burnedFromHistoryToday) || 0),
-    }));
-  }, [burnedFromHistoryToday]);
+  }, []);
 
   const eatenNow = safeNum(state.eatenNow, 0);
   const burnedNow = safeNum(state.burnedNow, 0);
