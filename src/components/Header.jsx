@@ -176,9 +176,20 @@ const [authUser, setAuthUser] = useState(null);
         borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}
     >
-      <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto', position: 'relative' }}>
+      <Toolbar
+        sx={{
+          maxWidth: 1200,
+          width: '100%',
+          mx: 'auto',
+          px: { xs: 1.5, sm: 2 },
+          display: 'grid',
+          gridTemplateColumns: { xs: 'auto 1fr', md: '1fr auto 1fr' },
+          alignItems: 'center',
+          columnGap: { xs: 1, md: 2 },
+        }}
+      >
         {/* Brand */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
           <a
             href="/"
             style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
@@ -230,73 +241,33 @@ const [authUser, setAuthUser] = useState(null);
         {/* Primary nav */}
         <Box
           sx={{
-            position: 'absolute',
-            inset: 0,
             display: { xs: 'none', md: 'flex' },
+            justifySelf: 'center',
             alignItems: 'center',
             justifyContent: 'center',
-            pointerEvents: 'none',
+            minWidth: 0,
           }}
         >
-          <Box
-            sx={{
-              position: 'relative',
-              width: 470,
-              height: 40,
-              pointerEvents: 'auto',
-            }}
-          >
-            <Box
-              sx={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 2,
-              }}
-            >
-              <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
-                Workout History
-              </NavLink>
-            </Box>
-            <Box
-              sx={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-165px, -50%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-                Home
-              </NavLink>
-            </Box>
-            <Box
-              sx={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(92px, -50%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
-                Dashboard
-              </NavLink>
-            </Box>
-          </Box>
+          <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
+            <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
+              Home
+            </NavLink>
+            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
+              Workout History
+            </NavLink>
+            <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
+              Dashboard
+            </NavLink>
+          </Stack>
         </Box>
 
         {/* Plan action + account */}
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ ml: 'auto' }}>
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          sx={{ justifySelf: 'end', ml: { xs: 'auto', md: 0 } }}
+        >
           {/* Upgrade CTA (hide when already Pro) */}
           {!pro && (
             <Button
