@@ -133,6 +133,38 @@ export default function WeeklyTrend() {
 
   useEffect(() => {
     recompute();
+
+    let raf = 0;
+    const scheduleRecompute = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        recompute();
+      });
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scheduleRecompute();
+    };
+
+    window.addEventListener("storage", scheduleRecompute);
+    window.addEventListener("focus", scheduleRecompute);
+    window.addEventListener("pageshow", scheduleRecompute);
+    window.addEventListener("slimcal:consumed:update", scheduleRecompute);
+    window.addEventListener("slimcal:burned:update", scheduleRecompute);
+    window.addEventListener("slimcal:workoutHistory:update", scheduleRecompute);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("storage", scheduleRecompute);
+      window.removeEventListener("focus", scheduleRecompute);
+      window.removeEventListener("pageshow", scheduleRecompute);
+      window.removeEventListener("slimcal:consumed:update", scheduleRecompute);
+      window.removeEventListener("slimcal:burned:update", scheduleRecompute);
+      window.removeEventListener("slimcal:workoutHistory:update", scheduleRecompute);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [recompute]);
 
   const chart = useMemo(
