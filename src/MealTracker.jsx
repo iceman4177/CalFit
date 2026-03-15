@@ -1302,45 +1302,59 @@ export default function MealTracker({ onMealUpdate }) {
                 <Typography
                   variant="h5"
                   sx={{
-                    mb: 1,
                     fontWeight: 800,
                     lineHeight: 1.12,
                     letterSpacing: '-0.02em',
-                    fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' },
+                    mb: 1
                   }}
                 >
                   AI Assist
                 </Typography>
-                <Typography
-                  variant="body1"
-                  color="text.secondary"
+                <Box
                   sx={{
-                    maxWidth: 620,
+                    width: '100%',
+                    maxWidth: 560,
                     mx: 'auto',
-                    textAlign: 'center',
-                    fontSize: { xs: '1rem', sm: '1.05rem' },
-                    lineHeight: 1.5
+                    display: 'flex',
+                    justifyContent: 'center'
                   }}
                 >
-                  Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
-                </Typography>
+                  <Typography
+                    variant="body1"
+                    color="text.secondary"
+                    sx={{
+                      width: '100%',
+                      textAlign: 'center',
+                      fontSize: { xs: '1rem', sm: '1.05rem' },
+                      lineHeight: 1.5
+                    }}
+                  >
+                    Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
+                  </Typography>
+                </Box>
               </Box>
 
               <Box
                 sx={{
-                  px: { xs: 2, sm: 2.5 },
-                  py: { xs: 1.5, sm: 1.75 },
-                  borderRadius: 4,
-                  border: '1px solid rgba(46, 101, 240, 0.12)',
-                  background: 'linear-gradient(180deg, rgba(46,101,240,0.05) 0%, rgba(46,101,240,0.025) 100%)'
+                  width: '100%',
+                  maxWidth: 640,
+                  mx: 'auto',
+                  p: { xs: 2.25, sm: 2.5 },
+                  borderRadius: 5,
+                  border: '1px solid rgba(88, 126, 255, 0.12)',
+                  background: 'rgba(88, 126, 255, 0.03)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.72)'
                 }}
               >
                 <Typography
                   sx={{
                     fontWeight: 800,
-                    lineHeight: 1.35,
-                    fontSize: { xs: '0.98rem', sm: '1.05rem' },
-                    color: '#0f172a'
+                    lineHeight: 1.3,
+                    letterSpacing: '-0.01em',
+                    fontSize: { xs: '1.12rem', sm: '1.2rem' },
+                    mb: 1.25,
+                    textAlign: 'left'
                   }}
                 >
                   Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
@@ -1348,12 +1362,12 @@ export default function MealTracker({ onMealUpdate }) {
                 <Typography
                   color="text.secondary"
                   sx={{
-                    mt: 0.75,
+                    fontSize: { xs: '1rem', sm: '1.03rem' },
                     lineHeight: 1.55,
-                    fontSize: { xs: '0.98rem', sm: '1.02rem' }
+                    textAlign: 'left'
                   }}
                 >
-                  Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>Log</Box> to drop it straight into today's meals.
+                  Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Log</Box> to drop it straight into today&apos;s meals.
                 </Typography>
               </Box>
 
