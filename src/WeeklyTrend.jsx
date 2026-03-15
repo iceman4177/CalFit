@@ -14,6 +14,7 @@ import {
 
 import { useAuth } from "./context/AuthProvider.jsx";
 import { readScopedJSON, KEYS } from "./lib/scopedStorage.js";
+import { getWorkoutDedupKey, getWorkoutCalories, isDraftWorkout } from "./lib/workoutHistoryTotals.js";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
@@ -123,19 +124,16 @@ function buildWorkoutTotalsByDay(userId) {
     byDay.set(dayISO, m);
   };
 
-  for (let i = 0; i < wh.length; i++) {
+  for (let i = 0; i < wh.length; i += 1) {
     const w = wh[i] || {};
     const dayISO = dayISOFromAny(
       w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
     );
     if (!dayISO) continue;
+    if (isDraftWorkout(w)) continue;
 
-    if (w?.isDraft || w?.draft === true || w?.status === "draft") continue;
-
-    const kcal =
-      Number(w?.total_calories ?? w?.totalCalories ?? w?.calories_burned ?? w?.calories ?? w?.burned ?? 0) || 0;
-
-    const key = String(w?.client_id || w?.id || i);
+    const kcal = getWorkoutCalories(w);
+    const key = getWorkoutDedupKey(w, i);
     put(dayISO, key, kcal);
   }
 

@@ -47,6 +47,50 @@ export function readWorkoutHistoryLocal(userId) {
   return Array.isArray(raw) ? raw : [];
 }
 
+function normalizeExerciseName(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function getWorkoutExercises(workout) {
+  if (Array.isArray(workout?.exercises)) return workout.exercises;
+  if (Array.isArray(workout?.items)) return workout.items;
+  if (workout?.items && typeof workout.items === 'object' && Array.isArray(workout.items.exercises)) {
+    return workout.items.exercises;
+  }
+  return [];
+}
+
+function buildExerciseSignature(workout) {
+  const ex = getWorkoutExercises(workout);
+  if (!Array.isArray(ex) || ex.length === 0) return '';
+  const parts = ex
+    .map((item) => {
+      const name = normalizeExerciseName(item?.name || item?.exerciseName || item?.exercise_name);
+      if (!name) return '';
+      const sets = Number(item?.sets || 0) || 0;
+      const reps = Number(item?.reps || 0) || 0;
+      const weight = Number(item?.weight || 0) || 0;
+      const cal = Number(item?.calories || 0) || 0;
+      return `${name}|${sets}|${reps}|${weight}|${cal}`;
+    })
+    .filter(Boolean)
+    .sort();
+  return parts.join('||');
+}
+
+export function getWorkoutDedupKey(workout, fallbackKey = '') {
+  const idKey = String(workout?.client_id || workout?.id || '').trim();
+  if (idKey) return `id:${idKey}`;
+
+  const sig = buildExerciseSignature(workout);
+  const kcal = Math.round(getWorkoutCalories(workout) || 0);
+  const started = String(workout?.started_at || workout?.createdAt || workout?.created_at || '').trim();
+
+  if (sig) return `sig:${sig}::kcal:${kcal}`;
+  if (started) return `time:${started}::kcal:${kcal}`;
+  return String(fallbackKey || '');
+}
+
 export function buildWorkoutBurnedTotalsByDay(userId) {
   const wh = readWorkoutHistoryLocal(userId);
   const byDay = new Map();
@@ -74,7 +118,7 @@ export function buildWorkoutBurnedTotalsByDay(userId) {
     if (isDraftWorkout(w)) continue;
 
     const kcal = getWorkoutCalories(w);
-    const key = String(w?.client_id || w?.id || i);
+    const key = getWorkoutDedupKey(w, i);
     put(dayISO, key, kcal);
   }
 
