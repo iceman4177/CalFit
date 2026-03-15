@@ -1320,6 +1320,30 @@ export default function MealTracker({ onMealUpdate }) {
                 >
                   Use AI food lookup or generate meal ideas without leaving the flow.
                 </Typography>
+
+                <Box
+                  sx={{
+                    mt: 1.5,
+                    mx: 'auto',
+                    width: '100%',
+                    maxWidth: 620,
+                    px: { xs: 1, sm: 0 },
+                    py: 1.5,
+                    borderRadius: 3,
+                    background: 'linear-gradient(180deg, rgba(37,99,235,0.05), rgba(37,99,235,0.02))',
+                    border: '1px solid rgba(37,99,235,0.10)',
+                    textAlign: 'left'
+                  }}
+                >
+                  <Stack spacing={0.9}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '0.96rem', color: 'text.primary' }}>
+                      Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                      Enter the food and quantity, add a brand if you know it, tap <strong>Get Nutrition</strong>, then hit <strong>Log</strong> to drop it straight into today’s meals.
+                    </Typography>
+                  </Stack>
+                </Box>
               </Box>
 
               <Box
