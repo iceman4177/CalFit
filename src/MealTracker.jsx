@@ -19,6 +19,7 @@ import { Container,
   Stack,
   Card,
   CardContent,
+  Chip,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -1291,43 +1292,84 @@ export default function MealTracker({ onMealUpdate }) {
       <Box ref={suggestRef} sx={{ width: '100%', maxWidth: 760 }}>
         <Card sx={{ borderRadius: 5, overflow: 'visible', boxShadow: '0 16px 40px rgba(0,0,0,0.04)' }}>
           <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
-            <Stack spacing={2.5}>
-              <Box sx={{ textAlign: 'center', position: 'relative' }}>
+            <Stack spacing={{ xs: 2.25, sm: 2.75 }}>
+              <Box sx={{ position: 'relative', pt: { xs: 0.5, sm: 0.75 } }}>
                 {!isProUser() && (
                   <Box sx={{ position: 'absolute', top: 0, right: 0 }}>
                     <FeatureUseBadge featureKey="ai_food_lookup" isPro={isProUser()} />
                   </Box>
                 )}
-                <Typography
-                  variant="h5"
+
+                <Stack
+                  spacing={{ xs: 1.25, sm: 1.5 }}
+                  alignItems="center"
                   sx={{
-                    fontWeight: 800,
-                    lineHeight: 1.12,
-                    letterSpacing: '-0.02em',
-                    fontSize: { xs: '1.72rem', sm: '1.95rem' },
-                    mb: 1
-                  }}
-                >
-                  AI Assist
-                </Typography>
-                <Typography
-                  variant="body1"
-                  color="text.secondary"
-                  sx={{
-                    maxWidth: 640,
-                    mx: 'auto',
+                    width: '100%',
                     textAlign: 'center',
-                    fontSize: { xs: '1rem', sm: '1.05rem' },
-                    lineHeight: 1.5
+                    px: { xs: 0.5, sm: 1 },
+                    pt: { xs: 2.5, sm: 1.5 }
                   }}
                 >
-                  Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
-                </Typography>
+                  <Typography
+                    variant="h5"
+                    sx={{
+                      fontWeight: 800,
+                      lineHeight: 1.08,
+                      letterSpacing: '-0.02em',
+                      fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                    }}
+                  >
+                    AI Assist
+                  </Typography>
+
+                  <Box
+                    sx={{
+                      width: '100%',
+                      maxWidth: 600,
+                      mx: 'auto',
+                      display: 'flex',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <Typography
+                      variant="body1"
+                      color="text.secondary"
+                      sx={{
+                        width: '100%',
+                        textAlign: 'center',
+                        fontSize: { xs: '1rem', sm: '1.05rem' },
+                        lineHeight: 1.5
+                      }}
+                    >
+                      Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
+                    </Typography>
+                  </Box>
+
+                  <Box
+                    sx={{
+                      width: '100%',
+                      maxWidth: 640,
+                      mx: 'auto',
+                      p: { xs: 2, sm: 2.5 },
+                      borderRadius: 4,
+                      border: '1px solid rgba(66, 99, 235, 0.12)',
+                      background: 'linear-gradient(180deg, rgba(247,249,255,0.9) 0%, rgba(244,247,255,0.96) 100%)',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <Typography sx={{ fontWeight: 800, lineHeight: 1.32, fontSize: { xs: '1rem', sm: '1.02rem' } }}>
+                      Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 1.1, lineHeight: 1.45, fontSize: { xs: '0.98rem', sm: '1rem' } }}>
+                      Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Log</Box> to drop it straight into today&apos;s meals.
+                    </Typography>
+                  </Box>
+                </Stack>
               </Box>
 
               <Box
                 sx={{
-                  p: { xs: 2, sm: 2.5 },
+                  p: { xs: 1.75, sm: 2.25 },
                   borderRadius: 4,
                   border: '1px solid rgba(0,0,0,0.08)',
                   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)'
