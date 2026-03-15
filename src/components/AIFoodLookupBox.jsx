@@ -154,7 +154,7 @@ export default function AIFoodLookupBox({
   return (
     <Card sx={{ mb: 2 }}>
       <CardContent>
-        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, textAlign: 'center' }}>
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, textAlign: "center" }}>
           AI Food Lookup
         </Typography>
         <Stack spacing={1.25}>
