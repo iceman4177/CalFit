@@ -1453,31 +1453,38 @@ Output format (use these headings):
   const RecapHeader = (
     <Stack
       direction={{ xs: "column", sm: "row" }}
-      spacing={1.25}
+      spacing={1.5}
       alignItems={{ xs: "stretch", sm: "center" }}
       justifyContent="space-between"
-      sx={{ mt: 1 }}
+      sx={{ mt: 1.15 }}
     >
-      <Box>
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+      <Box sx={{ minWidth: 0 }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap", rowGap: 0.75 }}>
           <Typography variant={embedded ? "h6" : "h5"} sx={{ fontWeight: 900 }}>
             Daily Recap
           </Typography>
-          <Chip label="AI" size="small" color="primary" sx={{ fontWeight: 800 }} />
+          <Chip
+            label="AI"
+            size="small"
+            color="primary"
+            sx={{ fontWeight: 800, borderRadius: 999, height: 26 }}
+          />
           {!embedded && !isPro && (
-            <Chip label="3/day Free" size="small" variant="outlined" sx={{ fontWeight: 700 }} />
-          )}
-          {!embedded && !isPro && (
-            <Chip label={`Free: ${Math.max(0, freeDailyRecapLimit - count)}/${freeDailyRecapLimit}`} size="small" variant="outlined" sx={{ fontWeight: 800, borderRadius: 999 }} />
+            <Chip
+              label={`${Math.max(0, freeDailyRecapLimit - count)}/${freeDailyRecapLimit} free today`}
+              size="small"
+              variant="outlined"
+              sx={{ fontWeight: 800, borderRadius: 999, height: 26 }}
+            />
           )}
         </Stack>
 
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.6, maxWidth: 620 }}>
           Get a detailed recap of today’s calories, macros, training, timing, and next steps.
         </Typography>
 
         {savedAt && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.55 }}>
             Saved: {new Date(savedAt).toLocaleString()}
           </Typography>
         )}
@@ -1487,7 +1494,7 @@ Output format (use these headings):
         variant="contained"
         onClick={handleGetRecap}
         disabled={loading}
-        sx={{ fontWeight: 900, borderRadius: 999, px: 3 }}
+        sx={{ fontWeight: 900, borderRadius: 999, px: 3, alignSelf: { xs: "flex-start", sm: "center" } }}
       >
         {loading ? <CircularProgress size={24} /> : buttonText}
       </Button>
@@ -1683,12 +1690,18 @@ Output format (use these headings):
           elevation={0}
           sx={{
             mb: 2.0,
-            border: "1px solid rgba(2,6,23,0.10)",
-            borderRadius: 2,
-            background: "rgba(2,6,23,0.03)",
+            border: "1px solid rgba(59,130,246,0.12)",
+            borderRadius: 2.2,
+            background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.98) 100%)",
           }}
         >
-          <CardContent>
+          <CardContent sx={{ py: 1.6 }}>
+            <Typography
+              variant="overline"
+              sx={{ display: "block", mb: 0.45, color: "rgba(37,99,235,0.86)", fontWeight: 900, letterSpacing: "0.08em" }}
+            >
+              Quick read
+            </Typography>
             <Typography sx={{ fontWeight: 900, lineHeight: 1.35 }}>{roastLine}</Typography>
           </CardContent>
         </Card>
@@ -1720,11 +1733,21 @@ Output format (use these headings):
                 value={lvl.next ? clamp((lvl.progress / lvl.next) * 100, 0, 100) : 0}
                 sx={{ height: 10, borderRadius: 999, backgroundColor: "rgba(2,6,23,0.06)" }}
               />
-              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
-                <Chip size="small" label={`🍽️ Meals: ${mealsCount}`} />
-                <Chip size="small" label={`🔥 Burned: ${burned}`} />
-                <Chip size="small" label={`🥩 Protein: ${proteinSoFar}g`} />
-                <Chip size="small" label={`⚖️ Net: ${net > 0 ? `+${net}` : net}`} />
+              <Stack direction="row" spacing={0.9} sx={{ mt: 1.1, flexWrap: "wrap", rowGap: 0.9 }}>
+                {[`🍽️ Meals: ${mealsCount}`, `🔥 Burned: ${burned}`, `🥩 Protein: ${proteinSoFar}g`, `⚖️ Net: ${net > 0 ? `+${net}` : net}`].map((label) => (
+                  <Chip
+                    key={label}
+                    size="small"
+                    label={label}
+                    sx={{
+                      height: 28,
+                      borderRadius: 999,
+                      fontWeight: 800,
+                      background: "rgba(2,6,23,0.05)",
+                      border: "1px solid rgba(2,6,23,0.06)",
+                    }}
+                  />
+                ))}
               </Stack>
             </Box>
           </Stack>
