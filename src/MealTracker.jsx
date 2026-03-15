@@ -1314,7 +1314,13 @@ export default function MealTracker({ onMealUpdate }) {
                 <Typography
                   variant="body1"
                   color="text.secondary"
-                  sx={{ maxWidth: 620, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
+                  sx={{
+                    maxWidth: 620,
+                    mx: 'auto',
+                    textAlign: 'center',
+                    fontSize: { xs: '1rem', sm: '1.05rem' },
+                    lineHeight: 1.5
+                  }}
                 >
                   Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
                 </Typography>
