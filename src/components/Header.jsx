@@ -182,14 +182,15 @@ const [authUser, setAuthUser] = useState(null);
           width: '100%',
           mx: 'auto',
           px: { xs: 1.5, sm: 2 },
+          minHeight: 74,
           display: 'grid',
-          gridTemplateColumns: { xs: 'auto 1fr', md: '1fr auto 1fr' },
+          gridTemplateColumns: { xs: '1fr auto', md: '1fr auto 1fr' },
           alignItems: 'center',
           columnGap: { xs: 1, md: 2 },
         }}
       >
         {/* Brand */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2, minWidth: 0 }}>
           <a
             href="/"
             style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
@@ -242,13 +243,13 @@ const [authUser, setAuthUser] = useState(null);
         <Box
           sx={{
             display: { xs: 'none', md: 'flex' },
-            justifySelf: 'center',
             alignItems: 'center',
             justifyContent: 'center',
+            justifySelf: 'center',
             minWidth: 0,
           }}
         >
-          <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
+          <Stack direction="row" spacing={2.25} alignItems="center" justifyContent="center">
             <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
               Home
             </NavLink>
