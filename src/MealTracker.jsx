@@ -1299,51 +1299,56 @@ export default function MealTracker({ onMealUpdate }) {
                     <FeatureUseBadge featureKey="ai_food_lookup" isPro={isProUser()} />
                   </Box>
                 )}
-                <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mb: 1 }}>
-                  <Typography
-                    variant="h5"
-                    sx={{
-                      fontWeight: 800,
-                      lineHeight: 1.12,
-                      letterSpacing: '-0.02em',
-                      fontSize: { xs: '1.72rem', sm: '1.95rem' }
-                    }}
-                  >
-                    AI Assist
-                  </Typography>
-                  <Chip size="small" color="primary" label="BETA" sx={{ fontWeight: 700, height: 28 }} />
-                </Stack>
+                <Typography
+                  variant="h5"
+                  sx={{
+                    mb: 1,
+                    fontWeight: 800,
+                    lineHeight: 1.12,
+                    letterSpacing: '-0.02em',
+                    fontSize: { xs: '1.72rem', sm: '1.95rem' }
+                  }}
+                >
+                  AI Assist
+                </Typography>
                 <Typography
                   variant="body1"
                   color="text.secondary"
-                  sx={{ maxWidth: 560, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
+                  sx={{ maxWidth: 620, mx: 'auto', fontSize: { xs: '1rem', sm: '1.05rem' }, lineHeight: 1.5 }}
                 >
-                  Use AI food lookup or generate meal ideas without leaving the flow.
+                  Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
                 </Typography>
+              </Box>
 
-                <Box
+              <Box
+                sx={{
+                  px: { xs: 2, sm: 2.5 },
+                  py: { xs: 1.5, sm: 1.75 },
+                  borderRadius: 4,
+                  border: '1px solid rgba(46, 101, 240, 0.12)',
+                  background: 'linear-gradient(180deg, rgba(46,101,240,0.05) 0%, rgba(46,101,240,0.025) 100%)'
+                }}
+              >
+                <Typography
                   sx={{
-                    mt: 1.5,
-                    mx: 'auto',
-                    width: '100%',
-                    maxWidth: 620,
-                    px: { xs: 1, sm: 0 },
-                    py: 1.5,
-                    borderRadius: 3,
-                    background: 'linear-gradient(180deg, rgba(37,99,235,0.05), rgba(37,99,235,0.02))',
-                    border: '1px solid rgba(37,99,235,0.10)',
-                    textAlign: 'left'
+                    fontWeight: 800,
+                    lineHeight: 1.35,
+                    fontSize: { xs: '0.98rem', sm: '1.05rem' },
+                    color: '#0f172a'
                   }}
                 >
-                  <Stack spacing={0.9}>
-                    <Typography sx={{ fontWeight: 800, fontSize: '0.96rem', color: 'text.primary' }}>
-                      Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
-                      Enter the food and quantity, add a brand if you know it, tap <strong>Get Nutrition</strong>, then hit <strong>Log</strong> to drop it straight into today’s meals.
-                    </Typography>
-                  </Stack>
-                </Box>
+                  Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
+                </Typography>
+                <Typography
+                  color="text.secondary"
+                  sx={{
+                    mt: 0.75,
+                    lineHeight: 1.55,
+                    fontSize: { xs: '0.98rem', sm: '1.02rem' }
+                  }}
+                >
+                  Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>Log</Box> to drop it straight into today's meals.
+                </Typography>
               </Box>
 
               <Box
