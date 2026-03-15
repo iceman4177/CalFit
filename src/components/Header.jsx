@@ -234,31 +234,32 @@ const [authUser, setAuthUser] = useState(null);
             left: '50%',
             transform: 'translateX(-50%)',
             display: { xs: 'none', md: 'block' },
-            width: 'min(460px, calc(100% - 420px))',
-            minWidth: 360,
             pointerEvents: 'none',
           }}
         >
           <Box
             sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-              alignItems: 'center',
-              justifyItems: 'center',
-              columnGap: 1,
-              width: '100%',
+              position: 'relative',
+              minWidth: 420,
+              height: 40,
               pointerEvents: 'auto',
             }}
           >
-            <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-              Home
-            </NavLink>
-            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
-              Workout History
-            </NavLink>
-            <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
-              Dashboard
-            </NavLink>
+            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
+                Workout History
+              </NavLink>
+            </Box>
+            <Box sx={{ position: 'absolute', right: 'calc(50% + 88px)', top: '50%', transform: 'translateY(-50%)' }}>
+              <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
+                Home
+              </NavLink>
+            </Box>
+            <Box sx={{ position: 'absolute', left: 'calc(50% + 88px)', top: '50%', transform: 'translateY(-50%)' }}>
+              <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
+                Dashboard
+              </NavLink>
+            </Box>
           </Box>
         </Box>
 
