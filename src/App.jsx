@@ -4,6 +4,7 @@ import {
   Route,
   Switch,
   Redirect,
+  NavLink,
   useLocation,
   useHistory
 } from 'react-router-dom';
@@ -12,9 +13,20 @@ import { Container,
   Typography,
   Button,
   Stack,
+  Menu,
+  MenuItem,
   Snackbar,
   Alert,
+  Badge,
+  Chip,
   CircularProgress } from '@mui/material';
+import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
+import RestaurantIcon    from '@mui/icons-material/Restaurant';
+import MoreVertIcon      from '@mui/icons-material/MoreVert';
+import EmojiEventsIcon   from '@mui/icons-material/EmojiEvents';
+import ListIcon          from '@mui/icons-material/List';
+import AssessmentIcon    from '@mui/icons-material/Assessment';
+import ChatIcon          from '@mui/icons-material/Chat';
 
 import ProLandingPage from './ProLandingPage';
 import ProSuccess     from './ProSuccess';
@@ -23,7 +35,15 @@ import AuthCallback   from './AuthCallback';
 import useFirstTimeTip       from './hooks/useFirstTimeTip';
 
 import HealthDataForm    from './HealthDataForm';
+import WorkoutPage       from './WorkoutPage';
+import WorkoutHistory    from './WorkoutHistory';
+import ProgressDashboard from './ProgressDashboard';
+import MealTracker       from './MealTracker';
 import NetCalorieBanner  from './NetCalorieBanner';
+import DailyRecapCoach   from './DailyRecapCoach';
+import HomeHub          from './HomeHub';
+import DailyEvaluationHome from './DailyEvaluationHome'; // ✅ NEW (Acquisition home)
+import PoseSession from './PoseSession.jsx';
 import StreakBanner      from './components/StreakBanner';
 
 import UpgradeModal      from './components/UpgradeModal';
@@ -47,24 +67,16 @@ import {
   hydrateStreakOnStartup,
 } from './utils/streak';
 
-const WorkoutPage = React.lazy(() => import('./WorkoutPage'));
-const WorkoutHistory = React.lazy(() => import('./WorkoutHistory'));
-const ProgressDashboard = React.lazy(() => import('./ProgressDashboard'));
-const MealTracker = React.lazy(() => import('./MealTracker'));
-const DailyRecapCoach = React.lazy(() => import('./DailyRecapCoach'));
-const HomeHub = React.lazy(() => import('./HomeHub'));
-const DailyEvaluationHome = React.lazy(() => import('./DailyEvaluationHome'));
-const PoseSession = React.lazy(() => import('./PoseSession.jsx'));
-
 const routeTips = {
   '/':            'Home: log food, train, scan, and get coached from one clean home base.',
-  '/verdict':      'Coach: get your clearest next step based on your day, goals, and intake.',
-  '/edit-info':    'Welcome to Slimcal.ai! Enter your health info to get started.',
-  '/workout':      'This is your Workout page: log exercises & calories burned.',
-  '/meals':        'Track your meals here: search foods or add calories manually.',
-  '/history':      'View your past workouts & meals at a glance.',
-  '/dashboard':    'Dashboard: see your trends and how today is tracking.',
-
+  '/edit-info':   'Welcome to Slimcal.ai! Enter your health info to get started.',
+  '/workout':     'This is your Workout page: log exercises & calories burned.',
+  '/meals':       'Track your meals here: search foods or add calories manually.',
+  '/history':     'View your past workouts & meals at a glance.',
+  '/dashboard':   'Dashboard: see your trends and how today is tracking.',
+  '/verdict':     'Coach: get your clearest next step based on today so far.',
+  '/daily-eval':  'Daily Check-In: see how today is tracking against your targets.',
+  '/daily-checklist': "Today's Plan: know what to do next and what still needs to get done.",
 };
 
 function PageTracker() {
@@ -338,8 +350,17 @@ export default function App() {
   }, []);
 
   /* ---------------- Entitlements (context) ---------------- */
-  const { isProActive, status } = useEntitlements();
+  const { isProActive, status, entitlements } = useEntitlements();
   const trialActive = status === 'trialing';
+
+  // Ambassador badge detection (robust to Set/Array/object)
+  const hasAmbassadorBadge = React.useMemo(() => {
+    if (!entitlements) return false;
+    if (typeof entitlements.has === 'function') return entitlements.has('ambassador_badge');
+    if (Array.isArray(entitlements)) return entitlements.includes('ambassador_badge');
+    if (typeof entitlements === 'object') return Boolean(entitlements['ambassador_badge']);
+    return false;
+  }, [entitlements]);
 
   /* --------------- Server-truth Pro check (includes trial eligibility) --------------- */
   const [proCheck, setProCheck] = useState({
@@ -430,6 +451,9 @@ export default function App() {
   const [upgradeDefaults, setUpgradeDefaults] = useState({ plan: 'monthly', autopay: false });
 
 
+  const [moreAnchor, setMoreAnchor] = useState(null);
+  const openMore  = e => setMoreAnchor(e.currentTarget);
+  const closeMore = () => setMoreAnchor(null);
 
   const minimumProfileStatus = React.useMemo(() => {
     if (!profileResolved) return null;
@@ -675,7 +699,6 @@ export default function App() {
     { auto: Boolean(message) }
   );
 
-  // ===== Coach hint state (pulsing "AI" badge) =====
   // === Quick Actions (Acquisition-forward) ===
   // navBar (legacy hero buttons) removed for production launch.
 
@@ -749,6 +772,10 @@ export default function App() {
   }, []);
 
   // ---- CTA logic (fixed): always show upgrade path when logged in and not Pro
+  const effectiveIsPro = (proCheck.isPro || isProActive || localPro);
+  const showLoggedInCta = !!authUser && !proCheck.loading && !effectiveIsPro;
+  const loggedInCtaLabel = proCheck.trialEligible ? "TRY PRO FREE" : "UPGRADE TO PRO";
+
   useEffect(() => {
     const openUpgradeHandler = () => setUpgradeOpen(true);
     const openSigninHandler = () => {
@@ -812,24 +839,14 @@ export default function App() {
           </>
         )}
 
-        <React.Suspense
-          fallback={
-            <Box sx={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}>
-              <CircularProgress size={32} />
-            </Box>
-          }
-        >
-          <Switch>
+        <Switch>
           <Route path="/auth/callback" component={AuthCallback} />
           <Route path="/pro" component={ProLandingPage} />
           <Route path="/pro-success" component={ProSuccess} />
           <Route
             exact
             path="/body-scan/session"
-            render={() => renderProfileGate(
-              "Complete your profile before Pose Session",
-              "Pose Session uses your body stats and goals so the scan feels personal and accurate."
-            ) || <PoseSession />}
+            render={() => renderProfileGate("Complete your profile before Pose Session", "Pose Session uses your body stats and goals so the scan feels personal and accurate.") || <PoseSession />}
           />
           <Route exact path="/body-scan" render={() => <Redirect to="/body-scan/session" />} />
 
@@ -871,7 +888,7 @@ export default function App() {
           <Route path="/calorie-log"  render={() => <Redirect to="/dashboard" />} />
           <Route path="/summary"      render={() => <Redirect to="/dashboard" />} />
 
-          {/* ✅ Legacy recap route now redirects to Coach (retention) */}
+          {/* Legacy recap route now redirects to the canonical Coach page */}
           <Route path="/recap" render={() => <Redirect to="/verdict" />} />
 
           <Route path="/waitlist"     render={() => <Redirect to="/dashboard" />} />
@@ -894,10 +911,10 @@ export default function App() {
           />
 
           
-
           {/* Legacy Get Verdict route now folds into Coach */}
           <Route exact path="/get-verdict" render={() => <Redirect to="/verdict" />} />
-{/* Daily Verdict (AI coach) */}
+
+          {/* Daily Verdict (AI coach) */}
           <Route
             exact
             path="/verdict"
@@ -909,10 +926,9 @@ export default function App() {
           />
 
 
-          {/* ✅ Retention side: Recap Coach */}
+          {/* Legacy Coach route retained for compatibility */}
           <Route path="/coach" render={() => <Redirect to="/verdict" />} />
-          </Switch>
-        </React.Suspense>
+        </Switch>
 
         <UpgradeModal
           open={upgradeOpen}

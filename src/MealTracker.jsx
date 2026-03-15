@@ -1456,7 +1456,7 @@ export default function MealTracker({ onMealUpdate }) {
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
-        description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap Coach, AI Food Lookup without limits, and advanced insights."
+        description="Unlock unlimited AI meal suggestions, unlimited AI workouts, Daily Recap, AI Food Lookup without limits, and advanced insights."
       />
 
       <CustomNutritionDialog open={openCustom} onClose={() => setOpenCustom(false)} onConfirm={item => logOne(item)} />

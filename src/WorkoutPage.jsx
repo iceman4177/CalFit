@@ -1861,7 +1861,7 @@ setNewExercise({
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
         title="Upgrade to Slimcal Pro"
-        description="Unlock unlimited AI workout recommendations, AI meal suggestions, the Daily Recap Coach, and advanced insights."
+        description="Unlock unlimited AI workout recommendations, AI meal suggestions, Daily Recap, and advanced insights."
       />
     </Container>
   );
