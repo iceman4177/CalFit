@@ -176,54 +176,59 @@ const [authUser, setAuthUser] = useState(null);
         borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}
     >
-      <Toolbar
-        sx={{
-          maxWidth: 1200,
-          width: '100%',
-          mx: 'auto',
-          px: { xs: 1.5, sm: 2 },
-          minHeight: 74,
-          display: 'grid',
-          gridTemplateColumns: { xs: '1fr auto', md: '1fr auto 1fr' },
-          alignItems: 'center',
-          columnGap: { xs: 1, md: 2 },
-        }}
-      >
-        {/* Brand */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2, minWidth: 0 }}>
-          <a
-            href="/"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
+      <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto', px: { xs: 2, sm: 3 } }}>
+        <Box
+          sx={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr auto', md: '1fr auto 1fr' },
+            alignItems: 'center',
+            columnGap: { xs: 1.25, md: 2 },
+            minHeight: 64,
+          }}
+        >
+          {/* Brand */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              minWidth: 0,
+              justifySelf: 'start',
+            }}
           >
-            <img
-              src={logoSrc}
-              alt="Slimcal.ai"
-              style={{ height: 28, width: 'auto' }}
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-            <Typography variant="h6" sx={{ fontWeight: 900, color: '#0f172a' }}>
-              Slimcal.ai
-            </Typography>
-          </a>
+            <a
+              href="/"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
+            >
+              <img
+                src={logoSrc}
+                alt="Slimcal.ai"
+                style={{ height: 28, width: 'auto' }}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+              <Typography variant="h6" sx={{ fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                Slimcal.ai
+              </Typography>
+            </a>
 
-          {showBeta && (
-            <Chip
-              label="BETA"
-              size="small"
-              sx={{
-                ml: 1,
-                fontWeight: 800,
-                height: 22,
-                '& .MuiChip-label': { px: 1 },
-              }}
-            />
-          )}
+            {showBeta && (
+              <Chip
+                label="BETA"
+                size="small"
+                sx={{
+                  ml: 1,
+                  fontWeight: 800,
+                  height: 22,
+                  '& .MuiChip-label': { px: 1 },
+                }}
+              />
+            )}
 
-          {/* Ambassador badge */}
-          {hasAmbassador && (
-            
+            {/* Ambassador badge */}
+            {hasAmbassador && (
               <Chip
                 label="Ambassador"
                 size="small"
@@ -235,40 +240,34 @@ const [authUser, setAuthUser] = useState(null);
                   '& .MuiChip-label': { px: 1 },
                 }}
               />
-            
-          )}
-        </Box>
+            )}
+          </Box>
 
-        {/* Primary nav */}
-        <Box
-          sx={{
-            display: { xs: 'none', md: 'flex' },
-            alignItems: 'center',
-            justifyContent: 'center',
-            justifySelf: 'center',
-            minWidth: 0,
-          }}
-        >
-          <Stack direction="row" spacing={2.25} alignItems="center" justifyContent="center">
-            <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
-              Home
-            </NavLink>
-            <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
-              Workout History
-            </NavLink>
-            <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
-              Dashboard
-            </NavLink>
-          </Stack>
-        </Box>
+          {/* Primary nav */}
+          <Box
+            sx={{
+              display: { xs: 'none', md: 'flex' },
+              alignItems: 'center',
+              justifyContent: 'center',
+              justifySelf: 'center',
+              minWidth: 0,
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="center">
+              <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
+                Home
+              </NavLink>
+              <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
+                Workout History
+              </NavLink>
+              <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
+                Dashboard
+              </NavLink>
+            </Stack>
+          </Box>
 
-        {/* Plan action + account */}
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="center"
-          sx={{ justifySelf: 'end', ml: { xs: 'auto', md: 0 } }}
-        >
+          {/* Plan action + account */}
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ justifySelf: 'end', ml: { xs: 'auto', md: 0 } }}>
           {/* Upgrade CTA (hide when already Pro) */}
           {!pro && (
             <Button
@@ -283,6 +282,7 @@ const [authUser, setAuthUser] = useState(null);
                 fontWeight: 900,
                 px: isMobile ? 1.25 : 2,
                 py: isMobile ? 0.6 : 0.9,
+                whiteSpace: 'nowrap',
               }}
             >
               {isMobile ? (trialEligible ? 'Try Pro' : 'Upgrade') : ctaLabel}
@@ -350,6 +350,7 @@ const [authUser, setAuthUser] = useState(null);
                     borderRadius: 999,
                     color: '#0f172a',
                     px: 1.25,
+                    maxWidth: 220,
                   }}
                 >
                   {(authUser?.user_metadata?.full_name ||
@@ -433,6 +434,7 @@ const [authUser, setAuthUser] = useState(null);
                     fontWeight: 900,
                     px: 2,
                     py: 0.9,
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   Login
@@ -454,7 +456,8 @@ const [authUser, setAuthUser] = useState(null);
             </>
           )}
         </Stack>
-</Toolbar>
+        </Box>
+      </Toolbar>
     </AppBar>
   );
 }
