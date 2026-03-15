@@ -1,4 +1,6 @@
-import { readScopedJSON, scopedKey, KEYS } from './scopedStorage.js';
+import { readScopedJSON, writeScopedJSON, KEYS } from './scopedStorage.js';
+
+export const VISIBLE_WORKOUT_ROWS_KEY = 'workoutHistoryVisibleRows';
 
 export function localDayISO(d = new Date()) {
   try {
@@ -38,17 +40,14 @@ export function isDraftWorkout(workout) {
   return Boolean(
     workout?.isDraft ||
       workout?.draft === true ||
-      workout?.status === 'draft'
+      workout?.status === 'draft' ||
+      workout?.__draft === true
   );
 }
 
-
-
-export const VISIBLE_WORKOUT_HISTORY_ROWS_KEY = 'visibleWorkoutHistoryRows';
-
 export function getWorkoutDedupKey(workout, fallback = '') {
-  const primary = workout?.client_id || workout?.id;
-  if (primary) return String(primary);
+  const explicit = workout?.client_id || workout?.id || workout?.workout_id || workout?.session_id;
+  if (explicit) return String(explicit);
 
   const dayISO = dayISOFromAny(
     workout?.local_day ||
@@ -60,29 +59,22 @@ export function getWorkoutDedupKey(workout, fallback = '') {
       workout?.created_at
   ) || 'unknown-day';
 
-  const kcal = Math.round(getWorkoutCalories(workout) || 0);
-  const started = String(workout?.started_at || workout?.created_at || workout?.date || '');
-  return `${dayISO}::${kcal}::${started}::${fallback}`;
-}
+  const kcal = Math.round(getWorkoutCalories(workout));
+  const exercises = Array.isArray(workout?.exercisesForShare)
+    ? workout.exercisesForShare
+    : Array.isArray(workout?.items?.exercises)
+      ? workout.items.exercises
+      : Array.isArray(workout?.exercises)
+        ? workout.exercises
+        : [];
 
-export function readVisibleWorkoutHistoryRows(userId) {
-  try {
-    const raw = localStorage.getItem(scopedKey(VISIBLE_WORKOUT_HISTORY_ROWS_KEY, userId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+  const names = exercises
+    .map((ex) => String(ex?.exerciseName || ex?.name || ex?.exercise_name || '').trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8)
+    .join('|');
 
-export function writeVisibleWorkoutHistoryRows(userId, rows) {
-  try {
-    localStorage.setItem(
-      scopedKey(VISIBLE_WORKOUT_HISTORY_ROWS_KEY, userId),
-      JSON.stringify(Array.isArray(rows) ? rows : [])
-    );
-  } catch {}
+  return `${dayISO}::${kcal}::${names || fallback}`;
 }
 
 export function readWorkoutHistoryLocal(userId) {
@@ -90,9 +82,20 @@ export function readWorkoutHistoryLocal(userId) {
   return Array.isArray(raw) ? raw : [];
 }
 
+export function readVisibleWorkoutRows(userId) {
+  const raw = readScopedJSON(VISIBLE_WORKOUT_ROWS_KEY, userId, []);
+  return Array.isArray(raw) ? raw : [];
+}
+
+export function writeVisibleWorkoutRows(userId, rows) {
+  try {
+    writeScopedJSON(VISIBLE_WORKOUT_ROWS_KEY, userId, Array.isArray(rows) ? rows : []);
+  } catch {}
+}
+
 export function buildWorkoutBurnedTotalsByDay(userId) {
-  const visibleRows = readVisibleWorkoutHistoryRows(userId);
-  const wh = visibleRows.length ? visibleRows : readWorkoutHistoryLocal(userId);
+  const visibleRows = readVisibleWorkoutRows(userId);
+  const source = visibleRows.length ? visibleRows : readWorkoutHistoryLocal(userId);
   const byDay = new Map();
 
   const put = (dayISO, key, calories) => {
@@ -103,8 +106,8 @@ export function buildWorkoutBurnedTotalsByDay(userId) {
     byDay.set(dayISO, m);
   };
 
-  for (let i = 0; i < wh.length; i += 1) {
-    const w = wh[i] || {};
+  for (let i = 0; i < source.length; i += 1) {
+    const w = source[i] || {};
     const dayISO = dayISOFromAny(
       w?.local_day ||
         w?.__local_day ||

@@ -14,7 +14,7 @@ import {
 
 import { useAuth } from "./context/AuthProvider.jsx";
 import { readScopedJSON, KEYS } from "./lib/scopedStorage.js";
-import { getWorkoutDedupKey, getWorkoutCalories, isDraftWorkout } from "./lib/workoutHistoryTotals.js";
+import { buildWorkoutBurnedTotalsByDay } from "./lib/workoutHistoryTotals.js";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
@@ -112,40 +112,6 @@ function buildMealTotalsByDay(userId) {
   return totals;
 }
 
-function buildWorkoutTotalsByDay(userId) {
-  const wh = readScopedJSON(KEYS.workoutHistory, userId, []) || [];
-  const byDay = new Map();
-
-  const put = (dayISO, key, calories) => {
-    if (!dayISO || !calories) return;
-    const m = byDay.get(dayISO) || new Map();
-    const prev = Number(m.get(key) || 0);
-    m.set(key, Math.max(prev, Number(calories) || 0));
-    byDay.set(dayISO, m);
-  };
-
-  for (let i = 0; i < wh.length; i += 1) {
-    const w = wh[i] || {};
-    const dayISO = dayISOFromAny(
-      w?.local_day || w?.__local_day || w?.day || w?.date || w?.started_at || w?.createdAt || w?.created_at
-    );
-    if (!dayISO) continue;
-    if (isDraftWorkout(w)) continue;
-
-    const kcal = getWorkoutCalories(w);
-    const key = getWorkoutDedupKey(w, i);
-    put(dayISO, key, kcal);
-  }
-
-  const totals = new Map();
-  for (const [dayISO, m] of byDay.entries()) {
-    let sum = 0;
-    for (const v of m.values()) sum += Number(v) || 0;
-    totals.set(dayISO, sum);
-  }
-  return totals;
-}
-
 export default function WeeklyTrend() {
   const { user } = useAuth();
   const uid = user?.id || null;
@@ -154,7 +120,7 @@ export default function WeeklyTrend() {
   const recompute = useCallback(() => {
     const days = lastNDaysISO(7);
     const eatenByDay = buildMealTotalsByDay(uid);
-    const burnedByDay = buildWorkoutTotalsByDay(uid);
+    const burnedByDay = buildWorkoutBurnedTotalsByDay(uid);
 
     setRows(
       days.map((dayISO) => {
