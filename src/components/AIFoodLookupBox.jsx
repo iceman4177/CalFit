@@ -1,5 +1,5 @@
 // src/components/AIFoodLookupBox.jsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Card, CardContent, CardActions,
   TextField, Button, Typography, Stack, Box
@@ -152,9 +152,9 @@ export default function AIFoodLookupBox({
   const disabled = !food.trim() || !quantity.trim() || loading;
 
   return (
-    <Card sx={{ mb: 0, borderRadius: 4, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.06)' }}>
-      <CardContent sx={{ p: { xs: 2.25, sm: 2.5 } }}>
-        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, textAlign: 'center', mb: 2 }}>
+    <Card sx={{ mb: 2 }}>
+      <CardContent>
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 800, textAlign: 'center' }}>
           AI Food Lookup
         </Typography>
         <Stack spacing={1.25}>
@@ -182,7 +182,7 @@ export default function AIFoodLookupBox({
           )}
         </Stack>
       </CardContent>
-      <CardActions sx={{ justifyContent: "space-between", px: { xs: 2.25, sm: 2.5 }, pb: { xs: 2.25, sm: 2.5 }, pt: 0 }}>
+      <CardActions sx={{ justifyContent: "space-between" }}>
         <Button variant="outlined" onClick={handleLookup} disabled={disabled}>
           {loading ? "Looking up..." : "Get Nutrition"}
         </Button>
