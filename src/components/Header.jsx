@@ -233,15 +233,23 @@ const [authUser, setAuthUser] = useState(null);
             position: 'absolute',
             left: '50%',
             transform: 'translateX(-50%)',
-            display: { xs: 'none', md: 'grid' },
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            alignItems: 'center',
-            justifyItems: 'center',
-            width: { md: 420, lg: 480 },
+            display: { xs: 'none', md: 'block' },
+            width: 'min(460px, calc(100% - 420px))',
+            minWidth: 360,
             pointerEvents: 'none',
           }}
         >
-          <Box sx={{ pointerEvents: 'auto', width: '100%', display: 'contents' }}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              alignItems: 'center',
+              justifyItems: 'center',
+              columnGap: 1,
+              width: '100%',
+              pointerEvents: 'auto',
+            }}
+          >
             <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
               Home
             </NavLink>
