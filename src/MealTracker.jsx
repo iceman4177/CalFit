@@ -18,8 +18,7 @@ import { Container,
   DialogActions,
   Stack,
   Card,
-  CardContent,
-  Chip,
+  CardContent ,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -1292,76 +1291,70 @@ export default function MealTracker({ onMealUpdate }) {
       <Box ref={suggestRef} sx={{ width: '100%', maxWidth: 760 }}>
         <Card sx={{ borderRadius: 5, overflow: 'visible', boxShadow: '0 16px 40px rgba(0,0,0,0.04)' }}>
           <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
-            <Stack spacing={{ xs: 2.25, sm: 2.75 }}>
-              <Box sx={{ position: 'relative', pt: { xs: 0.5, sm: 0.75 } }}>
+            <Stack spacing={2.5}>
+              <Box sx={{ position: 'relative', pt: !isProUser() ? { xs: 1.25, sm: 0.5 } : 0 }}>
                 {!isProUser() && (
-                  <Box sx={{ position: 'absolute', top: 0, right: 0 }}>
+                  <Box sx={{ position: 'absolute', top: 0, right: 0, zIndex: 1 }}>
                     <FeatureUseBadge featureKey="ai_food_lookup" isPro={isProUser()} />
                   </Box>
                 )}
-
-                <Stack
-                  spacing={{ xs: 1.25, sm: 1.5 }}
-                  alignItems="center"
-                  sx={{
-                    width: '100%',
-                    textAlign: 'center',
-                    px: { xs: 0.5, sm: 1 },
-                    pt: { xs: 2.5, sm: 1.5 }
-                  }}
-                >
+                <Stack spacing={1.5} alignItems="center" sx={{ textAlign: 'center', maxWidth: 760, mx: 'auto' }}>
                   <Typography
                     variant="h5"
                     sx={{
                       fontWeight: 800,
-                      lineHeight: 1.08,
+                      lineHeight: 1.12,
                       letterSpacing: '-0.02em',
                       fontSize: { xs: '1.72rem', sm: '1.95rem' }
                     }}
                   >
                     AI Assist
                   </Typography>
-
-                  <Box
+                  <Typography
+                    variant="body1"
+                    color="text.secondary"
                     sx={{
-                      width: '100%',
-                      maxWidth: 600,
+                      maxWidth: 640,
                       mx: 'auto',
-                      display: 'flex',
-                      justifyContent: 'center'
+                      textAlign: 'center',
+                      fontSize: { xs: '1rem', sm: '1.05rem' },
+                      lineHeight: 1.55
                     }}
                   >
-                    <Typography
-                      variant="body1"
-                      color="text.secondary"
-                      sx={{
-                        width: '100%',
-                        textAlign: 'center',
-                        fontSize: { xs: '1rem', sm: '1.05rem' },
-                        lineHeight: 1.5
-                      }}
-                    >
-                      Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
-                    </Typography>
-                  </Box>
-
+                    Use AI food lookup for packaged foods, restaurant meals, or anything you want to log fast without leaving the page.
+                  </Typography>
                   <Box
                     sx={{
                       width: '100%',
-                      maxWidth: 640,
+                      maxWidth: 700,
                       mx: 'auto',
                       p: { xs: 2, sm: 2.5 },
                       borderRadius: 4,
-                      border: '1px solid rgba(66, 99, 235, 0.12)',
-                      background: 'linear-gradient(180deg, rgba(247,249,255,0.9) 0%, rgba(244,247,255,0.96) 100%)',
-                      textAlign: 'left'
+                      border: '1px solid rgba(47,107,255,0.10)',
+                      background: 'rgba(47,107,255,0.03)',
+                      textAlign: 'center'
                     }}
                   >
-                    <Typography sx={{ fontWeight: 800, lineHeight: 1.32, fontSize: { xs: '1rem', sm: '1.02rem' } }}>
+                    <Typography
+                      sx={{
+                        fontWeight: 800,
+                        lineHeight: 1.3,
+                        fontSize: { xs: '1rem', sm: '1.05rem' },
+                        textAlign: 'center'
+                      }}
+                    >
                       Best for quick add-ins, packaged foods, restaurant items, or anything not already in your manual log.
                     </Typography>
-                    <Typography color="text.secondary" sx={{ mt: 1.1, lineHeight: 1.45, fontSize: { xs: '0.98rem', sm: '1rem' } }}>
-                      Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Log</Box> to drop it straight into today&apos;s meals.
+                    <Typography
+                      color="text.secondary"
+                      sx={{
+                        mt: 1,
+                        lineHeight: 1.5,
+                        fontSize: { xs: '0.98rem', sm: '1rem' },
+                        textAlign: 'center'
+                      }}
+                    >
+                      Enter the food and quantity, add a brand if you know it, tap <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Get Nutrition</Box>, then hit <Box component="span" sx={{ fontWeight: 800, color: 'text.primary' }}>Log</Box> to drop it straight into today's meals.
                     </Typography>
                   </Box>
                 </Stack>
@@ -1369,7 +1362,7 @@ export default function MealTracker({ onMealUpdate }) {
 
               <Box
                 sx={{
-                  p: { xs: 1.75, sm: 2.25 },
+                  p: { xs: 2, sm: 2.5 },
                   borderRadius: 4,
                   border: '1px solid rgba(0,0,0,0.08)',
                   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)'
