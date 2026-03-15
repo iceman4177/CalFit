@@ -231,31 +231,63 @@ const [authUser, setAuthUser] = useState(null);
         <Box
           sx={{
             position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: { xs: 'none', md: 'block' },
+            inset: 0,
+            display: { xs: 'none', md: 'flex' },
+            alignItems: 'center',
+            justifyContent: 'center',
             pointerEvents: 'none',
           }}
         >
           <Box
             sx={{
               position: 'relative',
-              minWidth: 420,
+              width: 470,
               height: 40,
               pointerEvents: 'auto',
             }}
           >
-            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Box
+              sx={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 2,
+              }}
+            >
               <NavLink to="/history" style={linkStyle} activeStyle={activeStyle}>
                 Workout History
               </NavLink>
             </Box>
-            <Box sx={{ position: 'absolute', right: 'calc(50% + 88px)', top: '50%', transform: 'translateY(-50%)' }}>
+            <Box
+              sx={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-165px, -50%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
               <NavLink to="/" exact style={linkStyle} activeStyle={activeStyle}>
                 Home
               </NavLink>
             </Box>
-            <Box sx={{ position: 'absolute', left: 'calc(50% + 88px)', top: '50%', transform: 'translateY(-50%)' }}>
+            <Box
+              sx={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(92px, -50%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
               <NavLink to="/dashboard" style={linkStyle} activeStyle={activeStyle}>
                 Dashboard
               </NavLink>
