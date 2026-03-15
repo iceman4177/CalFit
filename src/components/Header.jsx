@@ -176,9 +176,29 @@ const [authUser, setAuthUser] = useState(null);
         borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}
     >
-      <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto', position: 'relative' }}>
+      <Toolbar
+        sx={{
+          maxWidth: 1200,
+          width: '100%',
+          mx: 'auto',
+          position: 'relative',
+          display: { xs: 'flex', md: 'grid' },
+          gridTemplateColumns: { md: '1fr auto 1fr' },
+          alignItems: 'center',
+          columnGap: { md: 2 },
+        }}
+      >
         {/* Brand */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 2 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            mr: { xs: 2, md: 0 },
+            minWidth: 0,
+            justifySelf: { md: 'start' },
+          }}
+        >
           <a
             href="/"
             style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
@@ -230,11 +250,10 @@ const [authUser, setAuthUser] = useState(null);
         {/* Primary nav */}
         <Box
           sx={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
             display: { xs: 'none', md: 'flex' },
             justifyContent: 'center',
+            justifySelf: 'center',
+            minWidth: 0,
             pointerEvents: 'none',
           }}
         >
@@ -252,7 +271,12 @@ const [authUser, setAuthUser] = useState(null);
         </Box>
 
         {/* Plan action + account */}
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ ml: 'auto' }}>
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          sx={{ ml: { xs: 'auto', md: 0 }, justifySelf: { md: 'end' } }}
+        >
           {/* Upgrade CTA (hide when already Pro) */}
           {!pro && (
             <Button
